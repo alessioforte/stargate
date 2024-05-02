@@ -1,6 +1,5 @@
 mod config;
 mod controllers;
-mod db;
 mod models;
 mod services;
 mod utils;
@@ -9,6 +8,8 @@ use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web::Data, App, HttpServer};
 use serde_yaml;
+// use services::cache;
+use services::db;
 
 use config::{save_config_into_hashmap, Config, ConfigYAML};
 use dotenv::dotenv;
@@ -22,7 +23,8 @@ use std::env;
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
     env_logger::init();
-    db::init().await;
+    db::connect().await;
+    // cache::connect().await;
 
     // load the configuration file
     let config_file = env::var("CONFIG_FILE").unwrap_or_else(|_| "config.yaml".to_string());

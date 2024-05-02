@@ -17,6 +17,7 @@ pub struct Claims {
     pub exp: usize,               // expiration
 }
 
+// TODO: verify expiration
 pub fn create_token(
     user: &User,
     minutes_until_expire: i64,

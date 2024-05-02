@@ -11,7 +11,6 @@ pub struct NewUser {
     pub nickname: Option<String>,
     pub picture: Option<String>,
     pub phone_number: Option<String>,
-    // pub username: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,31 +23,44 @@ pub struct User {
     pub nickname: Option<String>,
     pub picture: Option<String>,
     pub phone_number: Option<String>,
-    pub refresh_token: Option<String>,
 }
 
 impl User {
     pub async fn create(user: NewUser) -> surrealdb::Result<Vec<Record>> {
-        DB.create("users").content(user).await
+        let db = DB.get().unwrap();
+        db.create("users").content(user).await
     }
 
     pub async fn get_all() -> surrealdb::Result<Vec<User>> {
-        DB.select("users").await
+        let db = DB.get().unwrap();
+        db.select("users").await
     }
 
     pub async fn get(id: String) -> surrealdb::Result<Option<User>> {
-        DB.select(("users", id)).await
+        let db = DB.get().unwrap();
+        db.select(("users", id)).await
+    }
+
+    pub async fn change_password(id: String, password: String) -> surrealdb::Result<Option<User>> {
+        let db = DB.get().unwrap();
+        let sql = format!("UPDATE users:{} SET password = $password", id);
+        let mut response = db.query(sql).bind(("password", password)).await?;
+        let users: Vec<User> = response.take(0)?;
+        let user = users.first().cloned();
+        Ok(user)
     }
 
     pub async fn get_by_email(email: String) -> surrealdb::Result<Option<User>> {
+        let db = DB.get().unwrap();
         let sql = format!("SELECT * FROM users WHERE email = $email");
-        let mut response = DB.query(sql).bind(("email", email)).await?;
+        let mut response = db.query(sql).bind(("email", email)).await?;
         let users: Vec<User> = response.take(0)?;
         let user = users.first().cloned();
         Ok(user)
     }
 
     pub async fn delete(id: String) -> surrealdb::Result<Option<User>> {
-        DB.delete(("users", id)).await
+        let db = DB.get().unwrap();
+        db.delete(("users", id)).await
     }
 }

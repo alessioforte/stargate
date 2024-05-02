@@ -2,6 +2,7 @@ use actix_web::{get, post, put, web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::services::smtp::send_email;
 use crate::utils::hash::Hash;
 use crate::{
     models::registrations::{NewRegistration, Registration},
@@ -29,21 +30,24 @@ pub async fn registration_request(body: web::Json<RegistrationRequestBody>) -> i
     }
 
     let uuid = Uuid::new_v4().to_string();
+
+    let is_mail_sent = send_email(body.email.clone(), uuid.clone());
+    if is_mail_sent.is_err() {
+        return HttpResponse::InternalServerError().json(web::Json("Could not send email"));
+    }
+
     let registration = NewRegistration {
         email: body.email.clone(),
         uuid: uuid.clone(),
     };
 
-    Registration::create(registration).await.unwrap();
+    let response = Registration::create(registration).await;
+    if response.is_err() {
+        return HttpResponse::InternalServerError()
+            .json(web::Json("Could not create registration"));
+    }
 
-    HttpResponse::Ok().json(web::Json(uuid))
-
-    // let is_success = send_email(body.email, token.clone());
-    // if is_success {
-    //     HttpResponse::Ok().json(web::Json(token))
-    // } else {
-    //     HttpResponse::InternalServerError().json(web::Json("Could not send email"))
-    // }
+    HttpResponse::Ok().json(web::Json("Registration request sent"))
 }
 
 // ----------------------------------------------------------------------------
@@ -55,7 +59,7 @@ struct RegistrationConfirmParams {
 pub async fn registration_confirm(query: web::Query<RegistrationConfirmParams>) -> impl Responder {
     let query = query.into_inner();
     let token = query.token.clone();
-    let registration = Registration::get_by_id(token.clone()).await.unwrap();
+    let registration = Registration::get_by_uuid(token.clone()).await.unwrap();
     HttpResponse::Ok().json(web::Json(registration))
 }
 
@@ -72,30 +76,24 @@ pub async fn registration_complete(
     body: web::Json<RegistrationCompleteRequestBody>,
 ) -> impl Responder {
     let body = body.into_inner();
-    println!("Body: {:?}", body);
 
-    // get registration by token
-    let registration = Registration::get_by_id(body.token.clone()).await.unwrap();
+    let registration = Registration::get_by_uuid(body.token.clone()).await.unwrap();
     if registration.is_none() {
         return HttpResponse::NotFound().json(web::Json("Registration not found"));
     }
-    // create user
+
     let registration = registration.unwrap();
     let user = NewUser {
         email: registration.email.clone(),
         name: body.name.clone(),
         nickname: body.nickname.clone(),
-        password: Hash::encoded(&body.password).unwrap(),
+        password: Hash::encode(&body.password).unwrap(),
         picture: None,
         phone_number: None,
     };
 
     User::create(user).await.unwrap();
-
-    // delete registration
-    println!("Registration: {:?}", registration);
     Registration::delete(registration.id.clone()).await.unwrap();
-
     HttpResponse::Ok().json(web::Json("Complete Registration"))
 }
 

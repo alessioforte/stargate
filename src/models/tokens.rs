@@ -8,26 +8,21 @@ pub struct Token {
     #[serde(deserialize_with = "thing_to_string")]
     pub id: String,
     pub value: String,
-    pub expires_at: i64,
-    pub issued_at: i64,
 }
 
 impl Token {
     pub async fn upsert(token: Token) -> surrealdb::Result<Option<Token>> {
+        let db = DB.get().unwrap();
         let sql = r#"
-            INSERT INTO tokens (id, value, expires_at, issued_at)
-            VALUES ($id, $value, $expires_at, $issued_at)
+            INSERT INTO tokens (id, value)
+            VALUES ($id, $value)
             ON DUPLICATE KEY UPDATE
-            value = $input.value,
-            expires_at = $input.expires_at,
-            issued_at = $input.issued_at
+            value = $input.value
         "#;
-        let mut responde = DB
+        let mut responde = db
             .query(sql)
             .bind(("id", token.id))
             .bind(("value", token.value))
-            .bind(("expires_at", token.expires_at))
-            .bind(("issued_at", token.issued_at))
             .await?;
 
         let tokens: Vec<Token> = responde.take(0)?;
@@ -36,6 +31,12 @@ impl Token {
     }
 
     pub async fn get(id: String) -> surrealdb::Result<Option<Token>> {
-        DB.select(("tokens", id)).await
+        let db = DB.get().unwrap();
+        db.select(("tokens", id)).await
+    }
+
+    pub async fn delete(id: String) -> surrealdb::Result<Option<Token>> {
+        let db = DB.get().unwrap();
+        db.delete(("tokens", id)).await
     }
 }

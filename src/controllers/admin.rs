@@ -1,7 +1,9 @@
-use crate::models::users::{NewUser, User};
-use crate::utils::hash::Hash;
 use actix_web::{delete, get, post, web, HttpResponse, Responder};
 
+use crate::models::users::{NewUser, User};
+use crate::utils::hash::Hash;
+
+// RODO: Handle authorization for admin routes
 #[get("/users")]
 pub async fn get_users() -> impl Responder {
     let users = User::get_all().await.unwrap();
@@ -14,7 +16,7 @@ pub async fn create_user(user: web::Json<NewUser>) -> impl Responder {
         email: user.email.clone(),
         name: user.name.clone(),
         nickname: user.nickname.clone(),
-        password: Hash::encoded(&user.password).unwrap(),
+        password: Hash::encode(&user.password).unwrap(),
         phone_number: user.phone_number.clone(),
         picture: user.picture.clone(),
     };
