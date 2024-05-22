@@ -1,5 +1,5 @@
 use actix_web::http::header::Header;
-use actix_web::{delete, post, put, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -7,14 +7,45 @@ use uuid::Uuid;
 
 use crate::models::resets::{NewPasswordReset, PasswordReset};
 use crate::models::tokens::Token;
-use crate::models::users::User;
+use crate::models::users::{User, Profile};
+use crate::modules::auth::{create_token, validate_token, Claims};
+use crate::modules::hash::Hash;
 use crate::services::smtp::send_email;
-use crate::utils::auth::{create_token, validate_token};
-use crate::utils::hash::Hash;
+
+
+#[get("/profile")]
+pub async fn profile(req: HttpRequest) -> impl Responder {
+    let auth = Authorization::<Bearer>::parse(&req);
+    let token = match auth {
+        Ok(auth) => auth.into_scheme().token().to_string(),
+        Err(_) => "".to_string(),
+    };
+
+    let claims = match validate_token(&token) {
+        Ok(claims) => claims,
+        Err(_) => return HttpResponse::Unauthorized().json(web::Json("Invalid Token")),
+    };
+
+    let user = User::get(claims.sub_id.clone()).await.unwrap();
+    if user.is_none() {
+        return HttpResponse::NotFound().json(web::Json("User not found"));
+    }
+
+    let user = user.unwrap();
+    HttpResponse::Ok().json(web::Json(Profile {
+        id: user.id.clone(),
+        name: user.name.clone(),
+        email: user.email.clone(),
+        nickname: user.nickname.clone(),
+        picture: user.picture.clone(),
+        phone_number: user.phone_number.clone(),
+    }))
+}
 
 // ----------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AuthResponse {
     access_token: String,
     refresh_token: String,
@@ -43,8 +74,27 @@ pub async fn login(credentials: web::Json<UserCredentials>) -> impl Responder {
         return HttpResponse::Unauthorized().json(web::Json("Invalid password"));
     }
 
-    let access_token = create_token(&user, 60).unwrap(); // expires in 60 minutes
-    let refresh_token = create_token(&user, 1440).unwrap(); // expires in 24 hours
+    let access_token = create_token(Claims {
+        sub: user.email.to_owned(),
+        sub_id: user.id.to_owned(),
+        name: Some(user.name.clone()),
+        nickname: user.nickname.clone(),
+        email_verified: true,
+        iat: Utc::now().timestamp() as usize,
+        exp: (Utc::now() + Duration::minutes(60)).timestamp() as usize,
+    })
+    .unwrap();
+
+    let refresh_token = create_token(Claims {
+        sub: user.email.to_owned(),
+        sub_id: user.id.to_owned(),
+        name: Some(user.name.clone()),
+        nickname: user.nickname.clone(),
+        email_verified: true,
+        iat: Utc::now().timestamp() as usize,
+        exp: (Utc::now() + Duration::minutes(1440)).timestamp() as usize,
+    })
+    .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
@@ -101,8 +151,28 @@ pub async fn refresh(body: web::Json<RefreshTokenRequestBody>) -> impl Responder
 
     let user = user.unwrap();
 
-    let access_token = create_token(&user, 60).unwrap(); // expires in 60 minutes
-    let refresh_token = create_token(&user, 1440).unwrap(); // expires in 24 hours
+    let access_token = create_token(Claims {
+        sub: user.email.to_owned(),
+        sub_id: user.id.to_owned(),
+        name: Some(user.name.clone()),
+        nickname: user.nickname.clone(),
+        email_verified: true,
+        iat: Utc::now().timestamp() as usize,
+        exp: (Utc::now() + Duration::minutes(60)).timestamp() as usize,
+    })
+    .unwrap(); // expires in 60 minutes
+
+    let refresh_token = create_token(Claims {
+        sub: user.email.to_owned(),
+        sub_id: user.id.to_owned(),
+        name: Some(user.name.clone()),
+        nickname: user.nickname.clone(),
+        email_verified: true,
+        iat: Utc::now().timestamp() as usize,
+        exp: (Utc::now() + Duration::minutes(1440)).timestamp() as usize,
+    })
+    .unwrap(); // expires in 24 hours
+
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
     Token::upsert(Token {
@@ -224,6 +294,7 @@ pub async fn change_password(body: web::Json<ChangePasswordRequestBody>) -> impl
 // ----------------------------------------------------------------------------
 pub fn routes() -> actix_web::Scope {
     web::scope("/account")
+        .service(profile)
         .service(login)
         .service(refresh)
         .service(logout)

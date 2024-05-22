@@ -14,7 +14,7 @@ pub async fn get() -> impl Responder {
     let version = env!("CARGO_PKG_VERSION");
 
     HttpResponse::Ok().json(Health {
-        name: "API Gateway",
-        version: version,
+        name: "Stargate is running!",
+        version,
     })
 }

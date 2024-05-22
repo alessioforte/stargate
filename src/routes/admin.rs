@@ -1,9 +1,12 @@
 use actix_web::{delete, get, post, web, HttpResponse, Responder};
 
 use crate::models::users::{NewUser, User};
-use crate::utils::hash::Hash;
+use crate::modules::hash::Hash;
 
-// RODO: Handle authorization for admin routes
+// TODO: Handle authorization for admin routes
+
+// #[get("/configurations")]
+
 #[get("/users")]
 pub async fn get_users() -> impl Responder {
     let users = User::get_all().await.unwrap();

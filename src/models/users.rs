@@ -25,6 +25,17 @@ pub struct User {
     pub phone_number: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    #[serde(deserialize_with = "thing_to_string")]
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub nickname: Option<String>,
+    pub picture: Option<String>,
+    pub phone_number: Option<String>,
+}
+
 impl User {
     pub async fn create(user: NewUser) -> surrealdb::Result<Vec<Record>> {
         let db = DB.get().unwrap();

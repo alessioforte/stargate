@@ -2,8 +2,9 @@ use actix_web::{get, post, put, web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::modules::hash::Hash;
+use crate::modules::password_policies::{PasswordPolicy, PasswordPolicyValidator};
 use crate::services::smtp::send_email;
-use crate::utils::hash::Hash;
 use crate::{
     models::registrations::{NewRegistration, Registration},
     models::users::{NewUser, User},
@@ -80,6 +81,13 @@ pub async fn registration_complete(
     let registration = Registration::get_by_uuid(body.token.clone()).await.unwrap();
     if registration.is_none() {
         return HttpResponse::NotFound().json(web::Json("Registration not found"));
+    }
+
+    let password_policies = PasswordPolicy::default();
+    let validate_password = password_policies.validate(&body.password);
+    if validate_password.is_err() {
+        let message = validate_password.unwrap_err();
+        return HttpResponse::BadRequest().json(web::Json(message));
     }
 
     let registration = registration.unwrap();

@@ -8,7 +8,7 @@ use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use reqwest::{Client, Method};
 
 use crate::config::{get_service, Config, Service};
-use crate::utils::auth::validate_token;
+use crate::modules::auth::validate_token;
 
 #[route(
     "/{tail:.*}",
