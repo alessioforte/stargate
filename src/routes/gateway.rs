@@ -7,7 +7,7 @@ use actix_web::{
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use reqwest::{Client, Method};
 
-use crate::config::{get_service, Config, Service};
+use crate::config::{Config, Service};
 use crate::modules::auth::validate_token;
 
 #[route(
@@ -39,7 +39,7 @@ pub async fn handle_request(config: Data<Config>, req: HttpRequest) -> impl Resp
         Err(_) => "".to_string(),
     };
 
-    let service = match get_service(path, &config.services) {
+    let service = match config.get_service(path) {
         Some(service) => service,
         None => {
             return HttpResponse::NotFound().body("Service not found");
@@ -86,7 +86,14 @@ pub async fn handle_request(config: Data<Config>, req: HttpRequest) -> impl Resp
     }
 
     // send the request
-    let response = request.send().await.unwrap();
+    let response = request.send().await;
+    let response = match response {
+        Ok(response) => response,
+        Err(e) => {
+            return HttpResponse::InternalServerError().body(format!("Error: {}", e));
+        }
+    };
+
     let status = response.status();
     let status: http::StatusCode = http::StatusCode::from_u16(status.as_u16()).unwrap();
     let body = response.text().await.unwrap();

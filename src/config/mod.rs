@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use serde_yaml;
 use std::collections::HashMap;
+use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Route {
@@ -25,25 +27,45 @@ pub struct ConfigYAML {
     pub services: Vec<Service>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub services: HashMap<String, Service>,
 }
 
-pub fn get_service(path: &str, services: &HashMap<String, Service>) -> Option<Service> {
-    let mut service = None;
-    for (key, value) in services {
-        if path.starts_with(key) {
-            service = Some(value.clone());
-            break;
+impl Config {
+    pub fn new(yaml: &ConfigYAML) -> Config {
+        let mut services = HashMap::new();
+        for service in &yaml.services {
+            services.insert(service.path.clone(), service.clone());
         }
+        Config { services }
     }
-    service
+
+    pub fn get_service(&self, path: &str) -> Option<Service> {
+        let mut service = None;
+        for (key, value) in &self.services {
+            if path.starts_with(key) {
+                service = Some(value.clone());
+                break;
+            }
+        }
+        service
+    }
+
+    pub fn export(&self) -> ConfigYAML {
+        let mut services = vec![];
+        for (_, value) in &self.services {
+            services.push(value.clone());
+        }
+        ConfigYAML { services }
+    }
 }
 
-pub fn save_config_into_hashmap(config: &ConfigYAML) -> HashMap<String, Service> {
-    let mut services = HashMap::new();
-    for service in &config.services {
-        services.insert(service.path.clone(), service.clone());
-    }
-    services
+pub fn get_config_from_yaml() -> Config {
+    let path = env::var("CONFIG_PATH").unwrap_or_else(|_| "".to_string());
+    let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
+    let file = std::fs::read_to_string(format!("{}/{}", path, filename))
+        .expect("Unable to read config file");
+    let yaml: ConfigYAML = serde_yaml::from_str(&file).expect("Unable to parse config file");
+    Config::new(&yaml)
 }

@@ -7,11 +7,10 @@ use uuid::Uuid;
 
 use crate::models::resets::{NewPasswordReset, PasswordReset};
 use crate::models::tokens::Token;
-use crate::models::users::{User, Profile};
+use crate::models::users::{Profile, User};
 use crate::modules::auth::{create_token, validate_token, Claims};
 use crate::modules::hash::Hash;
 use crate::services::smtp::send_email;
-
 
 #[get("/profile")]
 pub async fn profile(req: HttpRequest) -> impl Responder {
@@ -52,16 +51,25 @@ struct AuthResponse {
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct UserCredentials {
-    email: String,
+    username: String,
     password: String,
 }
 
 // TODO: verify access from another device and notify user
 #[post("/login")]
 pub async fn login(credentials: web::Json<UserCredentials>) -> impl Responder {
-    let user = User::get_by_email(credentials.email.clone()).await.unwrap();
+    let mut user = User::get_by_email(credentials.username.clone())
+        .await
+        .unwrap();
+
     if user.is_none() {
-        return HttpResponse::NotFound().json(web::Json("User not found"));
+        // get user by nickname
+        user = User::get_by_nickname(credentials.username.clone())
+            .await
+            .unwrap();
+        if user.is_none() {
+            return HttpResponse::NotFound().json(web::Json("User not found"));
+        }
     }
     let user = user.unwrap();
 

@@ -1,19 +1,17 @@
-use actix_web::{delete, get, post, web, HttpResponse, Responder};
-
 use crate::models::users::{NewUser, User};
 use crate::modules::hash::Hash;
+use actix_web::{delete, get, post, web, HttpResponse, Responder};
+use actix_web_grants::protect;
 
-// TODO: Handle authorization for admin routes
-
-// #[get("/configurations")]
-
-#[get("/users")]
+#[get("")]
+#[protect("SUPER_ADMIN")]
 pub async fn get_users() -> impl Responder {
     let users = User::get_all().await.unwrap();
     HttpResponse::Ok().json(web::Json(users))
 }
 
-#[post("/users")]
+#[post("")]
+#[protect("SUPER_ADMIN")]
 pub async fn create_user(user: web::Json<NewUser>) -> impl Responder {
     let new_user = NewUser {
         email: user.email.clone(),
@@ -28,7 +26,8 @@ pub async fn create_user(user: web::Json<NewUser>) -> impl Responder {
     HttpResponse::Ok().json(web::Json(user))
 }
 
-#[delete("/users/{id}")]
+#[delete("/{id}")]
+#[protect("SUPER_ADMIN")]
 pub async fn delete_user(params: web::Path<String>) -> impl Responder {
     let id = params.into_inner();
     let user = User::delete(id).await.unwrap();
@@ -36,7 +35,7 @@ pub async fn delete_user(params: web::Path<String>) -> impl Responder {
 }
 
 pub fn routes() -> actix_web::Scope {
-    web::scope("/admin")
+    web::scope("/users")
         .service(get_users)
         .service(create_user)
         .service(delete_user)

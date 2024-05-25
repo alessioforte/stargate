@@ -1,6 +1,6 @@
 pub mod records;
-pub mod registrations;
 pub mod resets;
+pub mod signup;
 pub mod tokens;
 pub mod users;
 

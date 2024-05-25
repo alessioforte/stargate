@@ -6,26 +6,24 @@ use crate::modules::hash::Hash;
 use crate::modules::password_policies::{PasswordPolicy, PasswordPolicyValidator};
 use crate::services::smtp::send_email;
 use crate::{
-    models::registrations::{NewRegistration, Registration},
+    models::signup::{NewSignup, Signup},
     models::users::{NewUser, User},
 };
 
 // ----------------------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
-struct RegistrationRequestBody {
+struct SignupRequestBody {
     email: String,
 }
 #[post("")]
-pub async fn registration_request(body: web::Json<RegistrationRequestBody>) -> impl Responder {
+pub async fn signup_request(body: web::Json<SignupRequestBody>) -> impl Responder {
     let body = body.into_inner();
 
     let user = User::get_by_email(body.email.clone()).await.unwrap();
     if user.is_some() {
         return HttpResponse::Conflict().json(web::Json("Email already in use"));
     }
-    let registration_request = Registration::get_by_email(body.email.clone())
-        .await
-        .unwrap();
+    let registration_request = Signup::get_by_email(body.email.clone()).await.unwrap();
     if registration_request.is_some() {
         return HttpResponse::Conflict().json(web::Json("Registration already requested"));
     }
@@ -37,18 +35,18 @@ pub async fn registration_request(body: web::Json<RegistrationRequestBody>) -> i
         return HttpResponse::InternalServerError().json(web::Json("Could not send email"));
     }
 
-    let registration = NewRegistration {
+    let registration = NewSignup {
         email: body.email.clone(),
         uuid: uuid.clone(),
     };
 
-    let response = Registration::create(registration).await;
+    let response = Signup::create(registration).await;
     if response.is_err() {
         return HttpResponse::InternalServerError()
             .json(web::Json("Could not create registration"));
     }
 
-    HttpResponse::Ok().json(web::Json("Registration request sent"))
+    HttpResponse::Ok().json(web::Json("Signup request sent"))
 }
 
 // ----------------------------------------------------------------------------
@@ -57,10 +55,10 @@ struct RegistrationConfirmParams {
     token: String,
 }
 #[get("")]
-pub async fn registration_confirm(query: web::Query<RegistrationConfirmParams>) -> impl Responder {
+pub async fn signup_confirm(query: web::Query<RegistrationConfirmParams>) -> impl Responder {
     let query = query.into_inner();
     let token = query.token.clone();
-    let registration = Registration::get_by_uuid(token.clone()).await.unwrap();
+    let registration = Signup::get_by_uuid(token.clone()).await.unwrap();
     HttpResponse::Ok().json(web::Json(registration))
 }
 
@@ -69,18 +67,22 @@ pub async fn registration_confirm(query: web::Query<RegistrationConfirmParams>) 
 struct RegistrationCompleteRequestBody {
     token: String,
     name: String,
-    nickname: Option<String>,
+    nickname: String,
     password: String,
 }
 #[put("")]
-pub async fn registration_complete(
-    body: web::Json<RegistrationCompleteRequestBody>,
-) -> impl Responder {
+pub async fn signup_complete(body: web::Json<RegistrationCompleteRequestBody>) -> impl Responder {
     let body = body.into_inner();
 
-    let registration = Registration::get_by_uuid(body.token.clone()).await.unwrap();
+    let registration = Signup::get_by_uuid(body.token.clone()).await.unwrap();
     if registration.is_none() {
-        return HttpResponse::NotFound().json(web::Json("Registration not found"));
+        return HttpResponse::NotFound().json(web::Json("Signup not found"));
+    }
+
+    // verify nickname
+    let user = User::get_by_nickname(body.nickname.clone()).await.unwrap();
+    if user.is_some() {
+        return HttpResponse::Conflict().json(web::Json("Nickname already in use"));
     }
 
     let password_policies = PasswordPolicy::default();
@@ -94,21 +96,21 @@ pub async fn registration_complete(
     let user = NewUser {
         email: registration.email.clone(),
         name: body.name.clone(),
-        nickname: body.nickname.clone(),
+        nickname: Some(body.nickname.clone()),
         password: Hash::encode(&body.password).unwrap(),
         picture: None,
         phone_number: None,
     };
 
     User::create(user).await.unwrap();
-    Registration::delete(registration.id.clone()).await.unwrap();
-    HttpResponse::Ok().json(web::Json("Complete Registration"))
+    Signup::delete(registration.id.clone()).await.unwrap();
+    HttpResponse::Ok().json(web::Json("Complete signup"))
 }
 
 // ----------------------------------------------------------------------------
 pub fn routes() -> actix_web::Scope {
-    web::scope("/registrations")
-        .service(registration_request)
-        .service(registration_confirm)
-        .service(registration_complete)
+    web::scope("/signup")
+        .service(signup_request)
+        .service(signup_confirm)
+        .service(signup_complete)
 }

@@ -1,8 +1,9 @@
 use crate::db::DB;
+use crate::models::records::thing_to_string;
 use crate::models::records::Record;
 use serde::{Deserialize, Serialize};
 
-use crate::models::records::thing_to_string;
+const RESOURCE: &str = "resets";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewPasswordReset {
@@ -25,12 +26,12 @@ pub struct PasswordReset {
 impl PasswordReset {
     pub async fn create(reset: NewPasswordReset) -> surrealdb::Result<Vec<Record>> {
         let db = DB.get().unwrap();
-        db.create("resets").content(reset).await
+        db.create(RESOURCE).content(reset).await
     }
 
     pub async fn get_by_uuid(id: String) -> surrealdb::Result<Option<PasswordReset>> {
         let db = DB.get().unwrap();
-        let sql = "SELECT * FROM resets WHERE uuid = $uuid";
+        let sql = format!("SELECT * FROM {} WHERE uuid = $uuid", RESOURCE);
         let mut response = db.query(sql).bind(("uuid", id)).await?;
         let registrations: Vec<PasswordReset> = response.take(0)?;
         let registration = registrations.first().cloned();

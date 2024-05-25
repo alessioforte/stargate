@@ -77,6 +77,10 @@ impl PasswordPolicy {
             PasswordPolicy::SpecialChars => "special_chars".to_string(),
         }
     }
+
+    pub fn to_vec_string(policies: Vec<PasswordPolicy>) -> Vec<String> {
+        policies.iter().map(|policy| policy.to_string()).collect()
+    }
 }
 
 pub trait PasswordPolicyValidator {
@@ -134,39 +138,39 @@ impl PasswordPolicyValidator for Vec<PasswordPolicy> {
 mod tests {
     use super::*;
 
-    // #[test]
-    // fn test_password_validation() {
-    //     let password_policies = PasswordPolicy::new(vec![
-    //         "min_length",
-    //         "max_length",
-    //         "lowercase",
-    //         "uppercase",
-    //         "digits",
-    //         "special_chars",
-    //     ]);
+    #[test]
+    fn test_password_validation() {
+        let password_policies = PasswordPolicy::new(vec![
+            "min_length",
+            "max_length",
+            "lowercase",
+            "uppercase",
+            "digits",
+            "special_chars",
+        ]);
 
-    //     let password = "pass";
-    //     let result = password_policies.validate(password);
-    //     assert_eq!(
-    //         result,
-    //         Err("Password must be at least 8 characters long".to_string())
-    //     );
+        let password = "pass";
+        let result = password_policies.validate(password);
+        assert_eq!(
+            result,
+            Err("Password must be at least 8 characters long".to_string())
+        );
 
-    //     let password = "Password";
-    //     assert_eq!(
-    //         password_policies.validate(password),
-    //         Err("Password must contain at least one digit".to_string())
-    //     );
+        let password = "Password";
+        assert_eq!(
+            password_policies.validate(password),
+            Err("Password must contain at least one digit".to_string())
+        );
 
-    //     let password = "Password1";
-    //     assert_eq!(
-    //         password_policies.validate(password),
-    //         Err("Password must contain at least one special character".to_string())
-    //     );
+        let password = "Password1";
+        assert_eq!(
+            password_policies.validate(password),
+            Err("Password must contain at least one special character".to_string())
+        );
 
-    //     let password = "Password1!";
-    //     assert_eq!(password_policies.validate(password), Ok(()));
-    // }
+        let password = "Password1!";
+        assert_eq!(password_policies.validate(password), Ok(()));
+    }
 
     #[test]
     fn min_length_validation() {
