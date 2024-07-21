@@ -1,6 +1,7 @@
+use chrono::{Duration, Utc};
 use std::env;
 
-use jsonwebtoken::{encode, DecodingKey, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, errors, DecodingKey, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,7 +15,21 @@ pub struct Claims {
     pub exp: usize,               // expiration
 }
 
-pub fn create_token(claims: Claims) -> Result<String, jsonwebtoken::errors::Error> {
+impl Default for Claims {
+    fn default() -> Self {
+        Claims {
+            sub: "".to_string(),
+            sub_id: "".to_string(),
+            name: None,
+            email_verified: false,
+            nickname: None,
+            iat: 0,
+            exp: 0,
+        }
+    }
+}
+
+pub fn generate_token(claims: Claims) -> Result<String, errors::Error> {
     let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
 
     let header = Header::default();
@@ -22,15 +37,32 @@ pub fn create_token(claims: Claims) -> Result<String, jsonwebtoken::errors::Erro
     encode(&header, &claims, &encoding_key)
 }
 
-pub fn validate_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+pub fn validate_token(token: &str, secret: &str) -> Result<Claims, errors::Error> {
     if token == "" {
-        return Err(jsonwebtoken::errors::Error::from(
-            jsonwebtoken::errors::ErrorKind::InvalidToken,
-        ));
+        return Err(errors::Error::from(errors::ErrorKind::InvalidToken));
     }
-    let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
     let encoding_key = DecodingKey::from_secret(secret.as_ref());
 
-    jsonwebtoken::decode::<Claims>(token, &encoding_key, &jsonwebtoken::Validation::default())
+    decode::<Claims>(token, &encoding_key, &jsonwebtoken::Validation::default())
         .map(|data| data.claims)
+}
+
+pub fn create_tokens(
+    claims: Claims,
+    access_token_expiration: i64,
+    refresh_token_expiration: i64,
+) -> Result<(String, String), errors::Error> {
+    let mut access_token_claims = claims.clone();
+    let mut refresh_token_claims = claims.clone();
+    let now = Utc::now();
+    access_token_claims.iat = now.timestamp() as usize;
+    access_token_claims.exp =
+        (now + Duration::minutes(access_token_expiration)).timestamp() as usize;
+    let access_token = generate_token(access_token_claims).unwrap();
+
+    refresh_token_claims.iat = now.timestamp() as usize;
+    refresh_token_claims.exp =
+        (now + Duration::minutes(refresh_token_expiration)).timestamp() as usize;
+    let refresh_token = generate_token(refresh_token_claims).unwrap();
+    Ok((access_token, refresh_token))
 }

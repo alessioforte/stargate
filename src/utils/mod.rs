@@ -1,6 +1,8 @@
+use crate::config::trie::TriePath;
 use crate::models::users::{NewUser, User};
 use crate::modules::hash::Hash;
 use rand::Rng;
+use std::env;
 
 pub fn generate_password(
     length: usize,

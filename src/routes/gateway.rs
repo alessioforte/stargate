@@ -1,13 +1,12 @@
+use crate::errors::{ErrorResponse, HttpError};
 use actix_web::{
     http::{self, header::Header},
-    route,
-    web::Data,
-    HttpRequest, HttpResponse, Responder,
+    route, HttpRequest, HttpResponse,
 };
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use reqwest::{Client, Method};
 
-use crate::config::{Config, Service};
+use crate::config::{config::Service, AppData};
 use crate::modules::auth::validate_token;
 
 #[route(
@@ -22,7 +21,10 @@ use crate::modules::auth::validate_token;
     method = "PATCH",
     method = "TRACE"
 )]
-pub async fn handle_request(config: Data<Config>, req: HttpRequest) -> impl Responder {
+pub async fn handle_request(
+    globals: AppData,
+    req: HttpRequest,
+) -> Result<HttpResponse, ErrorResponse> {
     let path = req.uri().path();
     let query = req.query_string();
     let method = req.method().as_str();
@@ -39,10 +41,13 @@ pub async fn handle_request(config: Data<Config>, req: HttpRequest) -> impl Resp
         Err(_) => "".to_string(),
     };
 
-    let service = match config.get_service(path) {
+    let config = globals.config.lock().unwrap();
+    let service = match config.search(path) {
         Some(service) => service,
         None => {
-            return HttpResponse::NotFound().body("Service not found");
+            return Err(ErrorResponse::from(HttpError::NotFound(
+                "Service not found".to_string(),
+            )))
         }
     };
 
@@ -62,14 +67,17 @@ pub async fn handle_request(config: Data<Config>, req: HttpRequest) -> impl Resp
             }
         }
         if route.is_none() {
-            return HttpResponse::NotFound().body("Route not found");
+            return Err(ErrorResponse::from(HttpError::NotFound(
+                "Route not found".to_string(),
+            )));
         }
-        // TODO:  check if this works
         auth_required = route.unwrap().auth_required.unwrap_or(auth_required);
     }
 
-    if auth_required && validate_token(&token).is_err() {
-        return HttpResponse::Unauthorized().body("Unauthorized");
+    if auth_required && validate_token(&token, &globals.jwt_secret).is_err() {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Unauthorized".to_string(),
+        )));
     }
 
     // format the URI
@@ -90,7 +98,9 @@ pub async fn handle_request(config: Data<Config>, req: HttpRequest) -> impl Resp
     let response = match response {
         Ok(response) => response,
         Err(e) => {
-            return HttpResponse::InternalServerError().body(format!("Error: {}", e));
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )))
         }
     };
 
@@ -98,15 +108,21 @@ pub async fn handle_request(config: Data<Config>, req: HttpRequest) -> impl Resp
     let status: http::StatusCode = http::StatusCode::from_u16(status.as_u16()).unwrap();
     let body = response.text().await.unwrap();
 
-    HttpResponse::build(status).body(body)
+    Ok(HttpResponse::build(status).body(body))
 }
 
 fn format_uri(service: &Service, path: String) -> String {
-    return format!(
-        "{}://{}:{}{}",
-        service.protocol,
-        service.host,
-        service.port,
-        path.replace(&service.path, "")
-    );
+    let protocol = match service.protocol.as_str() {
+        "http" => "http",
+        "https" => "https",
+        _ => "http",
+    };
+    let host = service.host.clone();
+    let port = match service.port {
+        Some(port) => format!(":{}", port),
+        None => "".to_string(),
+    };
+    let path = path.replace(&service.path, "");
+
+    format!("{}://{}{}{}", protocol, host, port, path)
 }

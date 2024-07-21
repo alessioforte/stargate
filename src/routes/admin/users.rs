@@ -6,6 +6,7 @@ use actix_web_grants::protect;
 #[get("")]
 #[protect("SUPER_ADMIN")]
 pub async fn get_users() -> impl Responder {
+    // FIXME: Remove password from response
     let users = User::get_all().await.unwrap();
     HttpResponse::Ok().json(web::Json(users))
 }
@@ -21,7 +22,6 @@ pub async fn create_user(user: web::Json<NewUser>) -> impl Responder {
         phone_number: user.phone_number.clone(),
         picture: user.picture.clone(),
     };
-    println!("new user{:?}", new_user);
     let user = User::create(new_user).await.unwrap();
     HttpResponse::Ok().json(web::Json(user))
 }

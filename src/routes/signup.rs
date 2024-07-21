@@ -1,4 +1,5 @@
-use actix_web::{get, post, put, web, HttpResponse, Responder};
+use crate::errors::{ErrorResponse, HttpError};
+use actix_web::{get, post, put, web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,99 +16,166 @@ use crate::{
 struct SignupRequestBody {
     email: String,
 }
+
+#[utoipa::path(
+    path = "/signup",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[post("")]
-pub async fn signup_request(body: web::Json<SignupRequestBody>) -> impl Responder {
+pub async fn signup_request(
+    body: web::Json<SignupRequestBody>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
 
     let user = User::get_by_email(body.email.clone()).await.unwrap();
     if user.is_some() {
-        return HttpResponse::Conflict().json(web::Json("Email already in use"));
+        return Err(ErrorResponse::from(HttpError::Conflict(
+            "User already exists".to_string(),
+        )));
     }
-    let registration_request = Signup::get_by_email(body.email.clone()).await.unwrap();
-    if registration_request.is_some() {
-        return HttpResponse::Conflict().json(web::Json("Registration already requested"));
+    let signup_request = Signup::get_by_email(body.email.clone()).await.unwrap();
+    if signup_request.is_some() {
+        return Err(ErrorResponse::from(HttpError::Conflict(
+            "Signup request already exists".to_string(),
+        )));
     }
 
     let uuid = Uuid::new_v4().to_string();
 
     let is_mail_sent = send_email(body.email.clone(), uuid.clone());
     if is_mail_sent.is_err() {
-        return HttpResponse::InternalServerError().json(web::Json("Could not send email"));
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not send email".to_string(),
+        )));
     }
 
-    let registration = NewSignup {
+    let signup = NewSignup {
         email: body.email.clone(),
         uuid: uuid.clone(),
     };
 
-    let response = Signup::create(registration).await;
+    let response = Signup::create(signup).await;
     if response.is_err() {
-        return HttpResponse::InternalServerError()
-            .json(web::Json("Could not create registration"));
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not create signup request".to_string(),
+        )));
     }
 
-    HttpResponse::Ok().json(web::Json("Signup request sent"))
+    Ok(HttpResponse::Ok().json(web::Json("Signup request sent")))
 }
 
 // ----------------------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
-struct RegistrationConfirmParams {
+struct SignupConfirmParams {
     token: String,
 }
+
+#[utoipa::path(
+    path = "/signup",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[get("")]
-pub async fn signup_confirm(query: web::Query<RegistrationConfirmParams>) -> impl Responder {
+pub async fn signup_confirm(
+    query: web::Query<SignupConfirmParams>,
+) -> Result<HttpResponse, ErrorResponse> {
     let query = query.into_inner();
     let token = query.token.clone();
-    let registration = Signup::get_by_uuid(token.clone()).await.unwrap();
-    HttpResponse::Ok().json(web::Json(registration))
+    let response = Signup::get_by_uuid(token.clone()).await;
+    match response {
+        Ok(signup) => {
+            if signup.is_none() {
+                return Err(ErrorResponse::from(HttpError::NotFound(
+                    "Signup not found".to_string(),
+                )));
+            }
+            Ok(HttpResponse::Ok().json(web::Json(signup)))
+        }
+        Err(_) => Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not get signup request".to_string(),
+        ))),
+    }
 }
 
 // ----------------------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
-struct RegistrationCompleteRequestBody {
+struct SignupCompleteRequestBody {
     token: String,
     name: String,
     nickname: String,
     password: String,
 }
+
+#[utoipa::path(
+    path = "/signup",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[put("")]
-pub async fn signup_complete(body: web::Json<RegistrationCompleteRequestBody>) -> impl Responder {
+pub async fn signup_complete(
+    body: web::Json<SignupCompleteRequestBody>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
 
-    let registration = Signup::get_by_uuid(body.token.clone()).await.unwrap();
-    if registration.is_none() {
-        return HttpResponse::NotFound().json(web::Json("Signup not found"));
+    let signup = Signup::get_by_uuid(body.token.clone()).await;
+    if signup.is_err() {
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not get signup request".to_string(),
+        )));
     }
 
     // verify nickname
-    let user = User::get_by_nickname(body.nickname.clone()).await.unwrap();
-    if user.is_some() {
-        return HttpResponse::Conflict().json(web::Json("Nickname already in use"));
+    let user = User::get_by_nickname(body.nickname.clone()).await;
+    if user.is_ok() {
+        return Err(ErrorResponse::from(HttpError::Conflict(
+            "Nickname already exists".to_string(),
+        )));
     }
 
     let password_policies = PasswordPolicy::default();
     let validate_password = password_policies.validate(&body.password);
     if validate_password.is_err() {
         let message = validate_password.unwrap_err();
-        return HttpResponse::BadRequest().json(web::Json(message));
+        return Err(ErrorResponse::from(HttpError::BadRequest(message)));
     }
 
-    let registration = registration.unwrap();
-    let user = NewUser {
-        email: registration.email.clone(),
-        name: body.name.clone(),
-        nickname: Some(body.nickname.clone()),
-        password: Hash::encode(&body.password).unwrap(),
-        picture: None,
-        phone_number: None,
-    };
+    match signup.unwrap() {
+        Some(signup) => {
+            let new_user = NewUser {
+                email: signup.email.clone(),
+                name: body.name.clone(),
+                nickname: Some(body.nickname.clone()),
+                password: Hash::encode(&body.password).unwrap(),
+                picture: None,
+                phone_number: None,
+            };
 
-    User::create(user).await.unwrap();
-    Signup::delete(registration.id.clone()).await.unwrap();
-    HttpResponse::Ok().json(web::Json("Complete signup"))
+            let response = User::create(new_user).await;
+            if response.is_err() {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    "Could not create user".to_string(),
+                )));
+            }
+
+            let response = Signup::delete(signup.id).await;
+            if response.is_err() {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    "Could not delete signup request".to_string(),
+                )));
+            }
+
+            Ok(HttpResponse::Ok().json(web::Json("Signup completed")))
+        }
+        None => Err(ErrorResponse::from(HttpError::NotFound(
+            "Signup not found".to_string(),
+        ))),
+    }
 }
 
-// ----------------------------------------------------------------------------
 pub fn routes() -> actix_web::Scope {
     web::scope("/signup")
         .service(signup_request)

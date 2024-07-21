@@ -1,4 +1,4 @@
-pub mod records;
+pub mod record;
 pub mod resets;
 pub mod signup;
 pub mod tokens;

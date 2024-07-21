@@ -1,44 +1,57 @@
+use crate::config::AppData;
+use crate::errors::{ErrorResponse, HttpError};
+use crate::models::resets::{NewPasswordReset, PasswordReset};
+use crate::models::tokens::Token;
+use crate::models::users::{Profile, User};
+use crate::modules::auth::{create_tokens, validate_token, Claims};
+use crate::modules::hash::Hash;
+use crate::services::smtp::send_email;
 use actix_web::http::header::Header;
-use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::models::resets::{NewPasswordReset, PasswordReset};
-use crate::models::tokens::Token;
-use crate::models::users::{Profile, User};
-use crate::modules::auth::{create_token, validate_token, Claims};
-use crate::modules::hash::Hash;
-use crate::services::smtp::send_email;
-
+#[utoipa::path(
+    path = "/account/profile",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[get("/profile")]
-pub async fn profile(req: HttpRequest) -> impl Responder {
+pub async fn profile(globals: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let auth = Authorization::<Bearer>::parse(&req);
     let token = match auth {
         Ok(auth) => auth.into_scheme().token().to_string(),
         Err(_) => "".to_string(),
     };
 
-    let claims = match validate_token(&token) {
+    let claims = match validate_token(&token, &globals.jwt_secret) {
         Ok(claims) => claims,
-        Err(_) => return HttpResponse::Unauthorized().json(web::Json("Invalid Token")),
+        Err(_) => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Invalid Token".to_string(),
+            )))
+        }
     };
 
     let user = User::get(claims.sub_id.clone()).await.unwrap();
     if user.is_none() {
-        return HttpResponse::NotFound().json(web::Json("User not found"));
+        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
+            "User not found".to_string(),
+        )));
     }
 
     let user = user.unwrap();
-    HttpResponse::Ok().json(web::Json(Profile {
+    Ok(HttpResponse::Ok().json(web::Json(Profile {
         id: user.id.clone(),
         name: user.name.clone(),
         email: user.email.clone(),
         nickname: user.nickname.clone(),
         picture: user.picture.clone(),
         phone_number: user.phone_number.clone(),
-    }))
+    })))
 }
 
 // ----------------------------------------------------------------------------
@@ -55,20 +68,29 @@ struct UserCredentials {
     password: String,
 }
 
-// TODO: verify access from another device and notify user
+#[utoipa::path(
+    path = "/account/login",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[post("/login")]
-pub async fn login(credentials: web::Json<UserCredentials>) -> impl Responder {
+pub async fn login(
+    globals: AppData,
+    credentials: web::Json<UserCredentials>,
+) -> Result<HttpResponse, ErrorResponse> {
     let mut user = User::get_by_email(credentials.username.clone())
         .await
         .unwrap();
 
     if user.is_none() {
-        // get user by nickname
         user = User::get_by_nickname(credentials.username.clone())
             .await
             .unwrap();
         if user.is_none() {
-            return HttpResponse::NotFound().json(web::Json("User not found"));
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Invalid username".to_string(),
+            )));
         }
     }
     let user = user.unwrap();
@@ -79,29 +101,23 @@ pub async fn login(credentials: web::Json<UserCredentials>) -> impl Responder {
     };
 
     if !is_valid {
-        return HttpResponse::Unauthorized().json(web::Json("Invalid password"));
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid password".to_string(),
+        )));
     }
 
-    let access_token = create_token(Claims {
-        sub: user.email.to_owned(),
-        sub_id: user.id.to_owned(),
-        name: Some(user.name.clone()),
-        nickname: user.nickname.clone(),
-        email_verified: true,
-        iat: Utc::now().timestamp() as usize,
-        exp: (Utc::now() + Duration::minutes(60)).timestamp() as usize,
-    })
-    .unwrap();
-
-    let refresh_token = create_token(Claims {
-        sub: user.email.to_owned(),
-        sub_id: user.id.to_owned(),
-        name: Some(user.name.clone()),
-        nickname: user.nickname.clone(),
-        email_verified: true,
-        iat: Utc::now().timestamp() as usize,
-        exp: (Utc::now() + Duration::minutes(1440)).timestamp() as usize,
-    })
+    let (access_token, refresh_token) = create_tokens(
+        Claims {
+            sub: user.email.to_owned(),
+            sub_id: user.id.to_owned(),
+            name: Some(user.name.clone()),
+            nickname: user.nickname.clone(),
+            email_verified: true,
+            ..Claims::default()
+        },
+        globals.access_token_expiration,
+        globals.refresh_token_expiration,
+    )
     .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
@@ -113,13 +129,15 @@ pub async fn login(credentials: web::Json<UserCredentials>) -> impl Responder {
     .await;
     if upsert_token.is_err() {
         log::error!("Could not create token: {:?}", upsert_token.err());
-        return HttpResponse::InternalServerError().json(web::Json("Could not create token"));
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not create token".to_string(),
+        )));
     }
 
-    HttpResponse::Ok().json(web::Json(AuthResponse {
+    Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,
         refresh_token,
-    }))
+    })))
 }
 
 // ----------------------------------------------------------------------------
@@ -127,18 +145,34 @@ pub async fn login(credentials: web::Json<UserCredentials>) -> impl Responder {
 struct RefreshTokenRequestBody {
     refresh_token: String,
 }
+
+#[utoipa::path(
+    path = "/account/refresh-token",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[put("/refresh-token")]
-pub async fn refresh(body: web::Json<RefreshTokenRequestBody>) -> impl Responder {
+pub async fn refresh(
+    globals: AppData,
+    body: web::Json<RefreshTokenRequestBody>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
     let refresh_token = body.refresh_token.clone();
-    let claims = match validate_token(&refresh_token) {
+    let claims = match validate_token(&refresh_token, &globals.jwt_secret) {
         Ok(claims) => claims,
-        Err(_) => return HttpResponse::Unauthorized().json(web::Json("Invalid Token")),
+        Err(_) => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Invalid Token".to_string(),
+            )))
+        }
     };
 
     let token = Token::get(claims.sub_id.clone()).await.unwrap();
     if token.is_none() {
-        return HttpResponse::NotFound().json(web::Json("Token not found"));
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid Token".to_string(),
+        )));
     }
 
     let token = token.unwrap();
@@ -148,38 +182,34 @@ pub async fn refresh(body: web::Json<RefreshTokenRequestBody>) -> impl Responder
     };
 
     if !is_valid {
-        return HttpResponse::Unauthorized().json(web::Json("Invalid Token"));
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid Token".to_string(),
+        )));
     }
 
     let user = User::get(claims.sub_id.clone()).await.unwrap();
 
     if user.is_none() {
-        return HttpResponse::NotFound().json(web::Json("User not found"));
+        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
+            "User not found".to_string(),
+        )));
     }
 
     let user = user.unwrap();
 
-    let access_token = create_token(Claims {
-        sub: user.email.to_owned(),
-        sub_id: user.id.to_owned(),
-        name: Some(user.name.clone()),
-        nickname: user.nickname.clone(),
-        email_verified: true,
-        iat: Utc::now().timestamp() as usize,
-        exp: (Utc::now() + Duration::minutes(60)).timestamp() as usize,
-    })
-    .unwrap(); // expires in 60 minutes
-
-    let refresh_token = create_token(Claims {
-        sub: user.email.to_owned(),
-        sub_id: user.id.to_owned(),
-        name: Some(user.name.clone()),
-        nickname: user.nickname.clone(),
-        email_verified: true,
-        iat: Utc::now().timestamp() as usize,
-        exp: (Utc::now() + Duration::minutes(1440)).timestamp() as usize,
-    })
-    .unwrap(); // expires in 24 hours
+    let (access_token, refresh_token) = create_tokens(
+        Claims {
+            sub: user.email.to_owned(),
+            sub_id: user.id.to_owned(),
+            name: Some(user.name.clone()),
+            nickname: user.nickname.clone(),
+            email_verified: true,
+            ..Claims::default()
+        },
+        globals.access_token_expiration,
+        globals.refresh_token_expiration,
+    )
+    .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
@@ -190,32 +220,43 @@ pub async fn refresh(body: web::Json<RefreshTokenRequestBody>) -> impl Responder
     .await
     .unwrap();
 
-    HttpResponse::Ok().json(web::Json(AuthResponse {
+    Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,
         refresh_token,
-    }))
+    })))
 }
 
-// ----------------------------------------------------------------------------
+#[utoipa::path(
+    path = "/account/logout",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[delete("/logout")]
-pub async fn logout(req: HttpRequest) -> impl Responder {
+pub async fn logout(globals: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let auth = Authorization::<Bearer>::parse(&req);
     let token = match auth {
         Ok(auth) => auth.into_scheme().token().to_string(),
         Err(_) => "".to_string(),
     };
 
-    let claims = match validate_token(&token) {
+    let claims = match validate_token(&token, &globals.jwt_secret) {
         Ok(claims) => claims,
-        Err(_) => return HttpResponse::Unauthorized().json(web::Json("Invalid Token")),
+        Err(_) => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Invalid Token".to_string(),
+            )))
+        }
     };
 
     let response = Token::delete(claims.sub_id.clone()).await;
     if response.is_err() {
-        return HttpResponse::NotFound().json(web::Json("Token not found"));
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not delete token".to_string(),
+        )));
     }
 
-    HttpResponse::Ok().json(web::Json("Logout User"))
+    Ok(HttpResponse::Ok().json(web::Json("Logout User")))
 }
 
 // ----------------------------------------------------------------------------
@@ -223,14 +264,24 @@ pub async fn logout(req: HttpRequest) -> impl Responder {
 struct ForgotPasswordRequestBody {
     email: String,
 }
-// forgot password request
+
+#[utoipa::path(
+    path = "/account/forgot-password",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[post("/forgot-password")]
-pub async fn forgot_password(body: web::Json<ForgotPasswordRequestBody>) -> impl Responder {
+pub async fn forgot_password(
+    body: web::Json<ForgotPasswordRequestBody>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
     let email = body.email.clone();
     let user = User::get_by_email(email.clone()).await.unwrap();
     if user.is_none() {
-        return HttpResponse::NotFound().json(web::Json("User not found"));
+        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
+            "User not found".to_string(),
+        )));
     }
 
     let user = user.unwrap();
@@ -245,41 +296,59 @@ pub async fn forgot_password(body: web::Json<ForgotPasswordRequestBody>) -> impl
     .await;
 
     if reset.is_err() {
-        return HttpResponse::InternalServerError().json(web::Json("Could not create reset"));
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not create reset request".to_string(),
+        )));
     }
 
     // send email
     match send_email(user.email.clone(), uuid.clone()) {
-        Ok(_) => HttpResponse::Ok().json(web::Json("Reset request sent")),
-        Err(_) => HttpResponse::InternalServerError().json(web::Json("Could not send email")),
+        Ok(_) => Ok(HttpResponse::Ok().json(web::Json("Email sent"))),
+        Err(_) => Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not send email".to_string(),
+        ))),
     }
 }
 
-// ----------------------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
 struct ChangePasswordRequestBody {
     token: String,
     password: String,
 }
+
+#[utoipa::path(
+    path = "/account/reset-password",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[put("/reset-password")]
-pub async fn change_password(body: web::Json<ChangePasswordRequestBody>) -> impl Responder {
+pub async fn change_password(
+    body: web::Json<ChangePasswordRequestBody>,
+) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
     let token = body.token.clone();
     let change_request = PasswordReset::get_by_uuid(token.clone()).await.unwrap();
     if change_request.is_none() {
-        return HttpResponse::NotFound().json(web::Json("Change request not found"));
+        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
+            "Change request not found".to_string(),
+        )));
     }
     let change_request = change_request.unwrap();
 
     if change_request.expires_at < Utc::now().timestamp() {
-        return HttpResponse::BadRequest().json(web::Json("Change request expired"));
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Change request expired".to_string(),
+        )));
     }
 
     let user = User::get_by_email(change_request.email.clone())
         .await
         .unwrap();
     if user.is_none() {
-        return HttpResponse::NotFound().json(web::Json("User not found"));
+        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
+            "User not found".to_string(),
+        )));
     }
 
     let user = user.unwrap();
@@ -287,19 +356,22 @@ pub async fn change_password(body: web::Json<ChangePasswordRequestBody>) -> impl
     let response = User::change_password(user.id.clone(), password.clone()).await;
     if response.is_err() {
         log::error!("Could not update password: {:?}", response.err());
-        return HttpResponse::InternalServerError().json(web::Json("Could not update password"));
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not update password".to_string(),
+        )));
     }
 
     let response = PasswordReset::delete(change_request.id.clone()).await;
     if response.is_err() {
-        return HttpResponse::InternalServerError().json(web::Json("Could not delete reset"));
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            "Could not delete change request".to_string(),
+        )));
     }
 
     // send email to notify user of password change
-    HttpResponse::Ok().json(web::Json("Change Password"))
+    Ok(HttpResponse::Ok().json(web::Json("Change Password")))
 }
 
-// ----------------------------------------------------------------------------
 pub fn routes() -> actix_web::Scope {
     web::scope("/account")
         .service(profile)

@@ -1,3 +1,4 @@
+use crate::config::AppData;
 use crate::modules::auth::validate_token;
 use actix_web::{
     body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
@@ -6,6 +7,7 @@ use actix_web::{
 use actix_web_grants::GrantsMiddleware;
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use std::collections::HashSet;
+// use std::env;
 pub mod configurations;
 pub mod users;
 
@@ -32,18 +34,15 @@ async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
         Ok(auth) => auth.into_scheme().token().to_string(),
         Err(_) => "".to_string(),
     };
-
-    let claims = match validate_token(&token) {
+    let globals = req.app_data::<AppData>().unwrap();
+    let claims = match validate_token(&token, &globals.jwt_secret) {
         Ok(claims) => claims,
         Err(_) => {
             return Ok(HashSet::new());
         }
     };
 
-    println!("Claims: {:?}", claims);
-
     if claims.nickname == Some("admin".to_string()) {
-        println!("Admin");
         return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
     }
 

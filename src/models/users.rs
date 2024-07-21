@@ -1,10 +1,11 @@
 use crate::db::DB;
-use crate::models::records::{thing_to_string, Record};
+use crate::models::record::{thing_to_string, Record};
 use serde::{Deserialize, Serialize};
 
 const RESOURCE: &str = "users";
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NewUser {
     pub name: String,
     pub email: String,
@@ -15,11 +16,13 @@ pub struct NewUser {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct User {
     #[serde(deserialize_with = "thing_to_string")]
     pub id: String,
     pub name: String,
     pub email: String,
+    // #[serde(skip)]
     pub password: String,
     pub nickname: Option<String>,
     pub picture: Option<String>,

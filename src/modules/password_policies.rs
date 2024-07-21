@@ -169,7 +169,8 @@ mod tests {
         );
 
         let password = "Password1!";
-        assert_eq!(password_policies.validate(password), Ok(()));
+        let result = password_policies.validate(password);
+        assert_eq!(result, Ok(()));
     }
 
     #[test]

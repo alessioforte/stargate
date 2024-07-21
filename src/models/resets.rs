@@ -1,6 +1,6 @@
 use crate::db::DB;
-use crate::models::records::thing_to_string;
-use crate::models::records::Record;
+use crate::models::record::thing_to_string;
+use crate::models::record::Record;
 use serde::{Deserialize, Serialize};
 
 const RESOURCE: &str = "resets";
