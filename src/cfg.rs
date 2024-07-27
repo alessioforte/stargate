@@ -1,4 +1,4 @@
-use crate::config;
+use crate::data::state::State;
 use crate::errors::{HttpError, PayloadError};
 use actix_web::error::JsonPayloadError;
 use actix_web::http::header::CONTENT_TYPE;
@@ -6,8 +6,8 @@ use actix_web::web::ServiceConfig;
 use actix_web::{web, web::Data, HttpRequest};
 
 pub fn app_data(cfg: &mut ServiceConfig) {
-    let globals = config::globals::Globals::init();
-    let config_data = Data::new(globals);
+    let state = State::init();
+    let data = Data::new(state);
 
     cfg.app_data(
         web::JsonConfig::default()
@@ -25,7 +25,7 @@ pub fn app_data(cfg: &mut ServiceConfig) {
                 err => PayloadError::from(err).into(),
             }),
     )
-    .app_data(config_data.clone());
+    .app_data(data.clone());
 }
 
 pub const LOGO: &str = "

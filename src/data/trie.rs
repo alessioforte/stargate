@@ -1,4 +1,4 @@
-use crate::config::config::Service;
+use crate::data::config::Service;
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]
@@ -26,7 +26,8 @@ impl TriePath {
             node = node
                 .children
                 .entry(segment.to_string())
-                .or_insert(TriePathNode::default());
+                // .or_insert(TriePathNode::default());
+                .or_default();
         }
         node.is_end = true;
         node.service = Some(service);

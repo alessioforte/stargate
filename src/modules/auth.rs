@@ -38,7 +38,7 @@ pub fn generate_token(claims: Claims) -> Result<String, errors::Error> {
 }
 
 pub fn validate_token(token: &str, secret: &str) -> Result<Claims, errors::Error> {
-    if token == "" {
+    if token.is_empty() {
         return Err(errors::Error::from(errors::ErrorKind::InvalidToken));
     }
     let encoding_key = DecodingKey::from_secret(secret.as_ref());

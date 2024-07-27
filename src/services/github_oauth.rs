@@ -2,7 +2,6 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::env;
 use std::error::Error;
-// use crate::model::AppState;
 
 #[derive(Deserialize)]
 pub struct GitHubOauthToken {

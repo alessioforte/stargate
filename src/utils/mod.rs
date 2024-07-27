@@ -1,8 +1,6 @@
-use crate::config::trie::TriePath;
-use crate::models::users::{NewUser, User};
+use crate::models::users::{Payload as UserPayload, User};
 use crate::modules::hash::Hash;
 use rand::Rng;
-use std::env;
 
 pub fn generate_password(
     length: usize,
@@ -51,7 +49,7 @@ pub async fn create_super_admin() {
         return;
     }
 
-    let super_admin = NewUser {
+    let super_admin = UserPayload {
         email: "admin@localhost".to_string(),
         name: "Admin".to_string(),
         nickname: Some("admin".to_string()),

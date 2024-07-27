@@ -1,4 +1,4 @@
-use crate::config::config::Config;
+use crate::data::config::Config;
 use crate::errors::{ErrorResponse, HttpError};
 use actix_web::{get, put, web, HttpResponse};
 use actix_web_grants::protect;
@@ -11,6 +11,13 @@ struct Params {
     format: Option<String>,
 }
 
+#[utoipa::path(
+    context_path = "/admin/configurations",
+    path = "/",
+    responses(
+        (status = 200, description = "OK", body = Health)
+    )
+)]
 #[get("")]
 #[protect("SUPER_ADMIN")]
 pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpResponse, ErrorResponse> {
@@ -41,6 +48,13 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
     }
 }
 
+#[utoipa::path(
+    context_path = "/admin/configurations",
+    path = "/",
+    responses(
+        (status = 200, description = "OK", body = Health)
+    )
+)]
 #[put("")]
 #[protect("SUPER_ADMIN")]
 pub async fn update_configurations() -> Result<HttpResponse, ErrorResponse> {

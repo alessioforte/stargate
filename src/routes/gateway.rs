@@ -1,12 +1,12 @@
 use crate::errors::{ErrorResponse, HttpError};
 use actix_web::{
     http::{self, header::Header},
-    route, HttpRequest, HttpResponse,
+    route, HttpRequest, HttpResponse, HttpResponseBuilder,
 };
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use reqwest::{Client, Method};
 
-use crate::config::{config::Service, AppData};
+use crate::data::{config::Service, AppData};
 use crate::modules::auth::validate_token;
 
 #[route(
@@ -22,7 +22,7 @@ use crate::modules::auth::validate_token;
     method = "TRACE"
 )]
 pub async fn handle_request(
-    globals: AppData,
+    data: AppData,
     req: HttpRequest,
 ) -> Result<HttpResponse, ErrorResponse> {
     let path = req.uri().path();
@@ -41,7 +41,8 @@ pub async fn handle_request(
         Err(_) => "".to_string(),
     };
 
-    let config = globals.config.lock().unwrap();
+    let config = data.config.read().await;
+
     let service = match config.search(path) {
         Some(service) => service,
         None => {
@@ -58,8 +59,8 @@ pub async fn handle_request(
         let mut route = None;
         for r in routes {
             let mut subpath = path.replace(&service.path, "");
-            if subpath == "" {
-                subpath.push_str("/");
+            if subpath.is_empty() {
+                subpath.push('/');
             }
             if r.path == subpath && r.method == method.as_str() {
                 route = Some(r);
@@ -74,15 +75,15 @@ pub async fn handle_request(
         auth_required = route.unwrap().auth_required.unwrap_or(auth_required);
     }
 
-    if auth_required && validate_token(&token, &globals.jwt_secret).is_err() {
+    if auth_required && validate_token(&token, &data.jwt_secret).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Unauthorized".to_string(),
         )));
     }
 
     // format the URI
-    let mut uri = format_uri(&service, path.to_string());
-    if query != "" {
+    let mut uri = format_uri(service, path.to_string());
+    if !query.is_empty() {
         uri.push_str(&format!("?{}", query));
     }
 
@@ -105,10 +106,17 @@ pub async fn handle_request(
     };
 
     let status = response.status();
-    let status: http::StatusCode = http::StatusCode::from_u16(status.as_u16()).unwrap();
+    let headers = response.headers().clone();
     let body = response.text().await.unwrap();
 
-    Ok(HttpResponse::build(status).body(body))
+    let status: http::StatusCode = http::StatusCode::from_u16(status.as_u16()).unwrap();
+    let mut response = HttpResponseBuilder::new(status);
+    for (k, v) in headers.iter() {
+        let tuple = (k.to_string(), v.to_str().unwrap().to_string());
+        response.append_header(tuple);
+    }
+
+    Ok(response.body(body))
 }
 
 fn format_uri(service: &Service, path: String) -> String {

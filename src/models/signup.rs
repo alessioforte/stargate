@@ -1,26 +1,21 @@
 use crate::db::DB;
+use crate::model;
 use crate::models::record::thing_to_string;
 use crate::models::record::Record;
 use serde::{Deserialize, Serialize};
 
 const TABLE: &str = "signups";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NewSignup {
-    pub email: String,
-    pub uuid: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Signup {
-    #[serde(deserialize_with = "thing_to_string")]
-    pub id: String,
-    pub email: String,
-    pub uuid: String,
+model! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Signup {
+        pub email: String,
+        pub uuid: String,
+    }
 }
 
 impl Signup {
-    pub async fn create(signup: NewSignup) -> surrealdb::Result<Vec<Record>> {
+    pub async fn create(signup: Payload) -> surrealdb::Result<Vec<Record>> {
         let db = DB.get().unwrap();
         db.create(TABLE).content(signup).await
     }

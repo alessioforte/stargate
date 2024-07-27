@@ -7,8 +7,8 @@ use crate::modules::hash::Hash;
 use crate::modules::password_policies::{PasswordPolicy, PasswordPolicyValidator};
 use crate::services::smtp::send_email;
 use crate::{
-    models::signup::{NewSignup, Signup},
-    models::users::{NewUser, User},
+    models::signup::{Payload as SignupPayload, Signup},
+    models::users::{Payload as UserPayload, User},
 };
 
 // ----------------------------------------------------------------------------
@@ -18,7 +18,8 @@ struct SignupRequestBody {
 }
 
 #[utoipa::path(
-    path = "/signup",
+    context_path = "/signup",
+    path = "/",
     responses(
         (status = 200, description = "OK")
     )
@@ -51,7 +52,7 @@ pub async fn signup_request(
         )));
     }
 
-    let signup = NewSignup {
+    let signup = SignupPayload {
         email: body.email.clone(),
         uuid: uuid.clone(),
     };
@@ -73,7 +74,8 @@ struct SignupConfirmParams {
 }
 
 #[utoipa::path(
-    path = "/signup",
+    context_path = "/signup",
+    path = "/",
     responses(
         (status = 200, description = "OK")
     )
@@ -110,7 +112,8 @@ struct SignupCompleteRequestBody {
 }
 
 #[utoipa::path(
-    path = "/signup",
+    context_path = "/signup",
+    path = "/",
     responses(
         (status = 200, description = "OK")
     )
@@ -145,7 +148,7 @@ pub async fn signup_complete(
 
     match signup.unwrap() {
         Some(signup) => {
-            let new_user = NewUser {
+            let new_user = UserPayload {
                 email: signup.email.clone(),
                 name: body.name.clone(),
                 nickname: Some(body.nickname.clone()),

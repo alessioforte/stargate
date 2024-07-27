@@ -13,7 +13,7 @@ where
 {
     let thing = Thing::deserialize(deserializer)?;
     let binding = thing.to_string();
-    let parts = binding.split(":").collect::<Vec<&str>>();
+    let parts = binding.split(':').collect::<Vec<&str>>();
     let id = parts.last().unwrap().to_string();
     Ok(id)
 }

@@ -1,0 +1,35 @@
+{
+  "name": "stargate",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "app",
+  "sourceRoot": "microservices/stargate/src",
+  "targets": {
+    "run": {
+      "executor": "@nxrs/cargo:run"
+    },
+    "build": {
+      "executor": "@nxrs/cargo:build",
+      "options": {
+        "profile": "dev"
+      },
+      "configurations": {
+        "production": {
+          "profile": "release"
+        }
+      }
+    },
+    "test": {
+      "executor": "@nxrs/cargo:test",
+      "options": {}
+    },
+    "lint": {
+      "executor": "@nxrs/cargo:clippy",
+      "options": {
+        "fix": false,
+        "failOnWarnings": true,
+        "noDeps": true
+      }
+    }
+  },
+  "tags": []
+}

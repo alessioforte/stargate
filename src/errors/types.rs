@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 enum ErrorType {
-    InternalError,
-    InvalidRequestError,
-    AuthenticationError,
+    Internal,
+    InvalidRequest,
+    Authentication,
 }
 
 impl fmt::Display for ErrorType {
@@ -14,9 +14,9 @@ impl fmt::Display for ErrorType {
         use ErrorType::*;
 
         match self {
-            InternalError => write!(f, "internal"),
-            InvalidRequestError => write!(f, "invalid_request"),
-            AuthenticationError => write!(f, "auth"),
+            Internal => write!(f, "internal"),
+            InvalidRequest => write!(f, "invalid_request"),
+            Authentication => write!(f, "authentication"),
         }
     }
 }
@@ -32,7 +32,7 @@ impl ErrCode {
         ErrCode {
             status_code,
             error_name,
-            error_type: ErrorType::AuthenticationError,
+            error_type: ErrorType::Authentication,
         }
     }
 
@@ -40,7 +40,7 @@ impl ErrCode {
         ErrCode {
             status_code,
             error_name,
-            error_type: ErrorType::InternalError,
+            error_type: ErrorType::Internal,
         }
     }
 
@@ -48,7 +48,7 @@ impl ErrCode {
         ErrCode {
             status_code,
             error_name,
-            error_type: ErrorType::InvalidRequestError,
+            error_type: ErrorType::InvalidRequest,
         }
     }
 }

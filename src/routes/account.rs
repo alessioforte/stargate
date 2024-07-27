@@ -1,6 +1,7 @@
-use crate::config::AppData;
+use crate::data::AppData;
 use crate::errors::{ErrorResponse, HttpError};
-use crate::models::resets::{NewPasswordReset, PasswordReset};
+// use crate::models::resets::{PasswordReset, PasswordResetPayload};
+use crate::models::resets::{PasswordReset, Payload as PasswordResetPayload};
 use crate::models::tokens::Token;
 use crate::models::users::{Profile, User};
 use crate::modules::auth::{create_tokens, validate_token, Claims};
@@ -14,20 +15,21 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[utoipa::path(
-    path = "/account/profile",
+    context_path = "/account",
+    path = "/profile",
     responses(
         (status = 200, description = "OK")
     )
 )]
 #[get("/profile")]
-pub async fn profile(globals: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
+pub async fn profile(data: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let auth = Authorization::<Bearer>::parse(&req);
     let token = match auth {
         Ok(auth) => auth.into_scheme().token().to_string(),
         Err(_) => "".to_string(),
     };
 
-    let claims = match validate_token(&token, &globals.jwt_secret) {
+    let claims = match validate_token(&token, &data.jwt_secret) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -69,14 +71,15 @@ struct UserCredentials {
 }
 
 #[utoipa::path(
-    path = "/account/login",
+    context_path = "/account",
+    path = "/login",
     responses(
         (status = 200, description = "OK")
     )
 )]
 #[post("/login")]
 pub async fn login(
-    globals: AppData,
+    data: AppData,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let mut user = User::get_by_email(credentials.username.clone())
@@ -94,13 +97,9 @@ pub async fn login(
         }
     }
     let user = user.unwrap();
+    let password = user.password();
 
-    let is_valid: bool = match Hash::verify(&credentials.password, &user.password) {
-        Ok(_) => true,
-        Err(_) => false,
-    };
-
-    if !is_valid {
+    if Hash::verify(&credentials.password, &password).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Invalid password".to_string(),
         )));
@@ -115,8 +114,8 @@ pub async fn login(
             email_verified: true,
             ..Claims::default()
         },
-        globals.access_token_expiration,
-        globals.refresh_token_expiration,
+        data.access_token_expiration,
+        data.refresh_token_expiration,
     )
     .unwrap();
 
@@ -147,19 +146,20 @@ struct RefreshTokenRequestBody {
 }
 
 #[utoipa::path(
-    path = "/account/refresh-token",
+    context_path = "/account",
+    path = "/refresh-token",
     responses(
         (status = 200, description = "OK")
     )
 )]
 #[put("/refresh-token")]
 pub async fn refresh(
-    globals: AppData,
+    data: AppData,
     body: web::Json<RefreshTokenRequestBody>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
     let refresh_token = body.refresh_token.clone();
-    let claims = match validate_token(&refresh_token, &globals.jwt_secret) {
+    let claims = match validate_token(&refresh_token, &data.jwt_secret) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -176,12 +176,8 @@ pub async fn refresh(
     }
 
     let token = token.unwrap();
-    let is_valid: bool = match Hash::verify(&refresh_token, &token.value) {
-        Ok(_) => true,
-        Err(_) => false,
-    };
 
-    if !is_valid {
+    if Hash::verify(&refresh_token, &token.value).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Invalid Token".to_string(),
         )));
@@ -206,8 +202,8 @@ pub async fn refresh(
             email_verified: true,
             ..Claims::default()
         },
-        globals.access_token_expiration,
-        globals.refresh_token_expiration,
+        data.access_token_expiration,
+        data.refresh_token_expiration,
     )
     .unwrap();
 
@@ -227,20 +223,21 @@ pub async fn refresh(
 }
 
 #[utoipa::path(
-    path = "/account/logout",
+    context_path = "/account",
+    path = "/logout",
     responses(
         (status = 200, description = "OK")
     )
 )]
 #[delete("/logout")]
-pub async fn logout(globals: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
+pub async fn logout(data: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let auth = Authorization::<Bearer>::parse(&req);
     let token = match auth {
         Ok(auth) => auth.into_scheme().token().to_string(),
         Err(_) => "".to_string(),
     };
 
-    let claims = match validate_token(&token, &globals.jwt_secret) {
+    let claims = match validate_token(&token, &data.jwt_secret) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -266,7 +263,8 @@ struct ForgotPasswordRequestBody {
 }
 
 #[utoipa::path(
-    path = "/account/forgot-password",
+    context_path = "/account",
+    path = "/forgot-password",
     responses(
         (status = 200, description = "OK")
     )
@@ -287,7 +285,7 @@ pub async fn forgot_password(
     let user = user.unwrap();
     // TODO: use JWT instead of UUID
     let uuid = Uuid::new_v4().to_string();
-    let reset = PasswordReset::create(NewPasswordReset {
+    let reset = PasswordReset::create(PasswordResetPayload {
         email: user.email.clone(),
         uuid: uuid.clone(),
         issued_at: Utc::now().timestamp(),
@@ -317,7 +315,8 @@ struct ChangePasswordRequestBody {
 }
 
 #[utoipa::path(
-    path = "/account/reset-password",
+    context_path = "/account",
+    path = "/reset-password",
     responses(
         (status = 200, description = "OK")
     )

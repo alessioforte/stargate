@@ -1,32 +1,21 @@
 use crate::db::DB;
+use crate::model;
 use crate::models::record::{thing_to_string, Record};
 use serde::{Deserialize, Serialize};
 
 const RESOURCE: &str = "users";
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NewUser {
-    pub name: String,
-    pub email: String,
-    pub password: String,
-    pub nickname: Option<String>,
-    pub picture: Option<String>,
-    pub phone_number: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct User {
-    #[serde(deserialize_with = "thing_to_string")]
-    pub id: String,
-    pub name: String,
-    pub email: String,
-    // #[serde(skip)]
-    pub password: String,
-    pub nickname: Option<String>,
-    pub picture: Option<String>,
-    pub phone_number: Option<String>,
+model! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct User {
+        pub name: String,
+        pub email: String,
+        pub password: String,
+        pub nickname: Option<String>,
+        pub picture: Option<String>,
+        pub phone_number: Option<String>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,12 +30,16 @@ pub struct Profile {
 }
 
 impl User {
-    pub async fn create(user: NewUser) -> surrealdb::Result<Vec<Record>> {
+    pub async fn create(user: Payload) -> surrealdb::Result<Vec<Record>> {
         let db = DB.get().unwrap();
         db.create(RESOURCE).content(user).await
     }
 
-    pub async fn get_all() -> surrealdb::Result<Vec<User>> {
+    pub fn password(&self) -> String {
+        self.password.clone()
+    }
+
+    pub async fn get_all() -> surrealdb::Result<Vec<Profile>> {
         let db = DB.get().unwrap();
         db.select(RESOURCE).await
     }

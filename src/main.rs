@@ -1,5 +1,5 @@
 mod cfg;
-mod config;
+mod data;
 mod errors;
 mod models;
 mod modules;
@@ -11,19 +11,21 @@ use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, App, HttpServer};
 use dotenvy::dotenv;
-use log;
-use pretty_env_logger;
 use services::db;
 use std::env;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("{}", cfg::LOGO);
-
     dotenv().ok();
     pretty_env_logger::init();
-    db::init().await;
 
+    println!("{}", cfg::LOGO);
+    let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
+    let version = env!("CARGO_PKG_VERSION");
+    log::info!("Starting server on port {}", port);
+    log::info!("Version: {}", version);
+
+    db::init().await;
     // create super admin user
     utils::create_super_admin().await;
 
@@ -33,9 +35,6 @@ async fn main() -> std::io::Result<()> {
         .burst_size(5)
         .finish()
         .unwrap();
-
-    let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
-    log::info!("Starting server on port {}", port);
 
     HttpServer::new(move || {
         App::new()

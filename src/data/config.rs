@@ -21,15 +21,9 @@ pub struct Service {
     pub routes: Option<Vec<Route>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub services: Vec<Service>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config { services: vec![] }
-    }
 }
 
 impl Config {

@@ -16,6 +16,10 @@
 // max_auth_age
 // hash_algorithm
 
+pub trait PasswordPolicyValidator {
+    fn validate(&self, password: &str) -> Result<(), String>;
+}
+
 pub enum PasswordPolicy {
     MinLength(usize),
     MaxLength(usize),
@@ -67,24 +71,22 @@ impl PasswordPolicy {
         }
     }
 
-    pub fn to_string(&self) -> String {
-        match *self {
-            PasswordPolicy::MinLength(_) => "min_length".to_string(),
-            PasswordPolicy::MaxLength(_) => "max_length".to_string(),
-            PasswordPolicy::Lowercase => "lowercase".to_string(),
-            PasswordPolicy::Uppercase => "uppercase".to_string(),
-            PasswordPolicy::Digits => "digits".to_string(),
-            PasswordPolicy::SpecialChars => "special_chars".to_string(),
-        }
-    }
-
     pub fn to_vec_string(policies: Vec<PasswordPolicy>) -> Vec<String> {
         policies.iter().map(|policy| policy.to_string()).collect()
     }
 }
 
-pub trait PasswordPolicyValidator {
-    fn validate(&self, password: &str) -> Result<(), String>;
+impl std::fmt::Display for PasswordPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match *self {
+            PasswordPolicy::MinLength(_) => write!(f, "min_length"),
+            PasswordPolicy::MaxLength(_) => write!(f, "max_length"),
+            PasswordPolicy::Lowercase => write!(f, "lowercase"),
+            PasswordPolicy::Uppercase => write!(f, "uppercase"),
+            PasswordPolicy::Digits => write!(f, "digits"),
+            PasswordPolicy::SpecialChars => write!(f, "special_chars"),
+        }
+    }
 }
 
 impl PasswordPolicyValidator for Vec<PasswordPolicy> {
