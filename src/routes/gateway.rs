@@ -6,7 +6,7 @@ use actix_web::{
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use reqwest::{Client, Method};
 
-use crate::data::{config::Service, AppData};
+use crate::data::{config::Service, AppData, Gate};
 use crate::modules::auth::validate_token;
 
 #[route(
@@ -23,6 +23,7 @@ use crate::modules::auth::validate_token;
 )]
 pub async fn handle_request(
     data: AppData,
+    gate: Gate,
     req: HttpRequest,
 ) -> Result<HttpResponse, ErrorResponse> {
     let path = req.uri().path();
@@ -41,7 +42,7 @@ pub async fn handle_request(
         Err(_) => "".to_string(),
     };
 
-    let config = data.config.read().await;
+    let config = gate.config.read().await;
 
     let service = match config.search(path) {
         Some(service) => service,

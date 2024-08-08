@@ -57,8 +57,11 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
 )]
 #[put("")]
 #[protect("SUPER_ADMIN")]
-pub async fn update_configurations() -> Result<HttpResponse, ErrorResponse> {
-    Ok(HttpResponse::Ok().json(web::Json("impl update configurations")))
+pub async fn update_configurations(
+    config: web::Json<Config>,
+) -> Result<HttpResponse, ErrorResponse> {
+    config.to_file();
+    Ok(HttpResponse::Ok().finish())
 }
 
 pub fn routes() -> actix_web::Scope {

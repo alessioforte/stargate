@@ -1,0 +1,14 @@
+{{- if .Values.persistentVolume.enabled }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: stargate-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /Users/alessioforte/.pv-kubernetes
+{{- end }}

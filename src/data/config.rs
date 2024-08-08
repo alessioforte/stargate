@@ -34,7 +34,7 @@ impl Config {
             std::fs::create_dir(".stargate").expect("Unable to create config directory");
         }
         if !Path::new(&format!("{}/{}", path, filename)).exists() {
-            println!("Creating config file");
+            log::info!("Creating gate configuration yaml file");
             let config = Config::default();
             let config_str = serde_yaml::to_string(&config).expect("Unable to serialize config");
             std::fs::write(format!("{}/{}", path, filename), config_str)
@@ -45,5 +45,13 @@ impl Config {
             .expect("Unable to read config file");
         let config: Config = serde_yaml::from_str(&file).expect("Unable to parse config file");
         config
+    }
+
+    pub fn to_file(&self) {
+        let path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
+        let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
+        let config_str = serde_yaml::to_string(&self).expect("Unable to serialize config");
+        std::fs::write(format!("{}/{}", path, filename), config_str)
+            .expect("Unable to write config file");
     }
 }

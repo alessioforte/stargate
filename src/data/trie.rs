@@ -23,11 +23,7 @@ impl TriePath {
     pub fn insert(&mut self, path: &str, service: Service) {
         let mut node = &mut self.root;
         for segment in path.trim_start_matches('/').split('/') {
-            node = node
-                .children
-                .entry(segment.to_string())
-                // .or_insert(TriePathNode::default());
-                .or_default();
+            node = node.children.entry(segment.to_string()).or_default();
         }
         node.is_end = true;
         node.service = Some(service);
