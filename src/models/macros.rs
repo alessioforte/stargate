@@ -17,8 +17,6 @@ macro_rules! model {
     ) => {
         $(#[$attr])*
         $vis struct $name {
-            #[serde(deserialize_with = "thing_to_string")]
-            pub id: String,
             $(
                 $(#[$field_attr])*
                 $field_vis $field: $type,

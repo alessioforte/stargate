@@ -13,6 +13,10 @@ model! {
         pub uuid: String,
         pub issued_at: i64,
         pub expires_at: i64,
+    },
+    {
+        #[serde(deserialize_with = "thing_to_string")]
+        pub id: String,
     }
 }
 

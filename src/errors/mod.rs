@@ -34,6 +34,8 @@ pub enum HttpError {
     NotFound(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("{0}")]
+    BadGateway(String),
 }
 
 impl ErrorCode for HttpError {
@@ -50,6 +52,7 @@ impl ErrorCode for HttpError {
             HttpError::NotFound(_) => Code::NotFound,
             HttpError::Conflict(_) => Code::Conflict,
             HttpError::BadRequest(_) => Code::BadRequest,
+            HttpError::BadGateway(_) => Code::BadGateway,
         }
     }
 }

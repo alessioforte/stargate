@@ -4,7 +4,7 @@ use surrealdb::sql::Thing;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Record {
     #[serde(deserialize_with = "thing_to_string")]
-    id: String,
+    pub id: String,
 }
 
 pub fn thing_to_string<'de, D>(deserializer: D) -> Result<String, D::Error>

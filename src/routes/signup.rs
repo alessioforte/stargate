@@ -152,7 +152,7 @@ pub async fn signup_complete(
                 email: signup.email.clone(),
                 name: body.name.clone(),
                 nickname: Some(body.nickname.clone()),
-                password: Hash::encode(&body.password).unwrap(),
+                password: Some(Hash::encode(&body.password).unwrap()),
                 picture: None,
                 phone_number: None,
             };
@@ -160,7 +160,7 @@ pub async fn signup_complete(
             let response = User::create(new_user).await;
             if response.is_err() {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    "Could not create user".to_string(),
+                    response.err().unwrap().to_string(),
                 )));
             }
 

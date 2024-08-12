@@ -11,10 +11,14 @@ model! {
     pub struct User {
         pub name: String,
         pub email: String,
-        pub password: String,
+        pub password: Option<String>,
         pub nickname: Option<String>,
         pub picture: Option<String>,
         pub phone_number: Option<String>,
+    },
+    {
+        #[serde(deserialize_with = "thing_to_string")]
+        pub id: String,
     }
 }
 
@@ -30,13 +34,36 @@ pub struct Profile {
 }
 
 impl User {
-    pub async fn create(user: Payload) -> surrealdb::Result<Vec<Record>> {
+    pub async fn create(user: Payload) -> surrealdb::Result<Record> {
         let db = DB.get().unwrap();
-        db.create(RESOURCE).content(user).await
+        let records = db.create(RESOURCE).content(user).await;
+        match records {
+            Ok(mut records) => Ok(records.pop().unwrap()),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn update(id: String, user: Payload) -> surrealdb::Result<Option<User>> {
+        let db = DB.get().unwrap();
+        let sql = format!(
+            "UPDATE {}:{} SET name = $name, email = $email, nickname = $nickname, picture = $picture, phone_number = $phone_number",
+            RESOURCE, id
+        );
+        let mut response = db
+            .query(sql)
+            .bind(("name", user.name))
+            .bind(("email", user.email))
+            .bind(("nickname", user.nickname))
+            .bind(("picture", user.picture))
+            .bind(("phone_number", user.phone_number))
+            .await?;
+        let users: Vec<User> = response.take(0)?;
+        let user = users.first().cloned();
+        Ok(user)
     }
 
     pub fn password(&self) -> String {
-        self.password.clone()
+        self.password.clone().unwrap_or_else(|| "".to_string())
     }
 
     pub async fn get_all() -> surrealdb::Result<Vec<Profile>> {

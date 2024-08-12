@@ -11,6 +11,10 @@ model! {
     pub struct Signup {
         pub email: String,
         pub uuid: String,
+    },
+    {
+        #[serde(deserialize_with = "thing_to_string")]
+        pub id: String,
     }
 }
 

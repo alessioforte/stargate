@@ -68,6 +68,7 @@ pub enum Code {
     PayloadTooLarge,
 
     BadParameter,
+    BadGateway,
     Unauthorized,
     Forbidden,
     NotFound,
@@ -102,6 +103,7 @@ impl Code {
             PayloadTooLarge => ErrCode::invalid("payload_too_large", StatusCode::PAYLOAD_TOO_LARGE),
             BadParameter => ErrCode::invalid("bad_parameter", StatusCode::BAD_REQUEST),
             NotFound => ErrCode::invalid("not_found", StatusCode::NOT_FOUND),
+            BadGateway => ErrCode::invalid("bad_gateway", StatusCode::BAD_GATEWAY),
             Conflict => ErrCode::invalid("conflict", StatusCode::CONFLICT),
             Forbidden => ErrCode::authentication("forbidden", StatusCode::FORBIDDEN),
             Unauthorized => ErrCode::authentication("unauthorized", StatusCode::UNAUTHORIZED),
