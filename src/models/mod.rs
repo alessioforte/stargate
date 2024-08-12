@@ -1,3 +1,4 @@
+pub mod oauth2_providers;
 pub mod record;
 pub mod resets;
 pub mod signup;

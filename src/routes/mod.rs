@@ -3,7 +3,7 @@ pub mod admin;
 pub mod docs;
 pub mod gateway;
 pub mod health;
-// pub mod oauth;
+pub mod oauth;
 pub mod signup;
 
 use actix_web::web::ServiceConfig;
@@ -31,7 +31,7 @@ pub fn configure(cfg: &mut ServiceConfig) {
     cfg.service(health::get)
         .service(docs::routes())
         .service(account::routes())
-        // .service(oauth::routes())
+        .service(oauth::routes())
         .service(signup::routes())
         .service(admin::routes())
         .service(gateway::handle_request);
