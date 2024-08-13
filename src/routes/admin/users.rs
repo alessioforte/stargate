@@ -14,7 +14,7 @@ use actix_web_grants::protect;
 #[get("")]
 #[protect("SUPER_ADMIN")]
 pub async fn get_users() -> Result<HttpResponse, ErrorResponse> {
-    let users = User::get_all().await.unwrap();
+    let users = User::list().await.unwrap();
     Ok(HttpResponse::Ok().json(web::Json(users)))
 }
 
@@ -32,15 +32,17 @@ pub async fn create_user(user: web::Json<UserPayload>) -> Result<HttpResponse, E
         Some(password) => Some(Hash::encode(password).unwrap()),
         None => return Err(HttpError::BadRequest("Password is required".to_string()).into()),
     };
-    let new_user = UserPayload {
-        email: user.email.clone(),
-        name: user.name.clone(),
-        nickname: user.nickname.clone(),
-        password,
-        phone_number: user.phone_number.clone(),
-        picture: user.picture.clone(),
-    };
-    let user = User::create(new_user).await.unwrap();
+    let user = User::new()
+        .name(user.name.clone())
+        .email(user.email.clone())
+        .nickname(user.nickname.clone())
+        .password(password)
+        .phone_number(user.phone_number.clone())
+        .picture(user.picture.clone())
+        .save()
+        .await
+        .unwrap();
+
     Ok(HttpResponse::Ok().json(web::Json(user)))
 }
 
@@ -55,7 +57,7 @@ pub async fn create_user(user: web::Json<UserPayload>) -> Result<HttpResponse, E
 #[protect("SUPER_ADMIN")]
 pub async fn delete_user(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
     let id = params.into_inner();
-    let user = User::delete(id).await.unwrap();
+    let user = User::delete(&id).await.unwrap();
     Ok(HttpResponse::Ok().json(web::Json(user)))
 }
 

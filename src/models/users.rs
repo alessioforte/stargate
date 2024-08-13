@@ -34,49 +34,96 @@ pub struct Profile {
 }
 
 impl User {
-    pub async fn create(user: Payload) -> surrealdb::Result<Record> {
-        let db = DB.get().unwrap();
-        let records = db.create(RESOURCE).content(user).await;
-        match records {
-            Ok(mut records) => Ok(records.pop().unwrap()),
-            Err(e) => Err(e),
+    pub fn new() -> User {
+        User {
+            name: "".to_string(),
+            email: "".to_string(),
+            password: None,
+            nickname: None,
+            picture: None,
+            phone_number: None,
+            id: "".to_string(),
         }
     }
 
-    pub async fn update(id: String, user: Payload) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
-        let sql = format!(
-            "UPDATE {}:{} SET name = $name, email = $email, nickname = $nickname, picture = $picture, phone_number = $phone_number",
-            RESOURCE, id
-        );
-        let mut response = db
-            .query(sql)
-            .bind(("name", user.name))
-            .bind(("email", user.email))
-            .bind(("nickname", user.nickname))
-            .bind(("picture", user.picture))
-            .bind(("phone_number", user.phone_number))
-            .await?;
-        let users: Vec<User> = response.take(0)?;
-        let user = users.first().cloned();
-        Ok(user)
+    pub fn name(mut self, name: String) -> Self {
+        self.name = name;
+        self
     }
 
-    pub fn password(&self) -> String {
-        self.password.clone().unwrap_or_else(|| "".to_string())
+    pub fn email(mut self, email: String) -> Self {
+        self.email = email;
+        self
     }
 
-    pub async fn get_all() -> surrealdb::Result<Vec<Profile>> {
+    pub fn password(mut self, password: Option<String>) -> Self {
+        self.password = password;
+        self
+    }
+
+    pub fn nickname(mut self, nickname: Option<String>) -> Self {
+        self.nickname = nickname;
+        self
+    }
+
+    pub fn picture(mut self, picture: Option<String>) -> Self {
+        self.picture = picture;
+        self
+    }
+
+    pub fn phone_number(mut self, phone_number: Option<String>) -> Self {
+        self.phone_number = phone_number;
+        self
+    }
+
+    pub async fn list() -> surrealdb::Result<Vec<Profile>> {
         let db = DB.get().unwrap();
         db.select(RESOURCE).await
     }
 
-    pub async fn get(id: String) -> surrealdb::Result<Option<User>> {
+    pub async fn get(id: &str) -> surrealdb::Result<Option<User>> {
         let db = DB.get().unwrap();
         db.select((RESOURCE, id)).await
     }
 
-    pub async fn change_password(id: String, password: String) -> surrealdb::Result<Option<User>> {
+    pub async fn save(mut self) -> surrealdb::Result<User> {
+        let db = DB.get().unwrap();
+        let payload = Payload {
+            name: self.name.clone(),
+            email: self.email.clone(),
+            password: self.password.clone(),
+            nickname: self.nickname.clone(),
+            picture: self.picture.clone(),
+            phone_number: self.phone_number.clone(),
+        };
+        let records: Result<Vec<Record>, surrealdb::Error> =
+            db.create(RESOURCE).content(payload).await;
+        match records {
+            Ok(mut records) => {
+                let id = records.pop().unwrap().id;
+                self.id = id;
+                Ok(self)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn update(self) -> surrealdb::Result<Option<User>> {
+        let db = DB.get().unwrap();
+        let payload = Payload {
+            name: self.name.clone(),
+            email: self.email.clone(),
+            password: self.password.clone(),
+            nickname: self.nickname.clone(),
+            picture: self.picture.clone(),
+            phone_number: self.phone_number.clone(),
+        };
+        db.update((RESOURCE, self.id.clone()))
+            .content(payload)
+            .await
+    }
+
+    pub async fn change_password(id: &str, password: &str) -> surrealdb::Result<Option<User>> {
         let db = DB.get().unwrap();
         let sql = format!("UPDATE {}:{} SET password = $password", RESOURCE, id);
         let mut response = db.query(sql).bind(("password", password)).await?;
@@ -85,7 +132,7 @@ impl User {
         Ok(user)
     }
 
-    pub async fn get_by_email(email: String) -> surrealdb::Result<Option<User>> {
+    pub async fn get_by_email(email: &str) -> surrealdb::Result<Option<User>> {
         let db = DB.get().unwrap();
         let sql = format!("SELECT * FROM {} WHERE email = $email", RESOURCE);
         let mut response = db.query(sql).bind(("email", email)).await?;
@@ -94,7 +141,7 @@ impl User {
         Ok(user)
     }
 
-    pub async fn get_by_nickname(nickname: String) -> surrealdb::Result<Option<User>> {
+    pub async fn get_by_nickname(nickname: &str) -> surrealdb::Result<Option<User>> {
         let db = DB.get().unwrap();
         let sql = format!("SELECT * FROM {} WHERE nickname = $nickname", RESOURCE);
         let mut response = db.query(sql).bind(("nickname", nickname)).await?;
@@ -103,7 +150,19 @@ impl User {
         Ok(user)
     }
 
-    pub async fn delete(id: String) -> surrealdb::Result<Option<User>> {
+    pub async fn get_by_username(username: &str) -> surrealdb::Result<Option<User>> {
+        let db = DB.get().unwrap();
+        let sql = format!(
+            "SELECT * FROM {} WHERE email = $username OR nickname = $username",
+            RESOURCE
+        );
+        let mut response = db.query(sql).bind(("username", username)).await?;
+        let users: Vec<User> = response.take(0)?;
+        let user = users.first().cloned();
+        Ok(user)
+    }
+
+    pub async fn delete(id: &str) -> surrealdb::Result<Option<User>> {
         let db = DB.get().unwrap();
         db.delete((RESOURCE, id)).await
     }

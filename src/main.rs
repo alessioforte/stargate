@@ -1,3 +1,4 @@
+mod actions;
 mod cfg;
 mod data;
 mod errors;
@@ -5,7 +6,6 @@ mod models;
 mod modules;
 mod routes;
 mod services;
-mod utils;
 
 use crate::data::gate::Gate;
 use crate::data::state::State;
@@ -30,7 +30,7 @@ async fn main() -> std::io::Result<()> {
 
     db::init().await;
     // create super admin user
-    utils::create_super_admin().await;
+    actions::create_super_admin().await;
 
     // rate limiter middleware
     let governor_config = GovernorConfigBuilder::default()

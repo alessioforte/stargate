@@ -22,7 +22,6 @@ pub struct GoogleUserResult {
 pub async fn get_google_oauth_token(
     authorization_code: &str,
 ) -> Result<OAuthResponse, Box<dyn Error>> {
-    println!("code: {}", authorization_code);
     let redirect_uri = "http://localhost:5050/oauth/google".to_string();
     let client_secret =
         std::env::var("GOOGLE_OAUTH_CLIENT_SECRET").unwrap_or_else(|_| "".to_string());
@@ -44,7 +43,7 @@ pub async fn get_google_oauth_token(
         Ok(oauth_response)
     } else {
         let res = response.text().await?;
-        log::error!("{}", res);
+        log::error!("get_google_oauth_token: {}", res);
         let message = "An error occurred while trying to retrieve access token.";
         Err(From::from(message))
     }
@@ -66,7 +65,7 @@ pub async fn get_google_user(
         Ok(user_info)
     } else {
         let res = response.text().await?;
-        log::error!("{}", res);
+        log::error!("get_google_user: {}", res);
         let message = "An error occurred while trying to retrieve user information.";
         Err(From::from(message))
     }

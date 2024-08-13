@@ -1,5 +1,5 @@
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::error::Error;
 
@@ -8,14 +8,16 @@ pub struct GitHubOauthToken {
     pub access_token: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubUserResult {
+    pub id: i64,
+    pub name: String,
+    pub bio: Option<String>,
     pub login: String,
     pub avatar_url: String,
     pub email: String,
 }
 
-#[allow(dead_code)]
 pub async fn get_github_oauth_token(
     authorization_code: &str,
 ) -> Result<GitHubOauthToken, Box<dyn Error>> {
@@ -28,8 +30,9 @@ pub async fn get_github_oauth_token(
 
     let params = [
         ("client_id", client_id.as_str()),
-        ("code", authorization_code),
         ("client_secret", client_secret.as_str()),
+        ("code", authorization_code),
+        ("accept", "json"),
     ];
 
     let response = client
@@ -43,12 +46,13 @@ pub async fn get_github_oauth_token(
         let oauth_response = response.json::<GitHubOauthToken>().await?;
         Ok(oauth_response)
     } else {
+        let res = response.text().await?;
+        log::error!("get_github_oauth_token: {}", res);
         let message = "An error occurred while trying to retrieve the access token.";
         Err(From::from(message))
     }
 }
 
-#[allow(dead_code)]
 pub async fn get_github_user(access_token: &str) -> Result<GitHubUserResult, Box<dyn Error>> {
     let root_url = "https://api.github.com/user";
 
@@ -57,6 +61,7 @@ pub async fn get_github_user(access_token: &str) -> Result<GitHubUserResult, Box
     let response = client
         .get(root_url)
         .bearer_auth(access_token)
+        .header("User-Agent", "reqwest")
         .send()
         .await?;
 
@@ -64,6 +69,8 @@ pub async fn get_github_user(access_token: &str) -> Result<GitHubUserResult, Box
         let user_info = response.json::<GitHubUserResult>().await?;
         Ok(user_info)
     } else {
+        let res = response.text().await?;
+        log::error!("get_github_user: {}", res);
         let message = "An error occurred while trying to retrieve user information.";
         Err(From::from(message))
     }

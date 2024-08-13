@@ -19,12 +19,12 @@ model! {
 }
 
 impl Signup {
-    pub async fn create(signup: Payload) -> surrealdb::Result<Vec<Record>> {
+    pub async fn save(signup: Payload) -> surrealdb::Result<Vec<Record>> {
         let db = DB.get().unwrap();
         db.create(TABLE).content(signup).await
     }
 
-    pub async fn get_by_email(email: String) -> surrealdb::Result<Option<Signup>> {
+    pub async fn get_by_email(email: &str) -> surrealdb::Result<Option<Signup>> {
         let db = DB.get().unwrap();
         let sql = format!("SELECT * FROM {} WHERE email = $email", TABLE);
         let mut response = db.query(sql).bind(("email", email)).await?;
@@ -33,7 +33,7 @@ impl Signup {
         Ok(signup)
     }
 
-    pub async fn get_by_uuid(id: String) -> surrealdb::Result<Option<Signup>> {
+    pub async fn get_by_uuid(id: &str) -> surrealdb::Result<Option<Signup>> {
         let db = DB.get().unwrap();
         let sql = format!("SELECT * FROM {} WHERE uuid = $uuid", TABLE);
         let mut response = db.query(sql).bind(("uuid", id)).await?;
@@ -42,7 +42,7 @@ impl Signup {
         Ok(signup)
     }
 
-    pub async fn delete(id: String) -> surrealdb::Result<Option<Signup>> {
+    pub async fn delete(id: &str) -> surrealdb::Result<Option<Signup>> {
         let db = DB.get().unwrap();
         db.delete((TABLE, id)).await
     }

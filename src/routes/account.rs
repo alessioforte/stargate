@@ -37,7 +37,7 @@ pub async fn profile(data: AppData, req: HttpRequest) -> Result<HttpResponse, Er
         }
     };
 
-    let user = User::get(claims.sub_id.clone()).await.unwrap();
+    let user = User::get(&claims.sub_id).await.unwrap();
     if user.is_none() {
         return Err(ErrorResponse::from(HttpError::DocumentNotFound(
             "User not found".to_string(),
@@ -81,22 +81,23 @@ pub async fn login(
     data: AppData,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let mut user = User::get_by_email(credentials.username.clone())
-        .await
-        .unwrap();
+    let user = match User::get_by_username(&credentials.username).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )))
+        }
+    };
 
     if user.is_none() {
-        user = User::get_by_nickname(credentials.username.clone())
-            .await
-            .unwrap();
-        if user.is_none() {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid username".to_string(),
-            )));
-        }
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid username".to_string(),
+        )));
     }
+
     let user = user.unwrap();
-    let password = user.password();
+    let password = user.password.clone().unwrap();
 
     if Hash::verify(&credentials.password, &password).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -120,7 +121,7 @@ pub async fn login(
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
-    let upsert_token = Token::upsert(Token {
+    let upsert_token = Token::save(Token {
         id: user.id.clone(),
         value: refresh_token_hash.clone(),
     })
@@ -167,7 +168,7 @@ pub async fn refresh(
         }
     };
 
-    let token = Token::get(claims.sub_id.clone()).await.unwrap();
+    let token = Token::get(&claims.sub_id).await.unwrap();
     if token.is_none() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Invalid Token".to_string(),
@@ -182,7 +183,7 @@ pub async fn refresh(
         )));
     }
 
-    let user = User::get(claims.sub_id.clone()).await.unwrap();
+    let user = User::get(&claims.sub_id).await.unwrap();
 
     if user.is_none() {
         return Err(ErrorResponse::from(HttpError::DocumentNotFound(
@@ -208,7 +209,7 @@ pub async fn refresh(
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
-    Token::upsert(Token {
+    Token::save(Token {
         id: user.id.clone(),
         value: refresh_token_hash.clone(),
     })
@@ -245,7 +246,7 @@ pub async fn logout(data: AppData, req: HttpRequest) -> Result<HttpResponse, Err
         }
     };
 
-    let response = Token::delete(claims.sub_id.clone()).await;
+    let response = Token::delete(&claims.sub_id).await;
     if response.is_err() {
         return Err(ErrorResponse::from(HttpError::InternalServerError(
             "Could not delete token".to_string(),
@@ -273,8 +274,7 @@ pub async fn forgot_password(
     body: web::Json<ForgotPasswordRequestBody>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
-    let email = body.email.clone();
-    let user = User::get_by_email(email.clone()).await.unwrap();
+    let user = User::get_by_email(&body.email).await.unwrap();
     if user.is_none() {
         return Err(ErrorResponse::from(HttpError::DocumentNotFound(
             "User not found".to_string(),
@@ -284,7 +284,7 @@ pub async fn forgot_password(
     let user = user.unwrap();
     // TODO: use JWT instead of UUID
     let uuid = Uuid::new_v4().to_string();
-    let reset = PasswordReset::create(PasswordResetPayload {
+    let reset = PasswordReset::save(PasswordResetPayload {
         email: user.email.clone(),
         uuid: uuid.clone(),
         issued_at: Utc::now().timestamp(),
@@ -326,7 +326,7 @@ pub async fn change_password(
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
     let token = body.token.clone();
-    let change_request = PasswordReset::get_by_uuid(token.clone()).await.unwrap();
+    let change_request = PasswordReset::get_by_uuid(&token).await.unwrap();
     if change_request.is_none() {
         return Err(ErrorResponse::from(HttpError::DocumentNotFound(
             "Change request not found".to_string(),
@@ -340,9 +340,7 @@ pub async fn change_password(
         )));
     }
 
-    let user = User::get_by_email(change_request.email.clone())
-        .await
-        .unwrap();
+    let user = User::get_by_email(&change_request.email).await.unwrap();
     if user.is_none() {
         return Err(ErrorResponse::from(HttpError::DocumentNotFound(
             "User not found".to_string(),
@@ -351,7 +349,7 @@ pub async fn change_password(
 
     let user = user.unwrap();
     let password = Hash::encode(&body.password).unwrap();
-    let response = User::change_password(user.id.clone(), password.clone()).await;
+    let response = User::change_password(&user.id, &password).await;
     if response.is_err() {
         log::error!("Could not update password: {:?}", response.err());
         return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -359,7 +357,7 @@ pub async fn change_password(
         )));
     }
 
-    let response = PasswordReset::delete(change_request.id.clone()).await;
+    let response = PasswordReset::delete(&change_request.id).await;
     if response.is_err() {
         return Err(ErrorResponse::from(HttpError::InternalServerError(
             "Could not delete change request".to_string(),

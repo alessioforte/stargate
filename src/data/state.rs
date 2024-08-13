@@ -18,12 +18,10 @@ impl State {
             .parse::<i64>()
             .unwrap();
 
-        let state = Self {
+        Self {
             jwt_secret,
             access_token_expiration,
             refresh_token_expiration,
-        };
-
-        state
+        }
     }
 }

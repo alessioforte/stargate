@@ -2,10 +2,10 @@ use crate::data::AppData;
 use crate::errors::{ErrorResponse, HttpError};
 use crate::models::oauth2_providers::Oauth2Provider;
 use crate::models::tokens::Token;
-use crate::models::users::{Payload as UserPayload, User};
+use crate::models::users::User;
 use crate::modules::auth::{create_tokens, Claims};
 use crate::modules::hash::Hash;
-use crate::services::google_oauth::{get_google_oauth_token, get_google_user};
+use crate::services::oauth::google::{get_google_oauth_token, get_google_user};
 use actix_web::{get, web, HttpResponse};
 use serde::{Deserialize, Serialize};
 
@@ -58,65 +58,72 @@ async fn login(data: AppData, query: web::Query<QueryCode>) -> Result<HttpRespon
     }
 
     let google_user = google_user.unwrap();
-    // TODO: now we have the user, we need to create if it doesn't exist and return a JWT token
-    let mut user = User::get_by_email(google_user.email.clone()).await.unwrap();
-    if user.is_none() {
-        // create user
-        let new_user = UserPayload {
-            email: google_user.email.clone(),
-            name: google_user.name.clone(),
-            picture: Some(google_user.picture.clone()),
-            nickname: None,
-            password: None,
-            phone_number: None,
-        };
 
-        let response = User::create(new_user).await;
-        if response.is_err() {
+    let user = match User::get_by_email(&google_user.email).await {
+        Ok(user) => user,
+        Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
-                response.err().unwrap().to_string(),
+                e.to_string(),
             )));
         }
+    };
 
-        let record = response.unwrap();
+    let user = match user {
+        Some(user) => {
+            let response = user
+                .picture(Some(google_user.picture.clone()))
+                .update()
+                .await;
 
+            if response.is_err() {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    response.err().unwrap().to_string(),
+                )));
+            }
+
+            // FIXME: I don't like this unwrap
+            let record = response.unwrap();
+            record.unwrap()
+        }
+        None => {
+            let new_user = User::new()
+                .email(google_user.email.clone())
+                .name(google_user.name.clone())
+                .picture(Some(google_user.picture.clone()));
+
+            let response = new_user.save().await;
+
+            if response.is_err() {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    response.err().unwrap().to_string(),
+                )));
+            }
+            response.unwrap()
+        }
+    };
+
+    let provider = Oauth2Provider::get_by_provider("google", &google_user.id).await;
+
+    if provider.is_err() {
+        return Err(ErrorResponse::from(HttpError::InternalServerError(
+            provider.err().unwrap().to_string(),
+        )));
+    }
+
+    let provider = provider.unwrap();
+    if provider.is_none() {
         let oauth2_provider = Oauth2Provider {
-            user_id: record.id.clone(),
-            provider: "google".to_string(),
-            provider_id: google_user.id.clone(),
+            id: format!("google:{}", google_user.id.clone()),
+            user_id: user.id.clone(),
         };
 
-        let response = Oauth2Provider::create(oauth2_provider).await;
-        if response.is_err() {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                response.err().unwrap().to_string(),
-            )));
-        }
-
-        user = User::get_by_email(google_user.email.clone()).await.unwrap();
-    } else {
-        let user = user.as_mut().unwrap();
-        let response = User::update(
-            user.id.clone(),
-            UserPayload {
-                email: google_user.email.clone(),
-                name: google_user.name.clone(),
-                picture: Some(google_user.picture.clone()),
-                nickname: user.nickname.clone(),
-                password: user.password.clone(),
-                phone_number: user.phone_number.clone(),
-            },
-        )
-        .await;
-
+        let response = Oauth2Provider::save(oauth2_provider).await;
         if response.is_err() {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 response.err().unwrap().to_string(),
             )));
         }
     }
-
-    let user = user.unwrap();
 
     let (access_token, refresh_token) = create_tokens(
         Claims {
@@ -134,7 +141,7 @@ async fn login(data: AppData, query: web::Query<QueryCode>) -> Result<HttpRespon
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
-    let upsert_token = Token::upsert(Token {
+    let upsert_token = Token::save(Token {
         id: user.id.clone(),
         value: refresh_token_hash.clone(),
     })

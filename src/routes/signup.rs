@@ -8,7 +8,7 @@ use crate::modules::password_policies::{PasswordPolicy, PasswordPolicyValidator}
 use crate::services::smtp::send_email;
 use crate::{
     models::signup::{Payload as SignupPayload, Signup},
-    models::users::{Payload as UserPayload, User},
+    models::users::User,
 };
 
 // ----------------------------------------------------------------------------
@@ -30,13 +30,13 @@ pub async fn signup_request(
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
 
-    let user = User::get_by_email(body.email.clone()).await.unwrap();
+    let user = User::get_by_email(&body.email).await.unwrap();
     if user.is_some() {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "User already exists".to_string(),
         )));
     }
-    let signup_request = Signup::get_by_email(body.email.clone()).await.unwrap();
+    let signup_request = Signup::get_by_email(&body.email).await.unwrap();
     if signup_request.is_some() {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "Signup request already exists".to_string(),
@@ -57,7 +57,7 @@ pub async fn signup_request(
         uuid: uuid.clone(),
     };
 
-    let response = Signup::create(signup).await;
+    let response = Signup::save(signup).await;
     if response.is_err() {
         return Err(ErrorResponse::from(HttpError::InternalServerError(
             "Could not create signup request".to_string(),
@@ -86,7 +86,7 @@ pub async fn signup_confirm(
 ) -> Result<HttpResponse, ErrorResponse> {
     let query = query.into_inner();
     let token = query.token.clone();
-    let response = Signup::get_by_uuid(token.clone()).await;
+    let response = Signup::get_by_uuid(&token).await;
     match response {
         Ok(signup) => {
             if signup.is_none() {
@@ -124,7 +124,7 @@ pub async fn signup_complete(
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
 
-    let signup = Signup::get_by_uuid(body.token.clone()).await;
+    let signup = Signup::get_by_uuid(&body.token).await;
     if signup.is_err() {
         return Err(ErrorResponse::from(HttpError::InternalServerError(
             "Could not get signup request".to_string(),
@@ -132,7 +132,7 @@ pub async fn signup_complete(
     }
 
     // verify nickname
-    let user = User::get_by_nickname(body.nickname.clone()).await;
+    let user = User::get_by_nickname(&body.nickname).await;
     if user.is_ok() {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "Nickname already exists".to_string(),
@@ -148,23 +148,22 @@ pub async fn signup_complete(
 
     match signup.unwrap() {
         Some(signup) => {
-            let new_user = UserPayload {
-                email: signup.email.clone(),
-                name: body.name.clone(),
-                nickname: Some(body.nickname.clone()),
-                password: Some(Hash::encode(&body.password).unwrap()),
-                picture: None,
-                phone_number: None,
-            };
+            let new_user = User::new()
+                .email(signup.email.clone())
+                .name(body.name.clone())
+                .nickname(Some(body.nickname.clone()))
+                .password(Some(Hash::encode(&body.password).unwrap()));
+            // .build();
 
-            let response = User::create(new_user).await;
+            let response = new_user.save().await;
+
             if response.is_err() {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
                     response.err().unwrap().to_string(),
                 )));
             }
 
-            let response = Signup::delete(signup.id).await;
+            let response = Signup::delete(&signup.id).await;
             if response.is_err() {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
                     "Could not delete signup request".to_string(),

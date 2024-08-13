@@ -12,7 +12,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub async fn upsert(token: Token) -> surrealdb::Result<Option<Token>> {
+    pub async fn save(token: Token) -> surrealdb::Result<Option<Token>> {
         let db = DB.get().unwrap();
         let sql = format!(
             "INSERT INTO {} (id, value) VALUES ($id, $value) ON DUPLICATE KEY UPDATE value = $value",
@@ -29,12 +29,12 @@ impl Token {
         Ok(token)
     }
 
-    pub async fn get(id: String) -> surrealdb::Result<Option<Token>> {
+    pub async fn get(id: &str) -> surrealdb::Result<Option<Token>> {
         let db = DB.get().unwrap();
         db.select((RESOURCE, id)).await
     }
 
-    pub async fn delete(id: String) -> surrealdb::Result<Option<Token>> {
+    pub async fn delete(id: &str) -> surrealdb::Result<Option<Token>> {
         let db = DB.get().unwrap();
         db.delete((RESOURCE, id)).await
     }
