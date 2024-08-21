@@ -1,4 +1,4 @@
-use crate::db::DB;
+use crate::db;
 use crate::model;
 use crate::models::record::thing_to_string;
 use crate::models::record::Record;
@@ -22,12 +22,12 @@ model! {
 
 impl PasswordReset {
     pub async fn save(reset: Payload) -> surrealdb::Result<Vec<Record>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         db.create(RESOURCE).content(reset).await
     }
 
     pub async fn get_by_uuid(id: &str) -> surrealdb::Result<Option<PasswordReset>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE uuid = $uuid", RESOURCE);
         let mut response = db.query(sql).bind(("uuid", id)).await?;
         let registrations: Vec<PasswordReset> = response.take(0)?;
@@ -36,7 +36,7 @@ impl PasswordReset {
     }
 
     pub async fn delete(id: &str) -> surrealdb::Result<Option<PasswordReset>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         db.delete(("resets", id)).await
     }
 }

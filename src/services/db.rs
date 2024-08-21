@@ -1,3 +1,4 @@
+use async_recursion::async_recursion;
 use log;
 use once_cell::sync::OnceCell;
 use std::env;
@@ -5,6 +6,7 @@ use std::path::Path;
 use surrealdb::engine::any::{self, Any};
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
+use tokio::time::{sleep, Duration};
 
 pub static DB: OnceCell<Surreal<Any>> = OnceCell::new();
 
@@ -49,4 +51,16 @@ pub async fn init() {
         }
         Err(e) => log::error!("Error connecting to database: {}", e),
     };
+}
+
+#[async_recursion]
+pub async fn connection() -> surrealdb::Result<&'static Surreal<Any>> {
+    match DB.get() {
+        Some(db) => Ok(db),
+        None => {
+            sleep(Duration::from_secs(10)).await;
+            init().await;
+            connection().await
+        }
+    }
 }

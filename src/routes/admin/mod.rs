@@ -2,25 +2,21 @@ pub mod configurations;
 pub mod docs;
 pub mod users;
 
+use crate::actions::get_token_from_request;
 use crate::data::AppData;
 use crate::modules::auth::validate_token;
 use actix_web::{
     body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
-    dev::ServiceResponse, http::header::Header, web, Error,
+    dev::ServiceResponse, web, Error,
 };
 use actix_web_grants::GrantsMiddleware;
-use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use std::collections::HashSet;
 use utoipa::OpenApi;
 
 const SUPER_ADMIN: &str = "SUPER_ADMIN";
 
 async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
-    let auth = Authorization::<Bearer>::parse(&req);
-    let token = match auth {
-        Ok(auth) => auth.into_scheme().token().to_string(),
-        Err(_) => "".to_string(),
-    };
+    let token = get_token_from_request(req.request());
     let data = req.app_data::<AppData>().unwrap();
     let claims = match validate_token(&token, &data.jwt_secret) {
         Ok(claims) => claims,
@@ -46,7 +42,6 @@ pub fn routes() -> actix_web::Scope<
     >,
 > {
     web::scope("/admin")
-        // TODO: Add middleware to extract claims
         .wrap(GrantsMiddleware::with_extractor(extract))
         .service(users::routes())
         .service(configurations::routes())

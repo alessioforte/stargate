@@ -1,11 +1,8 @@
 use crate::errors::{ErrorResponse, HttpError};
-use actix_web::{
-    http::{self, header::Header},
-    route, HttpRequest, HttpResponse, HttpResponseBuilder,
-};
-use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
+use actix_web::{http, route, HttpRequest, HttpResponse, HttpResponseBuilder};
 use reqwest::{Client, Method};
 
+use crate::actions::get_token_from_request;
 use crate::data::{config::Service, AppData, Gate};
 use crate::modules::auth::validate_token;
 
@@ -36,11 +33,7 @@ pub async fn handle_request(
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
         .collect::<Vec<(String, String)>>();
 
-    let auth = Authorization::<Bearer>::parse(&req);
-    let token = match auth {
-        Ok(auth) => auth.into_scheme().token().to_string(),
-        Err(_) => "".to_string(),
-    };
+    let token = get_token_from_request(&req);
 
     let config = gate.config.read().await;
 
@@ -121,11 +114,10 @@ pub async fn handle_request(
 }
 
 fn format_uri(service: &Service, path: String) -> String {
-    let protocol = match service.protocol.as_str() {
-        "http" => "http",
-        "https" => "https",
-        _ => "http",
-    };
+    let mut protocol = service.protocol.clone();
+    if protocol.is_empty() {
+        protocol = "http".to_string();
+    }
     let host = service.host.clone();
     let port = match service.port {
         Some(port) => format!(":{}", port),

@@ -2,6 +2,7 @@ mod actions;
 mod cfg;
 mod data;
 mod errors;
+mod middlewares;
 mod models;
 mod modules;
 mod routes;
@@ -12,7 +13,7 @@ use crate::data::state::State;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::web::Data;
-use actix_web::{middleware, App, HttpServer};
+use actix_web::{middleware, middleware::TrailingSlash, App, HttpServer};
 use dotenvy::dotenv;
 use services::db;
 use std::env;
@@ -41,6 +42,7 @@ async fn main() -> std::io::Result<()> {
 
     let data = Data::new(State::init());
     let gate = Gate::init();
+    let secret_key = actix_web::cookie::Key::generate();
     gate.watch_file();
     let gate = Data::new(gate);
 
@@ -50,9 +52,8 @@ async fn main() -> std::io::Result<()> {
             .app_data(gate.clone())
             .configure(cfg::app_data)
             .configure(routes::configure)
-            .wrap(middleware::NormalizePath::new(
-                middleware::TrailingSlash::Trim,
-            ))
+            .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
+            .wrap(middlewares::cookie_session(secret_key.clone()))
             .wrap(middleware::Logger::default())
             .wrap(Governor::new(&governor_config))
             .wrap(Cors::permissive())

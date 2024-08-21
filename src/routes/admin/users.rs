@@ -43,6 +43,8 @@ pub async fn create_user(user: web::Json<UserPayload>) -> Result<HttpResponse, E
         .await
         .unwrap();
 
+    // TODO: Send email to user
+
     Ok(HttpResponse::Ok().json(web::Json(user)))
 }
 

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::modules::hash::Hash;
 use crate::modules::password_policies::{PasswordPolicy, PasswordPolicyValidator};
-use crate::services::smtp::send_email;
+use crate::services::smtp::{Smtp, Template};
 use crate::{
     models::signup::{Payload as SignupPayload, Signup},
     models::users::User,
@@ -45,11 +45,16 @@ pub async fn signup_request(
 
     let uuid = Uuid::new_v4().to_string();
 
-    let is_mail_sent = send_email(body.email.clone(), uuid.clone());
-    if is_mail_sent.is_err() {
-        return Err(ErrorResponse::from(HttpError::InternalServerError(
-            "Could not send email".to_string(),
-        )));
+    let sender = Smtp::new()
+        .template(Template::SignupRequest)
+        .to(body.email.clone())
+        .token(uuid.clone())
+        .build()
+        .send();
+
+    if let Err(e) = sender {
+        let message = e.to_string();
+        return Err(ErrorResponse::from(HttpError::InternalServerError(message)));
     }
 
     let signup = SignupPayload {

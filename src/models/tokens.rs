@@ -1,4 +1,4 @@
-use crate::db::DB;
+use crate::db;
 use crate::models::record::thing_to_string;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ pub struct Token {
 
 impl Token {
     pub async fn save(token: Token) -> surrealdb::Result<Option<Token>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let sql = format!(
             "INSERT INTO {} (id, value) VALUES ($id, $value) ON DUPLICATE KEY UPDATE value = $value",
             RESOURCE
@@ -30,12 +30,12 @@ impl Token {
     }
 
     pub async fn get(id: &str) -> surrealdb::Result<Option<Token>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         db.select((RESOURCE, id)).await
     }
 
     pub async fn delete(id: &str) -> surrealdb::Result<Option<Token>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         db.delete((RESOURCE, id)).await
     }
 }

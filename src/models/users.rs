@@ -1,4 +1,4 @@
-use crate::db::DB;
+use crate::db;
 use crate::model;
 use crate::models::record::{thing_to_string, Record};
 use serde::{Deserialize, Serialize};
@@ -77,17 +77,17 @@ impl User {
     }
 
     pub async fn list() -> surrealdb::Result<Vec<Profile>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         db.select(RESOURCE).await
     }
 
     pub async fn get(id: &str) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         db.select((RESOURCE, id)).await
     }
 
     pub async fn save(mut self) -> surrealdb::Result<User> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let payload = Payload {
             name: self.name.clone(),
             email: self.email.clone(),
@@ -109,7 +109,7 @@ impl User {
     }
 
     pub async fn update(self) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let payload = Payload {
             name: self.name.clone(),
             email: self.email.clone(),
@@ -124,7 +124,7 @@ impl User {
     }
 
     pub async fn change_password(id: &str, password: &str) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let sql = format!("UPDATE {}:{} SET password = $password", RESOURCE, id);
         let mut response = db.query(sql).bind(("password", password)).await?;
         let users: Vec<User> = response.take(0)?;
@@ -133,7 +133,7 @@ impl User {
     }
 
     pub async fn get_by_email(email: &str) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE email = $email", RESOURCE);
         let mut response = db.query(sql).bind(("email", email)).await?;
         let users: Vec<User> = response.take(0)?;
@@ -142,7 +142,7 @@ impl User {
     }
 
     pub async fn get_by_nickname(nickname: &str) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE nickname = $nickname", RESOURCE);
         let mut response = db.query(sql).bind(("nickname", nickname)).await?;
         let users: Vec<User> = response.take(0)?;
@@ -151,7 +151,7 @@ impl User {
     }
 
     pub async fn get_by_username(username: &str) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         let sql = format!(
             "SELECT * FROM {} WHERE email = $username OR nickname = $username",
             RESOURCE
@@ -163,7 +163,7 @@ impl User {
     }
 
     pub async fn delete(id: &str) -> surrealdb::Result<Option<User>> {
-        let db = DB.get().unwrap();
+        let db = db::connection().await?;
         db.delete((RESOURCE, id)).await
     }
 }

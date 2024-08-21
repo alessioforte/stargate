@@ -1,3 +1,4 @@
+use crate::actions::get_token_from_request;
 use crate::data::AppData;
 use crate::errors::{ErrorResponse, HttpError};
 use crate::models::resets::{PasswordReset, Payload as PasswordResetPayload};
@@ -5,10 +6,9 @@ use crate::models::tokens::Token;
 use crate::models::users::{Profile, User};
 use crate::modules::auth::{create_tokens, validate_token, Claims};
 use crate::modules::hash::Hash;
-use crate::services::smtp::send_email;
-use actix_web::http::header::Header;
+use crate::services::smtp::{Smtp, Template};
+use actix_session::Session;
 use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
-use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -22,11 +22,7 @@ use uuid::Uuid;
 )]
 #[get("/profile")]
 pub async fn profile(data: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
-    let auth = Authorization::<Bearer>::parse(&req);
-    let token = match auth {
-        Ok(auth) => auth.into_scheme().token().to_string(),
-        Err(_) => "".to_string(),
-    };
+    let token = get_token_from_request(&req);
 
     let claims = match validate_token(&token, &data.jwt_secret) {
         Ok(claims) => claims,
@@ -78,6 +74,7 @@ struct UserCredentials {
 )]
 #[post("/login")]
 pub async fn login(
+    session: Session,
     data: AppData,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
@@ -132,6 +129,8 @@ pub async fn login(
             "Could not create token".to_string(),
         )));
     }
+
+    session.insert("token", access_token.clone()).unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,
@@ -231,11 +230,7 @@ pub async fn refresh(
 )]
 #[delete("/logout")]
 pub async fn logout(data: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
-    let auth = Authorization::<Bearer>::parse(&req);
-    let token = match auth {
-        Ok(auth) => auth.into_scheme().token().to_string(),
-        Err(_) => "".to_string(),
-    };
+    let token = get_token_from_request(&req);
 
     let claims = match validate_token(&token, &data.jwt_secret) {
         Ok(claims) => claims,
@@ -298,11 +293,18 @@ pub async fn forgot_password(
         )));
     }
 
-    // send email
-    match send_email(user.email.clone(), uuid.clone()) {
+    let sender = Smtp::new()
+        .template(Template::ChangePasswordRequest)
+        .to(user.email.clone())
+        .name(Some(user.name.clone()))
+        .token(uuid.clone())
+        .build()
+        .send();
+
+    match sender {
         Ok(_) => Ok(HttpResponse::Ok().json(web::Json("Email sent"))),
-        Err(_) => Err(ErrorResponse::from(HttpError::InternalServerError(
-            "Could not send email".to_string(),
+        Err(e) => Err(ErrorResponse::from(HttpError::InternalServerError(
+            e.to_string(),
         ))),
     }
 }

@@ -32,11 +32,12 @@ pub enum PasswordPolicy {
 
     // ForceExpired,
     // HashIterations,
-    // PasswordHistory,
     // PasswordBlacklist,
-    // Length,
     // RegexPattern,
     // MaxAuthAge,
+
+    // PasswordHistory,
+    // Length,
     // HashAlgorithm,
 }
 
