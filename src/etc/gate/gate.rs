@@ -1,5 +1,5 @@
-use crate::data::config::Config;
-use crate::data::trie::TriePath;
+use crate::etc::gate::config::Config;
+use crate::etc::gate::trie::TriePath;
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use std::env;
 use std::path::Path;
@@ -19,7 +19,8 @@ impl Gate {
         let cfg = Config::from_file();
         let mut trie = TriePath::new();
         for service in &cfg.services {
-            trie.insert(&service.path, service.clone());
+            // trie.insert(&service.path, service.clone());
+            trie.insert(&service.protocol, &service.path, service.clone());
         }
         let config = Arc::new(RwLock::new(trie));
         Self { config }
@@ -29,7 +30,8 @@ impl Gate {
         let new_config = Config::from_file();
         let mut trie = TriePath::new();
         for service in &new_config.services {
-            trie.insert(&service.path, service.clone());
+            // trie.insert(&service.path, service.clone());
+            trie.insert(&service.protocol, &service.path, service.clone());
         }
         let mut config = self.config.write().await;
         log::info!("Updating config");

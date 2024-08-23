@@ -1,7 +1,7 @@
 pub mod account;
 pub mod admin;
 pub mod docs;
-pub mod gateway;
+// pub mod gateway;
 pub mod health;
 pub mod oauth;
 pub mod signup;
@@ -33,6 +33,6 @@ pub fn configure(cfg: &mut ServiceConfig) {
         .service(account::routes())
         .service(oauth::routes())
         .service(signup::routes())
-        .service(admin::routes())
-        .service(gateway::handle_request);
+        .service(admin::routes());
+    // .service(gateway::handle_request);
 }

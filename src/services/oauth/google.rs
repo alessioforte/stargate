@@ -1,6 +1,7 @@
-use reqwest::{Client, Url};
+use awc::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use url::Url;
 
 #[derive(Deserialize)]
 pub struct OAuthResponse {
@@ -37,13 +38,13 @@ pub async fn get_google_oauth_token(
         ("code", authorization_code),
         ("client_secret", client_secret.as_str()),
     ];
-    let response = client.post(root_url).form(&params).send().await?;
+    let mut response = client.post(root_url).send_form(&params).await?;
     if response.status().is_success() {
         let oauth_response = response.json::<OAuthResponse>().await?;
         Ok(oauth_response)
     } else {
-        let res = response.text().await?;
-        log::error!("get_google_oauth_token: {}", res);
+        let res: serde_json::Value = response.json().await?;
+        log::error!("get_google_oauth_token: {}", res.to_string());
         let message = "An error occurred while trying to retrieve access token.";
         Err(From::from(message))
     }
@@ -59,13 +60,17 @@ pub async fn get_google_user(
     url.query_pairs_mut()
         .append_pair("access_token", access_token);
 
-    let response = client.get(url).bearer_auth(id_token).send().await?;
+    let mut response = client
+        .get(url.to_string())
+        .bearer_auth(id_token)
+        .send()
+        .await?;
     if response.status().is_success() {
         let user_info = response.json::<GoogleUserResult>().await?;
         Ok(user_info)
     } else {
-        let res = response.text().await?;
-        log::error!("get_google_user: {}", res);
+        let res: serde_json::Value = response.json().await?;
+        log::error!("get_google_user: {}", res.to_string());
         let message = "An error occurred while trying to retrieve user information.";
         Err(From::from(message))
     }

@@ -1,4 +1,4 @@
-use reqwest::Client;
+use awc::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::error::Error;
@@ -35,19 +35,18 @@ pub async fn get_github_oauth_token(
         ("accept", "json"),
     ];
 
-    let response = client
+    let mut response = client
         .post(root_url)
-        .header("Accept", "application/json")
-        .form(&params)
-        .send()
+        .append_header(("Accept", "application/json"))
+        .send_form(&params)
         .await?;
 
     if response.status().is_success() {
         let oauth_response = response.json::<GitHubOauthToken>().await?;
         Ok(oauth_response)
     } else {
-        let res = response.text().await?;
-        log::error!("get_github_oauth_token: {}", res);
+        let res: serde_json::Value = response.json().await?;
+        log::error!("get_github_oauth_token: {}", res.to_string());
         let message = "An error occurred while trying to retrieve the access token.";
         Err(From::from(message))
     }
@@ -58,10 +57,10 @@ pub async fn get_github_user(access_token: &str) -> Result<GitHubUserResult, Box
 
     let client = Client::new();
 
-    let response = client
+    let mut response = client
         .get(root_url)
         .bearer_auth(access_token)
-        .header("User-Agent", "reqwest")
+        .append_header(("User-Agent", "stargate"))
         .send()
         .await?;
 
@@ -69,8 +68,8 @@ pub async fn get_github_user(access_token: &str) -> Result<GitHubUserResult, Box
         let user_info = response.json::<GitHubUserResult>().await?;
         Ok(user_info)
     } else {
-        let res = response.text().await?;
-        log::error!("get_github_user: {}", res);
+        let res: serde_json::Value = response.json().await?;
+        log::error!("get_github_user: {}", res.to_string());
         let message = "An error occurred while trying to retrieve user information.";
         Err(From::from(message))
     }

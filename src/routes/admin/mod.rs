@@ -3,7 +3,7 @@ pub mod docs;
 pub mod users;
 
 use crate::actions::get_token_from_request;
-use crate::data::AppData;
+use crate::etc::AppData;
 use crate::modules::auth::validate_token;
 use actix_web::{
     body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,

@@ -25,15 +25,14 @@ OAUTH2 PROVIDERS
 
 PROTOCOLS
 - [x] HTTP/HTTPS
-- [ ] WebSockets
-- [ ] gRPC
-- [ ] GraphQL
-- [ ] MQTT
-- [ ] TCP/UDP
-- [ ] AMQP
-- [ ] SSE
-- [ ] SOAP
-- [ ] FTP/FTPS
+- [x] WebSockets
+- [ ] ? MQTT
+- [ ] ? gRPC
+- [ ] ? FTP/FTPS
+- [ ] ? TCP/UDP
+- [ ] ? AMQP
+- [ ] ? SSE
+- [ ] ? SOAP
 
 ACCESS CONTROL
 - [ ] Implement Role-Based Access Control (RBAC)

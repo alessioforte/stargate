@@ -1,6 +1,6 @@
 use crate::actions::get_token_from_request;
-use crate::data::AppData;
 use crate::errors::{ErrorResponse, HttpError};
+use crate::etc::AppData;
 use crate::models::resets::{PasswordReset, Payload as PasswordResetPayload};
 use crate::models::tokens::Token;
 use crate::models::users::{Profile, User};

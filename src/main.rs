@@ -1,19 +1,18 @@
 mod actions;
-mod cfg;
-mod data;
 mod errors;
+mod etc;
+mod gateway;
 mod middlewares;
 mod models;
 mod modules;
 mod routes;
 mod services;
 
-use crate::data::gate::Gate;
-use crate::data::state::State;
+use crate::etc::gate::Gate;
+use crate::etc::state::State;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
-use actix_web::web::Data;
-use actix_web::{middleware, middleware::TrailingSlash, App, HttpServer};
+use actix_web::{middleware, middleware::TrailingSlash, web::to, web::Data, App, HttpServer};
 use dotenvy::dotenv;
 use services::db;
 use std::env;
@@ -23,7 +22,7 @@ async fn main() -> std::io::Result<()> {
     dotenv().ok();
     pretty_env_logger::init();
 
-    println!("{}", LOGO);
+    println!("{}", etc::logo::LOGO);
     let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let version = env!("CARGO_PKG_VERSION");
     log::info!("Starting server on port {}", port);
@@ -46,30 +45,22 @@ async fn main() -> std::io::Result<()> {
     gate.watch_file();
     let gate = Data::new(gate);
 
+    let tls_config = etc::tls::config();
+
     HttpServer::new(move || {
         App::new()
             .app_data(data.clone())
             .app_data(gate.clone())
-            .configure(cfg::app_data)
+            .configure(etc::cfg::app_data)
             .configure(routes::configure)
+            .default_service(to(gateway::handler))
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
             .wrap(middlewares::cookie_session(secret_key.clone()))
             .wrap(middleware::Logger::default())
             .wrap(Governor::new(&governor_config))
             .wrap(Cors::permissive())
     })
-    .bind(format!("0.0.0.0:{}", port))?
+    .bind_rustls_0_23(format!("0.0.0.0:{}", port), tls_config)?
     .run()
     .await
 }
-
-pub const LOGO: &str = "
-    .d88888b.   dP                                         dP
-    88.         88                                         88
-    'Y88888b. d8888P .d8888b. 88d888b. .d8888b. .d8888b. d8888P .d8888b.
-          '8b   88   88'  '88 88'  '88 88'  '88 88'  '88   88   88ooood8
-    d8'   .8P   88   88.  .88 88       88.  .88 88.  .88   88   88.  ...
-     Y88888P    dP   '88888P8 dP       '8888P88 '88888P8   dP   '88888P'
-                                            .88
-                                        d8888P
-";
