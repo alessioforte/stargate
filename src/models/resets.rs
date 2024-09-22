@@ -21,7 +21,7 @@ model! {
 }
 
 impl PasswordReset {
-    pub async fn save(reset: Payload) -> surrealdb::Result<Vec<Record>> {
+    pub async fn save(reset: Payload) -> surrealdb::Result<Option<Record>> {
         let db = db::connection().await?;
         db.create(RESOURCE).content(reset).await
     }
@@ -29,7 +29,7 @@ impl PasswordReset {
     pub async fn get_by_uuid(id: &str) -> surrealdb::Result<Option<PasswordReset>> {
         let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE uuid = $uuid", RESOURCE);
-        let mut response = db.query(sql).bind(("uuid", id)).await?;
+        let mut response = db.query(sql).bind(("uuid", id.to_string())).await?;
         let registrations: Vec<PasswordReset> = response.take(0)?;
         let registration = registrations.first().cloned();
         Ok(registration)

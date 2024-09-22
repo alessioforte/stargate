@@ -19,7 +19,7 @@ model! {
 }
 
 impl Signup {
-    pub async fn save(signup: Payload) -> surrealdb::Result<Vec<Record>> {
+    pub async fn save(signup: Payload) -> surrealdb::Result<Option<Record>> {
         let db = db::connection().await?;
         db.create(TABLE).content(signup).await
     }
@@ -27,7 +27,7 @@ impl Signup {
     pub async fn get_by_email(email: &str) -> surrealdb::Result<Option<Signup>> {
         let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE email = $email", TABLE);
-        let mut response = db.query(sql).bind(("email", email)).await?;
+        let mut response = db.query(sql).bind(("email", email.to_string())).await?;
         let list: Vec<Signup> = response.take(0)?;
         let signup = list.first().cloned();
         Ok(signup)
@@ -36,7 +36,7 @@ impl Signup {
     pub async fn get_by_uuid(id: &str) -> surrealdb::Result<Option<Signup>> {
         let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE uuid = $uuid", TABLE);
-        let mut response = db.query(sql).bind(("uuid", id)).await?;
+        let mut response = db.query(sql).bind(("uuid", id.to_string())).await?;
         let list: Vec<Signup> = response.take(0)?;
         let signup = list.first().cloned();
         Ok(signup)

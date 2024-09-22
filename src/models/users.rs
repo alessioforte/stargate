@@ -19,6 +19,8 @@ model! {
     {
         #[serde(deserialize_with = "thing_to_string")]
         pub id: String,
+        // pub created_at: i64,
+        // pub updated_at: i64,
     }
 }
 
@@ -96,11 +98,11 @@ impl User {
             picture: self.picture.clone(),
             phone_number: self.phone_number.clone(),
         };
-        let records: Result<Vec<Record>, surrealdb::Error> =
+        let records: Result<Option<Record>, surrealdb::Error> =
             db.create(RESOURCE).content(payload).await;
         match records {
-            Ok(mut records) => {
-                let id = records.pop().unwrap().id;
+            Ok(records) => {
+                let id = records.unwrap().id;
                 self.id = id;
                 Ok(self)
             }
@@ -126,7 +128,10 @@ impl User {
     pub async fn change_password(id: &str, password: &str) -> surrealdb::Result<Option<User>> {
         let db = db::connection().await?;
         let sql = format!("UPDATE {}:{} SET password = $password", RESOURCE, id);
-        let mut response = db.query(sql).bind(("password", password)).await?;
+        let mut response = db
+            .query(sql)
+            .bind(("password", password.to_string()))
+            .await?;
         let users: Vec<User> = response.take(0)?;
         let user = users.first().cloned();
         Ok(user)
@@ -135,7 +140,7 @@ impl User {
     pub async fn get_by_email(email: &str) -> surrealdb::Result<Option<User>> {
         let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE email = $email", RESOURCE);
-        let mut response = db.query(sql).bind(("email", email)).await?;
+        let mut response = db.query(sql).bind(("email", email.to_string())).await?;
         let users: Vec<User> = response.take(0)?;
         let user = users.first().cloned();
         Ok(user)
@@ -144,7 +149,10 @@ impl User {
     pub async fn get_by_nickname(nickname: &str) -> surrealdb::Result<Option<User>> {
         let db = db::connection().await?;
         let sql = format!("SELECT * FROM {} WHERE nickname = $nickname", RESOURCE);
-        let mut response = db.query(sql).bind(("nickname", nickname)).await?;
+        let mut response = db
+            .query(sql)
+            .bind(("nickname", nickname.to_string()))
+            .await?;
         let users: Vec<User> = response.take(0)?;
         let user = users.first().cloned();
         Ok(user)
@@ -156,7 +164,10 @@ impl User {
             "SELECT * FROM {} WHERE email = $username OR nickname = $username",
             RESOURCE
         );
-        let mut response = db.query(sql).bind(("username", username)).await?;
+        let mut response = db
+            .query(sql)
+            .bind(("username", username.to_string()))
+            .await?;
         let users: Vec<User> = response.take(0)?;
         let user = users.first().cloned();
         Ok(user)

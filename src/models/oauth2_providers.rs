@@ -14,11 +14,12 @@ model! {
         pub id: String,
         pub user_id: String,
         // pub access_count: i32,
+        // pub last_access: i64,
     }
 }
 
 impl Oauth2Provider {
-    pub async fn save(provider: Oauth2Provider) -> surrealdb::Result<Vec<Record>> {
+    pub async fn save(provider: Oauth2Provider) -> surrealdb::Result<Option<Record>> {
         let db = db::connection().await?;
         db.create(RESOURCE).content(provider).await
     }

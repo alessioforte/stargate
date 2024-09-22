@@ -20,7 +20,7 @@ pub async fn init() {
                     log::error!("Error creating database: {}", e);
                 }
             }
-            "rocksdb:.stargate/stargate.db".to_owned()
+            "surrealkv://.stargate/stargate.db".to_owned()
         }
     };
 

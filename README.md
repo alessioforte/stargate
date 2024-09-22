@@ -13,6 +13,7 @@
 - [ ] API Keys - Generate, Revoke, List
 - [ ] Rate Limiting Global and Per User
 - [ ] ? Generate PDF as Infisical does
+- [ ] ? Bio-metric Authentication
 
 OAUTH2 PROVIDERS
 - [x] oAuth Github

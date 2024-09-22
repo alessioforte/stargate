@@ -127,9 +127,10 @@ async fn login(data: AppData, query: web::Query<QueryCode>) -> Result<HttpRespon
 
     let (access_token, refresh_token) = create_tokens(
         Claims {
-            sub: user.email.to_owned(),
+            sub: "google-oauth2".to_string(),
             sub_id: user.id.to_owned(),
             name: Some(user.name.clone()),
+            email: user.email.clone(),
             nickname: user.nickname.clone(),
             email_verified: google_user.verified_email,
             ..Claims::default()

@@ -114,11 +114,12 @@ async fn login(data: AppData, query: web::Query<QueryCode>) -> Result<HttpRespon
 
     let (access_token, refresh_token) = create_tokens(
         Claims {
-            sub: user.email.to_owned(),
+            sub: "github-oauth2".to_string(),
             sub_id: user.id.to_owned(),
             name: Some(user.name.clone()),
+            email: user.email.clone(),
             nickname: user.nickname.clone(),
-            email_verified: true,
+            email_verified: github_user.email_verified,
             ..Claims::default()
         },
         data.access_token_expiration,

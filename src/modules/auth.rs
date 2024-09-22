@@ -6,20 +6,26 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,              // subject (email)
+    pub sub: String,              // subject
     pub sub_id: String,           // subject id
+    pub email: String,            // email
     pub name: Option<String>,     // name
     pub email_verified: bool,     // email_verified
     pub nickname: Option<String>, // nickname
     pub iat: usize,               // issued at
+    pub iss: String,              // issuer
     pub exp: usize,               // expiration
+                                  // pub phone_number: Option<String>, // phone_number
 }
 
 impl Default for Claims {
     fn default() -> Self {
+        let iss = env::var("JWT_ISSUER").unwrap_or_else(|_| "issuer".to_string());
         Claims {
+            iss,
             sub: "".to_string(),
             sub_id: "".to_string(),
+            email: "".to_string(),
             name: None,
             email_verified: false,
             nickname: None,

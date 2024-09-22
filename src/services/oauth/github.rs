@@ -16,6 +16,7 @@ pub struct GitHubUserResult {
     pub login: String,
     pub avatar_url: String,
     pub email: String,
+    pub email_verified: bool,
 }
 
 pub async fn get_github_oauth_token(

@@ -107,6 +107,7 @@ pub async fn login(
             sub: user.email.to_owned(),
             sub_id: user.id.to_owned(),
             name: Some(user.name.clone()),
+            email: user.email.clone(),
             nickname: user.nickname.clone(),
             email_verified: true,
             ..Claims::default()
@@ -197,6 +198,7 @@ pub async fn refresh(
             sub: user.email.to_owned(),
             sub_id: user.id.to_owned(),
             name: Some(user.name.clone()),
+            email: user.email.clone(),
             nickname: user.nickname.clone(),
             email_verified: true,
             ..Claims::default()
