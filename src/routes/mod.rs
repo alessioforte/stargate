@@ -1,7 +1,6 @@
 pub mod account;
 pub mod admin;
 pub mod docs;
-// pub mod gateway;
 pub mod health;
 pub mod oauth;
 pub mod signup;
@@ -23,7 +22,7 @@ use utoipa::OpenApi;
         crate::routes::signup::signup_confirm,
         crate::routes::signup::signup_complete,
     ),
-    info(description = "Stargate documentation.")
+    info(description = "Stargate documentation")
 )]
 pub struct ApiDoc;
 
@@ -34,5 +33,4 @@ pub fn configure(cfg: &mut ServiceConfig) {
         .service(oauth::routes())
         .service(signup::routes())
         .service(admin::routes());
-    // .service(gateway::handle_request);
 }

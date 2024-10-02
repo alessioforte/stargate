@@ -3,15 +3,14 @@
 - [x] Send Email
 - [ ] Send SMS
 - [ ] Time-based One-Time Password (TOTP) - Authenticator App
-- [ ] QR Code - Generate and Scan
-- [ ] Login - verify access from another device and notify user - Handle sessions
 - [ ] MFA (Multi-Factor Authentication)
 - [x] Cookie-based authentication
-- [ ] act as oAuth provider
 - [x] Password Policies
-- [ ] Single Sign-On (SSO) and Single Log-Out (SLO)
-- [ ] API Keys - Generate, Revoke, List
-- [ ] Rate Limiting Global and Per User
+
+- [ ] ? Login - verify access from another device and notify user - Handle sessions
+- [ ] ? Single Sign-On (SSO) and Single Log-Out (SLO)
+- [ ] ? act as oAuth provider
+- [ ] ? QR Code - Generate and Scan
 - [ ] ? Generate PDF as Infisical does
 - [ ] ? Bio-metric Authentication
 
@@ -40,6 +39,9 @@ ACCESS CONTROL
 - [ ] Implement Attribute-Based Access Control (ABAC)
 - [ ] Implement Policy-Based Access Control (PBAC)
 - [ ] Implement Rule-Based Access Control (RBAC)
+
+- [ ] API Keys - Generate, Revoke, List
+- [ ] Rate Limiting Global and Per User
 
 PRICING PLANS
 - [ ] Implement Pricing Plans Configuration
