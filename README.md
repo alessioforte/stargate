@@ -52,6 +52,12 @@ ADMIN FEATURES
 - [x] √ Download configuration in json or yaml format
 - [x] √ Load configuration from a file at runtime
 
+- [ ] Create tenant - Use SurrealDB namespace
+- [ ] Create tenant admin
+- [ ] Assign permissions to tenant admin
+- [ ] Implement Admin Panel
+- [ ] Super Admin create access control for tenant
+
 TESTING AND PERFORMANCE
 - [x] √ Implement Trie Data Structure for fast path search
 - [ ] Unit Testing

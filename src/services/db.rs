@@ -11,6 +11,7 @@ use tokio::time::{sleep, Duration};
 pub static DB: OnceCell<Surreal<Any>> = OnceCell::new();
 
 pub async fn init() {
+    sleep(Duration::from_secs(5)).await;
     let endpoint = match env::var("SURREALDB_ENDPOINT") {
         Ok(endpoint) => endpoint,
         Err(_) => {
@@ -58,7 +59,6 @@ pub async fn connection() -> surrealdb::Result<&'static Surreal<Any>> {
     match DB.get() {
         Some(db) => Ok(db),
         None => {
-            sleep(Duration::from_secs(10)).await;
             init().await;
             connection().await
         }

@@ -15,7 +15,7 @@ struct Params {
     context_path = "/admin/configurations",
     path = "/",
     responses(
-        (status = 200, description = "OK", body = Health)
+        (status = 200, description = "OK")
     )
 )]
 #[get("")]
@@ -39,7 +39,7 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
             .body(content)),
         _ => {
             let config: Config =
-                serde_yaml::from_str(&content).expect("Unable to parse config file");
+                serde_yml::from_str(&content).expect("Unable to parse config file");
             let json_data = serde_json::to_string(&config).unwrap();
             Ok(HttpResponse::Ok()
                 .content_type("application/json")
@@ -52,7 +52,7 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
     context_path = "/admin/configurations",
     path = "/",
     responses(
-        (status = 200, description = "OK", body = Health)
+        (status = 200, description = "OK")
     )
 )]
 #[put("")]

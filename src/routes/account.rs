@@ -1,6 +1,5 @@
 use crate::actions::get_token_from_request;
 use crate::errors::{ErrorResponse, HttpError};
-use crate::etc::AppData;
 use crate::models::resets::{PasswordReset, Payload as PasswordResetPayload};
 use crate::models::tokens::Token;
 use crate::models::users::{Profile, User};
@@ -11,6 +10,7 @@ use actix_session::Session;
 use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[utoipa::path(
@@ -21,10 +21,10 @@ use uuid::Uuid;
     )
 )]
 #[get("/profile")]
-pub async fn profile(data: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
+pub async fn profile(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let token = get_token_from_request(&req);
 
-    let claims = match validate_token(&token, &data.jwt_secret) {
+    let claims = match validate_token(&token) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -53,13 +53,13 @@ pub async fn profile(data: AppData, req: HttpRequest) -> Result<HttpResponse, Er
 
 // ----------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AuthResponse {
     access_token: String,
     refresh_token: String,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct UserCredentials {
     username: String,
     password: String,
@@ -68,14 +68,14 @@ struct UserCredentials {
 #[utoipa::path(
     context_path = "/account",
     path = "/login",
+
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK", body = AuthResponse)
     )
 )]
 #[post("/login")]
 pub async fn login(
     session: Session,
-    data: AppData,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let user = match User::get_by_username(&credentials.username).await {
@@ -102,19 +102,15 @@ pub async fn login(
         )));
     }
 
-    let (access_token, refresh_token) = create_tokens(
-        Claims {
-            sub: user.email.to_owned(),
-            sub_id: user.id.to_owned(),
-            name: Some(user.name.clone()),
-            email: user.email.clone(),
-            nickname: user.nickname.clone(),
-            email_verified: true,
-            ..Claims::default()
-        },
-        data.access_token_expiration,
-        data.refresh_token_expiration,
-    )
+    let (access_token, refresh_token) = create_tokens(Claims {
+        sub: user.email.to_owned(),
+        sub_id: user.id.to_owned(),
+        name: Some(user.name.clone()),
+        email: user.email.clone(),
+        nickname: user.nickname.clone(),
+        email_verified: true,
+        ..Claims::default()
+    })
     .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
@@ -140,7 +136,7 @@ pub async fn login(
 }
 
 // ----------------------------------------------------------------------------
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct RefreshTokenRequestBody {
     refresh_token: String,
 }
@@ -154,12 +150,11 @@ struct RefreshTokenRequestBody {
 )]
 #[put("/refresh-token")]
 pub async fn refresh(
-    data: AppData,
     body: web::Json<RefreshTokenRequestBody>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
     let refresh_token = body.refresh_token.clone();
-    let claims = match validate_token(&refresh_token, &data.jwt_secret) {
+    let claims = match validate_token(&refresh_token) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -193,19 +188,15 @@ pub async fn refresh(
 
     let user = user.unwrap();
 
-    let (access_token, refresh_token) = create_tokens(
-        Claims {
-            sub: user.email.to_owned(),
-            sub_id: user.id.to_owned(),
-            name: Some(user.name.clone()),
-            email: user.email.clone(),
-            nickname: user.nickname.clone(),
-            email_verified: true,
-            ..Claims::default()
-        },
-        data.access_token_expiration,
-        data.refresh_token_expiration,
-    )
+    let (access_token, refresh_token) = create_tokens(Claims {
+        sub: user.email.to_owned(),
+        sub_id: user.id.to_owned(),
+        name: Some(user.name.clone()),
+        email: user.email.clone(),
+        nickname: user.nickname.clone(),
+        email_verified: true,
+        ..Claims::default()
+    })
     .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
@@ -231,10 +222,10 @@ pub async fn refresh(
     )
 )]
 #[delete("/logout")]
-pub async fn logout(data: AppData, req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
+pub async fn logout(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let token = get_token_from_request(&req);
 
-    let claims = match validate_token(&token, &data.jwt_secret) {
+    let claims = match validate_token(&token) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -254,7 +245,7 @@ pub async fn logout(data: AppData, req: HttpRequest) -> Result<HttpResponse, Err
 }
 
 // ----------------------------------------------------------------------------
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct ForgotPasswordRequestBody {
     email: String,
 }
@@ -311,7 +302,7 @@ pub async fn forgot_password(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct ChangePasswordRequestBody {
     token: String,
     password: String,

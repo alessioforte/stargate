@@ -3,7 +3,6 @@ pub mod docs;
 pub mod users;
 
 use crate::actions::get_token_from_request;
-use crate::etc::AppData;
 use crate::modules::auth::validate_token;
 use actix_web::{
     body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
@@ -17,8 +16,7 @@ const SUPER_ADMIN: &str = "SUPER_ADMIN";
 
 async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
     let token = get_token_from_request(req.request());
-    let data = req.app_data::<AppData>().unwrap();
-    let claims = match validate_token(&token, &data.jwt_secret) {
+    let claims = match validate_token(&token) {
         Ok(claims) => claims,
         Err(_) => {
             return Ok(HashSet::new());

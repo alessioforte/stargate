@@ -1,5 +1,5 @@
 mod create_super_admin;
-mod generate_code;
+// mod generate_code;
 mod generate_password;
 mod get_token_from_request;
 

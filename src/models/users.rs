@@ -2,11 +2,12 @@ use crate::db;
 use crate::model;
 use crate::models::record::{thing_to_string, Record};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 const RESOURCE: &str = "users";
 
 model! {
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
     #[serde(rename_all = "camelCase")]
     pub struct User {
         pub name: String,
@@ -24,7 +25,7 @@ model! {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Profile {
     #[serde(deserialize_with = "thing_to_string")]
     pub id: String,

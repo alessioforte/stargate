@@ -8,7 +8,7 @@ use actix_web_grants::protect;
     context_path = "/admin/users",
     path = "/",
     responses(
-        (status = 200, description = "OK", body = Health)
+        (status = 200, description = "OK")
     )
 )]
 #[get("")]
@@ -22,7 +22,7 @@ pub async fn get_users() -> Result<HttpResponse, ErrorResponse> {
     context_path = "/admin/users",
     path = "/",
     responses(
-        (status = 200, description = "OK", body = Health)
+        (status = 200, description = "OK")
     )
 )]
 #[post("")]
@@ -52,7 +52,7 @@ pub async fn create_user(user: web::Json<UserPayload>) -> Result<HttpResponse, E
     context_path = "/admin/users",
     path = "/{id}",
     responses(
-        (status = 200, description = "OK", body = Health)
+        (status = 200, description = "OK")
     )
 )]
 #[delete("/{id}")]

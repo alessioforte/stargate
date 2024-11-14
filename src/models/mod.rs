@@ -4,7 +4,7 @@ pub mod resets;
 pub mod signup;
 pub mod tokens;
 pub mod users;
-pub mod users_settings;
+// pub mod users_settings;
 
 #[macro_use]
 pub mod macros;

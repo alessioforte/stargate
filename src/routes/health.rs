@@ -1,8 +1,9 @@
 use crate::errors::ErrorResponse;
 use actix_web::{get, HttpResponse};
 use serde::Serialize;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 struct Health {
     name: &'static str,
     version: &'static str,

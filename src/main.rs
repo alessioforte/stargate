@@ -9,7 +9,6 @@ mod routes;
 mod services;
 
 use crate::etc::gate::Gate;
-use crate::etc::state::State;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, middleware::TrailingSlash, web::to, web::Data, App, HttpServer};
@@ -25,8 +24,8 @@ async fn main() -> std::io::Result<()> {
     println!("{}", etc::logo::LOGO);
     let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let version = env!("CARGO_PKG_VERSION");
-    log::info!("Starting server on port {}", port);
     log::info!("Version: {}", version);
+    log::info!("Starting server on port {}", port);
 
     db::init().await;
     // create super admin user
@@ -34,12 +33,11 @@ async fn main() -> std::io::Result<()> {
 
     // rate limiter middleware
     let governor_config = GovernorConfigBuilder::default()
-        .per_second(2)
+        .seconds_per_request(2)
         .burst_size(5)
         .finish()
         .unwrap();
 
-    let data = Data::new(State::init());
     let gate = Gate::init();
     let secret_key = actix_web::cookie::Key::generate();
     gate.watch_file();
@@ -49,7 +47,6 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .app_data(data.clone())
             .app_data(gate.clone())
             .configure(etc::cfg::app_data)
             .configure(routes::configure)

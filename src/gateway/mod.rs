@@ -8,10 +8,9 @@ use crate::modules::auth::validate_token;
 use actix_web::{web::Payload, HttpRequest, HttpResponse};
 pub use format_uri::format_uri;
 
-use crate::etc::{AppData, Gate};
+use crate::etc::Gate;
 
 pub async fn handler(
-    data: AppData,
     gate: Gate,
     req: HttpRequest,
     stream: Payload,
@@ -60,7 +59,7 @@ pub async fn handler(
         auth_required = route.unwrap().auth_required.unwrap_or(auth_required);
     }
 
-    if auth_required && validate_token(&token, &data.jwt_secret).is_err() {
+    if auth_required && validate_token(&token).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Unauthorized".to_string(),
         )));

@@ -1,8 +1,4 @@
 use crate::errors::{ErrorResponse, HttpError};
-use actix_web::{get, post, put, web, HttpResponse};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::modules::hash::Hash;
 use crate::modules::password_policies::{PasswordPolicy, PasswordPolicyValidator};
 use crate::services::smtp::{Smtp, Template};
@@ -10,9 +6,13 @@ use crate::{
     models::signup::{Payload as SignupPayload, Signup},
     models::users::User,
 };
+use actix_web::{get, post, put, web, HttpResponse};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 // ----------------------------------------------------------------------------
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct SignupRequestBody {
     email: String,
 }
@@ -108,7 +108,7 @@ pub async fn signup_confirm(
 }
 
 // ----------------------------------------------------------------------------
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct SignupCompleteRequestBody {
     token: String,
     name: String,

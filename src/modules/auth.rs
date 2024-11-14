@@ -15,7 +15,6 @@ pub struct Claims {
     pub iat: usize,               // issued at
     pub iss: String,              // issuer
     pub exp: usize,               // expiration
-                                  // pub phone_number: Option<String>, // phone_number
 }
 
 impl Default for Claims {
@@ -35,19 +34,20 @@ impl Default for Claims {
     }
 }
 
+// defautl algorithm is HS256
 pub fn generate_token(claims: Claims) -> Result<String, errors::Error> {
-    let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
-
+    let jwt_secret_key = env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "secret".to_string());
     let header = Header::default();
-    let encoding_key = EncodingKey::from_secret(secret.as_ref());
+    let encoding_key = EncodingKey::from_secret(jwt_secret_key.as_ref());
     encode(&header, &claims, &encoding_key)
 }
 
-pub fn validate_token(token: &str, secret: &str) -> Result<Claims, errors::Error> {
+pub fn validate_token(token: &str) -> Result<Claims, errors::Error> {
+    let jwt_secret_key = env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "secret".to_string());
     if token.is_empty() {
         return Err(errors::Error::from(errors::ErrorKind::InvalidToken));
     }
-    let encoding_key = DecodingKey::from_secret(secret.as_ref());
+    let encoding_key = DecodingKey::from_secret(jwt_secret_key.as_ref());
 
     decode::<Claims>(token, &encoding_key, &jsonwebtoken::Validation::default())
         .map(|data| data.claims)
@@ -55,9 +55,20 @@ pub fn validate_token(token: &str, secret: &str) -> Result<Claims, errors::Error
 
 pub fn create_tokens(
     claims: Claims,
-    access_token_expiration: i64,
-    refresh_token_expiration: i64,
+    // access_token_expiration: i64,
+    // refresh_token_expiration: i64,
+    // secret_key: &str,
 ) -> Result<(String, String), errors::Error> {
+    // let jwt_secret_key = env::var("JWT_SECRET_KEY").unwrap_or_else(|_| "secret".to_string());
+    let access_token_expiration = env::var("ACCESS_TOKEN_EXPIRATION")
+        .unwrap_or_else(|_| "60".to_string())
+        .parse::<i64>()
+        .unwrap();
+    let refresh_token_expiration = env::var("REFRESH_TOKEN_EXPIRATION")
+        .unwrap_or_else(|_| "1440".to_string())
+        .parse::<i64>()
+        .unwrap();
+
     let mut access_token_claims = claims.clone();
     let mut refresh_token_claims = claims.clone();
     let now = Utc::now();

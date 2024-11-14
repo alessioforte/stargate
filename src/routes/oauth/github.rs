@@ -1,5 +1,4 @@
 use crate::errors::{ErrorResponse, HttpError};
-use crate::etc::AppData;
 use crate::models::oauth2_providers::Oauth2Provider;
 use crate::models::tokens::Token;
 use crate::models::users::User;
@@ -22,7 +21,7 @@ struct AuthResponse {
 }
 
 #[get("")]
-async fn login(data: AppData, query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorResponse> {
+async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorResponse> {
     let code = &query.code;
 
     if code.is_empty() {
@@ -112,19 +111,15 @@ async fn login(data: AppData, query: web::Query<QueryCode>) -> Result<HttpRespon
         }
     }
 
-    let (access_token, refresh_token) = create_tokens(
-        Claims {
-            sub: "github-oauth2".to_string(),
-            sub_id: user.id.to_owned(),
-            name: Some(user.name.clone()),
-            email: user.email.clone(),
-            nickname: user.nickname.clone(),
-            email_verified: github_user.email_verified,
-            ..Claims::default()
-        },
-        data.access_token_expiration,
-        data.refresh_token_expiration,
-    )
+    let (access_token, refresh_token) = create_tokens(Claims {
+        sub: "github-oauth2".to_string(),
+        sub_id: user.id.to_owned(),
+        name: Some(user.name.clone()),
+        email: user.email.clone(),
+        nickname: user.nickname.clone(),
+        email_verified: github_user.email_verified,
+        ..Claims::default()
+    })
     .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
