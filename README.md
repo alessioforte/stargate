@@ -6,6 +6,9 @@
 - [ ] MFA (Multi-Factor Authentication)
 - [x] Cookie-based authentication
 - [x] Password Policies
+- [ ] Audit Logs
+- [ ] Consider to decouple the authentication from the gateway
+- [ ] ? Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
 
 - [ ] ? Login - verify access from another device and notify user - Handle sessions
 - [ ] ? Single Sign-On (SSO) and Single Log-Out (SLO)
@@ -26,8 +29,8 @@ OAUTH2 PROVIDERS
 PROTOCOLS
 - [x] HTTP/HTTPS
 - [x] WebSockets
-- [ ] ? MQTT
-- [ ] ? gRPC
+- [ ] MQTT - try with rumqtt crate
+- [ ] gRPC - try with tonic crate
 - [ ] ? FTP/FTPS
 - [ ] ? TCP/UDP
 - [ ] ? AMQP

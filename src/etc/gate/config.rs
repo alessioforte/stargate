@@ -7,16 +7,6 @@ pub struct Route {
     pub path: String,
     pub method: String,
     pub auth_required: Option<bool>,
-    // created_at: Option<DateTime<Utc>>,
-    // updated_at: Option<DateTime<Utc>>,
-    // hosts: Option<Vec<String>>,
-    // headers: Option<HashMap<String, String>>,
-    // methods: Option<Vec<String>>,
-    // paths: Option<Vec<String>>,
-    // preserve_host: Option<bool>,
-    // priority: Option<i32>,
-    // protocols: Option<Vec<String>>,
-    // strip_path: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -29,13 +19,6 @@ pub struct Service {
     pub path: String,
     pub auth_required: Option<bool>,
     pub routes: Option<Vec<Route>>,
-    // created_at: Option<DateTime<Utc>>,
-    // updated_at: Option<DateTime<Utc>>,
-    // retries: Option<i32>,
-    // read_timeout: Option<i32>,
-    // write_timeout: Option<i32>,
-    //
-    // TODO: given an url, parse it and extract the protocol, host, port, path
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, utoipa::ToSchema)]

@@ -1,6 +1,6 @@
-use crate::errors::{ErrorResponse, HttpError};
-use crate::models::users::{Payload as UserPayload, User};
-use crate::modules::hash::Hash;
+use crate::ent::users::{Payload as UserPayload, User};
+use crate::err::{ErrorResponse, HttpError};
+use crate::pks::hash::Hash;
 use actix_web::{delete, get, post, web, HttpResponse};
 use actix_web_grants::protect;
 

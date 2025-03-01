@@ -1,4 +1,4 @@
-use crate::errors::{ErrorResponse, HttpError};
+use crate::err::{ErrorResponse, HttpError};
 use crate::etc::gate::config::Config;
 use actix_web::{get, put, web, HttpResponse};
 use actix_web_grants::protect;

@@ -2,9 +2,9 @@ mod format_uri;
 mod http;
 mod ws;
 
-use crate::actions::get_token_from_request;
-use crate::errors::{ErrorResponse, HttpError};
-use crate::modules::auth::validate_token;
+use crate::act::get_token_from_request;
+use crate::err::{ErrorResponse, HttpError};
+use crate::pks::auth::validate_token;
 use actix_web::{web::Payload, HttpRequest, HttpResponse};
 pub use format_uri::format_uri;
 

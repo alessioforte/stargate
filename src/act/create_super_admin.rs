@@ -1,6 +1,6 @@
-use crate::actions::generate_password;
-use crate::models::users::User;
-use crate::modules::hash::Hash;
+use super::generate_password;
+use crate::ent::users::User;
+use crate::pks::hash::Hash;
 
 pub async fn create_super_admin() {
     let password = generate_password(40, true, true, true, false);

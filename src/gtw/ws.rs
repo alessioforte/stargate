@@ -1,4 +1,4 @@
-use crate::errors::{ErrorResponse, HttpError};
+use crate::err::{ErrorResponse, HttpError};
 use actix_web::{web::Payload, HttpRequest, HttpResponse};
 
 pub async fn handler(

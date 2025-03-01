@@ -1,6 +1,6 @@
 use crate::db;
+use crate::ent::record::{thing_to_string, Record};
 use crate::model;
-use crate::models::record::{thing_to_string, Record};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

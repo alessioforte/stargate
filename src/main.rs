@@ -1,20 +1,20 @@
-mod actions;
-mod errors;
+mod act;
+mod ent;
+mod err;
 mod etc;
-mod gateway;
-mod middlewares;
-mod models;
-mod modules;
-mod routes;
-mod services;
+mod gtw;
+mod mid;
+mod pks;
+mod rts;
+mod svc;
 
 use crate::etc::gate::Gate;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, middleware::TrailingSlash, web::to, web::Data, App, HttpServer};
 use dotenvy::dotenv;
-use services::db;
 use std::env;
+use svc::db;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -29,7 +29,7 @@ async fn main() -> std::io::Result<()> {
 
     db::init().await;
     // create super admin user
-    actions::create_super_admin().await;
+    act::create_super_admin().await;
 
     // rate limiter middleware
     let governor_config = GovernorConfigBuilder::default()
@@ -49,10 +49,10 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(gate.clone())
             .configure(etc::cfg::app_data)
-            .configure(routes::configure)
-            .default_service(to(gateway::handler))
+            .configure(rts::configure)
+            .default_service(to(gtw::handler))
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
-            .wrap(middlewares::cookie_session(secret_key.clone()))
+            .wrap(mid::cookie_session(secret_key.clone()))
             .wrap(middleware::Logger::default())
             .wrap(Governor::new(&governor_config))
             .wrap(Cors::permissive())

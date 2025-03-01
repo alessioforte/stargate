@@ -1,5 +1,6 @@
 use rand::Rng;
 
+/// Generate a random password.
 pub fn generate_password(
     length: usize,
     use_upper: bool,
@@ -26,10 +27,10 @@ pub fn generate_password(
         charset.push_str(special);
     }
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let password: String = (0..length)
         .map(|_| {
-            let idx = rng.gen_range(0..charset.len());
+            let idx = rng.random_range(0..charset.len());
             charset.chars().nth(idx).unwrap()
         })
         .collect();

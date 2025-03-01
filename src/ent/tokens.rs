@@ -1,5 +1,5 @@
 use crate::db;
-use crate::models::record::thing_to_string;
+use crate::ent::record::thing_to_string;
 use serde::{Deserialize, Serialize};
 
 const RESOURCE: &str = "tokens";

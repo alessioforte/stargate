@@ -2,8 +2,8 @@ pub mod configurations;
 pub mod docs;
 pub mod users;
 
-use crate::actions::get_token_from_request;
-use crate::modules::auth::validate_token;
+use crate::act::get_token_from_request;
+use crate::pks::auth::validate_token;
 use actix_web::{
     body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
     dev::ServiceResponse, web, Error,
@@ -49,12 +49,12 @@ pub fn routes() -> actix_web::Scope<
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::routes::admin::configurations::get_configurations,
-        crate::routes::admin::configurations::update_configurations,
-        crate::routes::admin::users::get_users,
-        crate::routes::admin::users::create_user,
-        crate::routes::admin::users::delete_user,
+        crate::rts::admin::configurations::get_configurations,
+        crate::rts::admin::configurations::update_configurations,
+        crate::rts::admin::users::get_users,
+        crate::rts::admin::users::create_user,
+        crate::rts::admin::users::delete_user,
     ),
-    info(description = "Stargate Admin documentation.")
+    info(description = "Stargate APIs Admin documentation")
 )]
 pub struct ApiDoc;

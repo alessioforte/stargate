@@ -1,4 +1,4 @@
-use crate::errors::{HttpError, PayloadError};
+use crate::err::{HttpError, PayloadError};
 use actix_web::error::JsonPayloadError;
 use actix_web::http::header::CONTENT_TYPE;
 use actix_web::web::ServiceConfig;

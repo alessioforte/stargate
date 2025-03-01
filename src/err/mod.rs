@@ -1,6 +1,6 @@
 pub mod types;
 
-use crate::errors::types::{Code, ErrorCode};
+use crate::err::types::{Code, ErrorCode};
 use actix_web::error::{JsonPayloadError, QueryPayloadError};
 use actix_web::http::StatusCode;
 use serde::{Deserialize, Serialize};

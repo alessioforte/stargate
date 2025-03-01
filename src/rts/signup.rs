@@ -1,10 +1,10 @@
-use crate::errors::{ErrorResponse, HttpError};
-use crate::modules::hash::Hash;
-use crate::modules::password_policies::{PasswordPolicy, PasswordPolicyValidator};
-use crate::services::smtp::{Smtp, Template};
+use crate::err::{ErrorResponse, HttpError};
+use crate::pks::hash::Hash;
+use crate::pks::password_policies::{PasswordPolicy, PasswordPolicyValidator};
+use crate::svc::smtp::{Smtp, Template};
 use crate::{
-    models::signup::{Payload as SignupPayload, Signup},
-    models::users::User,
+    ent::signup::{Payload as SignupPayload, Signup},
+    ent::users::User,
 };
 use actix_web::{get, post, put, web, HttpResponse};
 use serde::{Deserialize, Serialize};
