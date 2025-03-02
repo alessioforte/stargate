@@ -27,7 +27,9 @@ async fn main() -> std::io::Result<()> {
     log::info!("Version: {}", version);
     log::info!("Starting server on port {}", port);
 
+    pks::jwt::init();
     db::init().await;
+
     // create super admin user
     act::create_super_admin().await;
 
@@ -43,7 +45,7 @@ async fn main() -> std::io::Result<()> {
     gate.watch_file();
     let gate = Data::new(gate);
 
-    let tls_config = etc::tls::config();
+    let tls = etc::tls::builder();
 
     HttpServer::new(move || {
         App::new()
@@ -57,7 +59,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Governor::new(&governor_config))
             .wrap(Cors::permissive())
     })
-    .bind_rustls_0_23(format!("0.0.0.0:{}", port), tls_config)?
+    .bind_openssl(format!("0.0.0.0:{}", port), tls)?
     .run()
     .await
 }

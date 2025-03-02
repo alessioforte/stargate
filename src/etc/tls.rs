@@ -1,30 +1,19 @@
-use std::fs::File;
-use std::io::BufReader;
+use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslFiletype, SslMethod};
+use std::env;
 
-pub fn config() -> rustls::ServerConfig {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .unwrap();
+pub fn builder() -> SslAcceptorBuilder {
+    let key_file_path = env::var("TLS_KEY_FILE")
+        .unwrap_or_else(|_| ".stargate/certificate/localhost/key.pem".to_string());
+    let cert_file_path = env::var("TLS_CERT_FILE")
+        .unwrap_or_else(|_| ".stargate/certificate/localhost/cert.pem".to_string());
 
-    let mut certs_file = BufReader::new(File::open("certificate/localhost/cert.pem").unwrap());
-    let mut key_file = BufReader::new(File::open("certificate/localhost/key.pem").unwrap());
-
-    // load TLS certs and key
+    // load TLS keys
     // to create a self-signed temporary cert for testing:
     // `openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 365 -subj '/CN=localhost'`
-    let tls_certs = rustls_pemfile::certs(&mut certs_file)
-        .collect::<Result<Vec<_>, _>>()
+    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    builder
+        .set_private_key_file(key_file_path, SslFiletype::PEM)
         .unwrap();
-    let tls_key = rustls_pemfile::pkcs8_private_keys(&mut key_file)
-        .next()
-        .unwrap()
-        .unwrap();
-
-    // set up TLS config options
-    let tls_config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(tls_certs, rustls::pki_types::PrivateKeyDer::Pkcs8(tls_key))
-        .unwrap();
-
-    tls_config
+    builder.set_certificate_chain_file(cert_file_path).unwrap();
+    builder
 }

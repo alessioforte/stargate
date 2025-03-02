@@ -1,5 +1,97 @@
+# Stargate
+
+![Actix](https://img.shields.io/badge/actix-web-blue)
+![Rust](https://img.shields.io/badge/rust-1.78+-orange)
+
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Features](#features)
+- [Installation](#installation)
+- [Environment Variables](#environment-variables)
+- [Usage](#usage)
+
+## Introduction
+
+This project is a api gateway and user management system built using the [Actix Web](https://actix.rs/) framework for Rust.
+Actix Web is a powerful, pragmatic, and extremely fast web framework for Rust.
+
+## Features
+
+- Fast and efficient HTTP server
+
+## Installation
+
+To set up this project locally, you need to have [Rust](https://www.rust-lang.org/) and [Cargo](https://doc.rust-lang.org/cargo/) installed.
+
+1. Build the project:
+
+   ```sh
+   cargo build
+   ```
+
+2. Run the server:
+
+   ```sh
+   cargo run
+   ```
+
+## Environment Variables
+
+The following environment variables can be set to configure the application in the .env file:
+
+- `PORT`: The port on which the server will run. Default is `5050`.
+- `RUST_LOG`: The log level for the application..
+- `SURREALDB_ENDPOINT`: The endpoint for the SurrealDB. By default is a RocksDB database which persists data on the filesystem that is located at `.flows/flows.db`.
+- `SURREALDB_USERNAME`: The username for the SurrealDB.
+- `SURREALDB_PASSWORD`: The password for the SurrealDB.
+- `SURREALDB_NAMESPACE`: The namespace for the SurrealDB. Default is `sensoworks`.
+- `SURREALDB_DATABASE`: The database for the SurrealDB. Default is `flows`.
+- `API_BASE_PATH`: The base path for the API.
+- `COOKIE_BASED_SESSION`: Enable cookie-based session. Default is `false`.
+- `JWT_ALGORITHM`: The algorithm for the JWT token. Default is `HS256`.
+- `JWT_SECRET`: The secret for the JWT token.
+- `JWT_PUBLIC_KEY`: The public key for the JWT token in a PEM format.
+- `JWT_PRIVATE_KEY`: The private key for the JWT token in a PEM format.
+- `JWT_PRIVATE_KEY_PATH`: The path to the private key for the JWT token.
+- `JWT_PUBLIC_KEY_PATH`: The path to the public key for the JWT token.
+- `ACCESS_TOKEN_EXPIRATION`: The expiration time for the access token. Default is `15m`.
+- `REFRESH_TOKEN_EXPIRATION`: The expiration time for the refresh token. Default is `7d`.
+
+## Usage
+
+After running the server, it will be available at `http://localhost:5050`. You can test the endpoints using tools like [Postman](https://www.postman.com/) or `curl`.
+
+Example:
+
+```sh
+curl http://localhost:5050/health
+```
+
+## Docker Build
+
+To build the Docker image, run the following command:
+
+```sh
+docker buildx build -t stargate:VERSION .
+```
+
+Replace `VERSION` with the version of the image.
+
+## Docker Run
+
+To run the Docker container, run the following command:
+
+```sh
+docker run -d -p 5050:5050 --name stargate stargate:VERSION
+```
+
+Replace `VERSION` with the version of the image.
+
+
 ## Roadmap
 
+- [ ] JWT with RSA
 - [x] Send Email
 - [ ] Send SMS
 - [ ] Time-based One-Time Password (TOTP) - Authenticator App

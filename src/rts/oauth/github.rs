@@ -2,8 +2,8 @@ use crate::ent::oauth2_providers::Oauth2Provider;
 use crate::ent::tokens::Token;
 use crate::ent::users::User;
 use crate::err::{ErrorResponse, HttpError};
-use crate::pks::auth::{create_tokens, Claims};
 use crate::pks::hash::Hash;
+use crate::pks::jwt::{jwt_config, Claims};
 use crate::svc::oauth::github::{get_github_oauth_token, get_github_user};
 use actix_web::{get, web, HttpResponse};
 use serde::{Deserialize, Serialize};
@@ -111,16 +111,18 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         }
     }
 
-    let (access_token, refresh_token) = create_tokens(Claims {
-        sub: "github-oauth2".to_string(),
-        sub_id: user.id.to_owned(),
-        name: Some(user.name.clone()),
-        email: user.email.clone(),
-        nickname: user.nickname.clone(),
-        email_verified: github_user.email_verified,
-        ..Claims::default()
-    })
-    .unwrap();
+    let jwt = jwt_config();
+    let (access_token, refresh_token) = jwt
+        .create_tokens(Claims {
+            sub: "github-oauth2".to_string(),
+            sub_id: user.id.to_owned(),
+            name: Some(user.name.clone()),
+            email: user.email.clone(),
+            nickname: user.nickname.clone(),
+            email_verified: github_user.email_verified,
+            ..Claims::default()
+        })
+        .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 

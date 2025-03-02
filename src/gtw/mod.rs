@@ -4,7 +4,7 @@ mod ws;
 
 use crate::act::get_token_from_request;
 use crate::err::{ErrorResponse, HttpError};
-use crate::pks::auth::validate_token;
+use crate::pks::jwt;
 use actix_web::{web::Payload, HttpRequest, HttpResponse};
 pub use format_uri::format_uri;
 
@@ -59,7 +59,8 @@ pub async fn handler(
         auth_required = route.unwrap().auth_required.unwrap_or(auth_required);
     }
 
-    if auth_required && validate_token(&token).is_err() {
+    let jwt = jwt::jwt_config();
+    if auth_required && jwt.validate_token(&token).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Unauthorized".to_string(),
         )));

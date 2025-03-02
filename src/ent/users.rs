@@ -20,8 +20,6 @@ model! {
     {
         #[serde(deserialize_with = "thing_to_string")]
         pub id: String,
-        // pub created_at: i64,
-        // pub updated_at: i64,
     }
 }
 

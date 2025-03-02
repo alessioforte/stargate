@@ -27,10 +27,14 @@ use utoipa::OpenApi;
 pub struct ApiDoc;
 
 pub fn configure(cfg: &mut ServiceConfig) {
-    cfg.service(health::get)
-        .service(docs::routes())
-        .service(account::routes())
-        .service(oauth::routes())
-        .service(signup::routes())
-        .service(admin::routes());
+    let base_path = std::env::var("API_BASE_PATH").unwrap_or_else(|_| "".to_string());
+    cfg.service(
+        actix_web::web::scope(&base_path)
+            .service(health::get)
+            .service(docs::routes())
+            .service(account::routes())
+            .service(oauth::routes())
+            .service(signup::routes())
+            .service(admin::routes()),
+    );
 }

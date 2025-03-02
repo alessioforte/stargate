@@ -3,8 +3,8 @@ use crate::ent::resets::{PasswordReset, Payload as PasswordResetPayload};
 use crate::ent::tokens::Token;
 use crate::ent::users::{Profile, User};
 use crate::err::{ErrorResponse, HttpError};
-use crate::pks::auth::{create_tokens, validate_token, Claims};
 use crate::pks::hash::Hash;
+use crate::pks::jwt::{jwt_config, Claims};
 use crate::svc::smtp::{Smtp, Template};
 use actix_session::Session;
 use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
@@ -24,7 +24,8 @@ use uuid::Uuid;
 pub async fn profile(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let token = get_token_from_request(&req);
 
-    let claims = match validate_token(&token) {
+    let jwt = jwt_config();
+    let claims = match jwt.validate_token(&token) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -102,16 +103,18 @@ pub async fn login(
         )));
     }
 
-    let (access_token, refresh_token) = create_tokens(Claims {
-        sub: user.email.to_owned(),
-        sub_id: user.id.to_owned(),
-        name: Some(user.name.clone()),
-        email: user.email.clone(),
-        nickname: user.nickname.clone(),
-        email_verified: true,
-        ..Claims::default()
-    })
-    .unwrap();
+    let jwt = jwt_config();
+    let (access_token, refresh_token) = jwt
+        .create_tokens(Claims {
+            sub: user.email.to_owned(),
+            sub_id: user.id.to_owned(),
+            name: Some(user.name.clone()),
+            email: user.email.clone(),
+            nickname: user.nickname.clone(),
+            email_verified: true,
+            ..Claims::default()
+        })
+        .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
@@ -154,7 +157,8 @@ pub async fn refresh(
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
     let refresh_token = body.refresh_token.clone();
-    let claims = match validate_token(&refresh_token) {
+    let jwt = jwt_config();
+    let claims = match jwt.validate_token(&refresh_token) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -188,16 +192,17 @@ pub async fn refresh(
 
     let user = user.unwrap();
 
-    let (access_token, refresh_token) = create_tokens(Claims {
-        sub: user.email.to_owned(),
-        sub_id: user.id.to_owned(),
-        name: Some(user.name.clone()),
-        email: user.email.clone(),
-        nickname: user.nickname.clone(),
-        email_verified: true,
-        ..Claims::default()
-    })
-    .unwrap();
+    let (access_token, refresh_token) = jwt
+        .create_tokens(Claims {
+            sub: user.email.to_owned(),
+            sub_id: user.id.to_owned(),
+            name: Some(user.name.clone()),
+            email: user.email.clone(),
+            nickname: user.nickname.clone(),
+            email_verified: true,
+            ..Claims::default()
+        })
+        .unwrap();
 
     let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
 
@@ -225,7 +230,8 @@ pub async fn refresh(
 pub async fn logout(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let token = get_token_from_request(&req);
 
-    let claims = match validate_token(&token) {
+    let jwt = jwt_config();
+    let claims = match jwt.validate_token(&token) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
