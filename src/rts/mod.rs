@@ -2,6 +2,7 @@ pub mod account;
 pub mod admin;
 pub mod docs;
 pub mod health;
+pub mod knowns;
 pub mod oauth;
 pub mod signup;
 
@@ -12,15 +13,15 @@ use utoipa::OpenApi;
 #[openapi(
     paths(
         crate::rts::health::get,
-        crate::rts::account::profile,
-        crate::rts::account::login,
-        crate::rts::account::refresh,
-        crate::rts::account::logout,
-        crate::rts::account::forgot_password,
-        crate::rts::account::change_password,
-        crate::rts::signup::signup_request,
-        crate::rts::signup::signup_confirm,
-        crate::rts::signup::signup_complete,
+        crate::rts::account::profile::handler,
+        crate::rts::account::login::handler,
+        crate::rts::account::refresh_token::handler,
+        crate::rts::account::logout::handler,
+        crate::rts::account::forgot_password::handler,
+        crate::rts::account::change_password::handler,
+        crate::rts::signup::request::handler,
+        crate::rts::signup::confirm::handler,
+        crate::rts::signup::complete::handler,
     ),
     info(description = "Stargate APIs documentation")
 )]

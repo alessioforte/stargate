@@ -13,6 +13,7 @@ use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, middleware::TrailingSlash, web::to, web::Data, App, HttpServer};
 use dotenvy::dotenv;
+use pks::jwt;
 use std::env;
 use svc::db;
 
@@ -27,7 +28,7 @@ async fn main() -> std::io::Result<()> {
     log::info!("Version: {}", version);
     log::info!("Starting server on port {}", port);
 
-    pks::jwt::init();
+    jwt::init();
     db::init().await;
 
     // create super admin user
@@ -36,7 +37,7 @@ async fn main() -> std::io::Result<()> {
     // rate limiter middleware
     let governor_config = GovernorConfigBuilder::default()
         .seconds_per_request(2)
-        .burst_size(5)
+        .burst_size(32)
         .finish()
         .unwrap();
 

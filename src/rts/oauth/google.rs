@@ -1,6 +1,6 @@
-use crate::ent::oauth2_providers::Oauth2Provider;
-use crate::ent::tokens::Token;
-use crate::ent::users::User;
+use crate::ent::oauth2_provider::Oauth2Provider;
+use crate::ent::token::Token;
+use crate::ent::user::User;
 use crate::err::{ErrorResponse, HttpError};
 use crate::pks::hash::Hash;
 use crate::pks::jwt::{jwt_config, Claims};

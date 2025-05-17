@@ -10,13 +10,19 @@ pub struct Route {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Uri {
+    pub protocol: Option<String>,
+    pub host: String,
+    pub port: Option<i32>,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Service {
     pub connect_timeout: Option<i32>,
     pub name: Option<String>,
-    pub protocol: String,
-    pub host: String,
-    pub port: Option<i32>,
     pub path: String,
+    pub uri: Uri,
     pub auth_required: Option<bool>,
     pub routes: Option<Vec<Route>>,
 }
@@ -25,7 +31,7 @@ pub struct Service {
 pub struct Config {
     pub services: Vec<Service>,
 }
-
+// FIXME: Handle errors
 impl Config {
     pub fn from_file() -> Self {
         let path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());

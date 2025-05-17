@@ -6,6 +6,13 @@ use utoipa::ToSchema;
 
 const RESOURCE: &str = "users";
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+struct UserAuth {
+    user_id: String,
+    password: String,
+    timestamp: i64,
+}
+
 model! {
     #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
     #[serde(rename_all = "camelCase")]
@@ -35,15 +42,15 @@ pub struct Profile {
 }
 
 impl User {
-    pub fn new() -> User {
+    pub fn new() -> Self {
         User {
+            id: "".to_string(),
             name: "".to_string(),
             email: "".to_string(),
             password: None,
             nickname: None,
             picture: None,
             phone_number: None,
-            id: "".to_string(),
         }
     }
 

@@ -1,3 +1,4 @@
+use crate::act::generate_password;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{
     decode, encode, errors, Algorithm, DecodingKey, EncodingKey, Header, Validation,
@@ -6,7 +7,19 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{env, fs};
 
-use crate::act::generate_password;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefreshTokenClaims {
+    pub exp: usize,    // expiration
+    pub iat: usize,    // issued at
+    pub jti: String,   // JWT ID
+    pub iss: String,   // issuer
+    pub aud: String,   // audience
+    pub sub: String,   // subject
+    pub typ: String,   // type
+    pub azp: String,   // authorized party
+    pub sid: String,   // session ID
+    pub scope: String, // scope
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -110,28 +123,26 @@ impl JwtConfig {
     }
 
     pub fn create_tokens(&self, claims: Claims) -> Result<(String, String), errors::Error> {
-        let access_token_expiration = env::var("ACCESS_TOKEN_EXPIRATION")
+        let jwt_access_exp = env::var("JWT_ACCESS_EXPIRATION_MINUTES")
             .unwrap_or_else(|_| "60".to_string())
             .parse::<i64>()
             .unwrap();
-        let refresh_token_expiration = env::var("REFRESH_TOKEN_EXPIRATION")
+        let jwt_refresh_exp = env::var("JWT_REFRESH_EXPIRATION_DAYS")
             .unwrap_or_else(|_| "1440".to_string())
             .parse::<i64>()
             .unwrap();
 
-        let mut access_token_claims = claims.clone();
-        let mut refresh_token_claims = claims.clone();
+        let mut jwt_access_claims = claims.clone();
+        let mut jwt_refresh_claims = claims.clone();
         let now = Utc::now();
-        access_token_claims.iat = now.timestamp() as usize;
-        access_token_claims.exp =
-            (now + Duration::minutes(access_token_expiration)).timestamp() as usize;
-        let access_token = self.generate_token(&access_token_claims);
+        jwt_access_claims.iat = now.timestamp() as usize;
+        jwt_access_claims.exp = (now + Duration::minutes(jwt_access_exp)).timestamp() as usize;
+        let jwt_access = self.generate_token(&jwt_access_claims);
 
-        refresh_token_claims.iat = now.timestamp() as usize;
-        refresh_token_claims.exp =
-            (now + Duration::minutes(refresh_token_expiration)).timestamp() as usize;
-        let refresh_token = self.generate_token(&refresh_token_claims);
-        Ok((access_token, refresh_token))
+        jwt_refresh_claims.iat = now.timestamp() as usize;
+        jwt_refresh_claims.exp = (now + Duration::days(jwt_refresh_exp)).timestamp() as usize;
+        let jwt_refresh = self.generate_token(&jwt_refresh_claims);
+        Ok((jwt_access, jwt_refresh))
     }
 }
 

@@ -1,5 +1,5 @@
 use super::generate_password;
-use crate::ent::users::User;
+use crate::ent::user::User;
 use crate::pks::hash::Hash;
 
 pub const SUPER_ADMIN_NICKNAME: &str = "admin";

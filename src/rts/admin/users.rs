@@ -1,4 +1,4 @@
-use crate::ent::users::{Payload as UserPayload, User};
+use crate::ent::user::{Payload as UserPayload, User};
 use crate::err::{ErrorResponse, HttpError};
 use crate::pks::hash::Hash;
 use actix_web::{delete, get, post, web, HttpResponse};

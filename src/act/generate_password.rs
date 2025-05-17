@@ -36,3 +36,23 @@ pub fn generate_password(
         .collect();
     password
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_password() {
+        let password = generate_password(16, true, true, true, true);
+        assert_eq!(password.len(), 16);
+    }
+
+    #[test]
+    fn test_generate_password_no_upper() {
+        let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let password = generate_password(16, false, true, true, true);
+        for c in password.chars() {
+            assert!(!upper.contains(c));
+        }
+    }
+}

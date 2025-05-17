@@ -1,9 +1,10 @@
-pub mod oauth2_providers;
+pub mod oauth2_provider;
 pub mod record;
-pub mod resets;
+pub mod reset_password;
 pub mod signup;
-pub mod tokens;
-pub mod users;
+pub mod token;
+pub mod user;
+pub mod user_password;
 // pub mod users_settings;
 
 #[macro_use]

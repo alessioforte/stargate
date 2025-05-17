@@ -24,7 +24,12 @@ impl Gate {
         let mut trie = TriePath::new();
         for service in &cfg.services {
             // trie.insert(&service.path, service.clone());
-            trie.insert(&service.protocol, &service.path, service.clone());
+            let protocol = service
+                .uri
+                .protocol
+                .clone()
+                .unwrap_or_else(|| "http".to_string());
+            trie.insert(&protocol, &service.path, service.clone());
         }
         let config = Arc::new(RwLock::new(trie));
         Self { config }
@@ -35,7 +40,12 @@ impl Gate {
         let mut trie = TriePath::new();
         for service in &new_config.services {
             // trie.insert(&service.path, service.clone());
-            trie.insert(&service.protocol, &service.path, service.clone());
+            let protocol = service
+                .uri
+                .protocol
+                .clone()
+                .unwrap_or_else(|| "http".to_string());
+            trie.insert(&protocol, &service.path, service.clone());
         }
         let mut config = self.config.write().await;
         log::info!("Updating config");

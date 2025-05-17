@@ -55,8 +55,8 @@ The following environment variables can be set to configure the application in t
 - `JWT_PRIVATE_KEY`: The private key for the JWT token in a PEM format.
 - `JWT_PRIVATE_KEY_PATH`: The path to the private key for the JWT token.
 - `JWT_PUBLIC_KEY_PATH`: The path to the public key for the JWT token.
-- `ACCESS_TOKEN_EXPIRATION`: The expiration time for the access token. Default is `15m`.
-- `REFRESH_TOKEN_EXPIRATION`: The expiration time for the refresh token. Default is `7d`.
+- `JWT_ACCESS_EXPIRATION_MINUTES`: The expiration time for the access token. Default is `60`.
+- `JWT_REFRESH_EXPIRATION_DAYS`: The expiration time for the refresh token. Default is `1`.
 
 ## Usage
 
@@ -91,7 +91,6 @@ Replace `VERSION` with the version of the image.
 
 ## Roadmap
 
-- [ ] JWT with RSA
 - [x] Send Email
 - [ ] Send SMS
 - [ ] Time-based One-Time Password (TOTP) - Authenticator App
@@ -101,6 +100,8 @@ Replace `VERSION` with the version of the image.
 - [ ] Audit Logs
 - [ ] Consider to decouple the authentication from the gateway
 - [ ] ? Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
+- [ ] Server info and Provider info
+- [ ] Realms - Implement multiple realms
 
 - [ ] ? Login - verify access from another device and notify user - Handle sessions
 - [ ] ? Single Sign-On (SSO) and Single Log-Out (SLO)
