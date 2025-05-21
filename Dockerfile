@@ -1,4 +1,4 @@
-ARG RUST_VERSION=1.83.0
+ARG RUST_VERSION=1.86.0
 ARG APP_NAME=stargate
 
 FROM rust:${RUST_VERSION}-slim-bullseye AS chef
@@ -15,7 +15,7 @@ RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout .stargate/certif
 FROM chef AS planner
 ARG APP_NAME
 WORKDIR /app
-COPY src ./src
+COPY crates ./crates
 COPY Cargo.toml ./Cargo.toml
 COPY Cargo.lock ./Cargo.lock
 RUN cargo chef prepare --recipe-path recipe.json
@@ -24,11 +24,11 @@ FROM chef AS build
 ARG APP_NAME
 WORKDIR /app
 COPY --from=planner /app/recipe.json ./recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
-COPY src ./src
+RUN cargo chef cook --release --recipe-path recipe.json -p $APP_NAME
+COPY crates ./crates
 COPY Cargo.toml ./Cargo.toml
 COPY Cargo.lock ./Cargo.lock
-RUN cargo build --release && cp ./target/release/$APP_NAME /bin/server
+RUN cargo build --release -p $APP_NAME && cp ./target/release/$APP_NAME /bin/server
 
 FROM debian:bullseye-slim AS final
 RUN apt-get update && apt-get upgrade -y

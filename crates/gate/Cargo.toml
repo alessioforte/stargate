@@ -1,0 +1,16 @@
+[package]
+name = "gate"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+readme.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+log = "0.4.27"
+notify-debouncer-mini = "0.6.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_yml = "0.0.12"
+tokio = { version = "1.45.0", features = ["macros", "rt-multi-thread"] }
+utoipa = { version = "5.3.1", features = ["actix_extras", "yaml"] }
