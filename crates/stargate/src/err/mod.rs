@@ -1,10 +1,10 @@
 pub mod types;
 
-use crate::err::types::{Code, ErrorCode};
 use actix_web::error::{JsonPayloadError, QueryPayloadError};
 use actix_web::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use types::{Code, ErrorCode};
 
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {

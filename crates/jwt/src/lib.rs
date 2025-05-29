@@ -3,7 +3,6 @@ use jsonwebtoken::{
     decode, encode, errors, Algorithm, DecodingKey, EncodingKey, Header, Validation,
 };
 use once_cell::sync::Lazy;
-use password::generate_password;
 use serde::{Deserialize, Serialize};
 use std::{env, fs};
 
@@ -158,7 +157,7 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
     let mut secret = env::var("JWT_SECRET").ok();
     log::info!("JWT Algorithm: {:?}", algorithm);
     if secret.is_none() && algorithm == Algorithm::HS256 {
-        secret = Some(generate_password(512, false, true, true, false));
+        secret = Some(password::generator(512, false, true, true, false));
         log::warn!(
             "JWT_SECRET not set, generating a random secret key, {}",
             secret.as_ref().unwrap()

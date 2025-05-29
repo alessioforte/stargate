@@ -1,7 +1,7 @@
 use super::SignupCompleteRequestBody;
 use crate::err::{ErrorResponse, HttpError};
-use crate::{ent::signup::Signup, ent::user::User};
 use actix_web::{put, web, HttpResponse};
+use db::{ent::signup::Signup, ent::user::User};
 use password::Hash;
 use password::{PasswordPolicy, PasswordPolicyValidator};
 

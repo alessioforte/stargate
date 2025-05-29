@@ -1,9 +1,9 @@
 use super::AuthResponse;
 use super::RefreshTokenRequestBody;
-use crate::ent::token::Token;
-use crate::ent::user::User;
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{put, web, HttpResponse};
+use db::ent::token::Token;
+use db::ent::user::User;
 use jwt::{jwt_config, Claims};
 use password::Hash;
 

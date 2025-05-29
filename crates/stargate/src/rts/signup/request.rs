@@ -1,10 +1,10 @@
 use super::SignupRequestBody;
 use crate::err::{ErrorResponse, HttpError};
-use crate::{
+use actix_web::{post, web, HttpResponse};
+use db::{
     ent::signup::{Payload as SignupPayload, Signup},
     ent::user::User,
 };
-use actix_web::{post, web, HttpResponse};
 use smtp::{Smtp, Template};
 use uuid::Uuid;
 

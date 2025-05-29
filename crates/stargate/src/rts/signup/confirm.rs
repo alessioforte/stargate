@@ -1,7 +1,7 @@
 use super::SignupConfirmParams;
-use crate::ent::signup::Signup;
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{get, web, HttpResponse};
+use db::ent::signup::Signup;
 
 #[utoipa::path(
     context_path = "/signup",

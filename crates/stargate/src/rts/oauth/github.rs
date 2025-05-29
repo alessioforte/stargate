@@ -1,8 +1,8 @@
-use crate::ent::oauth2_provider::Oauth2Provider;
-use crate::ent::token::Token;
-use crate::ent::user::User;
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{get, web, HttpResponse};
+use db::ent::oauth2_provider::Oauth2Provider;
+use db::ent::token::Token;
+use db::ent::user::User;
 use jwt::{jwt_config, Claims};
 use oauth::github::{get_github_oauth_token, get_github_user};
 use password::Hash;

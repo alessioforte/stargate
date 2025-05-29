@@ -1,8 +1,8 @@
-use crate::ent::reset_password::{PasswordReset, Payload as PasswordResetPayload};
-use crate::ent::user::User;
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{post, web, HttpResponse};
 use chrono::{Duration, Utc};
+use db::ent::reset_password::{PasswordReset, Payload as PasswordResetPayload};
+use db::ent::user::User;
 use serde::{Deserialize, Serialize};
 use smtp::{Smtp, Template};
 use utoipa::ToSchema;

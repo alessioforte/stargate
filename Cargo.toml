@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "crates/gate", "crates/jwt", "crates/oauth", "crates/password", "crates/smtp",
+members = [ "crates/db", "crates/gate", "crates/jwt", "crates/oauth", "crates/password", "crates/smtp",
     "crates/stargate"
 ]
 
@@ -13,3 +13,10 @@ description = "Stargate API Gateway and IAM"
 readme = "README.md"
 edition = "2021"
 license = "MIT"
+
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+debug = false
+opt-level = 2

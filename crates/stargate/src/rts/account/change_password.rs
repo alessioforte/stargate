@@ -1,7 +1,7 @@
 use super::ChangePasswordRequestBody;
-use crate::ent::reset_password::PasswordReset;
-use crate::ent::user::User;
 use crate::err::{ErrorResponse, HttpError};
+use db::ent::reset_password::PasswordReset;
+use db::ent::user::User;
 
 use actix_web::{put, web, HttpResponse};
 use chrono::Utc;

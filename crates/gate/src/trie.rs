@@ -94,3 +94,45 @@ impl TriePath {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Service;
+
+    #[test]
+    fn test_trie_path() {
+        let mut trie = TriePath::new();
+        let service = Service {
+            connect_timeout: Some(30),
+            name: Some("test_service".to_string()),
+            path: "/v1/users".to_string(),
+            uri: crate::config::Uri {
+                protocol: Some("http".to_string()),
+                host: "localhost".to_string(),
+                port: Some(8080),
+                path: Some("/v1/users".to_string()),
+            },
+            auth_required: Some(true),
+            routes: None,
+        };
+
+        trie.insert("http", "/v1/users", service.clone());
+        trie.insert("http", "/v1/orders", service.clone());
+        trie.insert("ws", "/v1/users", service.clone());
+
+        let result = trie.search("http", "/v1/users");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, Some("test_service".to_string()));
+        let result = trie.search("http", "/v1/orders");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, Some("test_service".to_string()));
+        let result = trie.search("ws", "/v1/users");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, Some("test_service".to_string()));
+        let result = trie.search("http", "/v1/products");
+        assert!(result.is_none());
+        let result = trie.search("ws", "/v1/products");
+        assert!(result.is_none());
+    }
+}

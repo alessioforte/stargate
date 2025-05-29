@@ -1,7 +1,22 @@
 use rand::Rng;
 
 /// Generate a random password.
-pub fn generate_password(
+/// # Arguments
+/// * `length` - The length of the password.
+/// * `use_upper` - Whether to use uppercase letters.
+/// * `use_lower` - Whether to use lowercase letters.
+/// * `use_digits` - Whether to use digits.
+/// * `use_special` - Whether to use special characters.
+/// # Returns
+/// * A random password as a `String`.
+/// # Example
+/// ```
+/// let password = generator(16, true, true, true, true);
+/// assert_eq!(password.len(), 16);
+/// ```
+/// # Note
+/// This function uses the `rand` crate to generate random numbers.
+pub fn generator(
     length: usize,
     use_upper: bool,
     use_lower: bool,
@@ -43,14 +58,14 @@ mod tests {
 
     #[test]
     fn test_generate_password() {
-        let password = generate_password(16, true, true, true, true);
+        let password = generator(16, true, true, true, true);
         assert_eq!(password.len(), 16);
     }
 
     #[test]
     fn test_generate_password_no_upper() {
         let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let password = generate_password(16, false, true, true, true);
+        let password = generator(16, false, true, true, true);
         for c in password.chars() {
             assert!(!upper.contains(c));
         }

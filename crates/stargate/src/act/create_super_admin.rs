@@ -1,10 +1,9 @@
-use crate::ent::user::User;
-use password::{generate_password, Hash};
+use db::ent::user::User;
 
 pub const SUPER_ADMIN_NICKNAME: &str = "admin";
 
 pub async fn create_super_admin() {
-    let password = generate_password(40, true, true, true, false);
+    let pw = password::generator(40, true, true, true, false);
     let super_admin = User::get_by_nickname(SUPER_ADMIN_NICKNAME).await.unwrap();
     if super_admin.is_some() {
         log::info!("Super admin already exists");
@@ -19,11 +18,11 @@ pub async fn create_super_admin() {
         .email(email)
         .name(name)
         .nickname(Some(SUPER_ADMIN_NICKNAME.to_string()))
-        .password(Some(Hash::encode(&password).unwrap()))
+        .password(Some(password::Hash::encode(&pw).unwrap()))
         .phone_number(None)
         .picture(None);
 
     super_admin.save().await.unwrap();
 
-    log::info!("Super admin password: {}", password);
+    log::info!("Super admin password: {}", pw);
 }

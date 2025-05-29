@@ -1,22 +1,16 @@
 mod act;
-mod ent;
 mod err;
 mod etc;
 mod gtw;
 mod mid;
-// mod pks;
 mod rts;
-mod svc;
 
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, middleware::TrailingSlash, web::to, web::Data, App, HttpServer};
 use dotenvy::dotenv;
 use gate::Gate;
-// use pks::jwt;
-
 use std::env;
-use svc::db;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

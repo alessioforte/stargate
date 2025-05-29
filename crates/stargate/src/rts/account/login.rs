@@ -1,9 +1,9 @@
 use super::{AuthResponse, UserCredentials};
-use crate::ent::token::Token;
-use crate::ent::user::User;
 use crate::err::{ErrorResponse, HttpError};
 use actix_session::Session;
 use actix_web::{post, web, HttpResponse};
+use db::ent::token::Token;
+use db::ent::user::User;
 use jwt::{jwt_config, Claims};
 use password::Hash;
 

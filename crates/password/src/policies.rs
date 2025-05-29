@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 // Expire Password
 // Hashing iterations ?
 // Not Recently Used

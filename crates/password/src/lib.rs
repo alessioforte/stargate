@@ -2,6 +2,6 @@ mod generator;
 mod hash;
 mod policies;
 
-pub use generator::generate_password;
+pub use generator::*;
 pub use hash::Hash;
 pub use policies::*;

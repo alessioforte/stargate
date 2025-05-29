@@ -1,7 +1,7 @@
 use crate::act::get_token_from_request;
-use crate::ent::token::Token;
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{delete, web, HttpRequest, HttpResponse};
+use db::ent::token::Token;
 use jwt::jwt_config;
 
 #[utoipa::path(

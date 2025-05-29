@@ -1,7 +1,7 @@
-use crate::ent::user::{Payload as UserPayload, User};
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{delete, get, post, web, HttpResponse};
 use actix_web_grants::protect;
+use db::ent::user::{Payload as UserPayload, User};
 use password::Hash;
 
 #[utoipa::path(
