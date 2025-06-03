@@ -33,6 +33,7 @@ chrono = "0.4.41"
 dotenvy = "0.15.7"
 gate = { path = "../gate" }
 jwt = { path = "../jwt" }
+lb = { path = "../lb" }
 log = "0.4.27"
 mime = "0.3.17"
 oauth = { path = "../oauth" }

@@ -9,6 +9,7 @@ use surrealdb::Surreal;
 use tokio::time::{sleep, Duration};
 
 pub static DB: OnceCell<Surreal<Any>> = OnceCell::new();
+// pub static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
 pub async fn init() {
     sleep(Duration::from_secs(5)).await;

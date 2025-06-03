@@ -8,7 +8,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+lb = { path = "../lb" }
 log = "0.4.27"
+matchit = "0.8.6"
 notify-debouncer-mini = "0.6.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_yml = "0.0.12"

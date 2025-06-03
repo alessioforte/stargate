@@ -1,6 +1,43 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::Path;
+use std::sync::Arc;
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadBalancerStrategy {
+    RoundRobin,
+    Random,
+    IpHash,
+}
+
+impl Default for LoadBalancerStrategy {
+    fn default() -> Self {
+        LoadBalancerStrategy::RoundRobin
+    }
+}
+
+impl LoadBalancerStrategy {
+    pub fn build(&self, service: &Service) -> Box<Arc<dyn lb::LoadBalancer + Send + Sync>> {
+        let protocol = service
+            .protocol
+            .clone()
+            .unwrap_or_else(|| "http".to_string());
+        let upstreams = service
+            .endpoints
+            .iter()
+            .map(|ep| {
+                let base_url = format_endpoint(&protocol, ep);
+                lb::Upstream { base_url }
+            })
+            .collect::<Vec<_>>();
+        match self {
+            LoadBalancerStrategy::RoundRobin => Box::new(lb::RoundRobin::new(upstreams)),
+            LoadBalancerStrategy::Random => Box::new(lb::Random::new(upstreams)),
+            LoadBalancerStrategy::IpHash => Box::new(lb::IpHash::new(upstreams)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Route {
@@ -10,8 +47,7 @@ pub struct Route {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct Uri {
-    pub protocol: Option<String>,
+pub struct Endpoint {
     pub host: String,
     pub port: Option<i32>,
     pub path: Option<String>,
@@ -19,10 +55,12 @@ pub struct Uri {
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Service {
-    pub connect_timeout: Option<i32>,
+    pub connect_timeout: Option<u64>,
     pub name: Option<String>,
     pub path: String,
-    pub uri: Uri,
+    pub protocol: Option<String>,
+    pub endpoints: Vec<Endpoint>,
+    pub load_balancer: Option<LoadBalancerStrategy>,
     pub auth_required: Option<bool>,
     pub routes: Option<Vec<Route>>,
 }
@@ -60,4 +98,15 @@ impl Config {
         std::fs::write(format!("{}/{}", path, filename), config_str)
             .expect("Unable to write config file");
     }
+}
+
+pub fn format_endpoint(protocol: &str, endpoint: &Endpoint) -> String {
+    let host = endpoint.host.clone();
+    let port = match endpoint.port {
+        Some(port) => format!(":{}", port),
+        None => "".to_string(),
+    };
+    let path = endpoint.path.clone().unwrap_or_else(|| "".to_string());
+
+    format!("{}://{}{}{}", protocol, host, port, path)
 }

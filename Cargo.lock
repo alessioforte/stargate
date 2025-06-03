@@ -1910,7 +1910,9 @@ dependencies = [
 name = "gate"
 version = "0.1.0"
 dependencies = [
+ "lb",
  "log",
+ "matchit",
  "notify-debouncer-mini",
  "serde",
  "serde_yml",
@@ -2667,6 +2669,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "lb"
+version = "0.1.0"
+dependencies = [
+ "rand 0.9.1",
+]
+
+[[package]]
 name = "lettre"
 version = "0.11.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2838,6 +2847,12 @@ dependencies = [
  "quote",
  "syn 2.0.101",
 ]
+
+[[package]]
+name = "matchit"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f926ade0c4e170215ae43342bf13b9310a437609c81f29f86c5df6657582ef9"
 
 [[package]]
 name = "matrixmultiply"
@@ -4623,6 +4638,7 @@ dependencies = [
  "dotenvy",
  "gate",
  "jwt",
+ "lb",
  "log",
  "mime",
  "oauth",

@@ -98,10 +98,10 @@ Replace `VERSION` with the version of the image.
 - [x] Cookie-based authentication
 - [x] Password Policies
 - [ ] Audit Logs
-- [ ] Consider to decouple the authentication from the gateway
-- [ ] ? Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
+- [ ] Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
 - [ ] Server info and Provider info
-- [ ] Realms - Implement multiple realms
+- [ ] ? Realms - Implement multiple realms
+- [ ] Consider to decouple the authentication from the gateway
 
 - [ ] ? Login - verify access from another device and notify user - Handle sessions
 - [ ] ? Single Sign-On (SSO) and Single Log-Out (SLO)

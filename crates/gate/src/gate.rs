@@ -1,6 +1,7 @@
-use crate::config::Config;
-use crate::trie::TriePath;
+use crate::config::{Config, LoadBalancerStrategy};
+use crate::trie::{RouteNode, ServiceNode, TriePath};
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::sync::Arc;
@@ -9,43 +10,76 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Gate {
     pub config: Arc<RwLock<TriePath>>,
 }
 
 impl Gate {
     pub fn init() -> Self {
-        let cfg = Config::from_file();
-        let mut trie = TriePath::new();
-        for service in &cfg.services {
-            // trie.insert(&service.path, service.clone());
-            let protocol = service
-                .uri
-                .protocol
-                .clone()
-                .unwrap_or_else(|| "http".to_string());
-            trie.insert(&protocol, &service.path, service.clone());
-        }
+        let trie = Self::create_trie();
         let config = Arc::new(RwLock::new(trie));
         Self { config }
     }
 
     pub async fn update_config(&self) {
-        let new_config = Config::from_file();
+        let trie = Self::create_trie();
+        let mut config = self.config.write().await;
+        *config = trie;
+        log::info!("Gate configuration updated");
+    }
+
+    fn create_trie() -> TriePath {
         let mut trie = TriePath::new();
-        for service in &new_config.services {
-            // trie.insert(&service.path, service.clone());
+        let cfg = Config::from_file();
+        for service in &cfg.services {
             let protocol = service
-                .uri
                 .protocol
                 .clone()
                 .unwrap_or_else(|| "http".to_string());
-            trie.insert(&protocol, &service.path, service.clone());
+
+            let lb = service
+                .load_balancer
+                .clone()
+                .unwrap_or_else(|| LoadBalancerStrategy::default());
+
+            let lb = lb.build(service);
+
+            let mut routes = None;
+
+            if let Some(service_routes) = &service.routes {
+                let mut map: HashMap<String, matchit::Router<RouteNode>> = HashMap::new();
+                for r in service_routes {
+                    let route = RouteNode {
+                        auth_required: r.auth_required.unwrap_or(false),
+                    };
+                    let router = map.get(&r.method);
+                    if router.is_none() {
+                        let mut router = matchit::Router::new();
+                        router.insert(&r.path, route).unwrap();
+                        map.insert(r.method.clone(), router);
+                    } else {
+                        map.entry(r.method.clone()).and_modify(|router| {
+                            router.insert(&r.path, route).unwrap();
+                        });
+                    }
+                }
+                routes = Some(map);
+            }
+
+            let node = ServiceNode {
+                connect_timeout: service.connect_timeout,
+                auth_required: service.auth_required,
+                name: service.name.clone(),
+                path: service.path.clone(),
+                lb: Some(*lb),
+                routes,
+            };
+
+            trie.insert(&protocol, &service.path, node);
         }
-        let mut config = self.config.write().await;
-        log::info!("Updating config");
-        *config = trie;
+
+        trie
     }
 
     pub fn watch_file(&self) {
@@ -53,7 +87,7 @@ impl Gate {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
-                log::info!("Watching config file");
+                log::info!("Watching Gate configuration file");
                 let path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
                 let filename =
                     env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
