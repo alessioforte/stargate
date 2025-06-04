@@ -27,7 +27,7 @@ impl LoadBalancerStrategy {
             .endpoints
             .iter()
             .map(|ep| {
-                let base_url = format_endpoint(&protocol, ep);
+                let base_url = format!("{}://{}", protocol, ep.format());
                 lb::Upstream { base_url }
             })
             .collect::<Vec<_>>();
@@ -51,6 +51,17 @@ pub struct Endpoint {
     pub host: String,
     pub port: Option<i32>,
     pub path: Option<String>,
+}
+
+impl Endpoint {
+    pub fn format(&self) -> String {
+        let port = match self.port {
+            Some(port) => format!(":{}", port),
+            None => "".to_string(),
+        };
+        let path = self.path.clone().unwrap_or_else(|| "".to_string());
+        format!("{}{}{}", self.host, port, path)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -98,15 +109,4 @@ impl Config {
         std::fs::write(format!("{}/{}", path, filename), config_str)
             .expect("Unable to write config file");
     }
-}
-
-pub fn format_endpoint(protocol: &str, endpoint: &Endpoint) -> String {
-    let host = endpoint.host.clone();
-    let port = match endpoint.port {
-        Some(port) => format!(":{}", port),
-        None => "".to_string(),
-    };
-    let path = endpoint.path.clone().unwrap_or_else(|| "".to_string());
-
-    format!("{}://{}{}{}", protocol, host, port, path)
 }

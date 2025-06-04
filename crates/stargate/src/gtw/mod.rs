@@ -32,11 +32,6 @@ pub async fn handler(
             )))
         }
     };
-    println!(
-        "Service found: {} - {}",
-        service.name.as_deref().unwrap_or("Unknown"),
-        service.path
-    );
 
     let subpath = path.replacen(&service.path, "", 1);
     let mut auth_required = service.auth_required.unwrap_or(false);
@@ -69,7 +64,7 @@ pub async fn handler(
         )));
     }
 
-    // create the request context
+    // create the request context for the load balancer
     let ctx = lb::RequestContext {
         client_ip,
         path: path.to_string(),
@@ -86,9 +81,9 @@ pub async fn handler(
 
     // If the request is for a WebSocket connection, handle it accordingly
     if is_ws {
-        return ws::handler(&req, stream, &uri).await;
+        return ws::handler(&req, stream, &uri, service).await;
     }
 
     // Otherwise, handle it as a regular HTTP request
-    http::handler(&req, stream, &uri).await
+    http::handler(&req, stream, &uri, service).await
 }

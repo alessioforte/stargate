@@ -1,13 +1,23 @@
+use std::time::Duration;
+
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{web::Payload, HttpRequest, HttpResponse, HttpResponseBuilder};
 use awc::Client;
+use gate::Service;
 
 pub async fn handler(
     req: &HttpRequest,
     stream: Payload,
     uri: &String,
+    svc: &Service,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let client = Client::default();
+    let timeout = svc
+        .connect_timeout
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(5));
+
+    let client = Client::builder().timeout(timeout).finish();
+
     let request = client.request_from(uri, req.head()).no_decompress();
 
     let response = request

@@ -1,5 +1,5 @@
 use crate::config::{Config, LoadBalancerStrategy};
-use crate::trie::{RouteNode, ServiceNode, TriePath};
+use crate::trie::{RouteNode, Service, TriePath};
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use std::collections::HashMap;
 use std::env;
@@ -38,12 +38,12 @@ impl Gate {
                 .clone()
                 .unwrap_or_else(|| "http".to_string());
 
-            let lb = service
+            let lb_strategy = service
                 .load_balancer
                 .clone()
                 .unwrap_or_else(|| LoadBalancerStrategy::default());
 
-            let lb = lb.build(service);
+            let lb = lb_strategy.build(service);
 
             let mut routes = None;
 
@@ -67,7 +67,7 @@ impl Gate {
                 routes = Some(map);
             }
 
-            let node = ServiceNode {
+            let node = Service {
                 connect_timeout: service.connect_timeout,
                 auth_required: service.auth_required,
                 name: service.name.clone(),

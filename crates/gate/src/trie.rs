@@ -9,22 +9,25 @@ pub struct RouteNode {
 }
 
 #[derive(Default)]
-pub struct ServiceNode {
-    pub connect_timeout: Option<u64>,
+pub struct Service {
     pub name: Option<String>,
     pub path: String,
-    pub auth_required: Option<bool>,
-    pub routes: Option<HashMap<String, matchit::Router<RouteNode>>>,
     pub lb: Option<Arc<dyn LoadBalancer + Send + Sync>>,
+    pub auth_required: Option<bool>,
+    pub connect_timeout: Option<u64>,
+    pub routes: Option<HashMap<String, matchit::Router<RouteNode>>>,
 }
 
 #[derive(Default)]
 pub struct TriePathNode {
-    service: Option<ServiceNode>,
+    service: Option<Service>,
     children: HashMap<String, TriePathNode>,
     is_end: bool,
 }
 
+/// A TriePath is a data structure that allows for efficient storage and retrieval of paths associated with services.
+/// It uses a trie (prefix tree) to store paths, where each node represents a segment of the path.
+/// It supports insertion of paths with associated services and searching for services based on protocol and path.
 #[derive(Default)]
 pub struct TriePath {
     root: HashMap<String, TriePathNode>,
@@ -37,7 +40,7 @@ impl TriePath {
         }
     }
 
-    pub fn insert(&mut self, protocol: &str, path: &str, service: ServiceNode) {
+    pub fn insert(&mut self, protocol: &str, path: &str, service: Service) {
         let protocol = Protocols::from_str(protocol);
         if protocol.is_none() {
             return;
@@ -55,9 +58,9 @@ impl TriePath {
         node.service = Some(service);
     }
 
-    pub fn search(&self, protocol: &str, path: &str) -> Option<&ServiceNode> {
+    pub fn search(&self, protocol: &str, path: &str) -> Option<&Service> {
         if let Some(mut node) = self.root.get(protocol) {
-            let mut last: Option<&ServiceNode> = None;
+            let mut last: Option<&Service> = None;
 
             for segment in path.trim_start_matches('/').split('/') {
                 if let Some(next_node) = node.children.get(segment) {
