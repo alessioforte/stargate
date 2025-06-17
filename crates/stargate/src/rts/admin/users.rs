@@ -1,8 +1,16 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::ErrorResponse;
 use actix_web::{delete, get, post, web, HttpResponse};
 use actix_web_grants::protect;
-use db::ent::user::{Payload as UserPayload, User};
-use password::Hash;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+struct User {
+    email: String,
+    first_name: String,
+    last_name: String,
+    password: String,
+    nickname: String,
+}
 
 #[utoipa::path(
     context_path = "/admin/users",
@@ -14,8 +22,7 @@ use password::Hash;
 #[get("")]
 #[protect("SUPER_ADMIN")]
 pub async fn get_users() -> Result<HttpResponse, ErrorResponse> {
-    let users = User::list().await.unwrap();
-    Ok(HttpResponse::Ok().json(web::Json(users)))
+    Ok(HttpResponse::Ok().json(web::Json("List of users")))
 }
 
 #[utoipa::path(
@@ -27,25 +34,8 @@ pub async fn get_users() -> Result<HttpResponse, ErrorResponse> {
 )]
 #[post("")]
 #[protect("SUPER_ADMIN")]
-pub async fn create_user(user: web::Json<UserPayload>) -> Result<HttpResponse, ErrorResponse> {
-    let password = match &user.password {
-        Some(password) => Some(Hash::encode(password).unwrap()),
-        None => return Err(HttpError::BadRequest("Password is required".to_string()).into()),
-    };
-    let user = User::new()
-        .name(user.name.clone())
-        .email(user.email.clone())
-        .nickname(user.nickname.clone())
-        .password(password)
-        .phone_number(user.phone_number.clone())
-        .picture(user.picture.clone())
-        .save()
-        .await
-        .unwrap();
-
-    // TODO: Send email to user
-
-    Ok(HttpResponse::Ok().json(web::Json(user)))
+pub async fn create_user(_user: web::Json<User>) -> Result<HttpResponse, ErrorResponse> {
+    Ok(HttpResponse::Ok().json(web::Json("User created successfully")))
 }
 
 #[utoipa::path(
@@ -57,10 +47,8 @@ pub async fn create_user(user: web::Json<UserPayload>) -> Result<HttpResponse, E
 )]
 #[delete("/{id}")]
 #[protect("SUPER_ADMIN")]
-pub async fn delete_user(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
-    let id = params.into_inner();
-    let user = User::delete(&id).await.unwrap();
-    Ok(HttpResponse::Ok().json(web::Json(user)))
+pub async fn delete_user(_params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
+    Ok(HttpResponse::Ok().json(web::Json("User deleted successfully")))
 }
 
 pub fn routes() -> actix_web::Scope {

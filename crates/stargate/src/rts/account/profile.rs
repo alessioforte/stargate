@@ -1,8 +1,9 @@
 use crate::act::get_token_from_request;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc;
 use actix_web::{get, web, HttpRequest, HttpResponse};
-use db::ent::user::{Profile, User};
-use jwt::jwt_config;
+use db::Transaction;
+use etc::jwt::jwt_config;
 
 #[utoipa::path(
     context_path = "/account",
@@ -25,7 +26,16 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
         }
     };
 
-    let user = User::get(&claims.sub_id).await.unwrap();
+    let service = etc::db::service();
+    let user = match service.get_user_by_username(&claims.sub).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
     if user.is_none() {
         return Err(ErrorResponse::from(HttpError::DocumentNotFound(
             "User not found".to_string(),
@@ -33,12 +43,5 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     }
 
     let user = user.unwrap();
-    Ok(HttpResponse::Ok().json(web::Json(Profile {
-        id: user.id.clone(),
-        name: user.name.clone(),
-        email: user.email.clone(),
-        nickname: user.nickname.clone(),
-        picture: user.picture.clone(),
-        phone_number: user.phone_number.clone(),
-    })))
+    Ok(HttpResponse::Ok().json(web::Json(user)))
 }

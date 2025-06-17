@@ -1,11 +1,11 @@
+use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc;
 use actix_web::{get, web, HttpResponse};
-use db::ent::oauth2_provider::Oauth2Provider;
-use db::ent::token::Token;
-use db::ent::user::User;
-use jwt::{jwt_config, Claims};
+use db::ent::{CredentialType, User};
+use db::Transaction;
+use jwt::Claims;
 use oauth::google::{get_google_oauth_token, get_google_user};
-use password::Hash;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,8 +56,10 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
     }
 
     let google_user = google_user.unwrap();
+    println!("Google User: {:?}", google_user);
 
-    let user = match User::get_by_email(&google_user.email).await {
+    let svc = etc::db::service();
+    let mut user = match svc.get_user_by_username(&google_user.email).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -66,89 +68,53 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         }
     };
 
-    let user = match user {
-        Some(user) => {
-            let response = user
-                .picture(Some(google_user.picture.clone()))
-                .update()
-                .await;
+    if user.is_none() {
+        let new_user = User::new(google_user.email.clone())
+            .first_name(Some(google_user.name.clone()))
+            .picture(Some(google_user.picture.clone()));
 
-            if response.is_err() {
+        let value = format!("google:{}", google_user.id);
+        user = match svc
+            .clone()
+            .create_user(new_user, CredentialType::Oauth, &value)
+            .await
+        {
+            Ok(user) => Some(user),
+            Err(e) => {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    response.err().unwrap().to_string(),
+                    e.to_string(),
                 )));
             }
-
-            // FIXME: I don't like this unwrap
-            let record = response.unwrap();
-            record.unwrap()
-        }
-        None => {
-            let new_user = User::new()
-                .email(google_user.email.clone())
-                .name(google_user.name.clone())
-                .picture(Some(google_user.picture.clone()));
-
-            let response = new_user.save().await;
-
-            if response.is_err() {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    response.err().unwrap().to_string(),
-                )));
-            }
-            response.unwrap()
-        }
-    };
-
-    let provider = Oauth2Provider::get_by_provider("google", &google_user.id).await;
-
-    if provider.is_err() {
-        return Err(ErrorResponse::from(HttpError::InternalServerError(
-            provider.err().unwrap().to_string(),
-        )));
-    }
-
-    let provider = provider.unwrap();
-    if provider.is_none() {
-        let oauth2_provider = Oauth2Provider {
-            id: format!("google:{}", google_user.id.clone()),
-            user_id: user.id.clone(),
         };
-
-        let response = Oauth2Provider::save(oauth2_provider).await;
-        if response.is_err() {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                response.err().unwrap().to_string(),
-            )));
-        }
     }
 
-    let jwt = jwt_config();
-    let (access_token, refresh_token) = jwt
-        .create_tokens(Claims {
-            sub: "google-oauth2".to_string(),
-            sub_id: user.id.to_owned(),
-            name: Some(user.name.clone()),
-            email: user.email.clone(),
-            nickname: user.nickname.clone(),
-            email_verified: google_user.verified_email,
-            ..Claims::default()
-        })
-        .unwrap();
+    let user = user.unwrap();
 
-    let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
+    if user.picture.is_none() {
+        user.clone().picture(Some(google_user.picture.clone()));
+        match svc.update_user(user.clone()).await {
+            Ok(updated_user) => updated_user,
+            Err(e) => {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    e.to_string(),
+                )));
+            }
+        };
+    }
 
-    let upsert_token = Token::save(Token {
-        id: user.id.clone(),
-        value: refresh_token_hash.clone(),
+    let first_name = user.first_name.clone().unwrap_or_default();
+    let last_name = user.last_name.clone().unwrap_or_default();
+    let name = format_name(&first_name, &last_name);
+    let (access_token, refresh_token) = crate::act::generate_tokens(Claims {
+        sub: "google-oauth2".to_string(),
+        sub_id: Some(user.id),
+        name: Some(name),
+        email: user.email.clone(),
+        nickname: user.nickname.clone(),
+        email_verified: google_user.verified_email,
+        ..Claims::default()
     })
-    .await;
-    if upsert_token.is_err() {
-        log::error!("Could not create token: {:?}", upsert_token.err());
-        return Err(ErrorResponse::from(HttpError::InternalServerError(
-            "Could not create token".to_string(),
-        )));
-    }
+    .unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

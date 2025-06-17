@@ -17,10 +17,10 @@ use utoipa::OpenApi;
         crate::rts::account::login::handler,
         crate::rts::account::refresh_token::handler,
         crate::rts::account::logout::handler,
-        crate::rts::account::forgot_password::handler,
-        crate::rts::account::change_password::handler,
+        crate::rts::account::credentials::forgot::handler,
+        crate::rts::account::credentials::reset::handler,
         crate::rts::signup::request::handler,
-        crate::rts::signup::confirm::handler,
+        crate::rts::signup::verification::handler,
         crate::rts::signup::complete::handler,
     ),
     info(description = "Stargate APIs documentation")

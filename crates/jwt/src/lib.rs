@@ -1,11 +1,12 @@
 use chrono::{Duration, Utc};
-use jsonwebtoken::{
-    decode, encode, errors, Algorithm, DecodingKey, EncodingKey, Header, Validation,
-};
-use once_cell::sync::Lazy;
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::{env, fs};
 
+pub use jsonwebtoken::errors::Error as JwtError;
+pub use jsonwebtoken::Algorithm;
+
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RefreshTokenClaims {
     pub exp: usize,    // expiration
@@ -20,14 +21,16 @@ pub struct RefreshTokenClaims {
     pub scope: String, // scope
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,              // subject
-    pub sub_id: String,           // subject id
+    pub sub_id: Option<String>,   // subject id
     pub email: String,            // email
     pub name: Option<String>,     // name
     pub email_verified: bool,     // email_verified
     pub nickname: Option<String>, // nickname
+    pub uuid: Option<String>,     // UUID for the user
     pub iat: usize,               // issued at
     pub iss: String,              // issuer
     pub exp: usize,               // expiration
@@ -35,18 +38,68 @@ pub struct Claims {
 
 impl Default for Claims {
     fn default() -> Self {
+        let now = Utc::now();
         let iss = env::var("JWT_ISSUER").unwrap_or_else(|_| "issuer".to_string());
+
         Claims {
             iss,
             sub: "".to_string(),
-            sub_id: "".to_string(),
             email: "".to_string(),
+            sub_id: None,
             name: None,
             email_verified: false,
             nickname: None,
-            iat: 0,
-            exp: 0,
+            uuid: None,
+            iat: now.timestamp() as usize,
+            exp: (now + Duration::minutes(60)).timestamp() as usize,
         }
+    }
+}
+
+impl Claims {
+    pub fn sub(mut self, sub: String) -> Self {
+        self.sub = sub;
+        self
+    }
+
+    pub fn sub_id(mut self, sub_id: String) -> Self {
+        self.sub_id = Some(sub_id);
+        self
+    }
+
+    pub fn email(mut self, email: String) -> Self {
+        self.email = email;
+        self
+    }
+
+    pub fn name(mut self, name: Option<String>) -> Self {
+        self.name = name;
+        self
+    }
+
+    pub fn email_verified(mut self, email_verified: bool) -> Self {
+        self.email_verified = email_verified;
+        self
+    }
+
+    pub fn nickname(mut self, nickname: Option<String>) -> Self {
+        self.nickname = nickname;
+        self
+    }
+
+    pub fn uuid(mut self, uuid: Option<String>) -> Self {
+        self.uuid = uuid;
+        self
+    }
+
+    pub fn iat(mut self, iat: usize) -> Self {
+        self.iat = iat;
+        self
+    }
+
+    pub fn exp(mut self, exp: usize) -> Self {
+        self.exp = exp;
+        self
     }
 }
 
@@ -109,9 +162,8 @@ impl JwtConfig {
     }
 
     /// Generate a JWT token
-    fn generate_token(&self, claims: &Claims) -> String {
+    pub fn generate_token(&self, claims: &Claims) -> Result<String, jsonwebtoken::errors::Error> {
         encode(&Header::new(self.algorithm), claims, &self.encoding_key)
-            .expect("Token generation failed")
     }
 
     /// Validate a JWT token
@@ -120,56 +172,4 @@ impl JwtConfig {
         let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
         Ok(token_data.claims)
     }
-
-    pub fn create_tokens(&self, claims: Claims) -> Result<(String, String), errors::Error> {
-        let jwt_access_exp = env::var("JWT_ACCESS_EXPIRATION_MINUTES")
-            .unwrap_or_else(|_| "60".to_string())
-            .parse::<i64>()
-            .unwrap();
-        let jwt_refresh_exp = env::var("JWT_REFRESH_EXPIRATION_DAYS")
-            .unwrap_or_else(|_| "1440".to_string())
-            .parse::<i64>()
-            .unwrap();
-
-        let mut jwt_access_claims = claims.clone();
-        let mut jwt_refresh_claims = claims.clone();
-        let now = Utc::now();
-        jwt_access_claims.iat = now.timestamp() as usize;
-        jwt_access_claims.exp = (now + Duration::minutes(jwt_access_exp)).timestamp() as usize;
-        let jwt_access = self.generate_token(&jwt_access_claims);
-
-        jwt_refresh_claims.iat = now.timestamp() as usize;
-        jwt_refresh_claims.exp = (now + Duration::days(jwt_refresh_exp)).timestamp() as usize;
-        let jwt_refresh = self.generate_token(&jwt_refresh_claims);
-        Ok((jwt_access, jwt_refresh))
-    }
-}
-
-pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
-    let algorithm = env::var("JWT_ALGORITHM")
-        .unwrap_or_else(|_| "HS256".to_string()) // default algorithm
-        .parse::<Algorithm>()
-        .expect("Invalid JWT algorithm");
-    let private_key_path =
-        env::var("JWT_PRIVATE_KEY_PATH").unwrap_or_else(|_| ".stargate/private.pem".to_string());
-    let public_key_path =
-        env::var("JWT_PUBLIC_KEY_PATH").unwrap_or_else(|_| ".stargate/public.pem".to_string());
-    let mut secret = env::var("JWT_SECRET").ok();
-    log::info!("JWT Algorithm: {:?}", algorithm);
-    if secret.is_none() && algorithm == Algorithm::HS256 {
-        secret = Some(password::generator(512, false, true, true, false));
-        log::warn!(
-            "JWT_SECRET not set, generating a random secret key, {}",
-            secret.as_ref().unwrap()
-        );
-    }
-    JwtConfig::new(algorithm, private_key_path, public_key_path, secret)
-});
-
-pub fn init() {
-    Lazy::force(&JWT_CONFIG);
-}
-
-pub fn jwt_config() -> &'static JwtConfig {
-    &JWT_CONFIG
 }

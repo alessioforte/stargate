@@ -3,6 +3,7 @@ mod ws;
 
 use crate::act::get_token_from_request;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::jwt::jwt_config;
 use actix_web::{web::Payload, HttpRequest, HttpResponse};
 use gate::Gate;
 
@@ -57,7 +58,7 @@ pub async fn handler(
         }
     }
 
-    let jwt = jwt::jwt_config();
+    let jwt = jwt_config();
     if auth_required && jwt.validate_token(&token).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Unauthorized".to_string(),

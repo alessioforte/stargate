@@ -1,11 +1,10 @@
 use super::AuthResponse;
 use super::RefreshTokenRequestBody;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::jwt::jwt_config;
 use actix_web::{put, web, HttpResponse};
-use db::ent::token::Token;
-use db::ent::user::User;
-use jwt::{jwt_config, Claims};
-use password::Hash;
+use db::Transaction;
+use jwt::Claims;
 
 #[utoipa::path(
     context_path = "/account",
@@ -30,50 +29,30 @@ pub async fn handler(
         }
     };
 
-    let token = Token::get(&claims.sub_id).await.unwrap();
-    if token.is_none() {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid Token".to_string(),
-        )));
-    }
-
-    let token = token.unwrap();
-
-    if Hash::verify(&refresh_token, &token.value).is_err() {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid Token".to_string(),
-        )));
-    }
-
-    let user = User::get(&claims.sub_id).await.unwrap();
-
-    if user.is_none() {
-        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
-            "User not found".to_string(),
-        )));
-    }
+    let service = crate::etc::db::service();
+    let user = match service.get_user_by_username(&claims.sub).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )))
+        }
+    };
 
     let user = user.unwrap();
 
-    let (access_token, refresh_token) = jwt
-        .create_tokens(Claims {
-            sub: user.email.to_owned(),
-            sub_id: user.id.to_owned(),
-            name: Some(user.name.clone()),
-            email: user.email.clone(),
-            nickname: user.nickname.clone(),
-            email_verified: true,
-            ..Claims::default()
-        })
-        .unwrap();
-
-    let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
-
-    Token::save(Token {
-        id: user.id.clone(),
-        value: refresh_token_hash.clone(),
+    let first_name = user.first_name.clone().unwrap_or_default();
+    let last_name = user.last_name.clone().unwrap_or_default();
+    let name = crate::act::format_name(&first_name, &last_name);
+    let (access_token, refresh_token) = crate::act::generate_tokens(Claims {
+        sub: user.email.to_owned(),
+        sub_id: Some(user.id.to_owned()),
+        name: Some(name),
+        email: user.email.clone(),
+        nickname: user.nickname.clone(),
+        email_verified: true,
+        ..Claims::default()
     })
-    .await
     .unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {

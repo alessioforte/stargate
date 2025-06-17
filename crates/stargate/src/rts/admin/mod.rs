@@ -3,6 +3,7 @@ pub mod docs;
 pub mod users;
 
 use crate::act::{get_token_from_request, SUPER_ADMIN_NICKNAME};
+use crate::etc::jwt::jwt_config;
 use actix_web::{
     body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
     dev::ServiceResponse, web, Error,
@@ -15,7 +16,7 @@ const SUPER_ADMIN: &str = "SUPER_ADMIN";
 
 async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
     let token = get_token_from_request(req.request());
-    let jwt = jwt::jwt_config();
+    let jwt = jwt_config();
     let claims = match jwt.validate_token(&token) {
         Ok(claims) => claims,
         Err(_) => {

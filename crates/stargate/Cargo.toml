@@ -48,3 +48,4 @@ thiserror = "2.0.12"
 tokio = { version = "1.45.0", features = ["macros", "rt-multi-thread"] }
 utoipa = { version = "5.3.1", features = ["actix_extras", "yaml"] }
 uuid = { version = "1.16.0", features = ["v4"] }
+once_cell = "1.21.3"

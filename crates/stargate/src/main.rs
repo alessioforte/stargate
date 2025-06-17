@@ -12,6 +12,7 @@ use dotenvy::dotenv;
 use gate::Gate;
 use std::env;
 
+// =^.^=
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -23,8 +24,8 @@ async fn main() -> std::io::Result<()> {
     log::info!("Version: {}", version);
     log::info!("Starting server on port {}", port);
 
-    jwt::init();
-    db::init().await;
+    etc::jwt::init();
+    etc::db::init().await;
 
     // create super admin user
     act::create_super_admin().await;

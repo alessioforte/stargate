@@ -1,5 +1,4 @@
-pub mod change_password;
-pub mod forgot_password;
+pub mod credentials;
 pub mod login;
 pub mod logout;
 pub mod profile;
@@ -11,8 +10,7 @@ use utoipa::ToSchema;
 
 pub fn routes() -> Scope {
     web::scope("/account")
-        .service(change_password::handler)
-        .service(forgot_password::handler)
+        .service(credentials::routes())
         .service(login::handler)
         .service(logout::handler)
         .service(profile::handler)

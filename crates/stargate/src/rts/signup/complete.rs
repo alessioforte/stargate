@@ -1,7 +1,9 @@
 use super::SignupCompleteRequestBody;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::msg::MessageResponse;
 use actix_web::{put, web, HttpResponse};
-use db::{ent::signup::Signup, ent::user::User};
+use db::ent::{CredentialType, User};
+use db::Transaction;
 use password::Hash;
 use password::{PasswordPolicy, PasswordPolicyValidator};
 
@@ -18,16 +20,78 @@ pub async fn handler(
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
 
-    let signup = Signup::get_by_uuid(&body.token).await;
-    if signup.is_err() {
-        return Err(ErrorResponse::from(HttpError::InternalServerError(
-            "Could not get signup request".to_string(),
+    let jwt = crate::etc::jwt::jwt_config();
+    let claim = match jwt.validate_token(&body.token) {
+        Ok(claim) => claim,
+        Err(e) => return Err(ErrorResponse::from(HttpError::BadRequest(e.to_string()))),
+    };
+
+    let uuid = match claim.sub_id {
+        Some(uuid) => uuid,
+        None => {
+            return Err(ErrorResponse::from(HttpError::BadRequest(
+                "Invalid token".to_string(),
+            )))
+        }
+    };
+
+    let service = crate::etc::db::service();
+    let signup = match service.get_action_by_value(&uuid).await {
+        Ok(signup) => signup,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )))
+        }
+    };
+
+    if signup.is_none() {
+        return Err(ErrorResponse::from(HttpError::NotFound(
+            "Signup request not found".to_string(),
         )));
     }
 
-    // verify nickname
-    let user = User::get_by_nickname(&body.nickname).await;
-    if user.is_ok() {
+    let signup = signup.unwrap();
+    if signup.exp < chrono::Utc::now().timestamp() {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Signup request expired".to_string(),
+        )));
+    }
+
+    if signup.sub != claim.email {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Email does not match".to_string(),
+        )));
+    }
+
+    // Check if a user already exists with this email
+    let user = match service.get_user_by_username(&signup.sub).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )))
+        }
+    };
+
+    if user.is_some() {
+        // If a user already exists with this email, we return a conflict error
+        return Err(ErrorResponse::from(HttpError::Conflict(
+            "User already exists".to_string(),
+        )));
+    }
+
+    let user = match service.get_user_by_username(&body.nickname).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )))
+        }
+    };
+
+    if user.is_some() {
+        // If a user already exists with this nickname, we return a conflict error
         return Err(ErrorResponse::from(HttpError::Conflict(
             "Nickname already exists".to_string(),
         )));
@@ -40,34 +104,32 @@ pub async fn handler(
         return Err(ErrorResponse::from(HttpError::BadRequest(message)));
     }
 
-    match signup.unwrap() {
-        Some(signup) => {
-            let new_user = User::new()
-                .email(signup.email.clone())
-                .name(body.name.clone())
-                .nickname(Some(body.nickname.clone()))
-                .password(Some(Hash::encode(&body.password).unwrap()));
-            // .build();
+    let user = User::new(signup.sub)
+        .first_name(Some(body.first_name.clone()))
+        .last_name(Some(body.last_name.clone()))
+        .nickname(Some(body.nickname.clone()))
+        .phone_number(body.phone_number.clone())
+        .picture(None);
 
-            let response = new_user.save().await;
+    let pw = Hash::encode(&body.password).unwrap();
+    match service
+        .create_user(user, CredentialType::Password, &pw)
+        .await
+    {
+        Ok(_) => {
+            log::info!("User created successfully");
 
-            if response.is_err() {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    response.err().unwrap().to_string(),
-                )));
-            }
+            let message = MessageResponse::new(
+                "User created successfully".to_string(),
+                "signup_completed".to_string(),
+            );
 
-            let response = Signup::delete(&signup.id).await;
-            if response.is_err() {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    "Could not delete signup request".to_string(),
-                )));
-            }
-
-            Ok(HttpResponse::Ok().json(web::Json("Signup completed")))
+            Ok(HttpResponse::Ok().json(web::Json(message)))
         }
-        None => Err(ErrorResponse::from(HttpError::NotFound(
-            "Signup not found".to_string(),
-        ))),
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
     }
 }

@@ -1,11 +1,11 @@
+use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc;
 use actix_web::{get, web, HttpResponse};
-use db::ent::oauth2_provider::Oauth2Provider;
-use db::ent::token::Token;
-use db::ent::user::User;
-use jwt::{jwt_config, Claims};
+use db::ent::{CredentialType, User};
+use db::Transaction;
+use jwt::Claims;
 use oauth::github::{get_github_oauth_token, get_github_user};
-use password::Hash;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,22 +32,33 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
 
     let token_response = get_github_oauth_token(code).await;
     if token_response.is_err() {
+        let message = format!(
+            "Error getting token: {:?}",
+            token_response.err().unwrap().to_string()
+        );
         return Err(ErrorResponse::from(HttpError::BadGateway(
-            token_response.err().unwrap().to_string(),
+            message.to_string(),
         )));
     }
 
     let token = token_response.unwrap();
     let github_user = get_github_user(&token.access_token).await;
+
     if github_user.is_err() {
+        let message = format!(
+            "Error getting user: {:?}",
+            github_user.err().unwrap().to_string()
+        );
         return Err(ErrorResponse::from(HttpError::BadGateway(
-            github_user.err().unwrap().to_string(),
+            message.to_string(),
         )));
     }
 
     let github_user = github_user.unwrap();
+    println!("Github User: {:?}", github_user);
 
-    let user = match User::get_by_email(&github_user.email).await {
+    let svc = etc::db::service();
+    let mut user = match svc.get_user_by_username(&github_user.email).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -56,87 +67,54 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         }
     };
 
-    let user = match user {
-        Some(user) => {
-            let response = user
-                .picture(Some(github_user.avatar_url.clone()))
-                .update()
-                .await;
-            if response.is_err() {
+    if user.is_none() {
+        let new_user = User::new(github_user.email.clone())
+            .first_name(Some(github_user.name.clone()))
+            .nickname(Some(github_user.login.clone()))
+            .picture(Some(github_user.avatar_url.clone()));
+
+        let value = format!("github:{}", github_user.id);
+        user = match svc
+            .clone()
+            .create_user(new_user, CredentialType::Oauth, &value)
+            .await
+        {
+            Ok(user) => Some(user),
+            Err(e) => {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    response.err().unwrap().to_string(),
+                    e.to_string(),
                 )));
             }
-
-            let record = response.unwrap();
-
-            record.unwrap()
-        }
-        None => {
-            let new_user = User::new()
-                .email(github_user.email.clone())
-                .name(github_user.name.clone())
-                .picture(Some(github_user.avatar_url.clone()));
-
-            let response = new_user.save().await;
-
-            if response.is_err() {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    response.err().unwrap().to_string(),
-                )));
-            }
-
-            response.unwrap()
-        }
-    };
-
-    let provider = Oauth2Provider::get_by_provider("github", &github_user.id.to_string()).await;
-    if provider.is_err() {
-        return Err(ErrorResponse::from(HttpError::InternalServerError(
-            provider.err().unwrap().to_string(),
-        )));
-    }
-
-    let provider = provider.unwrap();
-    if provider.is_none() {
-        let oauth2_provider = Oauth2Provider {
-            id: format!("github:{}", github_user.id.clone()),
-            user_id: user.id.clone(),
         };
-        let response = Oauth2Provider::save(oauth2_provider).await;
-        if response.is_err() {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                response.err().unwrap().to_string(),
-            )));
-        }
     }
 
-    let jwt = jwt_config();
-    let (access_token, refresh_token) = jwt
-        .create_tokens(Claims {
-            sub: "github-oauth2".to_string(),
-            sub_id: user.id.to_owned(),
-            name: Some(user.name.clone()),
-            email: user.email.clone(),
-            nickname: user.nickname.clone(),
-            email_verified: github_user.email_verified,
-            ..Claims::default()
-        })
-        .unwrap();
+    let user = user.unwrap();
 
-    let refresh_token_hash = Hash::encode(&refresh_token).unwrap();
+    if user.picture.is_none() {
+        user.clone().picture(Some(github_user.avatar_url.clone()));
+        match svc.update_user(user.clone()).await {
+            Ok(updated_user) => updated_user,
+            Err(e) => {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    e.to_string(),
+                )));
+            }
+        };
+    }
 
-    let upsert_token = Token::save(Token {
-        id: user.id.clone(),
-        value: refresh_token_hash.clone(),
+    let first_name = user.first_name.clone().unwrap_or_default();
+    let last_name = user.last_name.clone().unwrap_or_default();
+    let name = format_name(&first_name, &last_name);
+    let (access_token, refresh_token) = crate::act::generate_tokens(Claims {
+        sub: "github-oauth2".to_string(),
+        sub_id: Some(user.id),
+        name: Some(name),
+        email: user.email.clone(),
+        nickname: user.nickname.clone(),
+        email_verified: github_user.email_verified,
+        ..Claims::default()
     })
-    .await;
-    if upsert_token.is_err() {
-        log::error!("Could not create token: {:?}", upsert_token.err());
-        return Err(ErrorResponse::from(HttpError::InternalServerError(
-            "Could not create token".to_string(),
-        )));
-    }
+    .unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,
