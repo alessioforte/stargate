@@ -6,9 +6,8 @@ use serde_json::json;
 pub enum Template {
     SignupRequest,
     ChangePasswordRequest,
-    // PasswordChangedNotification,
+    PasswordChangedNotification,
     // SignupCompleted,
-    // ChangePasswordRequest,
     // LoginWithOauthProvider,
 }
 
@@ -17,6 +16,7 @@ impl Template {
         match self {
             Template::SignupRequest => "Signup Request",
             Template::ChangePasswordRequest => "Change Password Request",
+            Template::PasswordChangedNotification => "Password Changed",
         }
     }
 
@@ -24,6 +24,7 @@ impl Template {
         match self {
             Template::SignupRequest => "signup_request",
             Template::ChangePasswordRequest => "change_password_request",
+            Template::PasswordChangedNotification => "password_changed_notification",
         }
     }
 }

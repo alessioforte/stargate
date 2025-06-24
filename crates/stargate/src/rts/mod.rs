@@ -2,9 +2,9 @@ pub mod account;
 pub mod admin;
 pub mod docs;
 pub mod health;
-pub mod knowns;
 pub mod oauth;
 pub mod signup;
+pub mod well_known;
 
 use actix_web::web::ServiceConfig;
 use utoipa::OpenApi;

@@ -13,14 +13,16 @@ use gate::Gate;
 use std::env;
 
 // =^.^=
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
     pretty_env_logger::init();
 
-    println!("{}", etc::logo::LOGO);
     let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let version = env!("CARGO_PKG_VERSION");
+
+    println!("{}", etc::logo::LOGO);
     log::info!("Version: {}", version);
     log::info!("Starting server on port {}", port);
 
@@ -37,16 +39,16 @@ async fn main() -> std::io::Result<()> {
         .finish()
         .unwrap();
 
-    let gate = Gate::init();
     let secret_key = actix_web::cookie::Key::generate();
-    gate.watch_file();
-    let gate = Data::new(gate);
-
     let tls = etc::tls::builder();
+
+    let gate = Gate::init();
+    gate.watch_file();
+    let data = Data::new(gate);
 
     HttpServer::new(move || {
         App::new()
-            .app_data(gate.clone())
+            .app_data(data.clone())
             .configure(etc::cfg::app_data)
             .configure(rts::configure)
             .default_service(to(gtw::handler))

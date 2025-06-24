@@ -1,19 +1,20 @@
 use super::repo::{ActionRepository, CredentialRepository, UserRepository};
 use crate::ent::{Action, ActionType, Credential, CredentialType, User};
-use crate::svc::Transaction;
+use crate::tx::Transaction;
 use anyhow::Result;
+use sqlx::sqlite::SqlitePool;
 use std::fs;
 
 #[derive(Clone)]
 pub struct Service {
-    pool: sqlx::AnyPool,
+    pool: SqlitePool,
     user: UserRepository,
     credential: CredentialRepository,
     action: ActionRepository,
 }
 
 impl Service {
-    pub fn new(pool: sqlx::AnyPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
             user: UserRepository::new(),
@@ -37,8 +38,7 @@ impl Service {
 }
 
 pub async fn init(conn: &str) -> Result<Service> {
-    sqlx::any::install_default_drivers();
-    let pool = sqlx::AnyPool::connect(conn)
+    let pool = SqlitePool::connect(conn)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
     let service = Service::new(pool.clone());

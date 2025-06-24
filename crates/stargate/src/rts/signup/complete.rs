@@ -58,7 +58,7 @@ pub async fn handler(
         )));
     }
 
-    if signup.sub != claim.email {
+    if claim.email.is_some() && signup.sub != claim.email.unwrap() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Email does not match".to_string(),
         )));

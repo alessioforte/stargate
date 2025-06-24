@@ -11,7 +11,7 @@ impl CredentialRepository {
 
     pub async fn create(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user_id: &str,
         credential_type: CredentialType,
         value: &str,
@@ -38,7 +38,7 @@ impl CredentialRepository {
 
     pub async fn get_by_user_id(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user_id: &str,
         credential_type: CredentialType,
     ) -> Result<Option<Credential>> {
@@ -58,7 +58,7 @@ impl CredentialRepository {
 
     pub async fn change_password(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user_id: &str,
         new_password: &str,
     ) -> Result<Credential> {

@@ -19,12 +19,12 @@ struct Jwks {
 }
 
 #[utoipa::path(
-    path = "/knowns",
+    path = "/.well-known/jwks.json",
     responses(
         (status = 200, description = "OK", body = Jwks)
     )
 )]
-#[get("/knowns")]
+#[get("/.well-known/jwks.json")]
 pub async fn get() -> Result<HttpResponse, ErrorResponse> {
     Ok(HttpResponse::Ok().json(()))
 }

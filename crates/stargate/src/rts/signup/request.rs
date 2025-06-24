@@ -60,7 +60,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
 
     let claim = jwt::Claims::default()
         .sub_id(uuid.clone())
-        .email(body.email.clone());
+        .email(Some(body.email.clone()));
 
     let jwt = crate::etc::jwt::jwt_config();
     let token = match jwt.generate_token(&claim) {

@@ -55,18 +55,18 @@ pub async fn handler(
         )));
     }
 
-    if request.sub != claim.email {
+    if claim.email.is_some() && request.sub != claim.email.clone().unwrap() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Email does not match".to_string(),
         )));
     }
 
-    let email = claim.email.clone();
+    let email = claim.email.unwrap_or_default();
     let uuid = Uuid::new_v4().to_string();
 
     let claim = jwt::Claims::default()
         .sub_id(uuid.clone())
-        .email(email.clone());
+        .email(Some(email.clone()));
 
     let jwt = crate::etc::jwt::jwt_config();
     let token = match jwt.generate_token(&claim) {

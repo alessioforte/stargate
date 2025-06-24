@@ -32,13 +32,16 @@ pub struct ChangePasswordRequestBody {
 #[serde(rename_all = "camelCase")]
 pub struct AuthResponse {
     access_token: String,
-    refresh_token: String,
     // expires_in: i64,
     // refresh_expires_in: i64,
+    refresh_token: String,
     token_type: String,
     // scope: String,
+    // id_token: String, ???
     // session_state: String,
+    // not-before-policy: i64, ???
 }
+
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UserCredentials {
     username: String,

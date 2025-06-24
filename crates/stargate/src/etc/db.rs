@@ -1,8 +1,34 @@
+#[cfg(feature = "postgres")]
+use db::postgres::svc;
+
+#[cfg(feature = "sqlite")]
 use db::sqlite::svc;
+
 use once_cell::sync::OnceCell;
 
-static SQLITE: OnceCell<svc::Service> = OnceCell::new();
+static DB: OnceCell<svc::Service> = OnceCell::new();
 
+pub fn service() -> svc::Service {
+    let service = DB.get().expect("Service not initialized");
+    service.clone()
+}
+
+#[cfg(feature = "postgres")]
+pub async fn init() {
+    let db_url = "postgres://root:root@localhost:5432/stargate";
+    let service = svc::init(db_url).await;
+    match service {
+        Ok(svc) => {
+            log::info!("PostgreSQL service initialized successfully");
+            if DB.set(svc).is_err() {
+                log::error!("Failed to set the PostgreSQL service instance");
+            }
+        }
+        Err(e) => log::error!("Error initializing PostgreSQL service > {}", e),
+    }
+}
+
+#[cfg(feature = "sqlite")]
 pub async fn init() {
     if std::path::Path::new(".stargate/sqlite.db").exists() {
         log::info!("SQLite database file found, initializing service...");
@@ -18,15 +44,10 @@ pub async fn init() {
     match service {
         Ok(svc) => {
             log::info!("Service initialized successfully");
-            if SQLITE.set(svc).is_err() {
+            if DB.set(svc).is_err() {
                 log::error!("Failed to set the service instance");
             }
         }
         Err(e) => log::error!("Error initializing service: {}", e),
     }
-}
-
-pub fn service() -> svc::Service {
-    let service = SQLITE.get().expect("Service not initialized");
-    service.clone()
 }

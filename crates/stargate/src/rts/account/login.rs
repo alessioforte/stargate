@@ -2,7 +2,7 @@ use super::{AuthResponse, UserCredentials};
 use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
-use actix_session::Session;
+// use actix_session::Session;
 use actix_web::{post, web, HttpResponse};
 use db::ent::CredentialType;
 use db::Transaction;
@@ -18,7 +18,7 @@ use password::Hash;
 )]
 #[post("/login")]
 pub async fn handler(
-    session: Session,
+    // session: Session,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let service = etc::db::service();
@@ -66,14 +66,12 @@ pub async fn handler(
         sub: user.email.to_owned(),
         sub_id: Some(user.id.to_owned()),
         name: Some(name),
-        email: user.email.clone(),
+        email: Some(user.email.to_owned()),
         nickname: user.nickname.clone(),
-        email_verified: true,
+        email_verified: Some(true),
         ..jwt::Claims::default()
     })
     .unwrap();
-
-    session.insert("token", access_token.clone()).unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

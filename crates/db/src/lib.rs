@@ -1,7 +1,11 @@
 extern crate objectid;
 
-mod svc;
-
+pub use tx::Transaction;
 pub mod ent;
+mod tx;
+
+#[cfg(feature = "postgres")]
+pub mod postgres;
+
+#[cfg(feature = "sqlite")]
 pub mod sqlite;
-pub use svc::Transaction;

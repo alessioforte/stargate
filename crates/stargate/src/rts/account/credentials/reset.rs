@@ -1,10 +1,12 @@
 use super::ChangePasswordRequestBody;
+use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use actix_web::{put, web, HttpResponse};
 use chrono::Utc;
 use db::Transaction;
 use password::Hash;
+use smtp::{Smtp, Template};
 
 #[utoipa::path(
     context_path = "/account",
@@ -28,9 +30,7 @@ pub async fn handler(
             )))
         }
     };
-
     let uuid = claims.uuid.clone().unwrap_or_default();
-
     let service = etc::db::service();
     let pra = match service.get_action_by_value(&uuid).await {
         Ok(action) => action,
@@ -87,5 +87,20 @@ pub async fn handler(
     );
 
     // TODO: send email to notify user of password change
+    let first_name = user.first_name.clone().unwrap_or_default();
+    let last_name = user.last_name.clone().unwrap_or_default();
+    let sender = Smtp::new()
+        .template(Template::PasswordChangedNotification)
+        .to(user.email.clone())
+        .name(Some(format_name(&first_name, &last_name)))
+        .token(token)
+        .build()
+        .send();
+
+    match sender {
+        Ok(_) => {}
+        Err(e) => log::error!("Could not send email: {:?}", e),
+    }
+
     Ok(HttpResponse::Ok().json(web::Json(message)))
 }

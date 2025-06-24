@@ -109,7 +109,7 @@ impl ErrorCode for PayloadError {
                     actix_web::error::PayloadError::UnknownLength => Code::Internal,
                     actix_web::error::PayloadError::Http2Payload(_) => Code::Internal,
                     actix_web::error::PayloadError::Io(_) => Code::Internal,
-                    _ => todo!(),
+                    _ => Code::Internal,
                 },
             },
             PayloadError::Json(err) => match err {

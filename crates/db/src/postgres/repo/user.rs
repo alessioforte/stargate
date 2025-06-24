@@ -11,7 +11,7 @@ impl UserRepository {
 
     pub async fn create(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user: User,
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
@@ -55,7 +55,7 @@ impl UserRepository {
 
     pub async fn get_by_username(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         username: &str,
     ) -> Result<Option<User>> {
         let row = sqlx::query_as::<_, User>(
@@ -72,7 +72,7 @@ impl UserRepository {
 
     pub async fn update(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user: User,
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(

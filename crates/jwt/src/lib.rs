@@ -1,107 +1,11 @@
-use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use serde::{Deserialize, Serialize};
-use std::{env, fs};
+mod claims;
 
+pub use claims::Claims;
 pub use jsonwebtoken::errors::Error as JwtError;
 pub use jsonwebtoken::Algorithm;
 
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RefreshTokenClaims {
-    pub exp: usize,    // expiration
-    pub iat: usize,    // issued at
-    pub jti: String,   // JWT ID
-    pub iss: String,   // issuer
-    pub aud: String,   // audience
-    pub sub: String,   // subject
-    pub typ: String,   // type
-    pub azp: String,   // authorized party
-    pub sid: String,   // session ID
-    pub scope: String, // scope
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Claims {
-    pub sub: String,              // subject
-    pub sub_id: Option<String>,   // subject id
-    pub email: String,            // email
-    pub name: Option<String>,     // name
-    pub email_verified: bool,     // email_verified
-    pub nickname: Option<String>, // nickname
-    pub uuid: Option<String>,     // UUID for the user
-    pub iat: usize,               // issued at
-    pub iss: String,              // issuer
-    pub exp: usize,               // expiration
-}
-
-impl Default for Claims {
-    fn default() -> Self {
-        let now = Utc::now();
-        let iss = env::var("JWT_ISSUER").unwrap_or_else(|_| "issuer".to_string());
-
-        Claims {
-            iss,
-            sub: "".to_string(),
-            email: "".to_string(),
-            sub_id: None,
-            name: None,
-            email_verified: false,
-            nickname: None,
-            uuid: None,
-            iat: now.timestamp() as usize,
-            exp: (now + Duration::minutes(60)).timestamp() as usize,
-        }
-    }
-}
-
-impl Claims {
-    pub fn sub(mut self, sub: String) -> Self {
-        self.sub = sub;
-        self
-    }
-
-    pub fn sub_id(mut self, sub_id: String) -> Self {
-        self.sub_id = Some(sub_id);
-        self
-    }
-
-    pub fn email(mut self, email: String) -> Self {
-        self.email = email;
-        self
-    }
-
-    pub fn name(mut self, name: Option<String>) -> Self {
-        self.name = name;
-        self
-    }
-
-    pub fn email_verified(mut self, email_verified: bool) -> Self {
-        self.email_verified = email_verified;
-        self
-    }
-
-    pub fn nickname(mut self, nickname: Option<String>) -> Self {
-        self.nickname = nickname;
-        self
-    }
-
-    pub fn uuid(mut self, uuid: Option<String>) -> Self {
-        self.uuid = uuid;
-        self
-    }
-
-    pub fn iat(mut self, iat: usize) -> Self {
-        self.iat = iat;
-        self
-    }
-
-    pub fn exp(mut self, exp: usize) -> Self {
-        self.exp = exp;
-        self
-    }
-}
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use std::fs;
 
 /// JWT Configuration struct to hold preloaded keys and algorithm
 pub struct JwtConfig {

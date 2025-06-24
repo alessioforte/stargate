@@ -43,15 +43,11 @@ pub async fn handler(
     }
 
     let user = user.unwrap();
-
-    println!("User found: {:?}", user);
-
     let uuid = Uuid::new_v4().to_string();
-
     let claim = jwt::Claims::default()
         .sub(user.id.clone())
         .sub_id(user.id.clone())
-        .email(user.email.clone())
+        .email(Some(user.email.clone()))
         .uuid(Some(uuid.clone()));
 
     let jwt = etc::jwt::jwt_config();

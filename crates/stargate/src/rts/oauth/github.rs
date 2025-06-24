@@ -109,9 +109,9 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         sub: "github-oauth2".to_string(),
         sub_id: Some(user.id),
         name: Some(name),
-        email: user.email.clone(),
+        email: Some(user.email.clone()),
         nickname: user.nickname.clone(),
-        email_verified: github_user.email_verified,
+        email_verified: Some(github_user.email_verified),
         ..Claims::default()
     })
     .unwrap();

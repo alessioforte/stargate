@@ -48,9 +48,9 @@ pub async fn handler(
         sub: user.email.to_owned(),
         sub_id: Some(user.id.to_owned()),
         name: Some(name),
-        email: user.email.clone(),
+        email: Some(user.email.clone()),
         nickname: user.nickname.clone(),
-        email_verified: true,
+        email_verified: Some(true),
         ..Claims::default()
     })
     .unwrap();

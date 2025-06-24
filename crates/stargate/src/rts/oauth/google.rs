@@ -109,9 +109,9 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         sub: "google-oauth2".to_string(),
         sub_id: Some(user.id),
         name: Some(name),
-        email: user.email.clone(),
+        email: Some(user.email.clone()),
         nickname: user.nickname.clone(),
-        email_verified: google_user.verified_email,
+        email_verified: Some(google_user.verified_email),
         ..Claims::default()
     })
     .unwrap();

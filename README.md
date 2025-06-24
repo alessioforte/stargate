@@ -24,16 +24,16 @@ Actix Web is a powerful, pragmatic, and extremely fast web framework for Rust.
 
 To set up this project locally, you need to have [Rust](https://www.rust-lang.org/) and [Cargo](https://doc.rust-lang.org/cargo/) installed.
 
-1. Build the project:
+1. Run the server:
 
    ```sh
-   cargo build
+   cargo run -p stargate
    ```
 
-2. Run the server:
+2. Build the project:
 
    ```sh
-   cargo run
+   cargo build --release -p stargate
    ```
 
 ## Environment Variables
@@ -92,23 +92,25 @@ Replace `VERSION` with the version of the image.
 ## Roadmap
 
 - [x] Send Email
-- [ ] Send SMS
-- [ ] Time-based One-Time Password (TOTP) - Authenticator App
-- [ ] MFA (Multi-Factor Authentication)
 - [x] Cookie-based authentication
 - [x] Password Policies
+- [x] Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
+- [x] Sqlite - Implement SQLite as a database option
+- [ ] PostgreSQL - Implement PostgreSQL as a database option
+- [ ] SurrealDB - Implement SurrealDB as a database option
+- [ ] Redis - Implement Redis as a cache option
+- [ ] API Keys - Generate, Revoke, List
+- [ ] Rate Limiting Global and Per User
+- [ ] Realms - Implement multiple realms
+- [ ] Send SMS
 - [ ] Audit Logs
-- [ ] Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
-- [ ] Server info and Provider info
-- [ ] ? Realms - Implement multiple realms
-- [ ] Consider to decouple the authentication from the gateway
+- [ ] MFA (Multi-Factor Authentication)
 
-- [ ] ? Login - verify access from another device and notify user - Handle sessions
-- [ ] ? Single Sign-On (SSO) and Single Log-Out (SLO)
-- [ ] ? act as oAuth provider
-- [ ] ? QR Code - Generate and Scan
-- [ ] ? Generate PDF as Infisical does
-- [ ] ? Bio-metric Authentication
+ACCESS CONTROL
+- [ ] Implement Role-Based Access Control (RBAC)
+- [ ] Implement Attribute-Based Access Control (ABAC)
+- [ ] Implement Policy-Based Access Control (PBAC)
+- [ ] Implement Rule-Based Access Control (RBAC)
 
 OAUTH2 PROVIDERS
 - [x] oAuth Github
@@ -127,17 +129,8 @@ PROTOCOLS
 - [ ] ? FTP/FTPS
 - [ ] ? TCP/UDP
 - [ ] ? AMQP
-- [ ] ? SSE
-- [ ] ? SOAP
+- [ ] ? SSE (Server-Sent Events)
 
-ACCESS CONTROL
-- [ ] Implement Role-Based Access Control (RBAC)
-- [ ] Implement Attribute-Based Access Control (ABAC)
-- [ ] Implement Policy-Based Access Control (PBAC)
-- [ ] Implement Rule-Based Access Control (RBAC)
-
-- [ ] API Keys - Generate, Revoke, List
-- [ ] Rate Limiting Global and Per User
 
 PRICING PLANS
 - [ ] Implement Pricing Plans Configuration
@@ -172,3 +165,11 @@ MONITORING
 - [ ] Implement Tracing
 - [ ] Implement Logging
 - [ ] Implement Alerting
+
+- [ ] ? Time-based One-Time Password (TOTP) - Authenticator App
+- [ ] ? Login - verify access from another device and notify user - Handle sessions
+- [ ] ? Single Sign-On (SSO) and Single Log-Out (SLO)
+- [ ] ? act as oAuth provider
+- [ ] ? QR Code - Generate and Scan
+- [ ] ? Generate PDF as Infisical does
+- [ ] ? Bio-metric Authentication
