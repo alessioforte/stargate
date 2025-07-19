@@ -15,9 +15,12 @@ pub fn service() -> svc::Service {
 
 #[cfg(feature = "postgres")]
 pub async fn init() {
-    // TODO: Use environment variable for database URL
-    let db_url = "postgres://root:root@localhost:5432/stargate";
-    let service = svc::init(db_url).await;
+    let password = std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "root".to_string());
+    let user = std::env::var("POSTGRES_USER").unwrap_or_else(|_| "root".to_string());
+    let host = std::env::var("POSTGRES_ENDPOINT").unwrap_or_else(|_| "localhost".to_string());
+    let database = std::env::var("POSTGRES_DATABASE").unwrap_or_else(|_| "stargate".to_string());
+    let db_url = format!("postgres://{}:{}@{}/{}", user, password, host, database);
+    let service = svc::init(&db_url).await;
     match service {
         Ok(svc) => {
             log::info!("PostgreSQL service initialized successfully");
