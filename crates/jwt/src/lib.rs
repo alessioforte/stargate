@@ -1,5 +1,6 @@
 mod claims;
 
+use chrono::Duration;
 pub use claims::Claims;
 pub use jsonwebtoken::errors::Error as JwtError;
 pub use jsonwebtoken::Algorithm;
@@ -12,15 +13,18 @@ pub struct JwtConfig {
     algorithm: Algorithm,
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
+    pub access_exp: Duration,
+    pub refresh_exp: Duration,
 }
 
 impl JwtConfig {
-    /// Load configuration once at startup
     pub fn new(
         algorithm: Algorithm,
         private_key_path: String,
         public_key_path: String,
         secret: Option<String>,
+        access_exp: Duration,
+        refresh_exp: Duration,
     ) -> Self {
         let encoding_key = match algorithm {
             Algorithm::RS256 | Algorithm::RS512 => {
@@ -62,6 +66,8 @@ impl JwtConfig {
             algorithm,
             encoding_key,
             decoding_key,
+            access_exp,
+            refresh_exp,
         }
     }
 

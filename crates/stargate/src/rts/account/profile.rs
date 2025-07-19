@@ -1,6 +1,6 @@
-use crate::act::get_token_from_request;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
+use crate::etc::ext::RequestExt;
 use actix_web::{get, web, HttpRequest, HttpResponse};
 use db::Transaction;
 use etc::jwt::jwt_config;
@@ -14,7 +14,7 @@ use etc::jwt::jwt_config;
 )]
 #[get("/profile")]
 pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
-    let token = get_token_from_request(&req);
+    let token = req.get_token();
 
     let jwt = jwt_config();
     let claims = match jwt.validate_token(&token) {

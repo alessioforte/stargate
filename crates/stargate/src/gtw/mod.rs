@@ -1,8 +1,8 @@
 mod http;
 mod ws;
 
-use crate::act::get_token_from_request;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
 use actix_web::{web::Payload, HttpRequest, HttpResponse};
 use gate::Gate;
@@ -15,7 +15,7 @@ pub async fn handler(
     let path = req.uri().path();
     let query = req.query_string();
     let method = req.method().clone();
-    let token = get_token_from_request(&req);
+    let token = req.get_token();
     let client_ip = req.peer_addr().map(|addr| addr.ip());
 
     let config = gate.config.read().await;
