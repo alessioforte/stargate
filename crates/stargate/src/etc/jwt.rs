@@ -7,10 +7,10 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
         .unwrap_or_else(|_| "HS256".to_string()) // default algorithm
         .parse::<Algorithm>()
         .expect("Invalid JWT algorithm");
-    let private_key_path =
-        env::var("JWT_PRIVATE_KEY_PATH").unwrap_or_else(|_| ".stargate/private.pem".to_string());
+    let private_key_path = env::var("JWT_PRIVATE_KEY_PATH")
+        .unwrap_or_else(|_| ".stargate/jwks/private.pem".to_string());
     let public_key_path =
-        env::var("JWT_PUBLIC_KEY_PATH").unwrap_or_else(|_| ".stargate/public.pem".to_string());
+        env::var("JWT_PUBLIC_KEY_PATH").unwrap_or_else(|_| ".stargate/jwks/public.pem".to_string());
     let mut secret = env::var("JWT_SECRET").ok();
     log::info!("JWT Algorithm: {:?}", algorithm);
     if secret.is_none() && algorithm == Algorithm::HS256 {

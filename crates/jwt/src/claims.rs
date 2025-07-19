@@ -65,7 +65,7 @@ impl Claims {
         self
     }
 
-    pub fn sub(mut self, sub: String) -> Self {
+    pub fn subject(mut self, sub: String) -> Self {
         self.sub = sub;
         self
     }
@@ -75,28 +75,28 @@ impl Claims {
         self
     }
 
-    pub fn email(mut self, email: Option<String>) -> Self {
-        self.email = email;
+    pub fn email(mut self, email: String) -> Self {
+        self.email = Some(email);
         self
     }
 
-    pub fn name(mut self, name: Option<String>) -> Self {
-        self.name = name;
+    pub fn name(mut self, name: String) -> Self {
+        self.name = Some(name);
         self
     }
 
-    pub fn email_verified(mut self, email_verified: Option<bool>) -> Self {
-        self.email_verified = email_verified;
+    pub fn email_verified(mut self, email_verified: bool) -> Self {
+        self.email_verified = Some(email_verified);
         self
     }
 
-    pub fn nickname(mut self, nickname: Option<String>) -> Self {
-        self.nickname = nickname;
+    pub fn nickname(mut self, nickname: String) -> Self {
+        self.nickname = Some(nickname);
         self
     }
 
-    pub fn uuid(mut self, uuid: Option<String>) -> Self {
-        self.uuid = uuid;
+    pub fn uuid(mut self, uuid: String) -> Self {
+        self.uuid = Some(uuid);
         self
     }
 }

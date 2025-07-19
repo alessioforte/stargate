@@ -45,10 +45,10 @@ pub async fn handler(
     let user = user.unwrap();
     let uuid = Uuid::new_v4().to_string();
     let claim = jwt::Claims::default()
-        .sub(user.id.clone())
+        .subject(user.id.clone())
         .sub_id(user.id.clone())
-        .email(Some(user.email.clone()))
-        .uuid(Some(uuid.clone()));
+        .email(user.email.clone())
+        .uuid(uuid.clone());
 
     let jwt = etc::jwt::jwt_config();
     let token = match jwt.generate_token(&claim) {

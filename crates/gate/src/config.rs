@@ -3,18 +3,13 @@ use std::env;
 use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadBalancerStrategy {
+    #[default]
     RoundRobin,
     Random,
     IpHash,
-}
-
-impl Default for LoadBalancerStrategy {
-    fn default() -> Self {
-        LoadBalancerStrategy::RoundRobin
-    }
 }
 
 impl LoadBalancerStrategy {
@@ -59,7 +54,7 @@ impl Endpoint {
             Some(port) => format!(":{}", port),
             None => "".to_string(),
         };
-        let path = self.path.clone().unwrap_or_else(|| "".to_string());
+        let path = self.path.clone().unwrap_or_default();
         format!("{}{}{}", self.host, port, path)
     }
 }

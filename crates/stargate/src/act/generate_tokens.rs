@@ -5,6 +5,7 @@ use std::env;
 pub fn generate_tokens(claims: jwt::Claims) -> Result<(String, String), jwt::JwtError> {
     let jwt = jwt_config();
 
+    // TODO: make these configurable
     let jwt_access_exp = env::var("JWT_ACCESS_EXPIRATION_MINUTES")
         .unwrap_or_else(|_| "60".to_string())
         .parse::<i64>()

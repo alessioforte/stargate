@@ -15,6 +15,7 @@ pub fn service() -> svc::Service {
 
 #[cfg(feature = "postgres")]
 pub async fn init() {
+    // TODO: Use environment variable for database URL
     let db_url = "postgres://root:root@localhost:5432/stargate";
     let service = svc::init(db_url).await;
     match service {

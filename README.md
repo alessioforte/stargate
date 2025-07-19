@@ -42,11 +42,6 @@ The following environment variables can be set to configure the application in t
 
 - `PORT`: The port on which the server will run. Default is `5050`.
 - `RUST_LOG`: The log level for the application..
-- `SURREALDB_ENDPOINT`: The endpoint for the SurrealDB. By default is a RocksDB database which persists data on the filesystem that is located at `.flows/flows.db`.
-- `SURREALDB_USERNAME`: The username for the SurrealDB.
-- `SURREALDB_PASSWORD`: The password for the SurrealDB.
-- `SURREALDB_NAMESPACE`: The namespace for the SurrealDB. Default is `sensoworks`.
-- `SURREALDB_DATABASE`: The database for the SurrealDB. Default is `flows`.
 - `API_BASE_PATH`: The base path for the API.
 - `COOKIE_BASED_SESSION`: Enable cookie-based session. Default is `false`.
 - `JWT_ALGORITHM`: The algorithm for the JWT token. Default is `HS256`.
@@ -57,6 +52,12 @@ The following environment variables can be set to configure the application in t
 - `JWT_PUBLIC_KEY_PATH`: The path to the public key for the JWT token.
 - `JWT_ACCESS_EXPIRATION_MINUTES`: The expiration time for the access token. Default is `60`.
 - `JWT_REFRESH_EXPIRATION_DAYS`: The expiration time for the refresh token. Default is `1`.
+
+- `SURREALDB_ENDPOINT`: The endpoint for the SurrealDB. By default is a RocksDB database which persists data on the filesystem that is located at `.flows/flows.db`.
+- `SURREALDB_USERNAME`: The username for the SurrealDB.
+- `SURREALDB_PASSWORD`: The password for the SurrealDB.
+- `SURREALDB_NAMESPACE`: The namespace for the SurrealDB. Default is `sensoworks`.
+- `SURREALDB_DATABASE`: The database for the SurrealDB. Default is `flows`.
 
 ## Usage
 
@@ -96,7 +97,7 @@ Replace `VERSION` with the version of the image.
 - [x] Password Policies
 - [x] Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
 - [x] Sqlite - Implement SQLite as a database option
-- [ ] PostgreSQL - Implement PostgreSQL as a database option
+- [x] PostgreSQL - Implement PostgreSQL as a database option
 - [ ] SurrealDB - Implement SurrealDB as a database option
 - [ ] Redis - Implement Redis as a cache option
 - [ ] API Keys - Generate, Revoke, List
@@ -131,21 +132,11 @@ PROTOCOLS
 - [ ] ? AMQP
 - [ ] ? SSE (Server-Sent Events)
 
-
-PRICING PLANS
-- [ ] Implement Pricing Plans Configuration
-
 ADMIN FEATURES
 - [x] √ Init basic configuration
 - [x] √ Save configuration to a file
 - [x] √ Download configuration in json or yaml format
 - [x] √ Load configuration from a file at runtime
-
-- [ ] Create tenant - Use SurrealDB namespace
-- [ ] Create tenant admin
-- [ ] Assign permissions to tenant admin
-- [ ] Implement Admin Panel
-- [ ] Super Admin create access control for tenant
 
 TESTING AND PERFORMANCE
 - [x] √ Implement Trie Data Structure for fast path search
@@ -155,7 +146,7 @@ TESTING AND PERFORMANCE
 - [ ] Load Testing and API Gateway Performance
 
 DOCUMENTATION
-- [ ] Documentation Portal
+- [ ] Documentation pages
 - [ ] Implement Swagger
 - [ ] Implement OpenAPI
 

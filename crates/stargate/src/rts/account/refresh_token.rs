@@ -44,16 +44,15 @@ pub async fn handler(
     let first_name = user.first_name.clone().unwrap_or_default();
     let last_name = user.last_name.clone().unwrap_or_default();
     let name = crate::act::format_name(&first_name, &last_name);
-    let (access_token, refresh_token) = crate::act::generate_tokens(Claims {
-        sub: user.email.to_owned(),
-        sub_id: Some(user.id.to_owned()),
-        name: Some(name),
-        email: Some(user.email.clone()),
-        nickname: user.nickname.clone(),
-        email_verified: Some(true),
-        ..Claims::default()
-    })
-    .unwrap();
+
+    let claims = Claims::default()
+        .subject(user.email.to_owned())
+        .sub_id(user.id.to_owned())
+        .name(name)
+        .email(user.email.clone())
+        .email_verified(true);
+
+    let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

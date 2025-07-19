@@ -47,7 +47,7 @@ impl PasswordPolicy {
             .collect()
     }
 
-    pub fn default() -> Vec<PasswordPolicy> {
+    pub fn standard() -> Vec<PasswordPolicy> {
         vec![
             PasswordPolicy::MinLength(8),
             PasswordPolicy::MaxLength(64),

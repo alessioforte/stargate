@@ -2,6 +2,7 @@ mod create_super_admin;
 mod format_name;
 mod generate_tokens;
 mod get_token_from_request;
+mod parse_duration;
 
 pub use create_super_admin::*;
 pub use format_name::*;

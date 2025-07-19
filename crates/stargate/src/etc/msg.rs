@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-// TODO: Add more fields as needed and handle code for i18n
-// Json Response Messages for the API
+/// A response structure for messages, typically used for API responses.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageResponse {
     pub message: String,

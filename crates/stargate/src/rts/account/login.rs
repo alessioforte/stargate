@@ -62,16 +62,14 @@ pub async fn handler(
     let last_name = user.last_name.clone().unwrap_or_default();
     let name = format_name(&first_name, &last_name);
 
-    let (access_token, refresh_token) = crate::act::generate_tokens(jwt::Claims {
-        sub: user.email.to_owned(),
-        sub_id: Some(user.id.to_owned()),
-        name: Some(name),
-        email: Some(user.email.to_owned()),
-        nickname: user.nickname.clone(),
-        email_verified: Some(true),
-        ..jwt::Claims::default()
-    })
-    .unwrap();
+    let claims = jwt::Claims::default()
+        .subject(user.email.to_owned())
+        .sub_id(user.id.to_owned())
+        .name(name.clone())
+        .email(user.email.to_owned())
+        .email_verified(true);
+
+    let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

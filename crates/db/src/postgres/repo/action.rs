@@ -25,8 +25,8 @@ impl ActionRepository {
         .bind(&action.action_type)
         .bind(&action.sub)
         .bind(&action.value)
-        .bind(&action.iat)
-        .bind(&action.exp)
+        .bind(action.iat)
+        .bind(action.exp)
         .fetch_one(&mut **tx)
         .await?;
 

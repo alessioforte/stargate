@@ -86,7 +86,6 @@ pub async fn handler(
         "change_password".to_string(),
     );
 
-    // TODO: send email to notify user of password change
     let first_name = user.first_name.clone().unwrap_or_default();
     let last_name = user.last_name.clone().unwrap_or_default();
     let sender = Smtp::new()

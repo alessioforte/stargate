@@ -41,7 +41,7 @@ impl Gate {
             let lb_strategy = service
                 .load_balancer
                 .clone()
-                .unwrap_or_else(|| LoadBalancerStrategy::default());
+                .unwrap_or_else(LoadBalancerStrategy::default);
 
             let lb = lb_strategy.build(service);
 

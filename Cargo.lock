@@ -3323,6 +3323,7 @@ dependencies = [
  "openssl",
  "password",
  "pretty_env_logger",
+ "regex",
  "serde 1.0.219",
  "serde_json",
  "serde_yml",

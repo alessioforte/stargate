@@ -97,7 +97,7 @@ pub async fn handler(
         )));
     }
 
-    let password_policies = PasswordPolicy::default();
+    let password_policies = PasswordPolicy::standard();
     let validate_password = password_policies.validate(&body.password);
     if validate_password.is_err() {
         let message = validate_password.unwrap_err();
@@ -126,10 +126,8 @@ pub async fn handler(
 
             Ok(HttpResponse::Ok().json(web::Json(message)))
         }
-        Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
-        }
+        Err(e) => Err(ErrorResponse::from(HttpError::InternalServerError(
+            e.to_string(),
+        ))),
     }
 }

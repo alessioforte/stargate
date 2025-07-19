@@ -37,6 +37,12 @@ pub struct Smtp {
     name: Option<String>,
 }
 
+impl Default for Smtp {
+    fn default() -> Self {
+        Smtp::new()
+    }
+}
+
 impl Smtp {
     pub fn new() -> Smtp {
         Smtp {

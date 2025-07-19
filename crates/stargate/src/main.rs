@@ -5,7 +5,6 @@ mod gtw;
 mod mid;
 mod rts;
 
-use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, middleware::TrailingSlash, web::to, web::Data, App, HttpServer};
 use dotenvy::dotenv;
@@ -56,7 +55,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(mid::cookie_session(secret_key.clone()))
             .wrap(middleware::Logger::default())
             .wrap(Governor::new(&governor_config))
-            .wrap(Cors::permissive())
+            .wrap(etc::cors::configure())
     })
     .bind_openssl(format!("0.0.0.0:{}", port), tls)?
     .run()

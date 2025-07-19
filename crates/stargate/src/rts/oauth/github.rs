@@ -105,16 +105,14 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
     let first_name = user.first_name.clone().unwrap_or_default();
     let last_name = user.last_name.clone().unwrap_or_default();
     let name = format_name(&first_name, &last_name);
-    let (access_token, refresh_token) = crate::act::generate_tokens(Claims {
-        sub: "github-oauth2".to_string(),
-        sub_id: Some(user.id),
-        name: Some(name),
-        email: Some(user.email.clone()),
-        nickname: user.nickname.clone(),
-        email_verified: Some(github_user.email_verified),
-        ..Claims::default()
-    })
-    .unwrap();
+    let claims = Claims::default()
+        .subject("github-oauth2".to_string())
+        .sub_id(user.id.to_owned())
+        .name(name.clone())
+        .email(user.email.to_owned())
+        .email_verified(true);
+
+    let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

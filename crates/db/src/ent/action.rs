@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +10,20 @@ pub enum ActionType {
     Signup,
 }
 
+impl FromStr for ActionType {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "password_reset" => Ok(ActionType::PasswordReset),
+            "email_verification" => Ok(ActionType::EmailVerification),
+            "account_deletion" => Ok(ActionType::AccountDeletion),
+            "signup" => Ok(ActionType::Signup),
+            _ => Err("Unknown action type"),
+        }
+    }
+}
+
 impl ActionType {
     pub fn as_str(&self) -> &str {
         match self {
@@ -15,16 +31,6 @@ impl ActionType {
             ActionType::EmailVerification => "email_verification",
             ActionType::AccountDeletion => "account_deletion",
             ActionType::Signup => "signup",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "password_reset" => Some(ActionType::PasswordReset),
-            "email_verification" => Some(ActionType::EmailVerification),
-            "account_deletion" => Some(ActionType::AccountDeletion),
-            "signup" => Some(ActionType::Signup),
-            _ => None,
         }
     }
 }
