@@ -12,6 +12,7 @@ use gate::Gate;
 use std::env;
 
 // =^.^=
+// 🦀 Stargate API Server 🚀
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

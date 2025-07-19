@@ -20,7 +20,7 @@ pub async fn get() -> Result<HttpResponse, ErrorResponse> {
     let version = env!("CARGO_PKG_VERSION");
 
     Ok(HttpResponse::Ok().json(Health {
-        name: "Stargate is up and running 🚀",
+        name: "Stargate is up and running ✨",
         version,
     }))
 }
