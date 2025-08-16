@@ -6,13 +6,14 @@ mod mid;
 mod rts;
 
 use actix_governor::{Governor, GovernorConfigBuilder};
-use actix_web::{middleware, middleware::TrailingSlash, web::to, web::Data, App, HttpServer};
+use actix_web::{middleware, middleware::TrailingSlash, web::to, App, HttpServer};
 use dotenvy::dotenv;
-use gate::Gate;
 use std::env;
 
 // =^.^=
-// 🦀 Stargate API Server 🚀
+// 🦀
+// Stargate ✨
+// 🚀
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -26,8 +27,10 @@ async fn main() -> std::io::Result<()> {
     log::info!("Version: {}", version);
     log::info!("Starting server on port {}", port);
 
+    etc::store::init();
     etc::jwt::init();
     etc::db::init().await;
+    let data = etc::gate::init();
 
     // create super admin user
     act::create_super_admin().await;
@@ -41,10 +44,6 @@ async fn main() -> std::io::Result<()> {
 
     let secret_key = actix_web::cookie::Key::generate();
     let tls = etc::tls::builder();
-
-    let gate = Gate::init();
-    gate.watch_file();
-    let data = Data::new(gate);
 
     HttpServer::new(move || {
         App::new()

@@ -6,7 +6,7 @@ use crate::etc;
 use actix_web::{post, web, HttpResponse};
 use db::ent::CredentialType;
 use db::Transaction;
-use password::Hash;
+use pw::Hash;
 
 #[utoipa::path(
     context_path = "/account",
@@ -62,12 +62,16 @@ pub async fn handler(
     let last_name = user.last_name.clone().unwrap_or_default();
     let name = format_name(&first_name, &last_name);
 
-    let claims = jwt::Claims::default()
+    let mut claims = jwt::Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
         .name(name.clone())
         .email(user.email.to_owned())
         .email_verified(true);
+
+    if user.nickname.is_some() {
+        claims = claims.nickname(user.nickname.unwrap());
+    }
 
     let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
 

@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y ca-certificates clang libssl-dev openssl pkg-config && \
     apt-get clean && \
-    cargo install --locked cargo-chef
+    cargo install cargo-chef --locked
 
 RUN mkdir -p .stargate/certificate/localhost
 RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout .stargate/certificate/localhost/key.pem -out .stargate/certificate/localhost/cert.pem -subj "/C=FR/ST=IDF/L=Paris/O=Global Security/OU=IT Department/CN=localhost"
@@ -31,7 +31,10 @@ COPY Cargo.lock ./Cargo.lock
 RUN cargo build --release -p $APP_NAME && cp ./target/release/$APP_NAME /bin/server
 
 FROM debian:bullseye-slim AS final
-RUN apt-get update && apt-get upgrade -y
+# RUN apt-get update && apt-get upgrade -y
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y ca-certificates && \
+    apt-get clean
 COPY --from=build /bin/server /bin/
 COPY --from=chef /app/.stargate /.stargate
 EXPOSE 5050

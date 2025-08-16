@@ -8,6 +8,46 @@ pub enum ParseDurationError {
     UnknownUnit,
 }
 
+impl std::fmt::Display for ParseDurationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseDurationError::InvalidFormat => write!(f, "Invalid duration format"),
+            ParseDurationError::InvalidNumber => write!(f, "Invalid number in duration"),
+            ParseDurationError::UnknownUnit => write!(f, "Unknown time unit in duration"),
+        }
+    }
+}
+
+pub fn deserialize_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: String = serde::Deserialize::deserialize(deserializer)?;
+    parse_duration(&s).map_err(serde::de::Error::custom)
+}
+
+pub fn serialize_duration<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let duration_str = duration_to_string(duration);
+    serializer.serialize_str(&duration_str)
+}
+
+pub fn duration_to_string(duration: &Duration) -> String {
+    if duration.num_seconds() < 60 {
+        format!("{}s", duration.num_seconds())
+    } else if duration.num_minutes() < 60 {
+        format!("{}m", duration.num_minutes())
+    } else if duration.num_hours() < 24 {
+        format!("{}h", duration.num_hours())
+    } else if duration.num_days() < 7 {
+        format!("{}d", duration.num_days())
+    } else {
+        format!("{}w", duration.num_weeks())
+    }
+}
+
 pub fn parse_duration(input: &str) -> Result<Duration, ParseDurationError> {
     let re = Regex::new(r"(?i)^(\d+)(s|m|h|d|w)$").unwrap();
     if let Some(caps) = re.captures(input.trim()) {

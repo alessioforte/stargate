@@ -1,7 +1,6 @@
-use std::str::FromStr;
-
 use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 pub enum ActionType {
     PasswordReset,

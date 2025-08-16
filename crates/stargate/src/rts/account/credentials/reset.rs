@@ -5,7 +5,7 @@ use crate::etc;
 use actix_web::{put, web, HttpResponse};
 use chrono::Utc;
 use db::Transaction;
-use password::Hash;
+use pw::Hash;
 use smtp::{Smtp, Template};
 
 #[utoipa::path(

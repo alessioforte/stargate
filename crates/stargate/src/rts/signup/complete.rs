@@ -4,8 +4,8 @@ use crate::etc::msg::MessageResponse;
 use actix_web::{put, web, HttpResponse};
 use db::ent::{CredentialType, User};
 use db::Transaction;
-use password::Hash;
-use password::{PasswordPolicy, PasswordPolicyValidator};
+use pw::Hash;
+use pw::{PasswordPolicy, PasswordPolicyValidator};
 
 #[utoipa::path(
     context_path = "/signup",
@@ -111,9 +111,9 @@ pub async fn handler(
         .phone_number(body.phone_number.clone())
         .picture(None);
 
-    let pw = Hash::encode(&body.password).unwrap();
+    let password = Hash::encode(&body.password).unwrap();
     match service
-        .create_user(user, CredentialType::Password, &pw)
+        .create_user(user, CredentialType::Password, &password)
         .await
     {
         Ok(_) => {

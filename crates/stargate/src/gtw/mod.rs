@@ -70,6 +70,7 @@ pub async fn handler(
         client_ip,
         path: path.to_string(),
         method: method.as_str().to_string(),
+        key: None,
     };
     // get the load balancer and select an upstream
     let upstream = service.lb.as_ref().unwrap().select(&ctx).unwrap();

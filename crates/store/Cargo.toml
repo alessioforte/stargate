@@ -1,0 +1,23 @@
+[package]
+name = "store"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+readme.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = "0.1.88"
+chrono = "0.4.41"
+dashmap = { version = "6.1.0", optional = true }
+log = "0.4.27"
+redis = { version = "0.32.4", features = ["tokio-comp"], optional = true }
+serde = "1.0.219"
+serde_json = "1.0.141"
+tokio = "1.47.0"
+
+[features]
+default = []
+memory = ["dep:dashmap"]
+redis = ["dep:redis"]

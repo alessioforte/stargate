@@ -1,7 +1,7 @@
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{get, put, web, HttpResponse};
 use actix_web_grants::protect;
-use gate::config::Config;
+use gate::{config::Config, Gate};
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -59,8 +59,10 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
 #[protect("SUPER_ADMIN")]
 pub async fn update_configurations(
     config: web::Json<Config>,
+    gate: actix_web::web::Data<Gate>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    config.to_file();
+    let cfg = config.into_inner();
+    gate.to_file(&cfg);
     Ok(HttpResponse::Ok().finish())
 }
 

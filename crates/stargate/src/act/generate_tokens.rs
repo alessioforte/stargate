@@ -1,6 +1,8 @@
 use crate::etc::jwt::jwt_config;
 use chrono::Utc;
 
+// TODO: the claims should be a struct with the necessary fields
+//       and differentiate between access and refresh tokens
 pub fn generate_tokens(claims: jwt::Claims) -> Result<(String, String), jwt::JwtError> {
     let jwt = jwt_config();
     let mut jwt_access_claims = claims.clone();

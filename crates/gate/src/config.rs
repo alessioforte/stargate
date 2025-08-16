@@ -1,37 +1,22 @@
+use lb::{BaseLoadBalancer, IpHash, Random, RoundRobin};
 use serde::{Deserialize, Serialize};
-use std::env;
-use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum LoadBalancerStrategy {
-    #[default]
-    RoundRobin,
-    Random,
-    IpHash,
+#[derive(Debug, Default, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Config {
+    pub services: Vec<Service>,
 }
 
-impl LoadBalancerStrategy {
-    pub fn build(&self, service: &Service) -> Box<Arc<dyn lb::LoadBalancer + Send + Sync>> {
-        let protocol = service
-            .protocol
-            .clone()
-            .unwrap_or_else(|| "http".to_string());
-        let upstreams = service
-            .endpoints
-            .iter()
-            .map(|ep| {
-                let base_url = format!("{}://{}", protocol, ep.format());
-                lb::Upstream { base_url }
-            })
-            .collect::<Vec<_>>();
-        match self {
-            LoadBalancerStrategy::RoundRobin => Box::new(lb::RoundRobin::new(upstreams)),
-            LoadBalancerStrategy::Random => Box::new(lb::Random::new(upstreams)),
-            LoadBalancerStrategy::IpHash => Box::new(lb::IpHash::new(upstreams)),
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Service {
+    pub connect_timeout: Option<u64>,
+    pub name: Option<String>,
+    pub path: String,
+    pub protocol: Option<String>,
+    pub endpoints: Vec<Endpoint>,
+    pub load_balancer: Option<LoadBalancer>,
+    pub auth_required: Option<bool>,
+    pub routes: Option<Vec<Route>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -59,49 +44,58 @@ impl Endpoint {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct Service {
-    pub connect_timeout: Option<u64>,
-    pub name: Option<String>,
+#[derive(Default, Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadBalancerStrategy {
+    #[default]
+    RoundRobin,
+    Random,
+    IpHash,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LivenessProbe {
     pub path: String,
-    pub protocol: Option<String>,
-    pub endpoints: Vec<Endpoint>,
-    pub load_balancer: Option<LoadBalancerStrategy>,
-    pub auth_required: Option<bool>,
-    pub routes: Option<Vec<Route>>,
+    pub interval: Option<String>,
+    pub timeout: Option<String>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct Config {
-    pub services: Vec<Service>,
+#[derive(Default, Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LoadBalancer {
+    pub strategy: LoadBalancerStrategy,
+    pub liveness_probe: Option<LivenessProbe>,
 }
 
-impl Config {
-    pub fn from_file() -> Self {
-        let path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
-        let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
-        if !Path::new(&path).exists() {
-            std::fs::create_dir(&path).expect("Unable to create config directory");
-        }
-        if !Path::new(&format!("{}/{}", path, filename)).exists() {
-            log::info!("Creating gate configuration yaml file");
-            let config = Config::default();
-            let config_str = serde_yml::to_string(&config).expect("Unable to serialize config");
-            std::fs::write(format!("{}/{}", path, filename), config_str)
-                .expect("Unable to write config file");
-            return config;
-        }
-        let file = std::fs::read_to_string(format!("{}/{}", path, filename))
-            .expect("Unable to read config file");
-        let config: Config = serde_yml::from_str(&file).expect("Unable to parse config file");
-        config
-    }
+impl LoadBalancer {
+    pub fn builder(
+        &self,
+        protocol: Option<String>,
+        endpoints: &Vec<Endpoint>,
+    ) -> Box<Arc<dyn lb::LoadBalancer + Send + Sync>> {
+        let protocol = protocol.unwrap_or_else(|| "http".to_string());
+        let upstreams = endpoints
+            .iter()
+            .map(|endpoint| {
+                let base_url = format!("{}://{}", protocol, endpoint.format());
+                let mut health_check_path = None;
+                if self.liveness_probe.is_some() {
+                    let health_check = self.liveness_probe.as_ref().unwrap();
+                    health_check_path = Some(health_check.path.clone());
+                }
 
-    pub fn to_file(&self) {
-        let path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
-        let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
-        let config_str = serde_yml::to_string(&self).expect("Unable to serialize config");
-        std::fs::write(format!("{}/{}", path, filename), config_str)
-            .expect("Unable to write config file");
+                lb::Upstream::new(base_url, health_check_path)
+            })
+            .collect::<Vec<_>>();
+        match self.strategy {
+            LoadBalancerStrategy::RoundRobin => {
+                Box::new(BaseLoadBalancer::new(RoundRobin::new(), upstreams))
+            }
+            LoadBalancerStrategy::Random => {
+                Box::new(BaseLoadBalancer::new(Random::new(), upstreams))
+            }
+            LoadBalancerStrategy::IpHash => {
+                Box::new(BaseLoadBalancer::new(IpHash::new(), upstreams))
+            }
+        }
     }
 }

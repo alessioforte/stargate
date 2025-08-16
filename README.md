@@ -99,7 +99,7 @@ Replace `VERSION` with the version of the image.
 - [x] Sqlite - Implement SQLite as a database option
 - [x] PostgreSQL - Implement PostgreSQL as a database option
 - [ ] SurrealDB - Implement SurrealDB as a database option
-- [ ] Redis - Implement Redis as a cache option
+- [x] Redis or Memory - Implement Redis as a cache option
 - [ ] API Keys - Generate, Revoke, List
 - [ ] Rate Limiting Global and Per User
 - [ ] Realms - Implement multiple realms

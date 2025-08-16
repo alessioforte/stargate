@@ -20,7 +20,7 @@ pub async fn create_super_admin() {
     let email =
         std::env::var("SUPER_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost".to_string());
     let name = std::env::var("SUPER_ADMIN_NAME").unwrap_or_else(|_| "Admin".to_string());
-    let pw = password::generator(40, true, true, true, false);
+    let password = pw::generator(40, true, true, true, false);
     let user = User::new(email)
         .first_name(Some(name))
         .nickname(Some(SUPER_ADMIN_NICKNAME.to_string()))
@@ -31,11 +31,11 @@ pub async fn create_super_admin() {
         .create_user(
             user,
             CredentialType::Password,
-            &password::Hash::encode(&pw).unwrap(),
+            &pw::Hash::encode(&password).unwrap(),
         )
         .await
     {
-        Ok(_) => log::info!("Super admin password: {}", pw),
+        Ok(_) => log::info!("Super admin password: {}", password),
         Err(e) => log::error!("Failed to create super admin: {}", e),
     };
 }

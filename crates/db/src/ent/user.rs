@@ -2,6 +2,7 @@ use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 #[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct User {
     pub id: String,
     pub email: String,
