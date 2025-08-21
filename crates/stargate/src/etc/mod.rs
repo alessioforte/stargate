@@ -1,4 +1,5 @@
 pub mod cfg;
+pub mod consts;
 pub mod cors;
 pub mod db;
 pub mod ext;

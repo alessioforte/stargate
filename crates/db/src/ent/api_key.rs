@@ -8,8 +8,7 @@ pub struct ApiKey {
     pub key_hash: String,
     pub label: Option<String>,
     pub revoked: bool,
-    pub scopes: Option<Vec<String>>,
-    pub expiration: Option<i64>,
+    pub exp: Option<i64>,
 }
 
 impl ApiKey {
@@ -21,8 +20,7 @@ impl ApiKey {
             key_hash,
             label,
             revoked: false,
-            scopes: None,
-            expiration: None,
+            exp: None,
         }
     }
 }

@@ -4,6 +4,7 @@ use crate::etc::ext::RequestExt;
 use actix_web::{get, web, HttpRequest, HttpResponse};
 use db::Transaction;
 use etc::jwt::jwt_config;
+use store::Store;
 
 #[utoipa::path(
     context_path = "/account",
@@ -25,6 +26,12 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
             )))
         }
     };
+
+    // Get session
+    let store = etc::store::use_store();
+    let sid = claims.sid.clone().unwrap_or_default();
+    let session = store.get::<db::ent::Subject>(&sid).await;
+    println!("Session: {:?}", session);
 
     let service = etc::db::service();
     let user = match service.get_user_by_username(&claims.sub).await {

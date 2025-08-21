@@ -2,11 +2,13 @@ use super::{AuthResponse, UserCredentials};
 use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
+use crate::etc::jwt::jwt_config;
 // use actix_session::Session;
 use actix_web::{post, web, HttpResponse};
 use db::ent::CredentialType;
 use db::Transaction;
 use pw::Hash;
+use store::Store;
 
 #[utoipa::path(
     context_path = "/account",
@@ -58,22 +60,35 @@ pub async fn handler(
         )));
     }
 
+    let subject = match service.get_subject_by_id(&user.id).await {
+        Ok(subject) => subject,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
     let first_name = user.first_name.clone().unwrap_or_default();
     let last_name = user.last_name.clone().unwrap_or_default();
     let name = format_name(&first_name, &last_name);
 
-    let mut claims = jwt::Claims::default()
+    let sid = uuid::Uuid::new_v4().to_string();
+    let claims = jwt::Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
         .name(name.clone())
         .email(user.email.to_owned())
-        .email_verified(true);
-
-    if user.nickname.is_some() {
-        claims = claims.nickname(user.nickname.unwrap());
-    }
+        .email_verified(true)
+        .sid(sid.clone());
 
     let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
+
+    // Store the user ID in the session
+    let store = etc::store::use_store();
+    let refresh_exp = jwt_config().refresh_exp;
+    let ttl: u64 = refresh_exp.as_seconds_f64() as u64;
+    store.set(&sid, &subject, Some(ttl)).await;
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

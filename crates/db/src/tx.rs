@@ -1,4 +1,4 @@
-use crate::ent::{Action, ActionType, Credential, CredentialType, User};
+use crate::ent::{Action, ActionType, Credential, CredentialType, Subject, User};
 use anyhow::Result;
 
 #[async_trait::async_trait]
@@ -8,6 +8,7 @@ pub trait Transaction {
         user: User,
         credential_type: CredentialType,
         value: &str,
+        attrs: Option<sqlx::types::JsonValue>,
     ) -> Result<User>;
 
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
@@ -25,4 +26,5 @@ pub trait Transaction {
         sub: &str,
         action_type: ActionType,
     ) -> Result<Option<Action>>;
+    async fn get_subject_by_id(&self, subject_id: &str) -> Result<Option<Subject>>;
 }

@@ -27,7 +27,7 @@ impl CredentialRepository {
         )
         .bind(&credential.id)
         .bind(&credential.user_id)
-        .bind(credential.timestamp)
+        .bind(&credential.timestamp)
         .bind(&credential.credential_type)
         .bind(&credential.value)
         .fetch_one(&mut **tx)

@@ -27,3 +27,21 @@ CREATE TABLE IF NOT EXISTS "actions" (
     `exp` INT NOT NULL,
     PRIMARY KEY (`id`)
 );
+
+CREATE TABLE IF NOT EXISTS "api_keys" (
+    `id` TEXT,
+    `user_id` TEXT NOT NULL,
+    `key_hash` TEXT NOT NULL UNIQUE,
+    `label` VARCHAR(100) NOT NULL,
+    `revoked` BOOLEAN NOT NULL DEFAULT FALSE,
+    `exp` INT,
+    PRIMARY KEY (`id`) FOREIGN KEY (`user_id`) REFERENCES "users" (`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "subjects" (
+    `id` TEXT,
+    `type` VARCHAR(50) NOT NULL,
+    `sub_id` TEXT NOT NULL,
+    `attrs` JSON NOT NULL DEFAULT '{}',
+    PRIMARY KEY (`id`)
+);

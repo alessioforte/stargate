@@ -47,6 +47,10 @@ impl MemoryStore {
     pub fn run_cleaner(&self, interval: u64) {
         let data = self.data.clone();
         tokio::spawn(async move {
+            log::info!(
+                "MemoryStore cleaner started with interval: {} seconds",
+                interval
+            );
             let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(interval));
             loop {
                 ticker.tick().await;

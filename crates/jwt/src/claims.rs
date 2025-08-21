@@ -99,4 +99,9 @@ impl Claims {
         self.uuid = Some(uuid);
         self
     }
+
+    pub fn sid(mut self, sid: String) -> Self {
+        self.sid = Some(sid);
+        self
+    }
 }

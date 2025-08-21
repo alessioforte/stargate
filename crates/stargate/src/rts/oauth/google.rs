@@ -76,7 +76,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         let value = format!("google:{}", google_user.id);
         user = match svc
             .clone()
-            .create_user(new_user, CredentialType::Oauth, &value)
+            .create_user(new_user, CredentialType::Oauth, &value, None)
             .await
         {
             Ok(user) => Some(user),

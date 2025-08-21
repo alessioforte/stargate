@@ -113,7 +113,7 @@ pub async fn handler(
 
     let password = Hash::encode(&body.password).unwrap();
     match service
-        .create_user(user, CredentialType::Password, &password)
+        .create_user(user, CredentialType::Password, &password, None)
         .await
     {
         Ok(_) => {

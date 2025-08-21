@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 #[sqlx(type_name = "credential_type", rename_all = "lowercase")]
 pub enum CredentialType {
     Password,
-    ApiKey,
     Oauth,
 }
 
@@ -13,7 +12,7 @@ impl CredentialType {
     pub fn as_str(&self) -> &str {
         match self {
             CredentialType::Password => "password",
-            CredentialType::ApiKey => "api_key",
+            // CredentialType::ApiKey => "api_key",
             CredentialType::Oauth => "oauth",
         }
     }
@@ -21,7 +20,6 @@ impl CredentialType {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "password" => Some(CredentialType::Password),
-            "api_key" => Some(CredentialType::ApiKey),
             "oauth" => Some(CredentialType::Oauth),
             _ => None,
         }
@@ -35,8 +33,8 @@ pub struct Credential {
     pub timestamp: i64,
     #[serde(rename = "type")]
     #[sqlx(rename = "type")]
-    pub credential_type: String, //
-    pub value: String, // hashed password, api key, provider user id, etc.
+    pub credential_type: String,
+    pub value: String, // hashed password, provider user id, etc.
 }
 
 impl Credential {

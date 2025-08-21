@@ -1,8 +1,8 @@
-use super::repo::{ActionRepository, CredentialRepository, UserRepository};
-use crate::ent::{Action, ActionType, Credential, CredentialType, User};
+use super::repo::{ActionRepository, CredentialRepository, SubjectRepository, UserRepository};
+use crate::ent::{Action, ActionType, Credential, CredentialType, Subject, SubjectType, User};
 use crate::tx::Transaction;
 use anyhow::Result;
-use sqlx::sqlite::SqlitePool;
+use sqlx::{sqlite::SqlitePool, types::JsonValue};
 use std::fs;
 
 #[derive(Clone)]
@@ -10,6 +10,7 @@ pub struct Service {
     pool: SqlitePool,
     user: UserRepository,
     credential: CredentialRepository,
+    subject: SubjectRepository,
     action: ActionRepository,
 }
 
@@ -19,6 +20,7 @@ impl Service {
             pool,
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
+            subject: SubjectRepository::new(),
             action: ActionRepository::new(),
         }
     }
@@ -38,9 +40,7 @@ impl Service {
 }
 
 pub async fn init(conn: &str) -> Result<Service> {
-    let pool = SqlitePool::connect(conn)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
+    let pool = SqlitePool::connect(conn).await?;
     let service = Service::new(pool.clone());
     service.init_schema().await;
     Ok(service)
@@ -48,17 +48,31 @@ pub async fn init(conn: &str) -> Result<Service> {
 
 #[async_trait::async_trait]
 impl Transaction for Service {
+    /// Creates a new user with the specified credential type and value.
+    ///
+    /// # Arguments
+    /// * `user`: The user to be created.
+    ///
+    /// * `credential_type`: The type of credential to be associated with the user.
+    ///
+    /// * `value`: The hashed password.
+    ///
+    /// * `attrs`: Optional attributes associated with the user.
     async fn create_user(
         &self,
         user: User,
         credential_type: CredentialType,
         value: &str,
+        attrs: Option<JsonValue>,
     ) -> Result<User> {
         let mut tx = self.pool.begin().await?;
         let user_id = user.id.clone();
         let record = self.user.create(&mut tx, user).await?;
         self.credential
             .create(&mut tx, &user_id, credential_type, value)
+            .await?;
+        self.subject
+            .create(&mut tx, SubjectType::User, &user_id, attrs)
             .await?;
         tx.commit().await?;
         Ok(record)
@@ -128,5 +142,12 @@ impl Transaction for Service {
             .await?;
         tx.commit().await?;
         Ok(action)
+    }
+
+    async fn get_subject_by_id(&self, subject_id: &str) -> Result<Option<Subject>> {
+        let mut tx = self.pool.begin().await?;
+        let subject = self.subject.get_by_sub_id(&mut tx, subject_id).await?;
+        tx.commit().await?;
+        Ok(subject)
     }
 }

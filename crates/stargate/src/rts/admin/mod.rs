@@ -2,14 +2,14 @@ pub mod configurations;
 pub mod docs;
 pub mod users;
 
-use crate::etc::jwt::jwt_config;
-use crate::{act::SUPER_ADMIN_NICKNAME, etc::ext::RequestExt};
+use crate::etc::{consts::STARGATE_ADMIN, ext::RequestExt, jwt::jwt_config, store::use_store};
 use actix_web::{
     body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
     dev::ServiceResponse, web, Error,
 };
 use actix_web_grants::GrantsMiddleware;
 use std::collections::HashSet;
+use store::Store;
 use utoipa::OpenApi;
 
 const SUPER_ADMIN: &str = "SUPER_ADMIN";
@@ -24,8 +24,14 @@ async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
         }
     };
 
-    if claims.nickname == Some(SUPER_ADMIN_NICKNAME.to_string()) {
-        return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
+    let sid = claims.sid.clone().unwrap_or_default();
+    let store = use_store();
+    if let Some(session) = store.get::<db::ent::Subject>(&sid).await {
+        if let Some(role) = session.attrs.get("role") {
+            if role == STARGATE_ADMIN {
+                return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
+            }
+        }
     }
 
     Ok(HashSet::new())
