@@ -8,3 +8,19 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "advanced_usage"
+path = "examples/advanced_usage.rs"
+
+[[example]]
+name = "extended_features"
+path = "examples/extended_features.rs"
+
+[[example]]
+name = "practical_usage"
+path = "examples/practical_usage.rs"
