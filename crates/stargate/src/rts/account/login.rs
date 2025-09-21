@@ -3,8 +3,7 @@ use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
-// use actix_session::Session;
-use actix_web::{post, web, HttpResponse};
+use actix_web::{cookie::Cookie, post, web, HttpResponse};
 use db::ent::CredentialType;
 use db::Transaction;
 use pw::Hash;
@@ -74,7 +73,7 @@ pub async fn handler(
     let name = format_name(&first_name, &last_name);
 
     let sid = uuid::Uuid::new_v4().to_string();
-    let claims = jwt::Claims::default()
+    let mut claims = jwt::Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
         .name(name.clone())
@@ -82,17 +81,33 @@ pub async fn handler(
         .email_verified(true)
         .sid(sid.clone());
 
+    let nickname = user.nickname.clone().unwrap_or_default();
+    if nickname == crate::etc::consts::STARGATE_ADMIN {
+        claims = claims.role(crate::etc::consts::STARGATE_ADMIN.to_string());
+    }
+
     let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
 
     // Store the user ID in the session
     let store = etc::store::use_store();
     let refresh_exp = jwt_config().refresh_exp;
-    let ttl: u64 = refresh_exp.as_seconds_f64() as u64;
-    store.set(&sid, &subject, Some(ttl)).await;
+    let access_exp = jwt_config().access_exp;
+    let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
+    let cttl: i64 = access_exp.as_seconds_f64() as i64;
+    store.set(&sid, &subject, Some(sttl)).await;
 
-    Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
-        access_token,
-        refresh_token,
-        token_type: "Bearer".to_string(),
-    })))
+    let cookie = Cookie::build("jwt", access_token.clone())
+        .path("/")
+        .http_only(true)
+        .same_site(actix_web::cookie::SameSite::Lax)
+        .max_age(actix_web::cookie::time::Duration::seconds(cttl))
+        .finish();
+
+    Ok(HttpResponse::Ok()
+        .cookie(cookie)
+        .json(web::Json(AuthResponse {
+            access_token,
+            refresh_token,
+            token_type: "Bearer".to_string(),
+        })))
 }

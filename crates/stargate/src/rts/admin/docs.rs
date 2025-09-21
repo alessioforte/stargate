@@ -1,9 +1,16 @@
 use super::ApiDoc;
 use crate::err::ErrorResponse;
-use actix_web::{get, HttpResponse, Scope};
+use actix_web::{HttpResponse, Scope, get};
 use actix_web_grants::protect;
 use utoipa::OpenApi;
 
+#[utoipa::path(
+    context_path = "/docs",
+    path = "/",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[get("")]
 #[protect("SUPER_ADMIN")]
 pub async fn get_api_doc() -> Result<HttpResponse, ErrorResponse> {

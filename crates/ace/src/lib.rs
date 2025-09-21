@@ -221,6 +221,26 @@ impl fmt::Display for Value {
     }
 }
 
+/// from serde_json::Value
+/// Convert serde_json::Value to our Value enum
+impl From<serde_json::Value> for Value {
+    fn from(v: serde_json::Value) -> Self {
+        match v {
+            serde_json::Value::String(s) => Value::String(s),
+            serde_json::Value::Bool(b) => Value::Boolean(b),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Value::Number(i)
+                } else if let Some(f) = n.as_f64() {
+                    Value::Float(f)
+                } else {
+                    Value::String(n.to_string())
+                }
+            }
+            _ => Value::String(v.to_string()),
+        }
+    }
+}
 /// Errors that can occur during policy parsing
 #[derive(Debug, Clone)]
 pub enum ParseError {
@@ -469,7 +489,7 @@ impl ContextBuilder {
         self
     }
 
-    pub fn custom(mut self, key: &str, value: Value) -> Self {
+    pub fn add(mut self, key: &str, value: Value) -> Self {
         self.context.insert(key.to_string(), value);
         self
     }

@@ -3,7 +3,7 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 
 mod meta;
-mod parse;
+// mod parse;
 
 pub fn generate_api_key() -> String {
     generate_api_key_with(meta::KeyType::Secret, meta::KeyEnvironment::Live)

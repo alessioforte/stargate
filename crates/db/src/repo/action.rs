@@ -11,7 +11,8 @@ impl ActionRepository {
 
     pub async fn create(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         action: Action,
     ) -> Result<Action> {
         let row = sqlx::query_as::<_, Action>(
@@ -25,8 +26,8 @@ impl ActionRepository {
         .bind(&action.action_type)
         .bind(&action.sub)
         .bind(&action.value)
-        .bind(action.iat)
-        .bind(action.exp)
+        .bind(&action.iat)
+        .bind(&action.exp)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -35,7 +36,8 @@ impl ActionRepository {
 
     pub async fn get_by_value(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         value: &str,
     ) -> Result<Option<Action>> {
         let row = sqlx::query_as::<_, Action>(
@@ -50,26 +52,28 @@ impl ActionRepository {
         Ok(row)
     }
 
-    // pub async fn delete_by_value(
-    //     &self,
-    //     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
-    //     value: &str,
-    // ) -> Result<()> {
-    //     sqlx::query(
-    //         "
-    //         DELETE FROM actions WHERE value = $1
-    //     ",
-    //     )
-    //     .bind(value)
-    //     .execute(&mut **tx)
-    //     .await?;
+    pub async fn delete_by_value(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        value: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "
+            DELETE FROM actions WHERE value = $1
+        ",
+        )
+        .bind(value)
+        .execute(&mut **tx)
+        .await?;
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     pub async fn get_by_sub_and_type(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         sub: &str,
         action_type: ActionType,
     ) -> Result<Option<Action>> {

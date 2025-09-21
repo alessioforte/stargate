@@ -1,5 +1,6 @@
 use crate::config::{Config, LoadBalancer, Service as Svc};
 use crate::trie::{RouteNode, Service, TriePath};
+use ace::PolicyEngine;
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use std::{collections::HashMap, path::Path, sync::Arc, thread, time::Duration};
 use tokio::{runtime::Runtime, sync::RwLock};
@@ -8,26 +9,41 @@ use tokio::{runtime::Runtime, sync::RwLock};
 pub struct Gate {
     file_path: String,
     liveness_probe: Arc<RwLock<lb::HealthCheck>>,
-    pub config: Arc<RwLock<TriePath>>,
+    pub services: Arc<RwLock<TriePath>>,
+    pub policy_engine: Arc<RwLock<PolicyEngine>>,
 }
 
 impl Gate {
     pub fn new(file_path: String) -> Self {
         let trie = TriePath::new();
-        let config = Arc::new(RwLock::new(trie));
+        let services = Arc::new(RwLock::new(trie));
         let liveness_probe = Arc::new(RwLock::new(lb::HealthCheck::new()));
+        let policy_engine = Arc::new(RwLock::new(PolicyEngine::new()));
         Self {
             file_path,
-            config,
+            services,
             liveness_probe,
+            policy_engine,
         }
     }
 
     pub fn build(mut self) -> Self {
         let config = self.from_file();
         let trie = self.create_trie(&config.services);
-        let config = Arc::new(RwLock::new(trie));
-        self.config = config;
+        let mut pe = PolicyEngine::new();
+        if let Some(ac) = config.access_control.clone() {
+            if ac.policy_file.is_some() {
+                let file_path = ac.policy_file.unwrap();
+                let content =
+                    std::fs::read_to_string(file_path).expect("Unable to read policy file");
+                pe.parse_file(&content)
+                    .expect("Unable to parse policy file");
+            }
+        }
+        let services = Arc::new(RwLock::new(trie));
+        let policy_engine = Arc::new(RwLock::new(pe));
+        self.services = services;
+        self.policy_engine = policy_engine;
         self
     }
 
@@ -38,8 +54,8 @@ impl Gate {
 
         let config = self.from_file();
         let trie = self.create_trie(&config.services);
-        let mut config = self.config.write().await;
-        *config = trie;
+        let mut services = self.services.write().await;
+        *services = trie;
         log::info!("Gate configuration updated");
     }
 
@@ -74,6 +90,7 @@ impl Gate {
                 for r in service_routes {
                     let route = RouteNode {
                         auth_required: r.auth_required.unwrap_or(false),
+                        resource: r.resource.clone(),
                     };
                     let router = map.get(&r.method);
                     if router.is_none() {
@@ -92,6 +109,7 @@ impl Gate {
             let node = Service {
                 connect_timeout: service.connect_timeout,
                 auth_required: service.auth_required,
+                resource: service.resource.clone(),
                 name: service.name.clone(),
                 path: service.path.clone(),
                 lb: Some(*lb),
@@ -133,6 +151,7 @@ impl Gate {
             rt.block_on(async {
                 log::info!("Watching Gate configuration file");
                 let (tx, rx) = std::sync::mpsc::channel();
+
                 let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
                 debouncer
                     .watcher()

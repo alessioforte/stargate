@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Config {
+    pub access_control: Option<AccessControl>,
     pub services: Vec<Service>,
 }
 
@@ -16,6 +17,7 @@ pub struct Service {
     pub endpoints: Vec<Endpoint>,
     pub load_balancer: Option<LoadBalancer>,
     pub auth_required: Option<bool>,
+    pub resource: Option<String>,
     pub routes: Option<Vec<Route>>,
 }
 
@@ -24,6 +26,7 @@ pub struct Route {
     pub path: String,
     pub method: String,
     pub auth_required: Option<bool>,
+    pub resource: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -98,4 +101,10 @@ impl LoadBalancer {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct AccessControl {
+    pub policy_file: Option<String>,
+    pub policies: Option<String>,
 }

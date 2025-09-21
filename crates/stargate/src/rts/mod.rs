@@ -4,7 +4,7 @@ pub mod docs;
 pub mod health;
 pub mod oauth;
 pub mod signup;
-pub mod well_known;
+// pub mod well_known;
 
 use actix_web::web::ServiceConfig;
 use utoipa::OpenApi;
@@ -22,6 +22,7 @@ use utoipa::OpenApi;
         crate::rts::signup::request::handler,
         crate::rts::signup::verification::handler,
         crate::rts::signup::complete::handler,
+        crate::rts::docs::get_api_doc,
     ),
     info(description = "Stargate APIs documentation")
 )]

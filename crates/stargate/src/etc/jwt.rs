@@ -27,10 +27,8 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
         );
     }
 
-    let jwt_access_exp =
-        env::var("JWT_ACCESS_EXPIRATION_MINUTES").unwrap_or_else(|_| "1h".to_string());
-    let jwt_refresh_exp =
-        env::var("JWT_REFRESH_EXPIRATION_DAYS").unwrap_or_else(|_| "1d".to_string());
+    let jwt_access_exp = env::var("JWT_ACCESS_EXP").unwrap_or_else(|_| "1h".to_string());
+    let jwt_refresh_exp = env::var("JWT_REFRESH_EXP").unwrap_or_else(|_| "1d".to_string());
 
     let access_exp =
         parse_duration(&jwt_access_exp).expect("Invalid JWT access expiration duration");

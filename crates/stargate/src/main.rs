@@ -42,7 +42,6 @@ async fn main() -> std::io::Result<()> {
         .finish()
         .unwrap();
 
-    let secret_key = actix_web::cookie::Key::generate();
     let tls = etc::tls::builder();
 
     HttpServer::new(move || {
@@ -52,7 +51,6 @@ async fn main() -> std::io::Result<()> {
             .configure(rts::configure)
             .default_service(to(gtw::handler))
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
-            .wrap(mid::cookie_session(secret_key.clone()))
             .wrap(middleware::Logger::default())
             .wrap(Governor::new(&governor_config))
             .wrap(etc::cors::configure())

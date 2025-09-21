@@ -1,6 +1,6 @@
 #[cfg(feature = "postgres")]
 mod postgres {
-    use db::postgres::svc;
+    use db::svc;
     use once_cell::sync::OnceCell;
 
     static DB: OnceCell<svc::Service> = OnceCell::new();
@@ -32,7 +32,7 @@ mod postgres {
 
 #[cfg(feature = "sqlite")]
 mod sqlite {
-    use db::sqlite::svc;
+    use db::svc;
     use once_cell::sync::OnceCell;
 
     static DB: OnceCell<svc::Service> = OnceCell::new();

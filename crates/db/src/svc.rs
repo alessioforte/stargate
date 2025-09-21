@@ -1,34 +1,57 @@
-use super::repo::{ActionRepository, CredentialRepository, SubjectRepository, UserRepository};
-use crate::ent::{Action, ActionType, Credential, CredentialType, Subject, SubjectType, User};
+use super::repo::{
+    ActionRepository, ApiKeyRepository, CredentialRepository, SubjectRepository, UserRepository,
+};
+use crate::ent::{
+    Action, ActionType, ApiKey, Credential, CredentialType, OwnerType, Subject, SubjectType, User,
+};
 use crate::tx::Transaction;
 use anyhow::Result;
-use sqlx::postgres::{PgPool, PgPoolOptions};
-use sqlx::types::JsonValue;
+use serde_json::Value as JsonValue;
+#[cfg(feature = "postgres")]
+use sqlx::PgPool;
 use std::fs;
 
 #[derive(Clone)]
 pub struct Service {
-    pool: PgPool,
+    #[cfg(feature = "postgres")]
+    pool: sqlx::PgPool,
+    #[cfg(feature = "sqlite")]
+    pool: sqlx::SqlitePool,
     user: UserRepository,
     credential: CredentialRepository,
     subject: SubjectRepository,
     action: ActionRepository,
+    api_key: ApiKeyRepository,
 }
 
 impl Service {
-    pub fn new(pool: PgPool) -> Self {
+    #[cfg(feature = "postgres")]
+    pub fn new(pool: sqlx::PgPool) -> Self {
         Self {
             pool,
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
             subject: SubjectRepository::new(),
             action: ActionRepository::new(),
+            api_key: ApiKeyRepository::new(),
+        }
+    }
+
+    #[cfg(feature = "sqlite")]
+    pub fn new(pool: sqlx::SqlitePool) -> Self {
+        Self {
+            pool,
+            user: UserRepository::new(),
+            credential: CredentialRepository::new(),
+            subject: SubjectRepository::new(),
+            action: ActionRepository::new(),
+            api_key: ApiKeyRepository::new(),
         }
     }
 
     // TODO: handle with migrations
-    pub async fn init_schema(&self) {
-        let ddl = fs::read_to_string("ddl/postgres.sql").expect("Failed to read schema file");
+    pub async fn init_schema(&self, file: &str) {
+        let ddl = fs::read_to_string(file).expect("Failed to read schema file");
         for stmt in ddl.split(';') {
             if !stmt.trim().is_empty() {
                 sqlx::query(stmt)
@@ -40,10 +63,22 @@ impl Service {
     }
 }
 
+// Generic init function that works with any database URL
 pub async fn init(conn: &str) -> Result<Service> {
-    let pool = PgPoolOptions::new().connect(conn).await?;
-    let service = Service::new(pool.clone());
-    service.init_schema().await;
+    #[cfg(feature = "sqlite")]
+    let pool = sqlx::SqlitePool::connect(conn).await?;
+
+    #[cfg(feature = "postgres")]
+    let pool = PgPool::connect(conn).await?;
+
+    let service = Service::new(pool);
+
+    #[cfg(feature = "postgres")]
+    service.init_schema("ddl/postgres.sql").await;
+
+    #[cfg(feature = "sqlite")]
+    service.init_schema("ddl/sqlite.sql").await;
+
     Ok(service)
 }
 
@@ -150,5 +185,42 @@ impl Transaction for Service {
         let subject = self.subject.get_by_sub_id(&mut tx, subject_id).await?;
         tx.commit().await?;
         Ok(subject)
+    }
+
+    async fn create_api_key(
+        &self,
+        owner: &str,
+        owner_type: OwnerType,
+        key_hash: &str,
+        label: Option<String>,
+        attrs: Option<JsonValue>,
+        exp: Option<i64>,
+    ) -> Result<ApiKey> {
+        let mut tx = self.pool.begin().await?;
+        let api_key = self
+            .api_key
+            .create(&mut tx, owner, owner_type, key_hash, label, exp)
+            .await?;
+
+        self.subject
+            .create(&mut tx, SubjectType::ApiKey, &api_key.id, attrs)
+            .await?;
+
+        tx.commit().await?;
+        Ok(api_key)
+    }
+
+    async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>> {
+        let mut tx = self.pool.begin().await?;
+        let api_key = self.api_key.get_by_hash(&mut tx, key_hash).await?;
+        tx.commit().await?;
+        Ok(api_key)
+    }
+
+    async fn revoke_api_key(&self, id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.api_key.revoke_by_id(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
     }
 }

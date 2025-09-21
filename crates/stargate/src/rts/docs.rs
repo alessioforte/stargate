@@ -1,8 +1,15 @@
 use super::ApiDoc;
 use crate::err::ErrorResponse;
-use actix_web::{get, HttpResponse, Scope};
+use actix_web::{HttpResponse, Scope, get};
 use utoipa::OpenApi;
 
+#[utoipa::path(
+    context_path = "/docs",
+    path = "/",
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
 #[get("")]
 pub async fn get_api_doc() -> Result<HttpResponse, ErrorResponse> {
     Ok(HttpResponse::Ok().json(ApiDoc::openapi()))

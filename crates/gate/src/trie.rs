@@ -6,6 +6,7 @@ use std::sync::Arc;
 #[derive(Default, Debug)]
 pub struct RouteNode {
     pub auth_required: bool,
+    pub resource: Option<String>,
 }
 
 #[derive(Default)]
@@ -15,6 +16,7 @@ pub struct Service {
     pub lb: Option<Arc<dyn LoadBalancer + Send + Sync>>,
     pub auth_required: Option<bool>,
     pub connect_timeout: Option<u64>,
+    pub resource: Option<String>,
     pub routes: Option<HashMap<String, matchit::Router<RouteNode>>>,
 }
 

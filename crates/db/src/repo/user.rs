@@ -11,7 +11,8 @@ impl UserRepository {
 
     pub async fn create(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user: User,
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
@@ -34,28 +35,30 @@ impl UserRepository {
         Ok(row)
     }
 
-    // pub async fn search(
-    //     &self,
-    //     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
-    //     query: &str,
-    // ) -> Result<Vec<User>> {
-    //     let rows = sqlx::query_as::<_, User>(
-    //         "
-    //         SELECT * FROM users
-    //         WHERE email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR nickname ILIKE $1
-    //         ORDER BY created_at DESC
-    //     ",
-    //     )
-    //     .bind(format!("%{}%", query))
-    //     .fetch_all(&mut **tx)
-    //     .await?;
+    pub async fn search(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        query: &str,
+    ) -> Result<Vec<User>> {
+        let rows = sqlx::query_as::<_, User>(
+            "
+            SELECT * FROM users
+            WHERE email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR nickname ILIKE $1
+            ORDER BY created_at DESC
+        ",
+        )
+        .bind(format!("%{}%", query))
+        .fetch_all(&mut **tx)
+        .await?;
 
-    //     Ok(rows)
-    // }
+        Ok(rows)
+    }
 
     pub async fn get_by_username(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         username: &str,
     ) -> Result<Option<User>> {
         let row = sqlx::query_as::<_, User>(
@@ -72,7 +75,8 @@ impl UserRepository {
 
     pub async fn update(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         user: User,
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(

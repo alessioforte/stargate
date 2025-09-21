@@ -383,8 +383,8 @@ fn demonstrate_device_policies(engine: &PolicyEngine) -> Result<(), Box<dyn std:
     for (description, device_type, app_version, rooted) in device_scenarios {
         let context = ContextBuilder::new()
             .device_type(device_type)
-            .custom("device.app_version", Value::Float(app_version))
-            .custom("device.rooted", Value::Boolean(rooted))
+            .add("device.app_version", Value::Float(app_version))
+            .add("device.rooted", Value::Boolean(rooted))
             .build();
 
         let read_access =

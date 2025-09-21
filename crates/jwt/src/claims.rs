@@ -21,6 +21,7 @@ pub struct Claims {
     pub azp: Option<String>,          // authorized party
     pub sid: Option<String>,          // session ID
     pub scope: Option<String>,        // scope
+    pub role: Option<String>,         // role
 }
 
 impl Default for Claims {
@@ -45,6 +46,7 @@ impl Default for Claims {
             azp: None,
             sid: None,
             scope: None,
+            role: None,
         }
     }
 }
@@ -102,6 +104,26 @@ impl Claims {
 
     pub fn sid(mut self, sid: String) -> Self {
         self.sid = Some(sid);
+        self
+    }
+
+    pub fn role(mut self, role: String) -> Self {
+        self.role = Some(role);
+        self
+    }
+
+    pub fn jti(mut self, jti: String) -> Self {
+        self.jti = Some(jti);
+        self
+    }
+
+    pub fn aud(mut self, aud: String) -> Self {
+        self.aud = Some(aud);
+        self
+    }
+
+    pub fn typ(mut self, typ: String) -> Self {
+        self.typ = Some(typ);
         self
     }
 }

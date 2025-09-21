@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Stargate API Gateway and IAM"
 readme = "README.md"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 
 [profile.dev]

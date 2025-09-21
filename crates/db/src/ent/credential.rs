@@ -12,7 +12,6 @@ impl CredentialType {
     pub fn as_str(&self) -> &str {
         match self {
             CredentialType::Password => "password",
-            // CredentialType::ApiKey => "api_key",
             CredentialType::Oauth => "oauth",
         }
     }

@@ -37,7 +37,7 @@ Where:
 
 **Logical Operators:**
 - `AND` - Logical and (higher precedence)
-- `OR` - Logical or (lower precedence)  
+- `OR` - Logical or (lower precedence)
 - `NOT` - Logical not (highest precedence)
 
 ### Supported Value Types
@@ -52,7 +52,7 @@ Where:
 Resources can specify specific actions using the syntax `"resource:ACTION"`:
 
 - `READ` - Read access
-- `WRITE` - Write access  
+- `WRITE` - Write access
 - `DELETE` - Delete access
 - `CREATE` - Create access
 - `UPDATE` - Update access
@@ -69,27 +69,27 @@ use ace::{PolicyEngine, context_with, Value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = PolicyEngine::new();
-    
+
     // Define policies as comments
     let policies = r#"
         // ALLOW user FOR "dashboard" WHEN user.role == "admin";
         // ALLOW user FOR "reports" WHEN user.role == "admin" OR user.role == "analyst";
         // DENY user FOR "admin_panel" WHEN user.suspended == true;
     "#;
-    
+
     // Parse the policies
     engine.parse_file(policies)?;
-    
+
     // Create context for evaluation
     let context = context_with(vec![
         ("user.role", Value::String("admin".to_string())),
         ("user.suspended", Value::Boolean(false)),
     ]);
-    
+
     // Evaluate access
     let allowed = engine.evaluate("user", "dashboard", &context);
     println!("Access allowed: {}", allowed); // true
-    
+
     Ok(())
 }
 ```
@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // ALLOW user FOR "database:WRITE" WHEN user.role == "admin" AND user.mfa_enabled == true;
 // DENY user FOR "database:DELETE" WHEN user.probation == true;
 
-// Time and location-based policies  
+// Time and location-based policies
 // ALLOW user FOR "after_hours_access" WHEN time.of_day == "night" AND user.on_call == true;
 // DENY user FOR "office_resources" WHEN location != "office" AND NOT user.vpn_connected == true;
 ```
@@ -144,9 +144,9 @@ println!("API access allowed: {}", allowed); // true
 
 // Evaluate with specific resource action
 let write_allowed = engine.evaluate_with_action(
-    "user", 
-    "database", 
-    &ResourceAction::Write, 
+    "user",
+    "database",
+    &ResourceAction::Write,
     &context
 );
 ```
@@ -220,8 +220,8 @@ let context = ContextBuilder::new()
     .time_of_day("business_hours")
     .device_type("desktop")
     .security_level(4)
-    .custom("user.mfa_enabled", Value::Boolean(true))
-    .custom("user.clearance", Value::String("top_secret".to_string()))
+    .add("user.mfa_enabled", Value::Boolean(true))
+    .add("user.clearance", Value::String("top_secret".to_string()))
     .build();
 
 let allowed = engine.evaluate("user", "classified_data", &context);

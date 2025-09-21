@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct QueryCode {
     pub code: String,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AuthResponse {

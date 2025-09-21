@@ -1,6 +1,6 @@
 use crate::ent::{Subject, SubjectType};
 use anyhow::Result;
-use sqlx::types::JsonValue;
+use serde_json::Value as JsonValue;
 
 #[derive(Clone)]
 pub struct SubjectRepository {}
@@ -12,7 +12,8 @@ impl SubjectRepository {
 
     pub async fn create(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         sub_type: SubjectType,
         sub_id: &str,
         attrs: Option<JsonValue>,
@@ -37,7 +38,8 @@ impl SubjectRepository {
 
     pub async fn get_by_id(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         id: &str,
     ) -> Result<Option<Subject>> {
         let row = sqlx::query_as::<_, Subject>(
@@ -54,7 +56,8 @@ impl SubjectRepository {
 
     pub async fn get_by_sub_id(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         sub_id: &str,
     ) -> Result<Option<Subject>> {
         let row = sqlx::query_as::<_, Subject>(
@@ -71,17 +74,19 @@ impl SubjectRepository {
 
     pub async fn update_attrs(
         &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        sub_id: &str,
         attrs: JsonValue,
     ) -> Result<Subject> {
+        let attrs_str = serde_json::to_string(&attrs)?;
         let row = sqlx::query_as::<_, Subject>(
             "
-            UPDATE subjects SET attrs = $1 WHERE id = $2 RETURNING *
+            UPDATE subjects SET attrs = $1 WHERE sub_id = $2 RETURNING *
         ",
         )
-        .bind(attrs)
-        .bind(id)
+        .bind(attrs_str)
+        .bind(sub_id)
         .fetch_one(&mut **tx)
         .await?;
 

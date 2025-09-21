@@ -248,15 +248,15 @@ fn demonstrate_context_builder(engine: &PolicyEngine) -> Result<(), Box<dyn std:
     let mobile_user_context = ContextBuilder::new()
         .user_role("customer")
         .device_type("mobile")
-        .custom("device.secure", Value::Boolean(true))
-        .custom("device.biometric_enabled", Value::Boolean(true))
+        .add("device.secure", Value::Boolean(true))
+        .add("device.biometric_enabled", Value::Boolean(true))
         .build();
 
     let unsecure_mobile_context = ContextBuilder::new()
         .user_role("customer")
         .device_type("mobile")
-        .custom("device.secure", Value::Boolean(true))
-        .custom("device.biometric_enabled", Value::Boolean(false))
+        .add("device.secure", Value::Boolean(true))
+        .add("device.biometric_enabled", Value::Boolean(false))
         .build();
 
     println!("Mobile Banking Access Tests:");
@@ -303,19 +303,19 @@ fn demonstrate_context_builder(engine: &PolicyEngine) -> Result<(), Box<dyn std:
     let business_hours_context = ContextBuilder::new()
         .user_role("employee")
         .time_of_day("day")
-        .custom("user.on_call", Value::Boolean(false))
+        .add("user.on_call", Value::Boolean(false))
         .build();
 
     let night_on_call_context = ContextBuilder::new()
         .user_role("employee")
         .time_of_day("night")
-        .custom("user.on_call", Value::Boolean(true))
+        .add("user.on_call", Value::Boolean(true))
         .build();
 
     let night_not_on_call_context = ContextBuilder::new()
         .user_role("employee")
         .time_of_day("night")
-        .custom("user.on_call", Value::Boolean(false))
+        .add("user.on_call", Value::Boolean(false))
         .build();
 
     println!("\nTime-Based Access Tests:");

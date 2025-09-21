@@ -19,6 +19,14 @@ Actix Web is a powerful, pragmatic, and extremely fast web framework for Rust.
 ## Features
 
 - Fast and efficient HTTP server
+- User authentication and authorization
+- JWT token generation and validation
+- Role-based access control (RBAC)
+- Attribute-based access control (ABAC)
+- Policy-based access control (PBAC)
+- Password hashing and validation
+- Email verification and password reset
+- Database integration with PostgreSQL and SQLite
 
 ## Installation
 
@@ -43,21 +51,21 @@ The following environment variables can be set to configure the application in t
 - `PORT`: The port on which the server will run. Default is `5050`.
 - `RUST_LOG`: The log level for the application..
 - `API_BASE_PATH`: The base path for the API.
-- `COOKIE_BASED_SESSION`: Enable cookie-based session. Default is `false`.
 - `JWT_ALGORITHM`: The algorithm for the JWT token. Default is `HS256`.
 - `JWT_SECRET`: The secret for the JWT token.
+- `JWT_ISSUER`: The issuer for the JWT token. Default is `stargate`.
+
 - `JWT_PUBLIC_KEY`: The public key for the JWT token in a PEM format.
 - `JWT_PRIVATE_KEY`: The private key for the JWT token in a PEM format.
 - `JWT_PRIVATE_KEY_PATH`: The path to the private key for the JWT token.
 - `JWT_PUBLIC_KEY_PATH`: The path to the public key for the JWT token.
-- `JWT_ACCESS_EXPIRATION_MINUTES`: The expiration time for the access token. Default is `60`.
-- `JWT_REFRESH_EXPIRATION_DAYS`: The expiration time for the refresh token. Default is `1`.
+- `JWT_ACCESS_EXP`: The expiration time for the access token. Default is `1h`.
+- `JWT_REFRESH_EXP`: The expiration time for the refresh token. Default is `1d`.
 
-- `SURREALDB_ENDPOINT`: The endpoint for the SurrealDB. By default is a RocksDB database which persists data on the filesystem that is located at `.flows/flows.db`.
-- `SURREALDB_USERNAME`: The username for the SurrealDB.
-- `SURREALDB_PASSWORD`: The password for the SurrealDB.
-- `SURREALDB_NAMESPACE`: The namespace for the SurrealDB. Default is `sensoworks`.
-- `SURREALDB_DATABASE`: The database for the SurrealDB. Default is `flows`.
+- `POSTGRES_ENDPOINT`: The endpoint for the PostgreSQL database.
+- `POSTGRES_USERNAME`: The username for the PostgreSQL database.
+- `POSTGRES_PASSWORD`: The password for the PostgreSQL database.
+- `POSTGRES_DATABASE`: The database name for the PostgreSQL database.
 
 ## Usage
 
@@ -98,9 +106,8 @@ Replace `VERSION` with the version of the image.
 - [x] Load Balancer - Implement Round Robin, Least Connections, IP Hash, URL Hash
 - [x] Sqlite - Implement SQLite as a database option
 - [x] PostgreSQL - Implement PostgreSQL as a database option
-- [ ] SurrealDB - Implement SurrealDB as a database option
 - [x] Redis or Memory - Implement Redis as a cache option
-- [ ] API Keys - Generate, Revoke, List
+- [x] API Keys - Generate, Revoke, List
 - [ ] Rate Limiting Global and Per User
 - [ ] Realms - Implement multiple realms
 - [ ] Send SMS
@@ -108,10 +115,9 @@ Replace `VERSION` with the version of the image.
 - [ ] MFA (Multi-Factor Authentication)
 
 ACCESS CONTROL
-- [ ] Implement Role-Based Access Control (RBAC)
-- [ ] Implement Attribute-Based Access Control (ABAC)
-- [ ] Implement Policy-Based Access Control (PBAC)
-- [ ] Implement Rule-Based Access Control (RBAC)
+- [x] Implement Role-Based Access Control (RBAC)
+- [x] Implement Attribute-Based Access Control (ABAC)
+- [x] Implement Policy-Based Access Control (PBAC)
 
 OAUTH2 PROVIDERS
 - [x] oAuth Github
@@ -151,10 +157,8 @@ DOCUMENTATION
 - [ ] Implement OpenAPI
 
 MONITORING
-- [ ] Implement Health Check
 - [ ] Implement Metrics
 - [ ] Implement Tracing
-- [ ] Implement Logging
 - [ ] Implement Alerting
 
 - [ ] ? Time-based One-Time Password (TOTP) - Authenticator App

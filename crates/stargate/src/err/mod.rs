@@ -27,6 +27,8 @@ pub enum HttpError {
     #[error("{0}")]
     Unauthorized(String),
     #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
     BadRequest(String),
     #[error("{0}")]
     InternalServerError(String),
@@ -48,6 +50,7 @@ impl ErrorCode for HttpError {
             HttpError::Payload(e) => e.error_code(),
             HttpError::Db(_) => Code::SurrealDBError,
             HttpError::Unauthorized(_) => Code::Unauthorized,
+            HttpError::Forbidden(_) => Code::Forbidden,
             HttpError::InternalServerError(_) => Code::InternalServerError,
             HttpError::NotFound(_) => Code::NotFound,
             HttpError::Conflict(_) => Code::Conflict,

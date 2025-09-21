@@ -14,6 +14,7 @@ pub struct QueryCode {
     pub code: String,
     // pub state: String,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AuthResponse {

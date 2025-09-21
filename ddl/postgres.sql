@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS "credentials" (
     "value" TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS "service_accounts" (
+    "id" TEXT PRIMARY KEY,
+    "name" VARCHAR(100) NOT NULL UNIQUE,
+    "description" TEXT,
+);
+
 CREATE TABLE IF NOT EXISTS "actions" (
     "id" TEXT PRIMARY KEY,
     "type" VARCHAR(50) NOT NULL,
@@ -27,7 +33,8 @@ CREATE TABLE IF NOT EXISTS "actions" (
 
 CREATE TABLE IF NOT EXISTS "api_keys" (
     "id" TEXT PRIMARY KEY,
-    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "owner" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "owner_type" VARCHAR(50) NOT NULL,
     "key_hash" TEXT NOT NULL UNIQUE,
     "label" VARCHAR(100) NOT NULL,
     "revoked" BOOLEAN NOT NULL DEFAULT FALSE,
@@ -39,6 +46,16 @@ CREATE TABLE IF NOT EXISTS "subjects" (
     "type" VARCHAR(50) NOT NULL,
     "sub_id" TEXT NOT NULL,
     "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS "audits" (
+    "id" TEXT PRIMARY KEY,
+    "timestamp" bigint NOT NULL,
+    "entity_type" VARCHAR(50) NOT NULL,
+    "entity_id" TEXT NOT NULL,
+    "action" VARCHAR(50) NOT NULL,
+    "performed_by" TEXT,
+    "details" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 -- Create indexes for performance optimization
