@@ -4,7 +4,7 @@ pub mod logout;
 pub mod profile;
 pub mod refresh_token;
 
-use actix_web::{web, Scope};
+use actix_web::{Scope, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -20,12 +20,6 @@ pub fn routes() -> Scope {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RefreshTokenRequestBody {
     refresh_token: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct ChangePasswordRequestBody {
-    token: String,
-    password: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

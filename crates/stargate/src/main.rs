@@ -2,11 +2,9 @@ mod act;
 mod err;
 mod etc;
 mod gtw;
-mod mid;
 mod rts;
 
-use actix_governor::{Governor, GovernorConfigBuilder};
-use actix_web::{middleware, middleware::TrailingSlash, web::to, App, HttpServer};
+use actix_web::{App, HttpServer, middleware, middleware::TrailingSlash, web::to};
 use dotenvy::dotenv;
 use std::env;
 
@@ -27,33 +25,26 @@ async fn main() -> std::io::Result<()> {
     log::info!("Version: {}", version);
     log::info!("Starting server on port {}", port);
 
-    etc::store::init();
     etc::jwt::init();
     etc::db::init().await;
-    let data = etc::gate::init();
+    let store = etc::store::init();
+    let tls = etc::tls::builder();
+    let data_gate = etc::gate::init();
+    let limiter = etc::lim::init(store.clone());
 
     // create super admin user
     act::create_super_admin().await;
 
-    // rate limiter middleware
-    let governor_config = GovernorConfigBuilder::default()
-        .seconds_per_request(2)
-        .burst_size(32)
-        .finish()
-        .unwrap();
-
-    let tls = etc::tls::builder();
-
     HttpServer::new(move || {
         App::new()
-            .app_data(data.clone())
+            .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
+            .wrap(middleware::Logger::default())
+            .wrap(etc::cors::configure())
+            .app_data(data_gate.clone())
+            .app_data(limiter.clone())
             .configure(etc::cfg::app_data)
             .configure(rts::configure)
             .default_service(to(gtw::handler))
-            .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
-            .wrap(middleware::Logger::default())
-            .wrap(Governor::new(&governor_config))
-            .wrap(etc::cors::configure())
     })
     .bind_openssl(format!("0.0.0.0:{}", port), tls)?
     .run()

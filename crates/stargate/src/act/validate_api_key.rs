@@ -36,7 +36,8 @@ pub async fn validate_api_key(key: &str) -> Option<db::ent::Subject> {
 
         // store the subject in the session store
         if let Some(subject) = subject {
-            let ttl = api_key.exp.map(|exp| exp as u64);
+            // let ttl = api_key.exp.map(|exp| exp as u64);
+            let ttl = Some(3600);
             store.set(&hash_key, &subject, ttl).await;
             return Some(subject);
         }

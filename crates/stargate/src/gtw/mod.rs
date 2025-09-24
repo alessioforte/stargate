@@ -1,38 +1,54 @@
 mod http;
 mod ws;
 
+use std::net::IpAddr;
+
 use crate::act::{access_control, validate_api_key};
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
-use actix_web::{web::Payload, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, web::Payload};
 use gate::Gate;
 use store::Store;
 
 pub async fn handler(
     gate: actix_web::web::Data<Gate>,
+    limiter: actix_web::web::Data<etc::lim::RateLimiter>,
     req: HttpRequest,
     stream: Payload,
 ) -> Result<HttpResponse, ErrorResponse> {
     let path = req.uri().path();
     let query = req.query_string();
     let method = req.method().clone();
-    let client_ip = req.peer_addr().map(|addr| addr.ip());
+    let client_ip = req.get_client_ip();
+
+    // FIXME: handle the case where client_ip is None more gracefully
+    let ip = client_ip.unwrap_or(IpAddr::from([127, 0, 0, 1]));
+
+    // Apply rate limiting
+    let decision = limiter.check_rate_limit_ip(ip).await.map_err(|e| {
+        log::error!("Rate limiting error: {}", e);
+        ErrorResponse::from(HttpError::InternalServerError(
+            "Internal server error".to_string(),
+        ))
+    })?;
+
+    if !decision.allowed {
+        return Err(ErrorResponse::from(HttpError::TooManyRequests(
+            "Too many requests".to_string(),
+        )));
+    }
 
     let services = gate.services.read().await;
+    let protocol = req.get_protocol();
 
-    // Check if the request is for a WebSocket connection
-    let header = req.headers().get("Upgrade");
-    let is_ws = header.is_some() && header.unwrap() == "websocket";
-    let protocol = if is_ws { "ws" } else { "http" };
-
-    let service = match services.search(protocol, path) {
+    let service = match services.search(&protocol, path) {
         Some(service) => service,
         None => {
             return Err(ErrorResponse::from(HttpError::NotFound(
                 "Service not found".to_string(),
-            )))
+            )));
         }
     };
 
@@ -90,7 +106,7 @@ pub async fn handler(
             None => {
                 return Err(ErrorResponse::from(HttpError::Unauthorized(
                     "Invalid session".to_string(),
-                )))
+                )));
             }
         }
     };
@@ -124,7 +140,7 @@ pub async fn handler(
     }
 
     // If the request is for a WebSocket connection, handle it accordingly
-    if is_ws {
+    if protocol == "ws" {
         return ws::handler(&req, stream, &uri, service).await;
     }
 

@@ -1,0 +1,26 @@
+[package]
+name = "rl"
+description = "Rate limiting library for Stargate API Gateway"
+readme = "README.md"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+actix-web = "4.11.0"
+futures-util = "0.3.30"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+tokio = { version = "1.42.0", features = ["time", "sync"] }
+log = "0.4.27"
+thiserror = "2.0.12"
+async-trait = "0.1.83"
+url = "2.5.4"
+chrono = { version = "0.4", features = ["serde"] }
+store = { path = "../store" }
+
+[dev-dependencies]
+tokio-test = "0.4.4"
+tokio = { version = "1.42.0", features = ["time", "sync", "macros", "rt", "rt-multi-thread"] }
+store = { path = "../store", features = ["memory"] }

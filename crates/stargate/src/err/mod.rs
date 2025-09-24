@@ -38,6 +38,8 @@ pub enum HttpError {
     Conflict(String),
     #[error("{0}")]
     BadGateway(String),
+    #[error("{0}")]
+    TooManyRequests(String),
 }
 
 impl ErrorCode for HttpError {
@@ -56,6 +58,7 @@ impl ErrorCode for HttpError {
             HttpError::Conflict(_) => Code::Conflict,
             HttpError::BadRequest(_) => Code::BadRequest,
             HttpError::BadGateway(_) => Code::BadGateway,
+            HttpError::TooManyRequests(_) => Code::TooManyRequests,
         }
     }
 }

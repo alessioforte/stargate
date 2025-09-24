@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use actix_web::{HttpRequest, http::header::Header, web::Query};
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 
@@ -6,6 +8,8 @@ const KEYS: &[&str] = &["token", "access_token", "jwt"];
 pub trait RequestExt {
     fn get_token(&self) -> String;
     fn get_api_key(&self) -> String;
+    fn get_protocol(&self) -> String;
+    fn get_client_ip(&self) -> Option<IpAddr>;
 }
 
 impl RequestExt for HttpRequest {
@@ -46,7 +50,36 @@ impl RequestExt for HttpRequest {
             None => "".to_string(),
         };
 
-        println!("API Key: {}", api_key);
         api_key
+    }
+
+    fn get_protocol(&self) -> String {
+        let header = self.headers().get("Upgrade");
+        let is_ws = header.is_some() && header.unwrap() == "websocket";
+        if is_ws {
+            "ws".to_string()
+        } else {
+            "http".to_string()
+        }
+    }
+
+    fn get_client_ip(&self) -> Option<IpAddr> {
+        // Check X-Forwarded-For header first
+        if let Some(forwarded_for) = self.headers().get("X-Forwarded-For") {
+            if let Ok(forwarded_for_str) = forwarded_for.to_str() {
+                if let Some(first_ip) = forwarded_for_str.split(',').next() {
+                    if let Ok(ip) = first_ip.trim().parse() {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+
+        // Fallback to peer address
+        if let Some(peer_addr) = self.peer_addr() {
+            return Some(peer_addr.ip());
+        }
+
+        None
     }
 }

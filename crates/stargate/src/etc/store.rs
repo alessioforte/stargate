@@ -9,9 +9,10 @@ mod memory {
         store
     });
 
-    pub fn init() {
+    pub fn init() -> &'static MemoryStore {
         Lazy::force(&STORE);
         log::info!("Memory store initialized");
+        &STORE
     }
 
     pub fn use_store() -> &'static MemoryStore {
@@ -30,9 +31,10 @@ mod redis {
         RedisStore::new(&url).expect("Failed to create Redis store")
     });
 
-    pub fn init() {
+    pub fn init() -> &'static RedisStore {
         Lazy::force(&STORE);
         log::info!("Redis store initialized");
+        &STORE
     }
 
     pub fn use_store() -> &'static RedisStore {

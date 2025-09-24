@@ -7,13 +7,12 @@ pub fn access_control(
     resource: &str,
 ) -> bool {
     // TODO: remove this log
-    policy_engine.get_policies().iter().for_each(|policy| {
-        log::info!("Policy: {:?}", policy);
-    });
+    // policy_engine.get_policies().iter().for_each(|policy| {
+    //     log::info!("Policy: {:?}", policy);
+    // });
 
     let sub_type = subject.sub_type.clone();
     let context = create_context(subject);
-    println!("Context: {:?}", context);
     let mut resource_action = None;
     let resource_name = if let Some(colon_pos) = resource.find(':') {
         let (res_name, action_str) = resource.split_at(colon_pos);

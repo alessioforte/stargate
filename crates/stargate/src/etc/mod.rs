@@ -5,6 +5,7 @@ pub mod db;
 pub mod ext;
 pub mod gate;
 pub mod jwt;
+pub mod lim;
 pub mod logo;
 pub mod msg;
 pub mod store;

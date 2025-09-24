@@ -6,6 +6,7 @@ pub mod oauth;
 pub mod signup;
 // pub mod well_known;
 
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::web::ServiceConfig;
 use utoipa::OpenApi;
 
@@ -29,9 +30,20 @@ use utoipa::OpenApi;
 pub struct ApiDoc;
 
 pub fn configure(cfg: &mut ServiceConfig) {
-    let base_path = std::env::var("API_BASE_PATH").unwrap_or_else(|_| "".to_string());
+    let mut base_path = std::env::var("API_BASE_PATH").unwrap_or_else(|_| "".to_string());
+    if base_path.is_empty() || base_path == "/" {
+        base_path = "/stargate".to_string();
+    }
+
+    let config = GovernorConfigBuilder::default()
+        .seconds_per_request(4)
+        .burst_size(2)
+        .finish()
+        .unwrap();
+
     cfg.service(
         actix_web::web::scope(&base_path)
+            .wrap(Governor::new(&config))
             .service(health::get)
             .service(docs::routes())
             .service(account::routes())
