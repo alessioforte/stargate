@@ -1,3 +1,4 @@
+#![cfg(feature = "memory")]
 use store::{MemoryStore, Store};
 use tokio::time::{Duration, sleep};
 

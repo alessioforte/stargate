@@ -139,13 +139,12 @@ PROTOCOLS
 - [ ] ? SSE (Server-Sent Events)
 
 ADMIN FEATURES
-- [x] √ Init basic configuration
-- [x] √ Save configuration to a file
-- [x] √ Download configuration in json or yaml format
-- [x] √ Load configuration from a file at runtime
+- [x] Init basic configuration
+- [x] Save configuration to a file
+- [x] Download configuration in json or yaml format
+- [x] Load configuration from a file at runtime
 
 TESTING AND PERFORMANCE
-- [x] √ Implement Trie Data Structure for fast path search
 - [ ] Unit Testing
 - [ ] Integration Testing
 - [ ] Performance Testing

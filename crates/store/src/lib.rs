@@ -107,6 +107,8 @@ pub use store::Store;
 mod memory;
 #[cfg(feature = "memory")]
 pub use memory::MemoryStore;
+#[cfg(feature = "memory")]
+pub use memory::print_stats;
 
 #[cfg(feature = "redis")]
 mod redis;

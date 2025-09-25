@@ -10,7 +10,7 @@ use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
 use actix_web::{HttpRequest, HttpResponse, web::Payload};
 use gate::Gate;
-use store::Store;
+use store::{Store, print_stats};
 
 pub async fn handler(
     gate: actix_web::web::Data<Gate>,
@@ -78,6 +78,7 @@ pub async fn handler(
         }
     }
 
+    let store = etc::store::use_store();
     let api_key = req.get_api_key();
     let api_key_sub = validate_api_key(&api_key).await;
 
@@ -99,7 +100,6 @@ pub async fn handler(
 
         let claims = claims.unwrap();
         let sid = claims.sid.clone().unwrap_or_default();
-        let store = etc::store::use_store();
         let session = store.get::<db::ent::Subject>(&sid).await;
         match session {
             Some(sub) => sub,
