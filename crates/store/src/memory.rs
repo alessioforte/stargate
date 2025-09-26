@@ -1,3 +1,4 @@
+use crate::error::{StoreError, StoreResult};
 use crate::store::Store;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -265,7 +266,14 @@ impl MemoryStore {
 
 #[async_trait]
 impl Store for MemoryStore {
-    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(&self, key: &str) -> Option<T> {
+    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(
+        &self,
+        key: &str,
+    ) -> StoreResult<Option<T>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
         self.stats.gets.fetch_add(1, Ordering::Relaxed);
 
         if let Some(entry) = self.data.get(key) {
@@ -273,37 +281,72 @@ impl Store for MemoryStore {
                 StoreValue::Simple(value, exp) => {
                     if self.is_expired(exp) {
                         self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                        return None;
+                        return Ok(None);
                     }
                     self.stats.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    serde_json::from_str(value).ok()
+                    let deserialized = serde_json::from_str(value).map_err(|e| {
+                        StoreError::DeserializationFailed(format!(
+                            "Failed to deserialize value for key '{}': {}",
+                            key, e
+                        ))
+                    })?;
+                    Ok(Some(deserialized))
                 }
                 StoreValue::Hash(_, _) => {
                     self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                    None // Cannot get hash as simple value
+                    Ok(None) // Cannot get hash as simple value
                 }
             }
         } else {
             self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-            None
+            Ok(None)
         }
     }
 
-    async fn set<T: serde::Serialize + Send + Sync>(&self, key: &str, value: &T, ttl: Option<u64>) {
+    async fn set<T: serde::Serialize + Send + Sync>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<()> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
-        let data = serde_json::to_string(value).expect("Failed to serialize value");
+        let data = serde_json::to_string(value).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize value for key '{}': {}",
+                key, e
+            ))
+        })?;
         let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
         self.data
             .insert(key.to_string(), StoreValue::Simple(data, exp));
+        Ok(())
     }
 
-    async fn delete(&self, key: &str) -> bool {
+    async fn delete(&self, key: &str) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
         self.stats.deletes.fetch_add(1, Ordering::Relaxed);
-        self.data.remove(key).is_some()
+        Ok(self.data.remove(key).is_some())
     }
 
-    async fn exists(&self, key: &str) -> bool {
+    async fn exists(&self, key: &str) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
         self.stats.exists_checks.fetch_add(1, Ordering::Relaxed);
 
         if let Some(entry) = self.data.get(key) {
@@ -311,9 +354,9 @@ impl Store for MemoryStore {
                 StoreValue::Simple(_, exp) => exp,
                 StoreValue::Hash(_, exp) => exp,
             };
-            !self.is_expired(exp)
+            Ok(!self.is_expired(exp))
         } else {
-            false
+            Ok(false)
         }
     }
 
@@ -323,30 +366,49 @@ impl Store for MemoryStore {
         field: &str,
         value: &T,
         ttl: Option<u64>,
-    ) -> bool {
+    ) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if field.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "Field cannot be empty".to_string(),
+            ));
+        }
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
         self.stats.hash_sets.fetch_add(1, Ordering::Relaxed);
 
-        let serialized_value = serde_json::to_string(value).expect("Failed to serialize value");
+        let serialized_value = serde_json::to_string(value).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize value for key '{}', field '{}': {}",
+                key, field, e
+            ))
+        })?;
         let field_exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
 
         if let Some(mut entry) = self.data.get_mut(key) {
             match entry.value_mut() {
                 StoreValue::Hash(hash_map, exp) => {
                     if self.is_expired(exp) {
-                        return false;
+                        return Ok(false);
                     }
                     let is_new = !hash_map.contains_key(field);
                     hash_map.insert(field.to_string(), (serialized_value, field_exp));
-                    is_new
+                    Ok(is_new)
                 }
-                StoreValue::Simple(_, _) => false, // Cannot set hash field on simple value
+                StoreValue::Simple(_, _) => Ok(false), // Cannot set hash field on simple value
             }
         } else {
             let hash_map = DashMap::new();
             hash_map.insert(field.to_string(), (serialized_value, field_exp));
             self.data
                 .insert(key.to_string(), StoreValue::Hash(hash_map, None));
-            true
+            Ok(true)
         }
     }
 
@@ -354,7 +416,16 @@ impl Store for MemoryStore {
         &self,
         key: &str,
         field: &str,
-    ) -> Option<T> {
+    ) -> StoreResult<Option<T>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if field.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "Field cannot be empty".to_string(),
+            ));
+        }
+
         self.stats.hash_gets.fetch_add(1, Ordering::Relaxed);
 
         if let Some(entry) = self.data.get(key) {
@@ -362,57 +433,77 @@ impl Store for MemoryStore {
                 StoreValue::Hash(hash_map, exp) => {
                     if self.is_expired(exp) {
                         self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                        return None;
+                        return Ok(None);
                     }
                     if let Some(value_entry) = hash_map.get(field) {
                         let (value, field_exp) = value_entry.value();
                         if self.is_expired(field_exp) {
                             self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                            return None;
+                            return Ok(None);
                         }
                         self.stats.cache_hits.fetch_add(1, Ordering::Relaxed);
-                        serde_json::from_str(value).ok()
+                        let deserialized = serde_json::from_str(value).map_err(|e| {
+                            StoreError::DeserializationFailed(format!(
+                                "Failed to deserialize hash field '{}' from key '{}': {}",
+                                field, key, e
+                            ))
+                        })?;
+                        Ok(Some(deserialized))
                     } else {
                         self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                        None
+                        Ok(None)
                     }
                 }
                 StoreValue::Simple(_, _) => {
                     self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                    None // Cannot get hash field from simple value
+                    Ok(None) // Cannot get hash field from simple value
                 }
             }
         } else {
             self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-            None
+            Ok(None)
         }
     }
 
-    async fn hdel(&self, key: &str, field: &str) -> bool {
+    async fn hdel(&self, key: &str, field: &str) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if field.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "Field cannot be empty".to_string(),
+            ));
+        }
+
         self.stats.hash_deletes.fetch_add(1, Ordering::Relaxed);
 
         if let Some(mut entry) = self.data.get_mut(key) {
             match entry.value_mut() {
                 StoreValue::Hash(hash_map, exp) => {
                     if self.is_expired(exp) {
-                        return false;
+                        return Ok(false);
                     }
-                    hash_map.remove(field).is_some()
+                    Ok(hash_map.remove(field).is_some())
                 }
-                StoreValue::Simple(_, _) => false, // Cannot delete hash field from simple value
+                StoreValue::Simple(_, _) => Ok(false), // Cannot delete hash field from simple value
             }
         } else {
-            false
+            Ok(false)
         }
     }
 
     async fn hgetall<T: serde::de::DeserializeOwned + Send + Sync>(
         &self,
         key: &str,
-    ) -> HashMap<String, T> {
+    ) -> StoreResult<HashMap<String, T>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
         self.stats.hash_getalls.fetch_add(1, Ordering::Relaxed);
 
         let mut result = HashMap::new();
+        let mut deserialization_errors = Vec::new();
 
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
@@ -421,8 +512,14 @@ impl Store for MemoryStore {
                         for item in hash_map.iter() {
                             let (field, (value, field_exp)) = item.pair();
                             if !self.is_expired(field_exp) {
-                                if let Ok(deserialized) = serde_json::from_str::<T>(value) {
-                                    result.insert(field.clone(), deserialized);
+                                match serde_json::from_str::<T>(value) {
+                                    Ok(deserialized) => {
+                                        result.insert(field.clone(), deserialized);
+                                    }
+                                    Err(e) => {
+                                        deserialization_errors
+                                            .push(format!("field '{}': {}", field, e));
+                                    }
                                 }
                             }
                         }
@@ -432,10 +529,27 @@ impl Store for MemoryStore {
             }
         }
 
-        result
+        if !deserialization_errors.is_empty() {
+            return Err(StoreError::DeserializationFailed(format!(
+                "Failed to deserialize some fields from key '{}': {}",
+                key,
+                deserialization_errors.join(", ")
+            )));
+        }
+
+        Ok(result)
     }
 
-    async fn hexists(&self, key: &str, field: &str) -> bool {
+    async fn hexists(&self, key: &str, field: &str) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if field.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "Field cannot be empty".to_string(),
+            ));
+        }
+
         self.stats
             .hash_exists_checks
             .fetch_add(1, Ordering::Relaxed);
@@ -444,23 +558,27 @@ impl Store for MemoryStore {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
                     if self.is_expired(exp) {
-                        return false;
+                        return Ok(false);
                     }
                     if let Some(entry) = hash_map.get(field) {
                         let (_, field_exp) = entry.value();
-                        !self.is_expired(field_exp)
+                        Ok(!self.is_expired(field_exp))
                     } else {
-                        false
+                        Ok(false)
                     }
                 }
-                StoreValue::Simple(_, _) => false, // Cannot check hash field existence in simple value
+                StoreValue::Simple(_, _) => Ok(false), // Cannot check hash field existence in simple value
             }
         } else {
-            false
+            Ok(false)
         }
     }
 
-    async fn hkeys(&self, key: &str) -> Vec<String> {
+    async fn hkeys(&self, key: &str) -> StoreResult<Vec<String>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
         self.stats.hash_keys_calls.fetch_add(1, Ordering::Relaxed);
 
         let mut keys = Vec::new();
@@ -481,23 +599,37 @@ impl Store for MemoryStore {
             }
         }
 
-        keys
+        Ok(keys)
     }
 
-    async fn hvals<T: serde::de::DeserializeOwned + Send + Sync>(&self, key: &str) -> Vec<T> {
+    async fn hvals<T: serde::de::DeserializeOwned + Send + Sync>(
+        &self,
+        key: &str,
+    ) -> StoreResult<Vec<T>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
         self.stats.hash_vals_calls.fetch_add(1, Ordering::Relaxed);
 
         let mut values = Vec::new();
+        let mut deserialization_errors = Vec::new();
 
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
                     if !self.is_expired(exp) {
-                        for item in hash_map.iter() {
+                        for (index, item) in hash_map.iter().enumerate() {
                             let (_, (value, field_exp)) = item.pair();
                             if !self.is_expired(field_exp) {
-                                if let Ok(deserialized) = serde_json::from_str::<T>(value) {
-                                    values.push(deserialized);
+                                match serde_json::from_str::<T>(value) {
+                                    Ok(deserialized) => {
+                                        values.push(deserialized);
+                                    }
+                                    Err(e) => {
+                                        deserialization_errors
+                                            .push(format!("index {}: {}", index, e));
+                                    }
                                 }
                             }
                         }
@@ -507,31 +639,43 @@ impl Store for MemoryStore {
             }
         }
 
-        values
+        if !deserialization_errors.is_empty() {
+            return Err(StoreError::DeserializationFailed(format!(
+                "Failed to deserialize some values from key '{}': {}",
+                key,
+                deserialization_errors.join(", ")
+            )));
+        }
+
+        Ok(values)
     }
 
-    async fn hlen(&self, key: &str) -> usize {
+    async fn hlen(&self, key: &str) -> StoreResult<usize> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
         self.stats.hash_len_calls.fetch_add(1, Ordering::Relaxed);
 
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
                     if self.is_expired(exp) {
-                        0
+                        Ok(0)
                     } else {
-                        hash_map
+                        Ok(hash_map
                             .iter()
                             .filter(|item| {
                                 let (_, (_, field_exp)) = item.pair();
                                 !self.is_expired(field_exp)
                             })
-                            .count()
+                            .count())
                     }
                 }
-                StoreValue::Simple(_, _) => 0, // Cannot get hash length from simple value
+                StoreValue::Simple(_, _) => Ok(0), // Cannot get hash length from simple value
             }
         } else {
-            0
+            Ok(0)
         }
     }
 }

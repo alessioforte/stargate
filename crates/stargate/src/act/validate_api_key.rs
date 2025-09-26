@@ -1,11 +1,15 @@
 use crate::etc;
-use db::Transaction;
+use db::{Transaction, ent::Subject};
 use store::Store;
 
-pub async fn validate_api_key(key: &str) -> Option<db::ent::Subject> {
+// TODO: maybe should return a Result instead of an Option
+pub async fn validate_api_key(key: &str) -> Option<Subject> {
     let hash_key = apiks::hash_api_key(key);
     let store = etc::store::use_store();
-    let session = store.get::<db::ent::Subject>(&hash_key).await;
+    let session = store
+        .get::<db::ent::Subject>(&hash_key)
+        .await
+        .unwrap_or(None);
 
     if let Some(subject) = session {
         return Some(subject);
@@ -38,7 +42,13 @@ pub async fn validate_api_key(key: &str) -> Option<db::ent::Subject> {
         if let Some(subject) = subject {
             // let ttl = api_key.exp.map(|exp| exp as u64);
             let ttl = Some(3600);
-            store.set(&hash_key, &subject, ttl).await;
+            match store.set(&hash_key, &subject, ttl).await {
+                Ok(_) => (),
+                Err(e) => {
+                    log::error!("Failed to store subject in the session store: {}", e);
+                }
+            }
+
             return Some(subject);
         }
     }

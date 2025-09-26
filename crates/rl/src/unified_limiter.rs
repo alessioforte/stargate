@@ -1,5 +1,4 @@
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::config::{GlobalRateLimitSettings, RateLimitConfig};
@@ -117,7 +116,7 @@ where
     {
         let store_clone = store.clone();
         let rate_limiter = RateLimiter::new(store, settings);
-        let quota_manager = QuotaManager::new(Arc::new(store_clone));
+        let quota_manager = QuotaManager::new(store_clone);
         Self::new(rate_limiter, quota_manager)
     }
 

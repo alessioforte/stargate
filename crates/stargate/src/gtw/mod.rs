@@ -10,7 +10,7 @@ use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
 use actix_web::{HttpRequest, HttpResponse, web::Payload};
 use gate::Gate;
-use store::{Store, print_stats};
+use store::Store;
 
 pub async fn handler(
     gate: actix_web::web::Data<Gate>,
@@ -100,7 +100,7 @@ pub async fn handler(
 
         let claims = claims.unwrap();
         let sid = claims.sid.clone().unwrap_or_default();
-        let session = store.get::<db::ent::Subject>(&sid).await;
+        let session = store.get::<db::ent::Subject>(&sid).await.unwrap_or(None);
         match session {
             Some(sub) => sub,
             None => {

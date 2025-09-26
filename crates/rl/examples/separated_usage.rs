@@ -96,7 +96,7 @@ async fn quota_manager_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("========================");
 
     let store = MemoryStore::new();
-    let quota_manager = QuotaManager::new(std::sync::Arc::new(store));
+    let quota_manager = QuotaManager::new(store);
 
     // Configure quotas: 1000 requests/day, 30000 requests/month
     let config = RateLimitConfig::default().with_quota(QuotaConfig::both(1000, 30000));

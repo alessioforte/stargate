@@ -76,7 +76,8 @@ pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, 
 
     let response = serde_json::json!({
         "id": api_key.id,
-        "user_id": api_key.owner,
+        "owner": api_key.owner,
+        "owner_type": api_key.owner_type,
         "label": api_key.label,
         "exp": payload.exp,
         "attrs": payload.attrs,

@@ -3,9 +3,9 @@ use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
-use actix_web::{cookie::Cookie, post, web, HttpResponse};
-use db::ent::CredentialType;
+use actix_web::{HttpResponse, cookie::Cookie, post, web};
 use db::Transaction;
+use db::ent::CredentialType;
 use pw::Hash;
 use store::Store;
 
@@ -28,7 +28,7 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
@@ -94,7 +94,15 @@ pub async fn handler(
     let access_exp = jwt_config().access_exp;
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
-    store.set(&sid, &subject, Some(sttl)).await;
+
+    match store.set(&sid, &subject, Some(sttl)).await {
+        Ok(_) => {}
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    }
 
     let cookie = Cookie::build("jwt", access_token.clone())
         .path("/")

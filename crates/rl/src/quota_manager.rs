@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
 use crate::config::RateLimitConfig;
 use crate::error::{RateLimitError, Result};
 use crate::quota::{QuotaDecision, QuotaStatus, QuotaTracker};
+use crate::storage::Storage;
 use store::Store;
 
 /// Manager for handling quota tracking and enforcement
@@ -10,7 +9,7 @@ pub struct QuotaManager<S>
 where
     S: Store,
 {
-    store: Arc<S>,
+    store: Storage<S>,
 }
 
 impl<S> QuotaManager<S>
@@ -18,8 +17,10 @@ where
     S: Store,
 {
     /// Create a new quota manager with the given store
-    pub fn new(store: Arc<S>) -> Self {
-        Self { store }
+    pub fn new(store: S) -> Self {
+        Self {
+            store: Storage::new(store),
+        }
     }
 
     /// Check quota status for a given key
@@ -47,19 +48,18 @@ where
 
         // Get or create quota tracker
         let quota_key = format!("quota:{}", key);
-        let mut tracker =
-            if let Some(tracker) = self.store.hget::<QuotaTracker>("quotas", &quota_key).await {
-                tracker
-            } else {
-                let quota_config = config.quota().unwrap().clone();
-                QuotaTracker::new(quota_config)?
-            };
+        let mut tracker = if let Some(tracker) = self.store.get_quota(&quota_key).await? {
+            tracker
+        } else {
+            let quota_config = config.quota().unwrap().clone();
+            QuotaTracker::new(quota_config)?
+        };
 
         // Check quota
         let decision = tracker.check_quota(count);
 
         // Save updated tracker
-        self.store.hset("quotas", &quota_key, &tracker, None).await;
+        self.store.set_quota(&quota_key, tracker).await?;
 
         Ok(decision)
     }
@@ -71,9 +71,9 @@ where
         }
 
         let quota_key = format!("quota:{}", key);
-        if let Some(mut tracker) = self.store.hget::<QuotaTracker>("quotas", &quota_key).await {
+        if let Some(mut tracker) = self.store.get_quota(&quota_key).await? {
             tracker.consume_quota(count);
-            self.store.hset("quotas", &quota_key, &tracker, None).await;
+            self.store.set_quota(&quota_key, tracker).await?;
         }
 
         Ok(())
@@ -86,7 +86,7 @@ where
         }
 
         let quota_key = format!("quota:{}", key);
-        if let Some(mut tracker) = self.store.hget::<QuotaTracker>("quotas", &quota_key).await {
+        if let Some(mut tracker) = self.store.get_quota(&quota_key).await? {
             Ok(Some(tracker.get_status()))
         } else {
             Ok(None)
@@ -100,7 +100,7 @@ where
         }
 
         let quota_key = format!("quota:{}", key);
-        let deleted = self.store.hdel("quotas", &quota_key).await;
+        let deleted = self.store.remove_quota(&quota_key).await?;
         Ok(deleted)
     }
 
@@ -111,10 +111,10 @@ where
         }
 
         let quota_key = format!("quota:{}", key);
-        if let Some(mut tracker) = self.store.hget::<QuotaTracker>("quotas", &quota_key).await {
+        if let Some(mut tracker) = self.store.get_quota(&quota_key).await? {
             if let Some(quota_config) = config.quota() {
                 tracker.update_config(quota_config.clone())?;
-                self.store.hset("quotas", &quota_key, &tracker, None).await;
+                self.store.set_quota(&quota_key, tracker).await?;
             }
         }
 
@@ -164,8 +164,8 @@ where
         Ok(results)
     }
 
-    /// Get the store reference
-    pub fn store(&self) -> &Arc<S> {
+    /// Get the storage reference
+    pub fn store(&self) -> &Storage<S> {
         &self.store
     }
 
@@ -184,7 +184,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            store: Arc::clone(&self.store),
+            store: self.store.clone(),
         }
     }
 }
@@ -194,7 +194,7 @@ pub struct QuotaManagerBuilder<S>
 where
     S: Store,
 {
-    store: Option<Arc<S>>,
+    store: Option<S>,
 }
 
 impl<S> QuotaManagerBuilder<S>
@@ -207,14 +207,14 @@ where
     }
 
     /// Set the storage backend
-    pub fn store(mut self, store: Arc<S>) -> Self {
+    pub fn store(mut self, store: S) -> Self {
         self.store = Some(store);
         self
     }
 
     /// Set the storage backend from a non-Arc store
     pub fn with_store(mut self, store: S) -> Self {
-        self.store = Some(Arc::new(store));
+        self.store = Some(store);
         self
     }
 
@@ -242,12 +242,11 @@ mod tests {
     use super::*;
     use crate::config::RateLimitConfig;
     use crate::quota::QuotaConfig;
-    use std::sync::Arc;
     use store::MemoryStore;
 
     #[tokio::test]
     async fn test_quota_manager_basic_functionality() {
-        let store = Arc::new(MemoryStore::new());
+        let store = MemoryStore::new();
         let manager = QuotaManager::new(store);
 
         // Create config with daily quota
@@ -268,7 +267,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quota_manager_no_quota_config() {
-        let store = Arc::new(MemoryStore::new());
+        let store = MemoryStore::new();
         let manager = QuotaManager::new(store);
 
         // Config without quota should allow all requests
@@ -286,7 +285,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quota_manager_check_and_consume() {
-        let store = Arc::new(MemoryStore::new());
+        let store = MemoryStore::new();
         let manager = QuotaManager::new(store);
 
         let config = RateLimitConfig::default().with_quota(QuotaConfig::daily_only(50));
@@ -306,7 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quota_manager_exceed_limit() {
-        let store = Arc::new(MemoryStore::new());
+        let store = MemoryStore::new();
         let manager = QuotaManager::new(store);
 
         let config = RateLimitConfig::default().with_quota(QuotaConfig::daily_only(50));
@@ -328,7 +327,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quota_manager_reset() {
-        let store = Arc::new(MemoryStore::new());
+        let store = MemoryStore::new();
         let manager = QuotaManager::new(store);
 
         let config = RateLimitConfig::default().with_quota(QuotaConfig::daily_only(100));
@@ -350,7 +349,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quota_manager_multiple_operations() {
-        let store = Arc::new(MemoryStore::new());
+        let store = MemoryStore::new();
         let manager = QuotaManager::new(store);
 
         let config = RateLimitConfig::default().with_quota(QuotaConfig::daily_only(100));
@@ -403,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quota_manager_invalid_key() {
-        let store = Arc::new(MemoryStore::new());
+        let store = MemoryStore::new();
         let manager = QuotaManager::new(store);
 
         let config = RateLimitConfig::default().with_quota(QuotaConfig::daily_only(100));

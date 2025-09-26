@@ -1,0 +1,167 @@
+//! Error types for store operations
+
+use std::fmt;
+
+/// Result type for store operations
+pub type StoreResult<T> = Result<T, StoreError>;
+
+/// Errors that can occur during store operations
+#[derive(Debug, Clone)]
+pub enum StoreError {
+    /// Connection failed to the underlying storage backend
+    ConnectionFailed(String),
+
+    /// Serialization failed when converting data to storage format
+    SerializationFailed(String),
+
+    /// Deserialization failed when converting data from storage format
+    DeserializationFailed(String),
+
+    /// Redis-specific operation failed
+    RedisFailed(String),
+
+    /// Key or field not found
+    NotFound(String),
+
+    /// Invalid input provided (e.g., empty key, invalid TTL)
+    InvalidInput(String),
+
+    /// Storage backend is unavailable or unreachable
+    BackendUnavailable(String),
+
+    /// Operation timed out
+    Timeout(String),
+
+    /// Generic I/O error occurred
+    IoError(String),
+
+    /// Unknown error occurred
+    Unknown(String),
+}
+
+impl fmt::Display for StoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StoreError::ConnectionFailed(msg) => write!(f, "Connection failed: {}", msg),
+            StoreError::SerializationFailed(msg) => write!(f, "Serialization failed: {}", msg),
+            StoreError::DeserializationFailed(msg) => write!(f, "Deserialization failed: {}", msg),
+            StoreError::RedisFailed(msg) => write!(f, "Redis operation failed: {}", msg),
+            StoreError::NotFound(resource) => write!(f, "Not found: {}", resource),
+            StoreError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
+            StoreError::BackendUnavailable(msg) => write!(f, "Backend unavailable: {}", msg),
+            StoreError::Timeout(msg) => write!(f, "Operation timed out: {}", msg),
+            StoreError::IoError(msg) => write!(f, "I/O error: {}", msg),
+            StoreError::Unknown(msg) => write!(f, "Unknown error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for StoreError {}
+
+#[cfg(feature = "redis")]
+impl From<redis::RedisError> for StoreError {
+    fn from(error: redis::RedisError) -> Self {
+        match error.kind() {
+            redis::ErrorKind::InvalidClientConfig => {
+                StoreError::ConnectionFailed(format!("Invalid Redis configuration: {}", error))
+            }
+            redis::ErrorKind::AuthenticationFailed => {
+                StoreError::ConnectionFailed(format!("Redis authentication failed: {}", error))
+            }
+            redis::ErrorKind::TypeError => StoreError::InvalidInput(format!(
+                "Invalid data type for Redis operation: {}",
+                error
+            )),
+            redis::ErrorKind::ExecAbortError => {
+                StoreError::RedisFailed(format!("Redis transaction aborted: {}", error))
+            }
+            redis::ErrorKind::BusyLoadingError => {
+                StoreError::BackendUnavailable(format!("Redis is loading data: {}", error))
+            }
+
+            redis::ErrorKind::NoScriptError => {
+                StoreError::RedisFailed(format!("Redis script error: {}", error))
+            }
+            redis::ErrorKind::ReadOnly => {
+                StoreError::RedisFailed(format!("Redis is in read-only mode: {}", error))
+            }
+            redis::ErrorKind::ClusterDown => {
+                StoreError::BackendUnavailable(format!("Redis cluster is down: {}", error))
+            }
+            redis::ErrorKind::CrossSlot => {
+                StoreError::RedisFailed(format!("Redis cross-slot operation: {}", error))
+            }
+            redis::ErrorKind::TryAgain => {
+                StoreError::Timeout(format!("Redis operation should be retried: {}", error))
+            }
+            redis::ErrorKind::Ask => {
+                StoreError::RedisFailed(format!("Redis cluster redirection: {}", error))
+            }
+            redis::ErrorKind::IoError => StoreError::IoError(format!("Redis I/O error: {}", error)),
+            redis::ErrorKind::ExtensionError => {
+                StoreError::RedisFailed(format!("Redis extension error: {}", error))
+            }
+            redis::ErrorKind::ClientError => {
+                StoreError::RedisFailed(format!("Redis client error: {}", error))
+            }
+            _ => StoreError::RedisFailed(format!("Redis error: {}", error)),
+        }
+    }
+}
+
+impl From<serde_json::Error> for StoreError {
+    fn from(error: serde_json::Error) -> Self {
+        if error.is_data() {
+            StoreError::DeserializationFailed(format!("Invalid JSON data: {}", error))
+        } else if error.is_syntax() {
+            StoreError::DeserializationFailed(format!("JSON syntax error: {}", error))
+        } else if error.is_eof() {
+            StoreError::DeserializationFailed(format!("Unexpected end of JSON: {}", error))
+        } else {
+            StoreError::SerializationFailed(format!("JSON processing error: {}", error))
+        }
+    }
+}
+
+impl From<std::io::Error> for StoreError {
+    fn from(error: std::io::Error) -> Self {
+        StoreError::IoError(format!("I/O operation failed: {}", error))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display() {
+        let error = StoreError::ConnectionFailed("test connection".to_string());
+        assert_eq!(error.to_string(), "Connection failed: test connection");
+
+        let error = StoreError::NotFound("key123".to_string());
+        assert_eq!(error.to_string(), "Not found: key123");
+    }
+
+    #[cfg(feature = "redis")]
+    #[test]
+    fn test_redis_error_conversion() {
+        let redis_error = redis::RedisError::from((redis::ErrorKind::IoError, "connection lost"));
+        let store_error = StoreError::from(redis_error);
+
+        match store_error {
+            StoreError::IoError(msg) => assert!(msg.contains("connection lost")),
+            _ => panic!("Expected IoError variant"),
+        }
+    }
+
+    #[test]
+    fn test_serde_error_conversion() {
+        let json_error = serde_json::from_str::<i32>("invalid json").unwrap_err();
+        let store_error = StoreError::from(json_error);
+
+        match store_error {
+            StoreError::DeserializationFailed(_) => {}
+            _ => panic!("Expected DeserializationFailed variant"),
+        }
+    }
+}

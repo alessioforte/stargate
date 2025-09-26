@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{web::Payload, HttpRequest, HttpResponse, HttpResponseBuilder};
+use actix_web::{HttpRequest, HttpResponse, HttpResponseBuilder, web::Payload};
 use awc::Client;
 use gate::Service;
 
@@ -20,10 +20,12 @@ pub async fn handler(
 
     let request = client.request_from(uri, req.head()).no_decompress();
 
-    let response = request
-        .send_stream(stream)
-        .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+    let response = request.send_stream(stream).await.map_err(|e| {
+        log::error!("Error forwarding request to backend: {}", e);
+        ErrorResponse::from(HttpError::BadGateway(
+            "Failed to connect to backend service".to_string(),
+        ))
+    })?;
 
     let status = response.status();
     let mut builder = HttpResponseBuilder::new(status);

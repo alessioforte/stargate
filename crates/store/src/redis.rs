@@ -1,3 +1,4 @@
+use crate::error::{StoreError, StoreResult};
 use crate::store::Store;
 use async_trait::async_trait;
 use redis::{Commands, HashFieldExpirationOptions, SetExpiry};
@@ -16,44 +17,136 @@ impl Clone for RedisStore {
 }
 
 impl RedisStore {
-    pub fn new(url: &str) -> redis::RedisResult<Self> {
-        let client = redis::Client::open(url)?;
+    pub fn new(url: &str) -> StoreResult<Self> {
+        if url.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "Redis URL cannot be empty".to_string(),
+            ));
+        }
+
+        let client = redis::Client::open(url).map_err(|e| {
+            StoreError::ConnectionFailed(format!("Failed to create Redis client: {}", e))
+        })?;
+
+        println!("Connected to Redis at {}", url);
         Ok(Self { client })
+    }
+
+    /// Get a Redis connection with proper error handling
+    async fn get_connection(&self) -> StoreResult<redis::Connection> {
+        self.client.get_connection().map_err(|e| {
+            StoreError::ConnectionFailed(format!("Failed to get Redis connection: {}", e))
+        })
+    }
+
+    /// Validate key is not empty
+    fn validate_key(&self, key: &str) -> StoreResult<()> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        Ok(())
+    }
+
+    /// Validate field is not empty
+    fn validate_field(&self, field: &str) -> StoreResult<()> {
+        if field.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "Field cannot be empty".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Store for RedisStore {
-    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(&self, key: &str) -> Option<T> {
-        let mut con = self.client.get_connection().unwrap();
-        let value: String = match con.get(key) {
-            Ok(v) => v,
-            Err(e) => {
-                println!("Failed to get key {}: {}", key, e);
-                return None;
-            }
-        };
-        serde_json::from_str(&value).ok()
-    }
+    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(
+        &self,
+        key: &str,
+    ) -> StoreResult<Option<T>> {
+        self.validate_key(key)?;
 
-    async fn set<T: serde::Serialize + Send + Sync>(&self, key: &str, value: &T, ttl: Option<u64>) {
-        let mut con = self.client.get_connection().unwrap();
-        let serialized_value = serde_json::to_string(value).expect("Failed to serialize value");
-        if let Some(ttl) = ttl {
-            con.set_ex(key, serialized_value, ttl).unwrap()
-        } else {
-            let _: () = con.set(key, serialized_value).unwrap();
+        let mut con = self.get_connection().await?;
+
+        let value: Option<String> = con
+            .get(key)
+            .map_err(|e| StoreError::RedisFailed(format!("Failed to get key '{}': {}", key, e)))?;
+
+        match value {
+            Some(v) => {
+                let deserialized = serde_json::from_str::<T>(&v).map_err(|e| {
+                    StoreError::DeserializationFailed(format!(
+                        "Failed to deserialize value for key '{}': {}",
+                        key, e
+                    ))
+                })?;
+                Ok(Some(deserialized))
+            }
+            None => Ok(None),
         }
     }
 
-    async fn delete(&self, key: &str) -> bool {
-        let mut con = self.client.get_connection().unwrap();
-        con.del(key).unwrap()
+    async fn set<T: serde::Serialize + Send + Sync>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<()> {
+        self.validate_key(key)?;
+
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let mut con = self.get_connection().await?;
+
+        let serialized_value = serde_json::to_string(value).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize value for key '{}': {}",
+                key, e
+            ))
+        })?;
+
+        if let Some(ttl) = ttl {
+            let _: () = con.set_ex(key, serialized_value, ttl).map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to set key '{}' with TTL {}: {}",
+                    key, ttl, e
+                ))
+            })?;
+        } else {
+            let _: () = con.set(key, serialized_value).map_err(|e| {
+                StoreError::RedisFailed(format!("Failed to set key '{}': {}", key, e))
+            })?;
+        }
+
+        Ok(())
     }
 
-    async fn exists(&self, key: &str) -> bool {
-        let mut con = self.client.get_connection().unwrap();
-        con.exists(key).unwrap()
+    async fn delete(&self, key: &str) -> StoreResult<bool> {
+        self.validate_key(key)?;
+
+        let mut con = self.get_connection().await?;
+
+        let result: i32 = con.del(key).map_err(|e| {
+            StoreError::RedisFailed(format!("Failed to delete key '{}': {}", key, e))
+        })?;
+
+        Ok(result > 0)
+    }
+
+    async fn exists(&self, key: &str) -> StoreResult<bool> {
+        self.validate_key(key)?;
+
+        let mut con = self.get_connection().await?;
+
+        let result: bool = con.exists(key).map_err(|e| {
+            StoreError::RedisFailed(format!("Failed to check existence of key '{}': {}", key, e))
+        })?;
+
+        Ok(result)
     }
 
     async fn hset<T: serde::Serialize + Send + Sync>(
@@ -62,83 +155,211 @@ impl Store for RedisStore {
         field: &str,
         value: &T,
         ttl: Option<u64>,
-    ) -> bool {
-        let mut con = self.client.get_connection().unwrap();
-        let serialized_value = serde_json::to_string(value).expect("Failed to serialize value");
+    ) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        self.validate_field(field)?;
+
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let mut con = self.get_connection().await?;
+
+        let serialized_value = serde_json::to_string(value).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize value for key '{}', field '{}': {}",
+                key, field, e
+            ))
+        })?;
 
         let hash_field_expiration_options = if let Some(ttl) = ttl {
             HashFieldExpirationOptions::default().set_expiration(SetExpiry::EX(ttl))
         } else {
             HashFieldExpirationOptions::default()
         };
+
         let fields_values = vec![(field, &serialized_value)];
         let result: i32 = con
             .hset_ex(key, &hash_field_expiration_options, &fields_values)
-            .unwrap();
+            .map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to set hash field '{}' in key '{}': {}",
+                    field, key, e
+                ))
+            })?;
 
-        result == 1
+        Ok(result == 1)
     }
 
     async fn hget<T: serde::de::DeserializeOwned + Send + Sync>(
         &self,
         key: &str,
         field: &str,
-    ) -> Option<T> {
-        let mut con = self.client.get_connection().unwrap();
-        let value: Option<String> = con.hget(key, field).ok()?;
-        value.and_then(|v| serde_json::from_str(&v).ok())
+    ) -> StoreResult<Option<T>> {
+        self.validate_key(key)?;
+        self.validate_field(field)?;
+
+        let mut con = self.get_connection().await?;
+
+        let value: Option<String> = con.hget(key, field).map_err(|e| {
+            StoreError::RedisFailed(format!(
+                "Failed to get hash field '{}' from key '{}': {}",
+                field, key, e
+            ))
+        })?;
+
+        match value {
+            Some(v) => {
+                let deserialized = serde_json::from_str::<T>(&v).map_err(|e| {
+                    StoreError::DeserializationFailed(format!(
+                        "Failed to deserialize hash field '{}' from key '{}': {}",
+                        field, key, e
+                    ))
+                })?;
+                Ok(Some(deserialized))
+            }
+            None => Ok(None),
+        }
     }
 
-    async fn hdel(&self, key: &str, field: &str) -> bool {
-        let mut con = self.client.get_connection().unwrap();
-        let result: i32 = con.hdel(key, field).unwrap();
-        result > 0
+    async fn hdel(&self, key: &str, field: &str) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        self.validate_field(field)?;
+
+        let mut con = self.get_connection().await?;
+
+        let result: i32 = con.hdel(key, field).map_err(|e| {
+            StoreError::RedisFailed(format!(
+                "Failed to delete hash field '{}' from key '{}': {}",
+                field, key, e
+            ))
+        })?;
+
+        Ok(result > 0)
     }
 
     async fn hgetall<T: serde::de::DeserializeOwned + Send + Sync>(
         &self,
         key: &str,
-    ) -> HashMap<String, T> {
-        let mut con = self.client.get_connection().unwrap();
-        let hash_data: HashMap<String, String> = con.hgetall(key).unwrap_or_default();
+    ) -> StoreResult<HashMap<String, T>> {
+        self.validate_key(key)?;
+
+        let mut con = self.get_connection().await?;
+
+        let hash_data: HashMap<String, String> = con.hgetall(key).map_err(|e| {
+            StoreError::RedisFailed(format!(
+                "Failed to get all hash fields from key '{}': {}",
+                key, e
+            ))
+        })?;
+
         let mut result = HashMap::new();
+        let mut deserialization_errors = Vec::new();
 
         for (field, value) in hash_data {
-            if let Ok(deserialized) = serde_json::from_str::<T>(&value) {
-                result.insert(field, deserialized);
+            match serde_json::from_str::<T>(&value) {
+                Ok(deserialized) => {
+                    result.insert(field, deserialized);
+                }
+                Err(e) => {
+                    deserialization_errors.push(format!("field '{}': {}", field, e));
+                }
             }
         }
 
-        result
+        if !deserialization_errors.is_empty() {
+            return Err(StoreError::DeserializationFailed(format!(
+                "Failed to deserialize some fields from key '{}': {}",
+                key,
+                deserialization_errors.join(", ")
+            )));
+        }
+
+        Ok(result)
     }
 
-    async fn hexists(&self, key: &str, field: &str) -> bool {
-        let mut con = self.client.get_connection().unwrap();
-        con.hexists(key, field).unwrap_or(false)
+    async fn hexists(&self, key: &str, field: &str) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        self.validate_field(field)?;
+
+        let mut con = self.get_connection().await?;
+
+        let result: bool = con.hexists(key, field).map_err(|e| {
+            StoreError::RedisFailed(format!(
+                "Failed to check existence of hash field '{}' in key '{}': {}",
+                field, key, e
+            ))
+        })?;
+
+        Ok(result)
     }
 
-    async fn hkeys(&self, key: &str) -> Vec<String> {
-        let mut con = self.client.get_connection().unwrap();
-        con.hkeys(key).unwrap_or_default()
+    async fn hkeys(&self, key: &str) -> StoreResult<Vec<String>> {
+        self.validate_key(key)?;
+
+        let mut con = self.get_connection().await?;
+
+        let result: Vec<String> = con.hkeys(key).map_err(|e| {
+            StoreError::RedisFailed(format!("Failed to get hash keys from key '{}': {}", key, e))
+        })?;
+
+        Ok(result)
     }
 
-    async fn hvals<T: serde::de::DeserializeOwned + Send + Sync>(&self, key: &str) -> Vec<T> {
-        let mut con = self.client.get_connection().unwrap();
-        let values: Vec<String> = con.hvals(key).unwrap_or_default();
+    async fn hvals<T: serde::de::DeserializeOwned + Send + Sync>(
+        &self,
+        key: &str,
+    ) -> StoreResult<Vec<T>> {
+        self.validate_key(key)?;
+
+        let mut con = self.get_connection().await?;
+
+        let values: Vec<String> = con.hvals(key).map_err(|e| {
+            StoreError::RedisFailed(format!(
+                "Failed to get hash values from key '{}': {}",
+                key, e
+            ))
+        })?;
+
         let mut result = Vec::new();
+        let mut deserialization_errors = Vec::new();
 
-        for value in values {
-            if let Ok(deserialized) = serde_json::from_str::<T>(&value) {
-                result.push(deserialized);
+        for (index, value) in values.iter().enumerate() {
+            match serde_json::from_str::<T>(value) {
+                Ok(deserialized) => {
+                    result.push(deserialized);
+                }
+                Err(e) => {
+                    deserialization_errors.push(format!("index {}: {}", index, e));
+                }
             }
         }
 
-        result
+        if !deserialization_errors.is_empty() {
+            return Err(StoreError::DeserializationFailed(format!(
+                "Failed to deserialize some values from key '{}': {}",
+                key,
+                deserialization_errors.join(", ")
+            )));
+        }
+
+        Ok(result)
     }
 
-    async fn hlen(&self, key: &str) -> usize {
-        let mut con = self.client.get_connection().unwrap();
-        let len: i32 = con.hlen(key).unwrap_or(0);
-        len as usize
+    async fn hlen(&self, key: &str) -> StoreResult<usize> {
+        self.validate_key(key)?;
+
+        let mut con = self.get_connection().await?;
+
+        let len: i32 = con.hlen(key).map_err(|e| {
+            StoreError::RedisFailed(format!(
+                "Failed to get hash length from key '{}': {}",
+                key, e
+            ))
+        })?;
+
+        Ok(len as usize)
     }
 }

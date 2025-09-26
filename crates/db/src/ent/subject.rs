@@ -54,6 +54,7 @@ pub struct Subject {
     pub sub_type: String,
     pub sub_id: String,
     pub attrs: JsonValue,
+    // pub limits: Option<Limits>,
 }
 
 impl Subject {
@@ -65,6 +66,7 @@ impl Subject {
             sub_type: sub_type.as_str().to_string(),
             sub_id,
             attrs: attrs.unwrap_or(JsonValue::Object(serde_json::Map::new())),
+            // limits: None,
         }
     }
 
@@ -78,4 +80,28 @@ impl Subject {
         self.attrs = attrs;
         Ok(self.attrs.clone())
     }
+}
+
+#[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize)]
+#[sqlx(type_name = "reset_period", rename_all = "lowercase")]
+pub enum ResetPeriod {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+    Never, // For lifetime quotas
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Quota {
+    pub limit: u64,
+    pub reset_period: ResetPeriod,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Limits {
+    pub request_per_second: u32,
+    pub burst_size: u32,
+    pub window_size: u64,
+    pub quotas: Option<Vec<Quota>>,
 }
