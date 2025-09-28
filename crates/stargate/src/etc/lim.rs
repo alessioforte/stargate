@@ -10,7 +10,6 @@ pub fn init(store: impl store::Store) -> Data<rl::RateLimiter<impl store::Store>
     let settings = rl::GlobalRateLimitSettings {
         enabled: true,
         default_config: rl::config::RateLimitConfig::new(1, 5, 60), // 100 req/sec, burst of 200
-        default_ip_config: rl::config::RateLimitConfig::new(1, 5, 60), // 10 req/sec, burst of 20
         ..Default::default()
     };
 

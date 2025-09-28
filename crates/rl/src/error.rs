@@ -139,77 +139,9 @@ impl RateLimitError {
 /// Result type for rate limiting operations
 pub type Result<T> = std::result::Result<T, RateLimitError>;
 
-/// Rate limit decision with additional metadata
-#[derive(Debug, Clone, PartialEq)]
-pub struct RateLimitDecision {
-    /// Whether the request is allowed
-    pub allowed: bool,
-
-    /// Remaining tokens in the bucket
-    pub remaining_tokens: f64,
-
-    /// Maximum tokens (burst size)
-    pub max_tokens: f64,
-
-    /// Estimated time until next token is available (in milliseconds)
-    pub retry_after_ms: Option<u64>,
-
-    /// The rate limit configuration used
-    pub config: crate::config::RateLimitConfig,
-}
-
-impl RateLimitDecision {
-    /// Create an allowed decision
-    pub fn allowed(
-        remaining_tokens: f64,
-        max_tokens: f64,
-        config: crate::config::RateLimitConfig,
-    ) -> Self {
-        Self {
-            allowed: true,
-            remaining_tokens,
-            max_tokens,
-            retry_after_ms: None,
-            config,
-        }
-    }
-
-    /// Create a denied decision
-    pub fn denied(
-        remaining_tokens: f64,
-        max_tokens: f64,
-        retry_after_ms: u64,
-        config: crate::config::RateLimitConfig,
-    ) -> Self {
-        Self {
-            allowed: false,
-            remaining_tokens,
-            max_tokens,
-            retry_after_ms: Some(retry_after_ms),
-            config,
-        }
-    }
-
-    /// Get retry after duration if available
-    pub fn retry_after_duration(&self) -> Option<std::time::Duration> {
-        self.retry_after_ms
-            .map(|ms| std::time::Duration::from_millis(ms))
-    }
-
-    /// Get the utilization percentage (0.0 to 1.0)
-    pub fn utilization(&self) -> f64 {
-        if self.max_tokens == 0.0 {
-            0.0
-        } else {
-            1.0 - (self.remaining_tokens / self.max_tokens)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::RateLimitConfig;
 
     #[test]
     fn test_error_creation() {
@@ -221,23 +153,5 @@ mod tests {
         let error = RateLimitError::invalid_config("invalid value");
         assert!(error.is_config_error());
         assert_eq!(error.category(), "invalid_config");
-    }
-
-    #[test]
-    fn test_rate_limit_decision() {
-        let config = RateLimitConfig::default();
-
-        let allowed = RateLimitDecision::allowed(15.0, 20.0, config.clone());
-        assert!(allowed.allowed);
-        assert_eq!(allowed.utilization(), 0.25);
-        assert!(allowed.retry_after_duration().is_none());
-
-        let denied = RateLimitDecision::denied(0.0, 20.0, 1000, config);
-        assert!(!denied.allowed);
-        assert_eq!(denied.utilization(), 1.0);
-        assert_eq!(
-            denied.retry_after_duration(),
-            Some(std::time::Duration::from_millis(1000))
-        );
     }
 }
