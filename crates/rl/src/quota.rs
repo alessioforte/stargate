@@ -3,128 +3,228 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{RateLimitError, Result};
 
-/// Quota configuration for daily and monthly limits
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct QuotaConfig {
-    /// Daily quota limit (optional)
-    pub daily_limit: Option<u64>,
-
-    /// Monthly quota limit (optional)
-    pub monthly_limit: Option<u64>,
+/// Reset period for quota limits
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum ResetPeriod {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+    Never,
 }
 
-impl Default for QuotaConfig {
-    fn default() -> Self {
-        Self {
-            daily_limit: None,
-            monthly_limit: None,
+impl ResetPeriod {
+    /// Calculate the start and end times for this reset period
+    pub fn period_bounds(&self, reference_time: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+        match self {
+            ResetPeriod::Daily => {
+                let start = reference_time
+                    .date_naive()
+                    .and_hms_opt(0, 0, 0)
+                    .map(|naive| Utc.from_utc_datetime(&naive))
+                    .unwrap_or(reference_time);
+                let end = start + chrono::Duration::days(1);
+                (start, end)
+            }
+            ResetPeriod::Weekly => {
+                let days_since_monday = reference_time.weekday().num_days_from_monday() as i64;
+                let start = (reference_time.date_naive()
+                    - chrono::Duration::days(days_since_monday))
+                .and_hms_opt(0, 0, 0)
+                .map(|naive| Utc.from_utc_datetime(&naive))
+                .unwrap_or(reference_time);
+                let end = start + chrono::Duration::weeks(1);
+                (start, end)
+            }
+            ResetPeriod::Monthly => {
+                let year = reference_time.year();
+                let month = reference_time.month();
+
+                let start = Utc
+                    .with_ymd_and_hms(year, month, 1, 0, 0, 0)
+                    .single()
+                    .unwrap_or(reference_time);
+
+                let end = if month == 12 {
+                    Utc.with_ymd_and_hms(year + 1, 1, 1, 0, 0, 0).single()
+                } else {
+                    Utc.with_ymd_and_hms(year, month + 1, 1, 0, 0, 0).single()
+                }
+                .unwrap_or(start + chrono::Duration::days(31));
+
+                (start, end)
+            }
+            ResetPeriod::Yearly => {
+                let year = reference_time.year();
+                let start = Utc
+                    .with_ymd_and_hms(year, 1, 1, 0, 0, 0)
+                    .single()
+                    .unwrap_or(reference_time);
+                let end = Utc
+                    .with_ymd_and_hms(year + 1, 1, 1, 0, 0, 0)
+                    .single()
+                    .unwrap_or(start + chrono::Duration::days(365));
+                (start, end)
+            }
+            ResetPeriod::Never => {
+                // For "Never" reset period, use epoch as start and far future as end
+                let start = DateTime::from_timestamp(0, 0).unwrap_or(reference_time);
+                let end = DateTime::from_timestamp(i64::MAX / 1000, 0)
+                    .unwrap_or(reference_time + chrono::Duration::days(365 * 100));
+                (start, end)
+            }
         }
     }
+
+    /// Check if a given time is within the current period defined by this reset period
+    pub fn is_current_period(
+        &self,
+        reference_time: DateTime<Utc>,
+        check_time: DateTime<Utc>,
+    ) -> bool {
+        let (start, end) = self.period_bounds(reference_time);
+        check_time >= start && check_time < end
+    }
+}
+
+/// Configuration containing multiple quotas
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuotaConfig {
+    pub quotas: std::collections::HashMap<ResetPeriod, u64>,
 }
 
 impl QuotaConfig {
-    /// Create a new quota configuration
-    pub fn new(daily_limit: Option<u64>, monthly_limit: Option<u64>) -> Self {
+    /// Create a new empty quota configuration
+    pub fn new() -> Self {
         Self {
-            daily_limit,
-            monthly_limit,
+            quotas: std::collections::HashMap::new(),
         }
     }
 
-    /// Create a quota configuration with only daily limit
+    /// Create an empty quota configuration
+    pub fn empty() -> Self {
+        Self::new()
+    }
+
+    // TODO: Remove these convenience methods if not needed -------------------
+    /// Create a configuration with daily quota only
     pub fn daily_only(limit: u64) -> Self {
-        Self {
-            daily_limit: Some(limit),
-            monthly_limit: None,
-        }
+        let mut quotas = std::collections::HashMap::new();
+        quotas.insert(ResetPeriod::Daily, limit);
+        Self { quotas }
     }
 
-    /// Create a quota configuration with only monthly limit
+    /// Create a configuration with monthly quota only
     pub fn monthly_only(limit: u64) -> Self {
-        Self {
-            daily_limit: None,
-            monthly_limit: Some(limit),
-        }
+        let mut quotas = std::collections::HashMap::new();
+        quotas.insert(ResetPeriod::Monthly, limit);
+        Self { quotas }
     }
 
-    /// Create a quota configuration with both daily and monthly limits
+    /// Create a configuration with both daily and monthly quotas
     pub fn both(daily_limit: u64, monthly_limit: u64) -> Self {
-        Self {
-            daily_limit: Some(daily_limit),
-            monthly_limit: Some(monthly_limit),
-        }
+        let mut quotas = std::collections::HashMap::new();
+        quotas.insert(ResetPeriod::Daily, daily_limit);
+        quotas.insert(ResetPeriod::Monthly, monthly_limit);
+        Self { quotas }
+    }
+    // ------------------------------------------------------------------------
+
+    /// Add a quota to this configuration
+    pub fn with_quota(mut self, period: ResetPeriod, limit: u64) -> Self {
+        self.quotas.insert(period, limit);
+        self
+    }
+
+    /// Add a daily quota
+    pub fn with_daily(self, limit: u64) -> Self {
+        self.with_quota(ResetPeriod::Daily, limit)
+    }
+
+    /// Add a weekly quota
+    pub fn with_weekly(self, limit: u64) -> Self {
+        self.with_quota(ResetPeriod::Weekly, limit)
+    }
+
+    /// Add a monthly quota
+    pub fn with_monthly(self, limit: u64) -> Self {
+        self.with_quota(ResetPeriod::Monthly, limit)
+    }
+
+    /// Add a yearly quota
+    pub fn with_yearly(self, limit: u64) -> Self {
+        self.with_quota(ResetPeriod::Yearly, limit)
+    }
+
+    /// Add a permanent quota (never resets)
+    pub fn with_permanent(self, limit: u64) -> Self {
+        self.with_quota(ResetPeriod::Never, limit)
     }
 
     /// Check if any quotas are configured
     pub fn has_quotas(&self) -> bool {
-        self.daily_limit.is_some() || self.monthly_limit.is_some()
+        !self.quotas.is_empty()
     }
 
     /// Validate the quota configuration
     pub fn validate(&self) -> Result<()> {
-        if let (Some(daily), Some(monthly)) = (self.daily_limit, self.monthly_limit) {
-            // Generally, monthly should be >= daily * 30, but we'll just warn if it's less than daily
-            if monthly < daily {
+        // Validate limits are positive
+        for &limit in self.quotas.values() {
+            if limit == 0 {
                 return Err(RateLimitError::invalid_config(
-                    "Monthly quota should not be less than daily quota",
+                    "Quota limit must be greater than 0",
                 ));
             }
         }
         Ok(())
     }
+
+    /// Get quota limit by reset period
+    pub fn get_limit(&self, period: &ResetPeriod) -> Option<u64> {
+        self.quotas.get(period).copied()
+    }
+
+    /// Get all quotas as a reference to the HashMap
+    pub fn get_quotas(&self) -> &std::collections::HashMap<ResetPeriod, u64> {
+        &self.quotas
+    }
 }
 
-/// Quota usage tracking for a specific time period
+impl Default for QuotaConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Usage tracking for a specific quota period
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotaUsage {
     /// Number of requests used in this period
     pub used: u64,
-
+    /// The reset period for this quota
+    pub reset_period: ResetPeriod,
+    /// The quota limit
+    pub limit: u64,
     /// Timestamp when this period started
     pub period_start: DateTime<Utc>,
-
     /// Timestamp when this period ends
     pub period_end: DateTime<Utc>,
+    /// Last time this usage was updated
+    pub last_updated: DateTime<Utc>,
 }
 
 impl QuotaUsage {
-    /// Create a new quota usage tracker for a daily period
-    pub fn new_daily(start_date: DateTime<Utc>) -> Self {
-        let period_start = start_date
-            .date_naive()
-            .and_hms_opt(0, 0, 0)
-            .map(|naive| Utc.from_utc_datetime(&naive))
-            .unwrap_or(start_date);
-        let period_end = period_start + chrono::Duration::days(1);
+    /// Create a new quota usage tracker
+    pub fn new(reset_period: ResetPeriod, limit: u64, reference_time: DateTime<Utc>) -> Self {
+        let (period_start, period_end) = reset_period.period_bounds(reference_time);
 
         Self {
             used: 0,
+            reset_period,
+            limit,
             period_start,
             period_end,
-        }
-    }
-
-    /// Create a new quota usage tracker for a monthly period
-    pub fn new_monthly(start_date: DateTime<Utc>) -> Self {
-        let year = start_date.year();
-        let month = start_date.month();
-
-        let period_start = Utc
-            .with_ymd_and_hms(year, month, 1, 0, 0, 0)
-            .single()
-            .unwrap_or(start_date);
-
-        let period_end = if month == 12 {
-            Utc.with_ymd_and_hms(year + 1, 1, 1, 0, 0, 0).single()
-        } else {
-            Utc.with_ymd_and_hms(year, month + 1, 1, 0, 0, 0).single()
-        }
-        .unwrap_or(period_start + chrono::Duration::days(31));
-
-        Self {
-            used: 0,
-            period_start,
-            period_end,
+            last_updated: reference_time,
         }
     }
 
@@ -141,14 +241,38 @@ impl QuotaUsage {
     /// Add usage to this period
     pub fn add_usage(&mut self, count: u64) {
         self.used += count;
+        self.last_updated = Utc::now();
     }
 
-    /// Reset usage for this period
-    pub fn reset(&mut self) {
+    /// Reset usage for this period and update period bounds
+    pub fn reset(&mut self, reference_time: DateTime<Utc>) {
+        let (period_start, period_end) = self.reset_period.period_bounds(reference_time);
         self.used = 0;
+        self.period_start = period_start;
+        self.period_end = period_end;
+        self.last_updated = reference_time;
     }
 
-    /// Get remaining time in this period
+    /// Get remaining quota in this period
+    pub fn remaining(&self) -> u64 {
+        self.limit.saturating_sub(self.used)
+    }
+
+    /// Check if quota is exhausted
+    pub fn is_exhausted(&self) -> bool {
+        self.used >= self.limit
+    }
+
+    /// Get utilization percentage (0.0 to 1.0)
+    pub fn utilization(&self) -> f64 {
+        if self.limit == 0 {
+            1.0
+        } else {
+            (self.used as f64) / (self.limit as f64)
+        }
+    }
+
+    /// Get time until reset
     pub fn time_until_reset(&self, now: DateTime<Utc>) -> chrono::Duration {
         if now >= self.period_end {
             chrono::Duration::zero()
@@ -161,15 +285,10 @@ impl QuotaUsage {
 /// Complete quota tracker for a key
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotaTracker {
-    /// Daily quota usage tracking
-    pub daily_usage: Option<QuotaUsage>,
-
-    /// Monthly quota usage tracking
-    pub monthly_usage: Option<QuotaUsage>,
-
+    /// Usage tracking for each configured quota
+    pub usage: std::collections::HashMap<ResetPeriod, QuotaUsage>,
     /// The quota configuration
     pub config: QuotaConfig,
-
     /// Last time this tracker was updated
     pub last_updated: DateTime<Utc>,
 }
@@ -180,55 +299,34 @@ impl QuotaTracker {
         config.validate()?;
 
         let now = Utc::now();
-        let daily_usage = if config.daily_limit.is_some() {
-            Some(QuotaUsage::new_daily(now))
-        } else {
-            None
-        };
+        let mut usage = std::collections::HashMap::new();
 
-        let monthly_usage = if config.monthly_limit.is_some() {
-            Some(QuotaUsage::new_monthly(now))
-        } else {
-            None
-        };
+        for (&period, &limit) in &config.quotas {
+            let quota_usage = QuotaUsage::new(period, limit, now);
+            usage.insert(period, quota_usage);
+        }
 
         Ok(Self {
-            daily_usage,
-            monthly_usage,
+            usage,
             config,
             last_updated: now,
         })
     }
 
-    /// Check if quota allows the given number of requests
+    /// Check quota without consuming it
     pub fn check_quota(&mut self, count: u64) -> QuotaDecision {
         let now = Utc::now();
         self.refresh_periods(now);
 
-        // Check daily quota
-        if let (Some(daily_usage), Some(daily_limit)) = (&self.daily_usage, self.config.daily_limit)
-        {
-            if daily_usage.used + count > daily_limit {
+        // Check all quotas
+        for usage in self.usage.values() {
+            if usage.used + count > usage.limit {
                 return QuotaDecision::denied(
-                    QuotaViolationType::Daily,
-                    daily_usage.used,
-                    daily_limit,
-                    daily_usage.time_until_reset(now),
-                    self.config.clone(),
-                );
-            }
-        }
-
-        // Check monthly quota
-        if let (Some(monthly_usage), Some(monthly_limit)) =
-            (&self.monthly_usage, self.config.monthly_limit)
-        {
-            if monthly_usage.used + count > monthly_limit {
-                return QuotaDecision::denied(
-                    QuotaViolationType::Monthly,
-                    monthly_usage.used,
-                    monthly_limit,
-                    monthly_usage.time_until_reset(now),
+                    QuotaViolationType::Quota(usage.reset_period),
+                    self.get_status(),
+                    usage.used,
+                    usage.limit,
+                    usage.time_until_reset(now),
                     self.config.clone(),
                 );
             }
@@ -237,190 +335,160 @@ impl QuotaTracker {
         QuotaDecision::allowed(self.get_status(), self.config.clone())
     }
 
-    /// Consume quota (after a successful quota check)
+    /// Consume quota (should only be called after a successful check)
     pub fn consume_quota(&mut self, count: u64) {
         let now = Utc::now();
         self.refresh_periods(now);
 
-        if let Some(daily_usage) = &mut self.daily_usage {
-            daily_usage.add_usage(count);
-        }
-
-        if let Some(monthly_usage) = &mut self.monthly_usage {
-            monthly_usage.add_usage(count);
+        for usage in self.usage.values_mut() {
+            usage.add_usage(count);
         }
 
         self.last_updated = now;
     }
 
     /// Get current quota status
-    pub fn get_status(&mut self) -> QuotaStatus {
-        let now = Utc::now();
-        self.refresh_periods(now);
+    pub fn get_status(&self) -> QuotaStatus {
+        let mut period_statuses = std::collections::HashMap::new();
 
-        let daily_status = if let (Some(daily_usage), Some(daily_limit)) =
-            (&self.daily_usage, self.config.daily_limit)
-        {
-            Some(QuotaPeriodStatus {
-                used: daily_usage.used,
-                limit: daily_limit,
-                remaining: daily_limit.saturating_sub(daily_usage.used),
-                reset_time: daily_usage.period_end,
-            })
-        } else {
-            None
-        };
-
-        let monthly_status = if let (Some(monthly_usage), Some(monthly_limit)) =
-            (&self.monthly_usage, self.config.monthly_limit)
-        {
-            Some(QuotaPeriodStatus {
-                used: monthly_usage.used,
-                limit: monthly_limit,
-                remaining: monthly_limit.saturating_sub(monthly_usage.used),
-                reset_time: monthly_usage.period_end,
-            })
-        } else {
-            None
-        };
+        for (period, usage) in &self.usage {
+            let status = QuotaPeriodStatus {
+                used: usage.used,
+                limit: usage.limit,
+                remaining: usage.remaining(),
+                reset_time: usage.period_end,
+            };
+            period_statuses.insert(*period, status);
+        }
 
         QuotaStatus {
-            daily: daily_status,
-            monthly: monthly_status,
+            periods: period_statuses,
             config: self.config.clone(),
         }
     }
 
-    /// Reset quota usage (admin function)
+    /// Reset quota usage
     pub fn reset_quota(&mut self) {
-        if let Some(daily_usage) = &mut self.daily_usage {
-            daily_usage.reset();
+        let now = Utc::now();
+        for usage in self.usage.values_mut() {
+            usage.reset(now);
         }
-        if let Some(monthly_usage) = &mut self.monthly_usage {
-            monthly_usage.reset();
-        }
-        self.last_updated = Utc::now();
+        self.last_updated = now;
     }
 
-    /// Update the quota configuration
+    /// Update quota configuration
     pub fn update_config(&mut self, new_config: QuotaConfig) -> Result<()> {
         new_config.validate()?;
 
         let now = Utc::now();
+        let mut new_usage = std::collections::HashMap::new();
 
-        // Handle daily quota changes
-        match (self.config.daily_limit, new_config.daily_limit) {
-            (None, Some(_)) => {
-                // Adding daily quota
-                self.daily_usage = Some(QuotaUsage::new_daily(now));
-            }
-            (Some(_), None) => {
-                // Removing daily quota
-                self.daily_usage = None;
-            }
-            _ => {
-                // Keep existing daily usage if it exists
+        // Preserve existing usage for quotas that still exist
+        for (&period, &limit) in &new_config.quotas {
+            if let Some(existing_usage) = self.usage.get(&period) {
+                let mut updated_usage = existing_usage.clone();
+                updated_usage.limit = limit;
+                updated_usage.last_updated = now;
+                new_usage.insert(period, updated_usage);
+            } else {
+                let quota_usage = QuotaUsage::new(period, limit, now);
+                new_usage.insert(period, quota_usage);
             }
         }
 
-        // Handle monthly quota changes
-        match (self.config.monthly_limit, new_config.monthly_limit) {
-            (None, Some(_)) => {
-                // Adding monthly quota
-                self.monthly_usage = Some(QuotaUsage::new_monthly(now));
-            }
-            (Some(_), None) => {
-                // Removing monthly quota
-                self.monthly_usage = None;
-            }
-            _ => {
-                // Keep existing monthly usage if it exists
-            }
-        }
-
+        self.usage = new_usage;
         self.config = new_config;
         self.last_updated = now;
         Ok(())
     }
 
-    /// Refresh usage periods if they have expired
+    /// Refresh quota periods (reset if expired)
     fn refresh_periods(&mut self, now: DateTime<Utc>) {
-        // Refresh daily usage if expired
-        if let Some(daily_usage) = &mut self.daily_usage {
-            if daily_usage.is_expired(now) {
-                *daily_usage = QuotaUsage::new_daily(now);
+        for usage in self.usage.values_mut() {
+            if usage.is_expired(now) {
+                usage.reset(now);
             }
         }
-
-        // Refresh monthly usage if expired
-        if let Some(monthly_usage) = &mut self.monthly_usage {
-            if monthly_usage.is_expired(now) {
-                *monthly_usage = QuotaUsage::new_monthly(now);
-            }
-        }
+        self.last_updated = now;
     }
 }
 
 /// Type of quota violation
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum QuotaViolationType {
-    Daily,
-    Monthly,
+    Quota(ResetPeriod),
 }
 
-/// Status of a quota period (daily or monthly)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct QuotaPeriodStatus {
-    /// Number of requests used in this period
-    pub used: u64,
+impl QuotaViolationType {
+    /// Check if this is a daily violation
+    pub fn is_daily(&self) -> bool {
+        matches!(self, QuotaViolationType::Quota(ResetPeriod::Daily))
+    }
 
+    /// Check if this is a monthly violation
+    pub fn is_monthly(&self) -> bool {
+        matches!(self, QuotaViolationType::Quota(ResetPeriod::Monthly))
+    }
+
+    /// Check if this is a weekly violation
+    pub fn is_weekly(&self) -> bool {
+        matches!(self, QuotaViolationType::Quota(ResetPeriod::Weekly))
+    }
+
+    /// Check if this is a yearly violation
+    pub fn is_yearly(&self) -> bool {
+        matches!(self, QuotaViolationType::Quota(ResetPeriod::Yearly))
+    }
+
+    /// Check if this is a permanent violation
+    pub fn is_permanent(&self) -> bool {
+        matches!(self, QuotaViolationType::Quota(ResetPeriod::Never))
+    }
+}
+
+/// Status for a specific quota period
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotaPeriodStatus {
+    /// Number of requests used
+    pub used: u64,
     /// Total limit for this period
     pub limit: u64,
-
     /// Remaining requests in this period
     pub remaining: u64,
-
     /// When this period resets
     pub reset_time: DateTime<Utc>,
 }
 
 impl QuotaPeriodStatus {
-    /// Get utilization as a percentage (0.0 to 1.0)
+    /// Get utilization percentage (0.0 to 1.0)
     pub fn utilization(&self) -> f64 {
         if self.limit == 0 {
-            0.0
+            1.0
         } else {
-            self.used as f64 / self.limit as f64
+            (self.used as f64) / (self.limit as f64)
         }
     }
 
     /// Check if quota is exhausted
     pub fn is_exhausted(&self) -> bool {
-        self.remaining == 0
+        self.used >= self.limit
     }
 
-    /// Get time until reset as std::time::Duration
-    pub fn time_until_reset(&self) -> std::time::Duration {
-        let now = Utc::now();
+    /// Get time until reset
+    pub fn time_until_reset(&self, now: DateTime<Utc>) -> chrono::Duration {
         if now >= self.reset_time {
-            std::time::Duration::ZERO
+            chrono::Duration::zero()
         } else {
-            (self.reset_time - now)
-                .to_std()
-                .unwrap_or(std::time::Duration::ZERO)
+            self.reset_time - now
         }
     }
 }
 
-/// Complete quota status for a key
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Overall quota status
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotaStatus {
-    /// Daily quota status (if configured)
-    pub daily: Option<QuotaPeriodStatus>,
-
-    /// Monthly quota status (if configured)
-    pub monthly: Option<QuotaPeriodStatus>,
-
+    /// Status for each configured period
+    pub periods: std::collections::HashMap<ResetPeriod, QuotaPeriodStatus>,
     /// The quota configuration
     pub config: QuotaConfig,
 }
@@ -428,52 +496,47 @@ pub struct QuotaStatus {
 impl QuotaStatus {
     /// Check if any quota is exhausted
     pub fn is_any_exhausted(&self) -> bool {
-        self.daily.as_ref().map_or(false, |d| d.is_exhausted())
-            || self.monthly.as_ref().map_or(false, |m| m.is_exhausted())
+        self.periods.values().any(|status| status.is_exhausted())
     }
 
-    /// Get the most restrictive reset time (soonest)
-    pub fn next_reset_time(&self) -> Option<DateTime<Utc>> {
-        let daily_reset = self.daily.as_ref().map(|d| d.reset_time);
-        let monthly_reset = self.monthly.as_ref().map(|m| m.reset_time);
-
-        match (daily_reset, monthly_reset) {
-            (Some(daily), Some(monthly)) => Some(daily.min(monthly)),
-            (Some(daily), None) => Some(daily),
-            (None, Some(monthly)) => Some(monthly),
-            (None, None) => None,
-        }
+    /// Get the next reset time across all periods
+    pub fn next_reset_time(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        self.periods
+            .values()
+            .map(|status| status.reset_time)
+            .filter(|&reset_time| reset_time > now)
+            .min()
     }
 
-    /// Get overall utilization (highest of daily/monthly)
+    /// Get maximum utilization across all quotas
     pub fn max_utilization(&self) -> f64 {
-        let daily_util = self.daily.as_ref().map_or(0.0, |d| d.utilization());
-        let monthly_util = self.monthly.as_ref().map_or(0.0, |m| m.utilization());
-        daily_util.max(monthly_util)
+        self.periods
+            .values()
+            .map(|status| status.utilization())
+            .fold(0.0, f64::max)
+    }
+
+    /// Get status for a specific reset period
+    pub fn get_period_status(&self, period: &ResetPeriod) -> Option<&QuotaPeriodStatus> {
+        self.periods.get(period)
     }
 }
 
-/// Quota checking decision
-#[derive(Debug, Clone, PartialEq)]
+/// Decision result from quota checking
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotaDecision {
     /// Whether the request is allowed
     pub allowed: bool,
-
-    /// Type of quota violation (if denied)
+    /// Type of violation if denied
     pub violation_type: Option<QuotaViolationType>,
-
     /// Current quota status
-    pub status: Option<QuotaStatus>,
-
-    /// Used requests for the violated quota period
+    pub status: QuotaStatus,
+    /// Current usage (for the violated quota if denied)
     pub used: Option<u64>,
-
-    /// Limit for the violated quota period
+    /// Limit (for the violated quota if denied)
     pub limit: Option<u64>,
-
-    /// Time until the violated quota resets
+    /// Time to wait before retry if denied
     pub retry_after: Option<chrono::Duration>,
-
     /// The quota configuration used
     pub config: QuotaConfig,
 }
@@ -484,7 +547,7 @@ impl QuotaDecision {
         Self {
             allowed: true,
             violation_type: None,
-            status: Some(status),
+            status,
             used: None,
             limit: None,
             retry_after: None,
@@ -495,6 +558,7 @@ impl QuotaDecision {
     /// Create a denied decision
     pub fn denied(
         violation_type: QuotaViolationType,
+        status: QuotaStatus,
         used: u64,
         limit: u64,
         retry_after: chrono::Duration,
@@ -503,7 +567,7 @@ impl QuotaDecision {
         Self {
             allowed: false,
             violation_type: Some(violation_type),
-            status: None,
+            status,
             used: Some(used),
             limit: Some(limit),
             retry_after: Some(retry_after),
@@ -511,172 +575,221 @@ impl QuotaDecision {
         }
     }
 
-    /// Get retry after as std::time::Duration
-    pub fn retry_after_duration(&self) -> Option<std::time::Duration> {
-        self.retry_after.and_then(|d| d.to_std().ok())
+    /// Get retry after duration
+    pub fn retry_after_duration(&self) -> Option<chrono::Duration> {
+        self.retry_after
     }
 
-    /// Check if this was a daily quota violation
+    /// Check if this is a daily violation
     pub fn is_daily_violation(&self) -> bool {
-        matches!(self.violation_type, Some(QuotaViolationType::Daily))
+        self.violation_type.as_ref().map_or(false, |v| v.is_daily())
     }
 
-    /// Check if this was a monthly quota violation
+    /// Check if this is a monthly violation
     pub fn is_monthly_violation(&self) -> bool {
-        matches!(self.violation_type, Some(QuotaViolationType::Monthly))
+        self.violation_type
+            .as_ref()
+            .map_or(false, |v| v.is_monthly())
+    }
+
+    /// Check if this is a weekly violation
+    pub fn is_weekly_violation(&self) -> bool {
+        self.violation_type
+            .as_ref()
+            .map_or(false, |v| v.is_weekly())
+    }
+
+    /// Check if this is a yearly violation
+    pub fn is_yearly_violation(&self) -> bool {
+        self.violation_type
+            .as_ref()
+            .map_or(false, |v| v.is_yearly())
+    }
+
+    /// Check if this is a permanent quota violation
+    pub fn is_permanent_violation(&self) -> bool {
+        self.violation_type
+            .as_ref()
+            .map_or(false, |v| v.is_permanent())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Timelike};
+
+    #[test]
+    fn test_reset_period_daily_bounds() {
+        let reference = Utc.with_ymd_and_hms(2023, 6, 15, 14, 30, 0).unwrap();
+        let (start, end) = ResetPeriod::Daily.period_bounds(reference);
+
+        assert_eq!(start, Utc.with_ymd_and_hms(2023, 6, 15, 0, 0, 0).unwrap());
+        assert_eq!(end, Utc.with_ymd_and_hms(2023, 6, 16, 0, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn test_reset_period_weekly_bounds() {
+        // Thursday, June 15, 2023
+        let reference = Utc.with_ymd_and_hms(2023, 6, 15, 14, 30, 0).unwrap();
+        let (start, end) = ResetPeriod::Weekly.period_bounds(reference);
+
+        // Should start on Monday, June 12, 2023
+        assert_eq!(start, Utc.with_ymd_and_hms(2023, 6, 12, 0, 0, 0).unwrap());
+        assert_eq!(end, Utc.with_ymd_and_hms(2023, 6, 19, 0, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn test_reset_period_monthly_bounds() {
+        let reference = Utc.with_ymd_and_hms(2023, 6, 15, 14, 30, 0).unwrap();
+        let (start, end) = ResetPeriod::Monthly.period_bounds(reference);
+
+        assert_eq!(start, Utc.with_ymd_and_hms(2023, 6, 1, 0, 0, 0).unwrap());
+        assert_eq!(end, Utc.with_ymd_and_hms(2023, 7, 1, 0, 0, 0).unwrap());
+    }
 
     #[test]
     fn test_quota_config_creation() {
-        let config = QuotaConfig::new(Some(1000), Some(30000));
-        assert_eq!(config.daily_limit, Some(1000));
-        assert_eq!(config.monthly_limit, Some(30000));
+        let config = QuotaConfig::both(100, 1000);
+        assert_eq!(config.quotas.len(), 2);
         assert!(config.has_quotas());
 
-        let daily_only = QuotaConfig::daily_only(500);
-        assert_eq!(daily_only.daily_limit, Some(500));
-        assert_eq!(daily_only.monthly_limit, None);
+        let daily_limit = config.get_limit(&ResetPeriod::Daily).unwrap();
+        assert_eq!(daily_limit, 100);
 
-        let monthly_only = QuotaConfig::monthly_only(10000);
-        assert_eq!(monthly_only.daily_limit, None);
-        assert_eq!(monthly_only.monthly_limit, Some(10000));
+        let monthly_limit = config.get_limit(&ResetPeriod::Monthly).unwrap();
+        assert_eq!(monthly_limit, 1000);
     }
 
     #[test]
     fn test_quota_config_validation() {
-        let valid_config = QuotaConfig::both(1000, 30000);
-        assert!(valid_config.validate().is_ok());
+        let config = QuotaConfig::new().with_daily(100).with_monthly(1000);
+        assert!(config.validate().is_ok());
 
-        let invalid_config = QuotaConfig::both(1000, 500);
-        assert!(invalid_config.validate().is_err());
+        // Test zero limit
+        let zero_config = QuotaConfig::new().with_daily(0);
+        assert!(zero_config.validate().is_err());
     }
 
     #[test]
-    fn test_quota_usage_daily() {
-        let start = Utc
-            .with_ymd_and_hms(2024, 1, 15, 14, 30, 0)
-            .single()
-            .unwrap();
-        let usage = QuotaUsage::new_daily(start);
+    fn test_quota_usage() {
+        let now = Utc::now();
+        let mut usage = QuotaUsage::new(ResetPeriod::Daily, 100, now);
 
-        // Should start at midnight of the same day
-        assert_eq!(usage.period_start.hour(), 0);
-        assert_eq!(usage.period_start.minute(), 0);
-        assert_eq!(usage.period_start.second(), 0);
-        assert_eq!(usage.period_start.day(), 15);
+        assert_eq!(usage.used, 0);
+        assert_eq!(usage.remaining(), 100);
+        assert!(!usage.is_exhausted());
 
-        // Should end at midnight of next day
-        assert_eq!(usage.period_end.day(), 16);
-        assert_eq!(usage.period_end.hour(), 0);
-    }
+        usage.add_usage(50);
+        assert_eq!(usage.used, 50);
+        assert_eq!(usage.remaining(), 50);
+        assert!(!usage.is_exhausted());
 
-    #[test]
-    fn test_quota_usage_monthly() {
-        let start = Utc
-            .with_ymd_and_hms(2024, 6, 15, 14, 30, 0)
-            .single()
-            .unwrap();
-        let usage = QuotaUsage::new_monthly(start);
-
-        // Should start at beginning of month
-        assert_eq!(usage.period_start.day(), 1);
-        assert_eq!(usage.period_start.hour(), 0);
-        assert_eq!(usage.period_start.month(), 6);
-
-        // Should end at beginning of next month
-        assert_eq!(usage.period_end.day(), 1);
-        assert_eq!(usage.period_end.month(), 7);
+        usage.add_usage(50);
+        assert_eq!(usage.used, 100);
+        assert_eq!(usage.remaining(), 0);
+        assert!(usage.is_exhausted());
     }
 
     #[test]
     fn test_quota_tracker_basic() {
-        let config = QuotaConfig::both(100, 3000);
-        let mut tracker = QuotaTracker::new(config).unwrap();
-
-        // Should allow requests within quota
-        let decision = tracker.check_quota(10);
-        assert!(decision.allowed);
-
-        // Consume the quota
-        tracker.consume_quota(10);
-
-        // Check status
-        let status = tracker.get_status();
-        assert_eq!(status.daily.unwrap().used, 10);
-        assert_eq!(status.monthly.unwrap().used, 10);
-    }
-
-    #[test]
-    fn test_quota_tracker_daily_violation() {
         let config = QuotaConfig::daily_only(100);
         let mut tracker = QuotaTracker::new(config).unwrap();
 
-        // Consume most of the quota
-        tracker.consume_quota(95);
+        let decision = tracker.check_quota(50);
+        assert!(decision.allowed);
 
-        // Should deny request that would exceed quota
-        let decision = tracker.check_quota(10);
+        tracker.consume_quota(50);
+        let status = tracker.get_status();
+        let daily_status = status.get_period_status(&ResetPeriod::Daily).unwrap();
+        assert_eq!(daily_status.used, 50);
+        assert_eq!(daily_status.remaining, 50);
+    }
+
+    #[test]
+    fn test_quota_tracker_violation() {
+        let config = QuotaConfig::daily_only(100);
+        let mut tracker = QuotaTracker::new(config).unwrap();
+
+        // Consume most quota
+        tracker.consume_quota(90);
+
+        // Should deny request that exceeds quota
+        let decision = tracker.check_quota(20);
         assert!(!decision.allowed);
         assert!(decision.is_daily_violation());
-        assert_eq!(decision.used, Some(95));
+        assert_eq!(decision.used, Some(90));
         assert_eq!(decision.limit, Some(100));
     }
 
     #[test]
-    fn test_quota_tracker_monthly_violation() {
-        let config = QuotaConfig::monthly_only(1000);
+    fn test_multiple_quotas() {
+        let config = QuotaConfig::new()
+            .with_daily(100)
+            .with_weekly(500)
+            .with_monthly(2000);
         let mut tracker = QuotaTracker::new(config).unwrap();
 
-        // Consume most of the quota
-        tracker.consume_quota(995);
+        // Should pass all quotas
+        let decision = tracker.check_quota(50);
+        assert!(decision.allowed);
 
-        // Should deny request that would exceed quota
-        let decision = tracker.check_quota(10);
-        assert!(!decision.allowed);
-        assert!(decision.is_monthly_violation());
-        assert_eq!(decision.used, Some(995));
-        assert_eq!(decision.limit, Some(1000));
+        tracker.consume_quota(50);
+        let status = tracker.get_status();
+
+        assert_eq!(status.periods.len(), 3);
+        assert!(status.get_period_status(&ResetPeriod::Daily).is_some());
+        assert!(status.get_period_status(&ResetPeriod::Weekly).is_some());
+        assert!(status.get_period_status(&ResetPeriod::Monthly).is_some());
     }
 
     #[test]
     fn test_quota_reset() {
-        let config = QuotaConfig::both(100, 3000);
+        let config = QuotaConfig::daily_only(100);
         let mut tracker = QuotaTracker::new(config).unwrap();
 
-        tracker.consume_quota(50);
-        assert_eq!(tracker.get_status().daily.unwrap().used, 50);
-
+        tracker.consume_quota(75);
         tracker.reset_quota();
-        assert_eq!(tracker.get_status().daily.unwrap().used, 0);
-        assert_eq!(tracker.get_status().monthly.unwrap().used, 0);
+
+        let status = tracker.get_status();
+        let daily_status = status.get_period_status(&ResetPeriod::Daily).unwrap();
+        assert_eq!(daily_status.used, 0);
+        assert_eq!(daily_status.remaining, 100);
     }
 
     #[test]
     fn test_quota_status_methods() {
-        let daily_status = QuotaPeriodStatus {
-            used: 75,
-            limit: 100,
-            remaining: 25,
-            reset_time: Utc::now() + chrono::Duration::hours(6),
-        };
+        let config = QuotaConfig::both(100, 1000);
+        let mut tracker = QuotaTracker::new(config).unwrap();
 
-        assert_eq!(daily_status.utilization(), 0.75);
-        assert!(!daily_status.is_exhausted());
+        tracker.consume_quota(100); // Exhaust daily quota
+        let status = tracker.get_status();
 
-        let exhausted_status = QuotaPeriodStatus {
-            used: 100,
-            limit: 100,
-            remaining: 0,
-            reset_time: Utc::now() + chrono::Duration::hours(6),
-        };
+        assert!(status.is_any_exhausted());
+        assert_eq!(status.max_utilization(), 1.0);
 
-        assert!(exhausted_status.is_exhausted());
-        assert_eq!(exhausted_status.utilization(), 1.0);
+        let daily_status = status.get_period_status(&ResetPeriod::Daily).unwrap();
+        assert!(daily_status.is_exhausted());
+        assert_eq!(daily_status.utilization(), 1.0);
+
+        let monthly_status = status.get_period_status(&ResetPeriod::Monthly).unwrap();
+        assert!(!monthly_status.is_exhausted());
+        assert_eq!(monthly_status.utilization(), 0.1);
+    }
+
+    #[test]
+    fn test_permanent_quota() {
+        let config = QuotaConfig::new().with_permanent(1000);
+        let mut tracker = QuotaTracker::new(config).unwrap();
+
+        // Consume some quota
+        tracker.consume_quota(500);
+
+        let decision = tracker.check_quota(400);
+        assert!(decision.allowed);
+
+        // Should deny when exceeding permanent quota
+        let decision = tracker.check_quota(600);
+        assert!(!decision.allowed);
+        assert!(decision.is_permanent_violation());
     }
 }

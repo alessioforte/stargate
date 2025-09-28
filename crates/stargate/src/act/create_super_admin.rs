@@ -1,6 +1,6 @@
 use crate::etc;
-use db::ent::{CredentialType, User};
 use db::Transaction;
+use db::ent::{CredentialType, User};
 
 pub async fn create_super_admin() {
     let service = etc::db::service();
@@ -45,6 +45,7 @@ pub async fn create_super_admin() {
             CredentialType::Password,
             &pw::Hash::encode(&password).unwrap(),
             Some(attrs),
+            None, // No limits for super admin
         )
         .await
     {

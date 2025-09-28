@@ -1,9 +1,9 @@
 use super::SignupCompleteRequestBody;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use actix_web::{put, web, HttpResponse};
-use db::ent::{CredentialType, User};
+use actix_web::{HttpResponse, put, web};
 use db::Transaction;
+use db::ent::{CredentialType, User};
 use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
 
@@ -31,7 +31,7 @@ pub async fn handler(
         None => {
             return Err(ErrorResponse::from(HttpError::BadRequest(
                 "Invalid token".to_string(),
-            )))
+            )));
         }
     };
 
@@ -41,7 +41,7 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
@@ -70,7 +70,7 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
@@ -86,7 +86,7 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
@@ -113,7 +113,7 @@ pub async fn handler(
 
     let password = Hash::encode(&body.password).unwrap();
     match service
-        .create_user(user, CredentialType::Password, &password, None)
+        .create_user(user, CredentialType::Password, &password, None, None)
         .await
     {
         Ok(_) => {

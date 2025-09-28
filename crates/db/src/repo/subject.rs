@@ -1,4 +1,4 @@
-use crate::ent::{Subject, SubjectType};
+use crate::ent::{Limits, Subject, SubjectType};
 use anyhow::Result;
 use serde_json::Value as JsonValue;
 
@@ -17,12 +17,13 @@ impl SubjectRepository {
         sub_type: SubjectType,
         sub_id: &str,
         attrs: Option<JsonValue>,
+        limits: Option<Limits>,
     ) -> Result<Subject> {
-        let subject = Subject::new(sub_type, sub_id.to_string(), attrs);
+        let subject = Subject::new(sub_type, sub_id.to_string(), attrs, limits);
         let row = sqlx::query_as::<_, Subject>(
             "
-            INSERT INTO subjects (id, type, sub_id, attrs)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO subjects (id, type, sub_id, attrs, limits)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         ",
         )
@@ -30,6 +31,7 @@ impl SubjectRepository {
         .bind(&subject.sub_type)
         .bind(&subject.sub_id)
         .bind(&subject.attrs)
+        .bind(&subject.limits)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -86,6 +88,27 @@ impl SubjectRepository {
         ",
         )
         .bind(attrs_str)
+        .bind(sub_id)
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn update_limits(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        sub_id: &str,
+        limits: Limits,
+    ) -> Result<Subject> {
+        let limits_str = serde_json::to_string(&limits)?;
+        let row = sqlx::query_as::<_, Subject>(
+            "
+            UPDATE subjects SET limits = $1 WHERE sub_id = $2 RETURNING *
+        ",
+        )
+        .bind(limits_str)
         .bind(sub_id)
         .fetch_one(&mut **tx)
         .await?;

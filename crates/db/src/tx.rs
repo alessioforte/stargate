@@ -1,5 +1,5 @@
 use crate::ent::{
-    Action, ActionType, ApiKey, Credential, CredentialType, OwnerType, Subject, User,
+    Action, ActionType, ApiKey, Credential, CredentialType, Limits, OwnerType, Subject, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -12,6 +12,7 @@ pub trait Transaction {
         credential_type: CredentialType,
         value: &str,
         attrs: Option<JsonValue>,
+        limits: Option<Limits>,
     ) -> Result<User>;
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
     async fn update_user(&self, user: User) -> Result<User>;
@@ -36,6 +37,7 @@ pub trait Transaction {
         key_hash: &str,
         label: Option<String>,
         attrs: Option<JsonValue>,
+        limits: Option<Limits>,
         exp: Option<i64>,
     ) -> Result<ApiKey>;
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>>;

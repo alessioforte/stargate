@@ -13,10 +13,17 @@ use store::Store;
 )]
 #[delete("/logout")]
 pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
-    let token = req.get_token();
+    let token = match req.get_token() {
+        Some(t) => Some(t),
+        None => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Token not found".to_string(),
+            )));
+        }
+    };
 
     let jwt = jwt_config();
-    let claims = match jwt.validate_token(&token) {
+    let claims = match jwt.validate_token(&token.unwrap()) {
         Ok(claims) => claims,
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(

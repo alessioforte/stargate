@@ -9,8 +9,12 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use rl::{
-    DenialReason, config::RateLimitConfig, limiter::RateLimiter, quota::QuotaConfig,
-    quota_manager::QuotaManager, unified_limiter::UnifiedLimiter,
+    DenialReason,
+    config::RateLimitConfig,
+    limiter::RateLimiter,
+    quota::{QuotaConfig, ResetPeriod},
+    quota_manager::QuotaManager,
+    unified_limiter::UnifiedLimiter,
 };
 use store::MemoryStore;
 
@@ -119,7 +123,7 @@ async fn quota_manager_example() -> Result<(), Box<dyn std::error::Error>> {
 
             // Show quota status
             if let Some(status) = quota_manager.get_quota_status("user_456").await? {
-                if let Some(daily) = &status.daily {
+                if let Some(daily) = status.periods.get(&ResetPeriod::Daily) {
                     println!(
                         "  Daily: {}/{} used ({:.1}% utilization)",
                         daily.used,
@@ -127,12 +131,22 @@ async fn quota_manager_example() -> Result<(), Box<dyn std::error::Error>> {
                         (daily.used as f64 / daily.limit as f64) * 100.0
                     );
                 }
+                if let Some(monthly) = status.periods.get(&ResetPeriod::Monthly) {
+                    println!(
+                        "  Monthly: {}/{} used ({:.1}% utilization)",
+                        monthly.used,
+                        monthly.limit,
+                        (monthly.used as f64 / monthly.limit as f64) * 100.0
+                    );
+                }
             }
         } else {
             let violation_type = if decision.is_daily_violation() {
                 "daily"
-            } else {
+            } else if decision.is_monthly_violation() {
                 "monthly"
+            } else {
+                "quota"
             };
             println!(
                 "✗ {} (cost: {}) - {} quota exceeded",
@@ -183,10 +197,8 @@ async fn unified_limiter_example() -> Result<(), Box<dyn std::error::Error>> {
                     decision.rate_limit.remaining_tokens
                 );
                 if let Some(quota) = &decision.quota {
-                    if let Some(status) = &quota.status {
-                        if let Some(daily) = &status.daily {
-                            println!("  Quota: {}/{} used", daily.used, daily.limit);
-                        }
+                    if let Some(daily) = quota.status.periods.get(&ResetPeriod::Daily) {
+                        println!("  Quota: {}/{} used", daily.used, daily.limit);
                     }
                 }
             }
@@ -196,11 +208,17 @@ async fn unified_limiter_example() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Retry after: {}ms", retry_ms);
                 }
             }
-            (false, Some(DenialReason::DailyQuota)) => {
+            (false, Some(DenialReason::Quota(ResetPeriod::Daily))) => {
                 println!("✗ {} (cost: {}) - Daily quota exceeded", operation, cost);
             }
-            (false, Some(DenialReason::MonthlyQuota)) => {
+            (false, Some(DenialReason::Quota(ResetPeriod::Monthly))) => {
                 println!("✗ {} (cost: {}) - Monthly quota exceeded", operation, cost);
+            }
+            (false, Some(DenialReason::Quota(period))) => {
+                println!(
+                    "✗ {} (cost: {}) - {:?} quota exceeded",
+                    operation, cost, period
+                );
             }
             _ => println!("? {} (cost: {}) - Unknown status", operation, cost),
         }
@@ -277,15 +295,21 @@ async fn api_gateway_example() -> Result<(), Box<dyn std::error::Error>> {
                 status
                     .quota
                     .as_ref()
-                    .map(|q| q.daily.as_ref().map(|d| format!("{}/{}", d.used, d.limit)))
-                    .flatten()
+                    .and_then(|q| q.periods.get(&ResetPeriod::Daily))
+                    .map(|d| format!("{}/{}", d.used, d.limit))
                     .unwrap_or_else(|| "No quota".to_string())
             );
         } else {
-            let reason = match decision.denial_reason {
+            let reason = match &decision.denial_reason {
                 Some(DenialReason::RateLimit) => "rate limited",
-                Some(DenialReason::DailyQuota) => "daily quota exceeded",
-                Some(DenialReason::MonthlyQuota) => "monthly quota exceeded",
+                Some(DenialReason::Quota(ResetPeriod::Daily)) => "daily quota exceeded",
+                Some(DenialReason::Quota(ResetPeriod::Monthly)) => "monthly quota exceeded",
+                Some(DenialReason::Quota(period)) => match period {
+                    ResetPeriod::Weekly => "weekly quota exceeded",
+                    ResetPeriod::Yearly => "yearly quota exceeded",
+                    ResetPeriod::Never => "permanent quota exceeded",
+                    _ => "quota exceeded",
+                },
                 None => "unknown reason",
             };
             println!("✗ Request denied: {}", reason);

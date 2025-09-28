@@ -38,8 +38,7 @@ where
         if !config.has_quota() {
             return Ok(QuotaDecision::allowed(
                 QuotaStatus {
-                    daily: None,
-                    monthly: None,
+                    periods: std::collections::HashMap::new(),
                     config: crate::quota::QuotaConfig::default(),
                 },
                 crate::quota::QuotaConfig::default(),
@@ -86,7 +85,7 @@ where
         }
 
         let quota_key = format!("quota:{}", key);
-        if let Some(mut tracker) = self.store.get_quota(&quota_key).await? {
+        if let Some(tracker) = self.store.get_quota(&quota_key).await? {
             Ok(Some(tracker.get_status()))
         } else {
             Ok(None)
@@ -163,19 +162,6 @@ where
 
         Ok(results)
     }
-
-    /// Get the storage reference
-    pub fn store(&self) -> &Storage<S> {
-        &self.store
-    }
-
-    /// Clean up expired quota trackers
-    pub async fn cleanup_expired_trackers(&self) -> Result<usize> {
-        // This would require iterating through all quota keys
-        // Implementation depends on the store's capabilities for bulk operations
-        // For now, return 0 as a placeholder
-        Ok(0)
-    }
 }
 
 impl<S> Clone for QuotaManager<S>
@@ -241,7 +227,7 @@ where
 mod tests {
     use super::*;
     use crate::config::RateLimitConfig;
-    use crate::quota::QuotaConfig;
+    use crate::quota::{QuotaConfig, ResetPeriod};
     use store::MemoryStore;
 
     #[tokio::test]
@@ -261,8 +247,9 @@ mod tests {
 
         // Check status
         let status = manager.get_quota_status("test_key").await.unwrap().unwrap();
-        assert_eq!(status.daily.as_ref().unwrap().used, 10);
-        assert_eq!(status.daily.as_ref().unwrap().remaining, 90);
+        let daily_status = status.periods.get(&ResetPeriod::Daily).unwrap();
+        assert_eq!(daily_status.used, 10);
+        assert_eq!(daily_status.remaining, 90);
     }
 
     #[tokio::test]
@@ -299,8 +286,9 @@ mod tests {
 
         // Status should show consumption
         let status = manager.get_quota_status("test_key").await.unwrap().unwrap();
-        assert_eq!(status.daily.as_ref().unwrap().used, 25);
-        assert_eq!(status.daily.as_ref().unwrap().remaining, 25);
+        let daily_status = status.periods.get(&ResetPeriod::Daily).unwrap();
+        assert_eq!(daily_status.used, 25);
+        assert_eq!(daily_status.remaining, 25);
     }
 
     #[tokio::test]
@@ -414,5 +402,40 @@ mod tests {
             result.unwrap_err(),
             RateLimitError::InvalidKey { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn test_quota_manager_multiple_quota_types() {
+        let store = MemoryStore::new();
+        let manager = QuotaManager::new(store);
+
+        // Create config with multiple quota types
+        let quota_config = QuotaConfig::new()
+            .with_daily(100)
+            .with_weekly(500)
+            .with_monthly(2000);
+        let config = RateLimitConfig::default().with_quota(quota_config);
+
+        // Should allow requests within all quotas
+        let decision = manager.check_quota("test_key", 50, &config).await.unwrap();
+        assert!(decision.allowed);
+
+        manager.consume_quota("test_key", 50).await.unwrap();
+
+        // Check status for all periods
+        let status = manager.get_quota_status("test_key").await.unwrap().unwrap();
+        assert_eq!(status.periods.len(), 3);
+
+        let daily_status = status.periods.get(&ResetPeriod::Daily).unwrap();
+        assert_eq!(daily_status.used, 50);
+        assert_eq!(daily_status.remaining, 50);
+
+        let weekly_status = status.periods.get(&ResetPeriod::Weekly).unwrap();
+        assert_eq!(weekly_status.used, 50);
+        assert_eq!(weekly_status.remaining, 450);
+
+        let monthly_status = status.periods.get(&ResetPeriod::Monthly).unwrap();
+        assert_eq!(monthly_status.used, 50);
+        assert_eq!(monthly_status.remaining, 1950);
     }
 }

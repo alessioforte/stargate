@@ -4,6 +4,7 @@ pub mod cors;
 pub mod db;
 pub mod ext;
 pub mod gate;
+pub mod guard;
 pub mod jwt;
 pub mod lim;
 pub mod logo;

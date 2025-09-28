@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS "subjects" (
     `type` VARCHAR(50) NOT NULL,
     `sub_id` TEXT NOT NULL,
     `attrs` JSON NOT NULL DEFAULT '{}',
+    `limits` JSON DEFAULT '{}',
     PRIMARY KEY (`id`)
 );
 

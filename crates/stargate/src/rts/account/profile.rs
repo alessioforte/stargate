@@ -1,7 +1,7 @@
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
-use actix_web::{get, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, get, web};
 use db::Transaction;
 use etc::jwt::jwt_config;
 use store::Store;
@@ -15,7 +15,14 @@ use store::Store;
 )]
 #[get("/profile")]
 pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
-    let token = req.get_token();
+    let token = match req.get_token() {
+        Some(t) => t,
+        None => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Token not found".to_string(),
+            )));
+        }
+    };
 
     let jwt = jwt_config();
     let claims = match jwt.validate_token(&token) {
@@ -23,7 +30,7 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
                 "Invalid Token".to_string(),
-            )))
+            )));
         }
     };
 

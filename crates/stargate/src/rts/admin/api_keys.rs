@@ -4,6 +4,25 @@ use actix_web_grants::protect;
 use db::Transaction;
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "lowercase")]
+enum ResetPeriod {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+    Never, // For lifetime quotas
+}
+
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema, Clone)]
+#[serde(rename_all = "camelCase")]
+struct Limits {
+    pub request_per_second: u32,
+    pub burst_size: u32,
+    pub window_size_seconds: u64,
+    pub quotas: Option<std::collections::HashMap<ResetPeriod, u64>>,
+}
+
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct ApiKey {
@@ -11,6 +30,7 @@ struct ApiKey {
     label: Option<String>,
     exp: Option<String>,
     attrs: Option<serde_json::Value>,
+    limits: Option<Limits>,
 }
 
 #[utoipa::path(
@@ -55,6 +75,26 @@ pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, 
     let secret = apiks::generate_api_key();
     let key_hash = apiks::hash_api_key(&secret);
 
+    let limits = match &payload.limits {
+        Some(l) => Some(db::ent::Limits {
+            request_per_second: l.request_per_second,
+            burst_size: l.burst_size,
+            window_size_seconds: l.window_size_seconds,
+            quotas: l.quotas.as_ref().map(|q| {
+                q.iter()
+                    .map(|(k, v)| match k {
+                        ResetPeriod::Daily => (db::ent::ResetPeriod::Daily, *v),
+                        ResetPeriod::Weekly => (db::ent::ResetPeriod::Weekly, *v),
+                        ResetPeriod::Monthly => (db::ent::ResetPeriod::Monthly, *v),
+                        ResetPeriod::Yearly => (db::ent::ResetPeriod::Yearly, *v),
+                        ResetPeriod::Never => (db::ent::ResetPeriod::Never, *v),
+                    })
+                    .collect()
+            }),
+        }),
+        None => None,
+    };
+
     let api_key = match service
         .create_api_key(
             &payload.owner,
@@ -62,6 +102,7 @@ pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, 
             &key_hash,
             payload.label.clone(),
             payload.attrs.clone(),
+            limits,
             exp,
         )
         .await

@@ -2,7 +2,8 @@ use super::repo::{
     ActionRepository, ApiKeyRepository, CredentialRepository, SubjectRepository, UserRepository,
 };
 use crate::ent::{
-    Action, ActionType, ApiKey, Credential, CredentialType, OwnerType, Subject, SubjectType, User,
+    Action, ActionType, ApiKey, Credential, CredentialType, Limits, OwnerType, Subject,
+    SubjectType, User,
 };
 use crate::tx::Transaction;
 use anyhow::Result;
@@ -100,6 +101,7 @@ impl Transaction for Service {
         credential_type: CredentialType,
         value: &str,
         attrs: Option<JsonValue>,
+        limits: Option<Limits>,
     ) -> Result<User> {
         let mut tx = self.pool.begin().await?;
         let user_id = user.id.clone();
@@ -108,7 +110,7 @@ impl Transaction for Service {
             .create(&mut tx, &user_id, credential_type, value)
             .await?;
         self.subject
-            .create(&mut tx, SubjectType::User, &user_id, attrs)
+            .create(&mut tx, SubjectType::User, &user_id, attrs, limits)
             .await?;
         tx.commit().await?;
         Ok(record)
@@ -194,6 +196,7 @@ impl Transaction for Service {
         key_hash: &str,
         label: Option<String>,
         attrs: Option<JsonValue>,
+        limits: Option<Limits>,
         exp: Option<i64>,
     ) -> Result<ApiKey> {
         let mut tx = self.pool.begin().await?;
@@ -203,7 +206,7 @@ impl Transaction for Service {
             .await?;
 
         self.subject
-            .create(&mut tx, SubjectType::ApiKey, &api_key.id, attrs)
+            .create(&mut tx, SubjectType::ApiKey, &api_key.id, attrs, limits)
             .await?;
 
         tx.commit().await?;

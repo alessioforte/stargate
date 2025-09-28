@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS "subjects" (
     "id" TEXT PRIMARY KEY,
     "type" VARCHAR(50) NOT NULL,
     "sub_id" TEXT NOT NULL,
-    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
+    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb,
+    "limits" JSONB DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS "audits" (

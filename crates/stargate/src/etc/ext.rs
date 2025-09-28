@@ -1,19 +1,18 @@
-use std::net::IpAddr;
-
 use actix_web::{HttpRequest, http::header::Header, web::Query};
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
+use std::net::IpAddr;
 
 const KEYS: &[&str] = &["token", "access_token", "jwt"];
 
 pub trait RequestExt {
-    fn get_token(&self) -> String;
-    fn get_api_key(&self) -> String;
+    fn get_token(&self) -> Option<String>;
+    fn get_api_key(&self) -> Option<String>;
     fn get_protocol(&self) -> String;
     fn get_client_ip(&self) -> Option<IpAddr>;
 }
 
 impl RequestExt for HttpRequest {
-    fn get_token(&self) -> String {
+    fn get_token(&self) -> Option<String> {
         // get token from Authorization header
         let mut token = match Authorization::<Bearer>::parse(self) {
             Ok(auth) => auth.into_scheme().token().to_string(),
@@ -41,16 +40,19 @@ impl RequestExt for HttpRequest {
             }
         }
 
-        token
+        if token.is_empty() { None } else { Some(token) }
     }
 
-    fn get_api_key(&self) -> String {
-        let api_key = match self.headers().get("x-api-key") {
-            Some(header_value) => header_value.to_str().unwrap_or("").to_string(),
-            None => "".to_string(),
-        };
-
-        api_key
+    fn get_api_key(&self) -> Option<String> {
+        let api_key = self.headers().get("x-api-key");
+        if let Some(header_value) = api_key {
+            if let Ok(key) = header_value.to_str() {
+                if !key.is_empty() {
+                    return Some(key.to_string());
+                }
+            }
+        }
+        None
     }
 
     fn get_protocol(&self) -> String {

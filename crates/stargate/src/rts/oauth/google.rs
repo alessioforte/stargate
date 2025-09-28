@@ -1,9 +1,9 @@
 use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
-use actix_web::{get, web, HttpResponse};
-use db::ent::{CredentialType, User};
+use actix_web::{HttpResponse, get, web};
 use db::Transaction;
+use db::ent::{CredentialType, User};
 use jwt::Claims;
 use oauth::google::{get_google_oauth_token, get_google_user};
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         let value = format!("google:{}", google_user.id);
         user = match svc
             .clone()
-            .create_user(new_user, CredentialType::Oauth, &value, None)
+            .create_user(new_user, CredentialType::Oauth, &value, None, None)
             .await
         {
             Ok(user) => Some(user),

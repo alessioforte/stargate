@@ -1,16 +1,13 @@
 mod http;
 mod ws;
 
-use std::net::IpAddr;
-
-use crate::act::{access_control, validate_api_key};
+// use std::net::IpAddr;
+use crate::act::access_control;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
-use crate::etc::ext::RequestExt;
-use crate::etc::jwt::jwt_config;
+use crate::etc::{ext::RequestExt, guard};
 use actix_web::{HttpRequest, HttpResponse, web::Payload};
 use gate::Gate;
-use store::Store;
 
 pub async fn handler(
     gate: actix_web::web::Data<Gate>,
@@ -23,23 +20,25 @@ pub async fn handler(
     let method = req.method().clone();
     let client_ip = req.get_client_ip();
 
-    // FIXME: handle the case where client_ip is None more gracefully
-    let ip = client_ip.unwrap_or(IpAddr::from([127, 0, 0, 1]));
+    let mut sub = match guard::verify_api_key(&req).await {
+        Some(s) => Some(s),
+        None => None,
+    };
 
-    // Apply rate limiting
-    let decision = limiter.check_rate_limit_ip(ip).await.map_err(|e| {
-        log::error!("Rate limiting error: {}", e);
-        ErrorResponse::from(HttpError::InternalServerError(
-            "Internal server error".to_string(),
-        ))
-    })?;
-
-    if !decision.allowed {
-        return Err(ErrorResponse::from(HttpError::TooManyRequests(
-            "Too many requests".to_string(),
-        )));
+    if sub.is_none() {
+        sub = match guard::verify_jwt(&req).await {
+            Some(s) => Some(s),
+            None => None,
+        };
     }
 
+    let has_auth = sub.is_some();
+
+    // Rate limiting ----------------------------------------------------------
+    guard::apply_rate_limit(&limiter, &sub, &client_ip).await?;
+    // ------------------------------------------------------------------------
+
+    // check if the service exists --------------------------------------------
     let services = gate.services.read().await;
     let protocol = req.get_protocol();
 
@@ -77,42 +76,19 @@ pub async fn handler(
             }
         }
     }
+    // ------------------------------------------------------------------------
 
-    let store = etc::store::use_store();
-    let api_key = req.get_api_key();
-    let api_key_sub = validate_api_key(&api_key).await;
+    // if auth is required and no subject is found return unauthorized
+    if auth_required && !has_auth {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Unauthorized".to_string(),
+        )));
+    }
 
-    let subject = if let Some(subject) = api_key_sub.clone() {
-        subject
-    } else {
-        let jwt = jwt_config();
-        let token = req.get_token();
-        let claims = match jwt.validate_token(&token) {
-            Ok(claims) => Some(claims),
-            Err(_) => None,
-        };
-
-        if auth_required && claims.is_none() {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Unauthorized".to_string(),
-            )));
-        }
-
-        let claims = claims.unwrap();
-        let sid = claims.sid.clone().unwrap_or_default();
-        let session = store.get::<db::ent::Subject>(&sid).await.unwrap_or(None);
-        match session {
-            Some(sub) => sub,
-            None => {
-                return Err(ErrorResponse::from(HttpError::Unauthorized(
-                    "Invalid session".to_string(),
-                )));
-            }
-        }
-    };
-
-    // if a resource is define match it against the policies
-    if let Some(resource) = resource {
+    // if a resource is define and subject is found check access control
+    if let Some(resource) = resource
+        && let Some(subject) = sub
+    {
         let policy_engine = gate.policy_engine.read().await;
         let allowed = access_control(&policy_engine, &subject, &resource);
 

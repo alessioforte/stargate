@@ -16,8 +16,13 @@ const SUPER_ADMIN: &str = "SUPER_ADMIN";
 
 async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
     // TODO: add admin api keys support ?
+    let token = match req.request().get_token() {
+        Some(t) => t,
+        None => {
+            return Ok(HashSet::new());
+        }
+    };
 
-    let token = req.request().get_token();
     let jwt = jwt_config();
     let claims = match jwt.validate_token(&token) {
         Ok(claims) => claims,

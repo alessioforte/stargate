@@ -54,11 +54,16 @@ pub struct Subject {
     pub sub_type: String,
     pub sub_id: String,
     pub attrs: JsonValue,
-    // pub limits: Option<Limits>,
+    pub limits: Option<sqlx::types::Json<Limits>>,
 }
 
 impl Subject {
-    pub fn new(sub_type: SubjectType, sub_id: String, attrs: Option<JsonValue>) -> Self {
+    pub fn new(
+        sub_type: SubjectType,
+        sub_id: String,
+        attrs: Option<JsonValue>,
+        limits: Option<Limits>,
+    ) -> Self {
         let id = ObjectId::new().unwrap().to_string();
 
         Subject {
@@ -66,7 +71,7 @@ impl Subject {
             sub_type: sub_type.as_str().to_string(),
             sub_id,
             attrs: attrs.unwrap_or(JsonValue::Object(serde_json::Map::new())),
-            // limits: None,
+            limits: limits.map(sqlx::types::Json),
         }
     }
 
@@ -82,7 +87,7 @@ impl Subject {
     }
 }
 
-#[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize)]
+#[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[sqlx(type_name = "reset_period", rename_all = "lowercase")]
 pub enum ResetPeriod {
     Daily,
@@ -93,15 +98,32 @@ pub enum ResetPeriod {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Quota {
-    pub limit: u64,
-    pub reset_period: ResetPeriod,
+pub struct Limits {
+    /// Maximum number of requests allowed per second.
+    pub request_per_second: u32,
+
+    /// Maximum burst size - number of requests that can be made in a short burst
+    pub burst_size: u32,
+
+    /// Time window in seconds for rate limiting.
+    pub window_size_seconds: u64,
+
+    /// Quotas for different reset periods.
+    pub quotas: Option<std::collections::HashMap<ResetPeriod, u64>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Limits {
-    pub request_per_second: u32,
-    pub burst_size: u32,
-    pub window_size: u64,
-    pub quotas: Option<Vec<Quota>>,
+impl Limits {
+    pub fn new(
+        request_per_second: u32,
+        burst_size: u32,
+        window_size_seconds: u64,
+        quotas: Option<std::collections::HashMap<ResetPeriod, u64>>,
+    ) -> Self {
+        Limits {
+            request_per_second,
+            burst_size,
+            window_size_seconds,
+            quotas,
+        }
+    }
 }

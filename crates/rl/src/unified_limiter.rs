@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::config::{GlobalRateLimitSettings, RateLimitConfig};
 use crate::error::{RateLimitDecision, RateLimitError, Result};
 use crate::limiter::RateLimiter;
-use crate::quota::{QuotaDecision, QuotaStatus};
+use crate::quota::{QuotaDecision, QuotaStatus, ResetPeriod};
 use crate::quota_manager::QuotaManager;
 use store::Store;
 
@@ -26,10 +26,8 @@ pub struct UnifiedDecision {
 pub enum DenialReason {
     /// Rate limit exceeded
     RateLimit,
-    /// Daily quota exceeded
-    DailyQuota,
-    /// Monthly quota exceeded
-    MonthlyQuota,
+    /// Quota exceeded for a specific reset period
+    Quota(ResetPeriod),
 }
 
 impl UnifiedDecision {
@@ -80,10 +78,48 @@ impl UnifiedDecision {
     }
 
     /// Check if the denial was due to quota violation
+    /// Check if this is a quota violation
     pub fn is_quota_violation(&self) -> bool {
+        matches!(self.denial_reason, Some(DenialReason::Quota(_)))
+    }
+
+    /// Check if this is a daily quota violation
+    pub fn is_daily_quota_violation(&self) -> bool {
         matches!(
             self.denial_reason,
-            Some(DenialReason::DailyQuota) | Some(DenialReason::MonthlyQuota)
+            Some(DenialReason::Quota(ResetPeriod::Daily))
+        )
+    }
+
+    /// Check if this is a monthly quota violation
+    pub fn is_monthly_quota_violation(&self) -> bool {
+        matches!(
+            self.denial_reason,
+            Some(DenialReason::Quota(ResetPeriod::Monthly))
+        )
+    }
+
+    /// Check if this is a weekly quota violation
+    pub fn is_weekly_quota_violation(&self) -> bool {
+        matches!(
+            self.denial_reason,
+            Some(DenialReason::Quota(ResetPeriod::Weekly))
+        )
+    }
+
+    /// Check if this is a yearly quota violation
+    pub fn is_yearly_quota_violation(&self) -> bool {
+        matches!(
+            self.denial_reason,
+            Some(DenialReason::Quota(ResetPeriod::Yearly))
+        )
+    }
+
+    /// Check if this is a permanent quota violation
+    pub fn is_permanent_quota_violation(&self) -> bool {
+        matches!(
+            self.denial_reason,
+            Some(DenialReason::Quota(ResetPeriod::Never))
         )
     }
 }
@@ -174,10 +210,11 @@ where
             let quota_decision = self.quota_manager.check_quota(key, cost, &config).await?;
 
             if !quota_decision.allowed {
-                let reason = if quota_decision.is_daily_violation() {
-                    DenialReason::DailyQuota
-                } else {
-                    DenialReason::MonthlyQuota
+                let reason = match &quota_decision.violation_type {
+                    Some(crate::quota::QuotaViolationType::Quota(period)) => {
+                        DenialReason::Quota(period.clone())
+                    }
+                    None => DenialReason::Quota(ResetPeriod::Daily), // fallback
                 };
 
                 return Ok(UnifiedDecision::denied(
@@ -549,7 +586,10 @@ mod tests {
         assert!(!decision.allowed);
         assert!(!decision.is_rate_limit_violation());
         assert!(decision.is_quota_violation());
-        assert_eq!(decision.denial_reason, Some(DenialReason::DailyQuota));
+        assert_eq!(
+            decision.denial_reason,
+            Some(DenialReason::Quota(ResetPeriod::Daily))
+        );
     }
 
     #[tokio::test]
@@ -575,7 +615,14 @@ mod tests {
         let status = limiter.get_status("test_key", None).await.unwrap();
         assert!(status.quota.is_some());
         assert_eq!(
-            status.quota.as_ref().unwrap().daily.as_ref().unwrap().used,
+            status
+                .quota
+                .as_ref()
+                .unwrap()
+                .periods
+                .get(&ResetPeriod::Daily)
+                .unwrap()
+                .used,
             25
         );
     }
@@ -659,8 +706,7 @@ mod tests {
         let rate_decision = RateLimitDecision::allowed(10.0, 20.0, RateLimitConfig::default());
         let quota_decision = QuotaDecision::allowed(
             crate::quota::QuotaStatus {
-                daily: None,
-                monthly: None,
+                periods: std::collections::HashMap::new(),
                 config: QuotaConfig::default(),
             },
             QuotaConfig::default(),
