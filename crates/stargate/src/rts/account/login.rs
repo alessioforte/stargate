@@ -19,7 +19,6 @@ use store::Store;
 )]
 #[post("/login")]
 pub async fn handler(
-    // session: Session,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let service = etc::db::service();

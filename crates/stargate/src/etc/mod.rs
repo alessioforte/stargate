@@ -10,4 +10,5 @@ pub mod lim;
 pub mod logo;
 pub mod msg;
 pub mod store;
+pub mod sub;
 pub mod tls;

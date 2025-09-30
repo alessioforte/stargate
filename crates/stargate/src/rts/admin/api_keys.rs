@@ -1,4 +1,7 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::{
+    err::{ErrorResponse, HttpError},
+    etc::store::use_store,
+};
 use actix_web::{HttpResponse, delete, get, post, web};
 use actix_web_grants::protect;
 use db::Transaction;
@@ -17,7 +20,7 @@ enum ResetPeriod {
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Limits {
-    pub request_per_second: u32,
+    pub requests_per_second: u32,
     pub burst_size: u32,
     pub window_size_seconds: u64,
     pub quotas: Option<std::collections::HashMap<ResetPeriod, u64>>,
@@ -44,6 +47,19 @@ struct ApiKey {
 #[protect("SUPER_ADMIN")]
 pub async fn get_api_keys() -> Result<HttpResponse, ErrorResponse> {
     // TODO: implement get api keys logic
+
+    #[cfg(feature = "memory")]
+    {
+        let store = use_store();
+        match store
+            .export_to_simple_json("./.stargate/memory_store_backup.json")
+            .await
+        {
+            Ok(_) => println!("Memory store backed up successfully."),
+            Err(e) => eprintln!("Failed to back up memory store: {}", e),
+        }
+    }
+
     Ok(HttpResponse::Ok().json(web::Json("List of API keys")))
 }
 
@@ -77,7 +93,7 @@ pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, 
 
     let limits = match &payload.limits {
         Some(l) => Some(db::ent::Limits {
-            request_per_second: l.request_per_second,
+            requests_per_second: l.requests_per_second,
             burst_size: l.burst_size,
             window_size_seconds: l.window_size_seconds,
             quotas: l.quotas.as_ref().map(|q| {
@@ -94,6 +110,8 @@ pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, 
         }),
         None => None,
     };
+
+    // TODO: check if owner exists and is a user
 
     let api_key = match service
         .create_api_key(

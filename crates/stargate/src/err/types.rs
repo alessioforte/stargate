@@ -60,13 +60,11 @@ pub enum Code {
     InvalidContentType,
     DocumentNotFound,
     MissingPayload,
-
     BadRequest,
     Internal,
     MalformedPayload,
     UnsupportedMediaType,
     PayloadTooLarge,
-
     BadParameter,
     BadGateway,
     Unauthorized,
@@ -76,8 +74,6 @@ pub enum Code {
     InternalServerError,
     InvalidToken,
     MissingParameter,
-    SurrealDBError, // TODO: delete
-
     TooManyRequests,
 }
 
@@ -114,7 +110,6 @@ impl Code {
             }
             InvalidToken => ErrCode::authentication("invalid_api_key", StatusCode::FORBIDDEN),
             MissingParameter => ErrCode::invalid("missing_parameter", StatusCode::BAD_REQUEST),
-            SurrealDBError => ErrCode::internal("surrealdb", StatusCode::INTERNAL_SERVER_ERROR),
             TooManyRequests => ErrCode::invalid("too_many_requests", StatusCode::TOO_MANY_REQUESTS),
         }
     }

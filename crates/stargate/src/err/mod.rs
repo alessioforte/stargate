@@ -50,7 +50,7 @@ impl ErrorCode for HttpError {
             HttpError::DocumentNotFound(_) => Code::DocumentNotFound,
             HttpError::MissingPayload(_) => Code::MissingPayload,
             HttpError::Payload(e) => e.error_code(),
-            HttpError::Db(_) => Code::SurrealDBError,
+            HttpError::Db(_) => Code::Internal,
             HttpError::Unauthorized(_) => Code::Unauthorized,
             HttpError::Forbidden(_) => Code::Forbidden,
             HttpError::InternalServerError(_) => Code::InternalServerError,
@@ -172,30 +172,61 @@ impl From<PayloadError> for actix_web::Error {
     }
 }
 
+/// Standardized error response structure
+/// Follows a consistent format for all error responses
+/// Includes HTTP status code, message, error code, type, and link
+/// Can be easily serialized to JSON for API responses
+/// Includes optional headers for additional context
+/// Implements `ResponseError` for seamless integration with Actix-web
+/// Example usage:
+/// ```
+/// let error = ErrorResponse::from_msg("Not Found".to_string(), Code::NotFound);
+/// let response = error.error_response();
+/// /// ```
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorResponse {
+    /// HTTP status code
     #[serde(skip)]
     pub code: StatusCode,
+
+    /// Optional headers to include in the response
+    #[serde(skip)]
+    pub headers: Vec<(String, String)>,
+
+    /// Human-readable error message
     pub message: String,
+
+    /// Application-specific error code
     #[serde(rename = "code")]
     error_code: String,
+
+    /// Error type/category
     #[serde(rename = "type")]
     error_type: String,
+
+    /// Link to documentation or more info
     #[serde(rename = "link")]
     error_link: String,
 }
 
 impl ErrorResponse {
+    /// Create a new error response from a message and error code
     pub fn from_msg(message: String, code: Code) -> Self {
-        log::error!("{}: {}", code.name(), message);
         Self {
             code: code.http(),
             message,
             error_code: code.name(),
             error_type: code.type_(),
             error_link: code.url(),
+            headers: vec![],
         }
+    }
+
+    /// Add a header to the error response
+    pub fn insert_header(mut self, key: String, value: String) -> Self {
+        self.headers.push((key, value));
+        self
     }
 }
 
@@ -224,6 +255,10 @@ impl actix_web::error::ResponseError for ErrorResponse {
 
         if self.code == StatusCode::SERVICE_UNAVAILABLE {
             builder.insert_header((actix_web::http::header::RETRY_AFTER, "10"));
+        }
+
+        for (key, value) in &self.headers {
+            builder.insert_header((key.as_str(), value.as_str()));
         }
 
         builder.body(json)

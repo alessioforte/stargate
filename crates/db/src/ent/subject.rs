@@ -89,6 +89,7 @@ impl Subject {
 
 #[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[sqlx(type_name = "reset_period", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum ResetPeriod {
     Daily,
     Weekly,
@@ -97,10 +98,22 @@ pub enum ResetPeriod {
     Never, // For lifetime quotas
 }
 
+impl ToString for ResetPeriod {
+    fn to_string(&self) -> String {
+        match self {
+            ResetPeriod::Daily => "daily".to_string(),
+            ResetPeriod::Weekly => "weekly".to_string(),
+            ResetPeriod::Monthly => "monthly".to_string(),
+            ResetPeriod::Yearly => "yearly".to_string(),
+            ResetPeriod::Never => "never".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Limits {
     /// Maximum number of requests allowed per second.
-    pub request_per_second: u32,
+    pub requests_per_second: u32,
 
     /// Maximum burst size - number of requests that can be made in a short burst
     pub burst_size: u32,
@@ -114,13 +127,13 @@ pub struct Limits {
 
 impl Limits {
     pub fn new(
-        request_per_second: u32,
+        requests_per_second: u32,
         burst_size: u32,
         window_size_seconds: u64,
         quotas: Option<std::collections::HashMap<ResetPeriod, u64>>,
     ) -> Self {
         Limits {
-            request_per_second,
+            requests_per_second,
             burst_size,
             window_size_seconds,
             quotas,

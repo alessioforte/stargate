@@ -486,6 +486,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1331,7 +1337,7 @@ dependencies = [
  "matchit",
  "notify-debouncer-mini",
  "serde 1.0.219",
- "serde_yml",
+ "serde_yaml_bw",
  "tokio",
  "tools",
  "utoipa",
@@ -2110,16 +2116,6 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
-]
-
-[[package]]
-name = "libyml"
-version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3302702afa434ffa30847a83305f0a69d6abd74293b6554c18ec85c7ef30c980"
-dependencies = [
- "anyhow",
- "version_check",
 ]
 
 [[package]]
@@ -3124,6 +3120,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "saphyr-parser"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fb771b59f6b1985d1406325ec28f97cfb14256abcec4fdfb37b36a1766d6af7"
+dependencies = [
+ "arraydeque",
+ "hashlink",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3281,18 +3287,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_yml"
-version = "0.0.12"
+name = "serde_yaml_bw"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59e2dd588bf1597a252c3b920e0143eb99b0f76e4e082f4c92ce34fbc9e71ddd"
+checksum = "814d1b82333584be69e4e8ced48e0f04245125d86b49f75062b7c669d7f4be12"
 dependencies = [
+ "base64",
  "indexmap 2.10.0",
  "itoa",
- "libyml",
- "memchr",
  "ryu",
+ "saphyr-parser",
  "serde 1.0.219",
- "version_check",
+ "unsafe-libyaml-norway",
 ]
 
 [[package]]
@@ -3678,7 +3684,7 @@ dependencies = [
  "rl",
  "serde 1.0.219",
  "serde_json",
- "serde_yml",
+ "serde_yaml_bw",
  "smtp",
  "store",
  "thiserror",

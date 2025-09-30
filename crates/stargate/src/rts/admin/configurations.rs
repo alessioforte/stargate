@@ -1,7 +1,7 @@
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{get, put, web, HttpResponse};
+use actix_web::{HttpResponse, get, put, web};
 use actix_web_grants::protect;
-use gate::{config::Config, Gate};
+use gate::{Gate, config::Config};
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -39,7 +39,7 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
             .body(content)),
         _ => {
             let config: Config =
-                serde_yml::from_str(&content).expect("Unable to parse config file");
+                serde_yaml_bw::from_str(&content).expect("Unable to parse config file");
             let json_data = serde_json::to_string(&config).unwrap();
             Ok(HttpResponse::Ok()
                 .content_type("application/json")

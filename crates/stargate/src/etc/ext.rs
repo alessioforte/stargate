@@ -77,11 +77,33 @@ impl RequestExt for HttpRequest {
             }
         }
 
-        // Fallback to peer address
-        if let Some(peer_addr) = self.peer_addr() {
-            return Some(peer_addr.ip());
+        // Check Forwarded header (RFC 7239)
+        if let Some(forwarded) = self.headers().get("Forwarded") {
+            if let Ok(forwarded_str) = forwarded.to_str() {
+                for part in forwarded_str.split(';') {
+                    if part.trim_start().starts_with("for=") {
+                        let for_part = part.trim_start().trim_start_matches("for=").trim();
+                        let for_part = for_part.trim_matches('"');
+                        if let Some(ip_str) = for_part.split(',').next() {
+                            if let Ok(ip) = ip_str.trim().parse() {
+                                return Some(ip);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        None
+        let mut ip = self.peer_addr().map(|addr| addr.ip())?;
+
+        // customers often get their own /56 prefix, apply rate-limiting per prefix instead of per
+        // address for IPv6
+        if let IpAddr::V6(ipv6) = ip {
+            let mut octets = ipv6.octets();
+            octets[7..16].fill(0);
+            ip = IpAddr::V6(octets.into());
+        }
+
+        Some(ip)
     }
 }

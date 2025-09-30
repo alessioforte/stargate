@@ -45,9 +45,9 @@ impl QuotaUsage {
         now >= self.period_end
     }
 
-    /// Add usage to this period
+    /// Add usage to this period with overflow protection
     pub fn add_usage(&mut self, count: u64) {
-        self.used += count;
+        self.used = self.used.saturating_add(count);
         self.last_updated = Utc::now();
     }
 

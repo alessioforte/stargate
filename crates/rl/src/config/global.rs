@@ -69,9 +69,7 @@ impl GlobalRateLimitSettings {
     pub fn for_development() -> Self {
         Self {
             default_config: RateLimitConfig::permissive(),
-            // default_ip_config: RateLimitConfig::permissive_ip(),
             enabled: true,
-            // ip_rate_limiting_enabled: false, // Disable IP limiting in dev
             cleanup_interval_seconds: 600,
             max_buckets: 1000,
             config_cache_ttl_seconds: 300,

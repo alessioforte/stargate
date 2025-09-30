@@ -5,12 +5,28 @@ use crate::error::{RateLimitError, Result};
 
 /// Reset period for quota limits
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
 pub enum ResetPeriod {
     Daily,
     Weekly,
     Monthly,
     Yearly,
     Never,
+}
+
+impl std::str::FromStr for ResetPeriod {
+    type Err = RateLimitError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "daily" => Ok(ResetPeriod::Daily),
+            "weekly" => Ok(ResetPeriod::Weekly),
+            "monthly" => Ok(ResetPeriod::Monthly),
+            "yearly" => Ok(ResetPeriod::Yearly),
+            "never" => Ok(ResetPeriod::Never),
+            _ => Err(RateLimitError::invalid_config("Invalid reset period")),
+        }
+    }
 }
 
 impl ResetPeriod {

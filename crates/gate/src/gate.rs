@@ -130,17 +130,17 @@ impl Gate {
         if !Path::new(file_path).exists() {
             log::info!("Creating gate configuration yaml file");
             let config = Config::default();
-            let config_str = serde_yml::to_string(&config).expect("Unable to serialize config");
+            let config_str = serde_yaml_bw::to_string(&config).expect("Unable to serialize config");
             std::fs::write(file_path, config_str).expect("Unable to write config file");
             return config;
         }
         let file = std::fs::read_to_string(file_path).expect("Unable to read config file");
-        let config: Config = serde_yml::from_str(&file).expect("Unable to parse config file");
+        let config: Config = serde_yaml_bw::from_str(&file).expect("Unable to parse config file");
         config
     }
 
     pub fn to_file(&self, cfg: &Config) {
-        let config_str = serde_yml::to_string(cfg).expect("Unable to serialize config");
+        let config_str = serde_yaml_bw::to_string(cfg).expect("Unable to serialize config");
         std::fs::write(&self.file_path, config_str).expect("Unable to write config file");
     }
 

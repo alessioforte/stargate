@@ -17,8 +17,6 @@ pub struct RateLimitDecision {
 
     /// Estimated time until next token is available (in milliseconds)
     pub retry_after_ms: Option<u64>,
-    // /// The rate limit configuration used
-    // pub config: crate::config::RateLimitConfig,
 }
 
 impl RateLimitDecision {
@@ -33,23 +31,16 @@ impl RateLimitDecision {
             remaining_tokens,
             max_tokens,
             retry_after_ms: None,
-            // config,
         }
     }
 
     /// Create a denied decision
-    pub fn denied(
-        remaining_tokens: f64,
-        max_tokens: f64,
-        retry_after_ms: u64,
-        // config: crate::config::RateLimitConfig,
-    ) -> Self {
+    pub fn denied(remaining_tokens: f64, max_tokens: f64, retry_after_ms: u64) -> Self {
         Self {
             allowed: false,
             remaining_tokens,
             max_tokens,
             retry_after_ms: Some(retry_after_ms),
-            // config,
         }
     }
 
