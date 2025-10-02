@@ -136,9 +136,8 @@ where
         // Get or create token bucket
         let mut bucket = self.get_or_create_bucket(key, config).await?;
 
-        // Try to consume one token
-        let rate_limit_decision = bucket.try_consume(1.0);
-        let quota_decision = bucket.check_and_consume_quota(count);
+        // Use optimized single-timestamp method
+        let (rate_limit_decision, quota_decision) = bucket.check_rate_limit_and_quota(1.0, count);
 
         // Store the updated bucket back
         self.store.set_bucket(&key, bucket).await?;
@@ -149,13 +148,7 @@ where
     /// Set a custom configuration for a specific key if the bucket exists
     /// If the bucket does not exist, this is a no-op
     /// To create a bucket with custom config, call `check_rate_limit` first
-    /// Optionally set a TTL for the configuration (not implemented in this example)
-    pub async fn set_config(
-        &self,
-        key: &str,
-        config: RateLimitConfig,
-        // ttl: Option<Duration>,
-    ) -> Result<()> {
+    pub async fn set_config(&self, key: &str, config: RateLimitConfig) -> Result<()> {
         if key.is_empty() {
             return Err(RateLimitError::invalid_key(key));
         }

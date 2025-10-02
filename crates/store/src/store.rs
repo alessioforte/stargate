@@ -38,4 +38,12 @@ pub trait Store: Send + Sync {
     async fn hkeys(&self, key: &str) -> StoreResult<Vec<String>>;
     async fn hvals<T: DeserializeOwned + Send + Sync>(&self, key: &str) -> StoreResult<Vec<T>>;
     async fn hlen(&self, key: &str) -> StoreResult<usize>;
+
+    async fn compare_and_swap<T: Serialize + DeserializeOwned + PartialEq + Send + Sync>(
+        &self,
+        key: &str,
+        expected: &T,
+        new: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool>;
 }

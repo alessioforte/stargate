@@ -16,7 +16,8 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
     };
     let hash_key = apiks::hash_api_key(&api_key);
     let store = etc::store::use_store();
-    let session = store.get::<Subject>(&hash_key).await.unwrap_or(None);
+    let key = format!("sub:{}", hash_key);
+    let session = store.get::<Subject>(&key).await.unwrap_or(None);
 
     if let Some(subject) = session {
         return Some(subject);
@@ -49,7 +50,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
         if let Some(subject) = subject {
             // let ttl = api_key.exp.map(|exp| exp as u64);
             let ttl = Some(3600);
-            match store.set(&hash_key, &subject, ttl).await {
+            match store.set(&key, &subject, ttl).await {
                 Ok(_) => (),
                 Err(e) => {
                     log::error!("Failed to store subject in the session store: {}", e);
@@ -82,7 +83,8 @@ pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
     // Get subject from session store
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
-    let session = store.get::<Subject>(&sid).await;
+    let key = format!("sub:{}", sid);
+    let session = store.get::<Subject>(&key).await;
 
     if let Ok(Some(subject)) = session {
         return Some(subject);

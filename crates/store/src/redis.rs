@@ -362,4 +362,70 @@ impl Store for RedisStore {
 
         Ok(len as usize)
     }
+
+    async fn compare_and_swap<
+        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Send + Sync,
+    >(
+        &self,
+        key: &str,
+        expected: &T,
+        new: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool> {
+        self.validate_key(key)?;
+
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let mut con = self.get_connection().await?;
+
+        let expected_serialized = serde_json::to_string(expected).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize expected value for key '{}': {}",
+                key, e
+            ))
+        })?;
+
+        let new_serialized = serde_json::to_string(new).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize new value for key '{}': {}",
+                key, e
+            ))
+        })?;
+
+        let script = redis::Script::new(
+            r#"
+            local current = redis.call("GET", KEYS[1])
+            if current == ARGV[1] then
+                redis.call("SET", KEYS[1], ARGV[2])
+                if ARGV[3] ~= "nil" then
+                    redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
+                end
+                return 1
+            else
+                return 0
+            end
+            "#,
+        );
+
+        let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
+
+        let result: i32 = script
+            .key(key)
+            .arg(expected_serialized)
+            .arg(new_serialized)
+            .arg(ttl_str)
+            .invoke(&mut con)
+            .map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to perform compare and swap on key '{}': {}",
+                    key, e
+                ))
+            })?;
+
+        Ok(result == 1)
+    }
 }

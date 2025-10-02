@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::ResetPeriod;
 
 /// Usage tracking for a specific quota period
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QuotaUsage {
     /// Number of requests used in this period
     pub used: u64,

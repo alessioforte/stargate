@@ -94,7 +94,8 @@ pub async fn handler(
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
-    match store.set(&sid, &subject, Some(sttl)).await {
+    let key = format!("sub:{}", &sid);
+    match store.set(&key, &subject, Some(sttl)).await {
         Ok(_) => {}
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(

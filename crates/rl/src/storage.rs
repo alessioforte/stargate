@@ -1,8 +1,6 @@
-use crate::error::{RateLimitError, Result};
-// use crate::quota_tracker::QuotaTracker;
 use crate::bucket::Bucket;
+use crate::error::{RateLimitError, Result};
 use std::sync::Arc;
-// use std::time::Duration;
 use store::Store;
 
 pub struct Storage<S>
@@ -28,7 +26,7 @@ where
             return Err(RateLimitError::invalid_key(key));
         }
 
-        match self.store.hget("buckets", &key).await {
+        match self.store.get(format!("lim:{}", key).as_str()).await {
             Ok(bucket) => Ok(bucket),
             Err(e) => Err(RateLimitError::storage(&e.to_string())),
         }
@@ -40,7 +38,11 @@ where
             return Err(RateLimitError::invalid_key(key));
         }
 
-        match self.store.hset("buckets", &key, &bucket, None).await {
+        match self
+            .store
+            .set(format!("lim:{}", key).as_str(), &bucket, None)
+            .await
+        {
             Ok(_) => Ok(()),
             Err(e) => Err(RateLimitError::storage(&e.to_string())),
         }
@@ -52,8 +54,30 @@ where
             return Err(RateLimitError::invalid_key(key));
         }
 
-        match self.store.hdel("buckets", &key).await {
+        match self.store.delete(format!("lim:{}", key).as_str()).await {
             Ok(removed) => Ok(removed),
+            Err(e) => Err(RateLimitError::storage(&e.to_string())),
+        }
+    }
+
+    pub async fn compare_and_swap_bucket(
+        &self,
+        key: &str,
+        old: &Bucket,
+        new: &Bucket,
+    ) -> Result<bool> {
+        if key.is_empty() {
+            return Err(RateLimitError::invalid_key(key));
+        }
+
+        let store_key = format!("lim:{}", key);
+
+        match self
+            .store
+            .compare_and_swap(&store_key, old, new, None)
+            .await
+        {
+            Ok(swapped) => Ok(swapped),
             Err(e) => Err(RateLimitError::storage(&e.to_string())),
         }
     }

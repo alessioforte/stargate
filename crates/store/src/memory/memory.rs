@@ -102,55 +102,6 @@ impl MemoryStore {
         }
     }
 
-    /// Compare and swap operation for atomic updates
-    pub async fn compare_and_swap<
-        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Send + Sync,
-    >(
-        &self,
-        key: &str,
-        expected: &T,
-        new_value: &T,
-        ttl: Option<u64>,
-    ) -> StoreResult<bool> {
-        if key.trim().is_empty() {
-            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
-        }
-
-        let expected_str = serde_json::to_string(expected).map_err(|e| {
-            StoreError::SerializationFailed(format!(
-                "Failed to serialize expected value for key '{}': {}",
-                key, e
-            ))
-        })?;
-
-        let new_str = serde_json::to_string(new_value).map_err(|e| {
-            StoreError::SerializationFailed(format!(
-                "Failed to serialize new value for key '{}': {}",
-                key, e
-            ))
-        })?;
-
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
-
-        if let Some(mut entry) = self.data.get_mut(key) {
-            match entry.value_mut() {
-                StoreValue::Simple(current, current_exp) => {
-                    if !self.is_expired(current_exp) && current == &expected_str {
-                        *current = new_str;
-                        *current_exp = exp;
-                        self.stats.sets.fetch_add(1, Ordering::SeqCst);
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                }
-                _ => Ok(false),
-            }
-        } else {
-            Ok(false)
-        }
-    }
-
     /// Atomic multi-operation for setting multiple keys
     pub async fn atomic_multi_set(
         &self,
@@ -791,6 +742,55 @@ impl Store for MemoryStore {
             }
         } else {
             Ok(0)
+        }
+    }
+
+    /// Compare and swap operation for atomic updates
+    async fn compare_and_swap<
+        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Send + Sync,
+    >(
+        &self,
+        key: &str,
+        expected: &T,
+        new_value: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
+        let expected_str = serde_json::to_string(expected).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize expected value for key '{}': {}",
+                key, e
+            ))
+        })?;
+
+        let new_str = serde_json::to_string(new_value).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Failed to serialize new value for key '{}': {}",
+                key, e
+            ))
+        })?;
+
+        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+
+        if let Some(mut entry) = self.data.get_mut(key) {
+            match entry.value_mut() {
+                StoreValue::Simple(current, current_exp) => {
+                    if !self.is_expired(current_exp) && current == &expected_str {
+                        *current = new_str;
+                        *current_exp = exp;
+                        self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                }
+                _ => Ok(false),
+            }
+        } else {
+            Ok(false)
         }
     }
 }
