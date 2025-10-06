@@ -76,13 +76,13 @@ pub trait Store: Send + Sync {
     async fn hvals<T: DeserializeOwned + Send + Sync>(&self, key: &str) -> StoreResult<Vec<T>>;
     async fn hlen(&self, key: &str) -> StoreResult<usize>;
 
-    // async fn compare_and_swap<T: Serialize + DeserializeOwned + PartialEq + Send + Sync>(
-    //     &self,
-    //     key: &str,
-    //     expected: &T,
-    //     new: &T,
-    //     ttl: Option<u64>,
-    // ) -> StoreResult<bool>;
+    async fn compare_and_swap<T: Serialize + DeserializeOwned + PartialEq + Send + Sync>(
+        &self,
+        key: &str,
+        expected: &T,
+        new: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool>;
 
     // fn serialize<T: Serialize + Send + Sync>(&self, value: &T) -> StoreResult<Vec<u8>> {
     //     serde_json::to_vec(value)
