@@ -1,4 +1,4 @@
-use db::ent::Subject;
+use crate::etc::sub::Subject;
 use std::collections::HashMap;
 
 pub fn access_control(

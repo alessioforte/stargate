@@ -3,7 +3,7 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use actix_web::{HttpResponse, get, web};
 use db::Transaction;
-use db::ent::{CredentialType, User};
+use db::ent::{CredentialType, Profile};
 use jwt::Claims;
 use oauth::github::{get_github_oauth_token, get_github_user};
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
     };
 
     if user.is_none() {
-        let new_user = User::new(github_user.email.clone())
+        let new_user = Profile::new(github_user.email.clone())
             .first_name(Some(github_user.name.clone()))
             .nickname(Some(github_user.login.clone()))
             .picture(Some(github_user.avatar_url.clone()));
@@ -77,7 +77,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         let value = format!("github:{}", github_user.id);
         user = match svc
             .clone()
-            .create_user(new_user, CredentialType::Oauth, &value, None, None)
+            .create_user(new_user, CredentialType::Oauth, &value)
             .await
         {
             Ok(user) => Some(user),

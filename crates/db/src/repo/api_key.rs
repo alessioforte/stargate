@@ -1,4 +1,4 @@
-use crate::ent::{ApiKey, OwnerType};
+use crate::ent::ApiKey;
 use anyhow::Result;
 
 #[derive(Clone)]
@@ -13,33 +13,30 @@ impl ApiKeyRepository {
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        owner: &str,
-        owner_type: OwnerType,
+        account_id: &str,
         key_hash: &str,
         label: Option<String>,
-        exp: Option<i64>,
+        attrs: Option<serde_json::Value>,
     ) -> Result<ApiKey> {
         let api_key = ApiKey::new(
             key_hash.to_string(),
-            owner.to_string(),
-            owner_type,
+            account_id.to_string(),
             label,
-            exp,
+            attrs.unwrap_or(serde_json::Value::Null),
         );
         let row = sqlx::query_as::<_, ApiKey>(
             "
-            INSERT INTO api_keys (id, owner, owner_type, key_hash, label, revoked, exp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO api_keys (id, account_id, key_hash, label, revoked, attrs)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         ",
         )
         .bind(&api_key.id)
-        .bind(&api_key.owner)
-        .bind(&api_key.owner_type)
+        .bind(&api_key.account_id)
         .bind(&api_key.key_hash)
         .bind(&api_key.label)
         .bind(&api_key.revoked)
-        .bind(&api_key.exp)
+        .bind(&api_key.attrs)
         .fetch_one(&mut **tx)
         .await?;
 

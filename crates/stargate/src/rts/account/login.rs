@@ -59,14 +59,7 @@ pub async fn handler(
         )));
     }
 
-    let subject = match service.get_subject_by_id(&user.id).await {
-        Ok(subject) => subject,
-        Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
-        }
-    };
+    let subject = etc::sub::Subject::from(user.clone());
 
     let first_name = user.first_name.clone().unwrap_or_default();
     let last_name = user.last_name.clone().unwrap_or_default();

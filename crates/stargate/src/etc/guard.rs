@@ -1,13 +1,11 @@
-use crate::err::ErrorResponse;
 use crate::etc;
-use crate::etc::{ext::RequestExt, lim::RateLimiter};
+use crate::etc::ext::RequestExt;
 use actix_web::HttpRequest;
-use db::{Transaction, ent::Subject};
-use std::net::IpAddr;
+use db::Transaction;
 use store::Store;
 
 // TODO: maybe should return a Result instead of an Option
-pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
+pub async fn verify_api_key(req: &HttpRequest) -> Option<etc::sub::Subject> {
     let api_key = match req.get_api_key() {
         Some(k) => k,
         None => {
@@ -17,7 +15,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
     let hash_key = apiks::hash_api_key(&api_key);
     let store = etc::store::use_store();
     let session = store
-        .get::<db::ent::Subject>(&hash_key)
+        .get::<etc::sub::Subject>(&hash_key)
         .await
         .unwrap_or(None);
 
@@ -40,33 +38,32 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
             return None;
         }
 
-        let subject = match service.get_subject_by_id(&api_key.id).await {
-            Ok(subject) => subject,
-            Err(e) => {
-                log::error!("Failed to get subject by id: {}", e);
-                return None;
-            }
-        };
+        // let subject = match service.get_subject_by_id(&api_key.id).await {
+        //     Ok(subject) => subject,
+        //     Err(e) => {
+        //         log::error!("Failed to get subject by id: {}", e);
+        //         return None;
+        //     }
+        // };
+        let subject = etc::sub::Subject::from(api_key.clone());
 
         // store the subject in the session store
-        if let Some(subject) = subject {
-            // let ttl = api_key.exp.map(|exp| exp as u64);
-            let ttl = Some(3600);
-            match store.set(&hash_key, &subject, ttl).await {
-                Ok(_) => (),
-                Err(e) => {
-                    log::error!("Failed to store subject in the session store: {}", e);
-                }
+        // let ttl = api_key.exp.map(|exp| exp as u64);
+        let ttl = Some(3600);
+        match store.set(&hash_key, &subject, ttl).await {
+            Ok(_) => (),
+            Err(e) => {
+                log::error!("Failed to store subject in the session store: {}", e);
             }
-
-            return Some(subject);
         }
+
+        return Some(subject);
     }
 
     None
 }
 
-pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
+pub async fn verify_jwt(req: &HttpRequest) -> Option<etc::sub::Subject> {
     let token = match req.get_token() {
         Some(t) => t,
         None => {
@@ -85,7 +82,7 @@ pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
     // Get subject from session store
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
-    let session = store.get::<db::ent::Subject>(&sid).await;
+    let session = store.get::<etc::sub::Subject>(&sid).await;
     println!("Session: {:?}", session);
 
     if let Ok(Some(subject)) = session {
@@ -95,15 +92,49 @@ pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
     None
 }
 
-pub async fn apply_rate_limit(
-    limiter: &RateLimiter,
-    sub: &Option<Subject>,
-    ip: &Option<IpAddr>,
-) -> Result<(), ErrorResponse> {
-    // if has auth get the subject has config pass it to the rate limiter
-    // if has auth but the subject has no config use the default rate limit
-    // if has no auth apply rate limit to the client IP
-    // if has no auth and no client IP (localhost) use the very restrictive default rate limit
+// pub async fn apply_rate_limit(
+//     limiter: &RateLimiter,
+//     sub: &Option<Subject>,
+//     ip: &Option<IpAddr>,
+// ) -> Result<(), ErrorResponse> {
+//     let (rd, qd) = if let Some(subject) = sub {
+//         // if has auth get the subject config and pass it to the rate limiter
+//         // if has auth but the subject has no config use the default rate limit
+//         let config = subject.limits.clone();
+//         limiter
+//             .check_rate_limit_and_consume_quota(&subject.id, 1, config)
+//             .await
+//             .map_err(|e| ErrorResponse::from(HttpError::TooManyRequests(e.to_string())))?
+//     } else {
+//         // if has no auth apply rate limit to the client IP
+//         // if has no auth and no client IP (localhost) use the very restrictive default rate limit
+//         // TODO: Analyze how to handle if no IP is found
+//         limiter
+//             .check_rate_limit_and_consume_quota(
+//                 &ip.map_or("anonymous".to_string(), |ip| ip.to_string()),
+//                 1,
+//                 None,
+//             )
+//             .await
+//             .map_err(|e| ErrorResponse::from(HttpError::TooManyRequests(e.to_string())))?
+//     };
 
-    Ok(())
-}
+//     if !rd.allowed {
+//         let retry_after = rd.retry_after_ms.unwrap_or(60_000) / 1000; // in seconds
+//         let message = format!(
+//             "Too Many Requests. Please try again in {} seconds.",
+//             retry_after
+//         );
+//         return Err(ErrorResponse::from(HttpError::TooManyRequests(message))
+//             .insert_header("Retry-After".to_string(), retry_after.to_string())
+//             .insert_header("X-Ratelimit-After".to_string(), retry_after.to_string()));
+//     }
+
+//     if !qd.allowed {
+//         return Err(ErrorResponse::from(HttpError::TooManyRequests(
+//             "Quota exceeded".to_string(),
+//         )));
+//     }
+
+//     Ok(())
+// }

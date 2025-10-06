@@ -3,7 +3,7 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
 use actix_web::{HttpResponse, put, web};
 use db::Transaction;
-use db::ent::{CredentialType, User};
+use db::ent::{CredentialType, Profile};
 use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
 
@@ -104,7 +104,7 @@ pub async fn handler(
         return Err(ErrorResponse::from(HttpError::BadRequest(message)));
     }
 
-    let user = User::new(signup.sub)
+    let user = Profile::new(signup.sub)
         .first_name(Some(body.first_name.clone()))
         .last_name(Some(body.last_name.clone()))
         .nickname(Some(body.nickname.clone()))
@@ -113,7 +113,7 @@ pub async fn handler(
 
     let password = Hash::encode(&body.password).unwrap();
     match service
-        .create_user(user, CredentialType::Password, &password, None, None)
+        .create_user(user, CredentialType::Password, &password)
         .await
     {
         Ok(_) => {

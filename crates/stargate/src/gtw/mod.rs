@@ -1,17 +1,15 @@
 mod http;
 mod ws;
 
-// use std::net::IpAddr;
 use crate::act::access_control;
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc;
 use crate::etc::{ext::RequestExt, guard};
 use actix_web::{HttpRequest, HttpResponse, web::Payload};
 use gate::Gate;
 
 pub async fn handler(
     gate: actix_web::web::Data<Gate>,
-    limiter: actix_web::web::Data<etc::lim::RateLimiter>,
+    // limiter: actix_web::web::Data<etc::lim::RateLimiter>,
     req: HttpRequest,
     stream: Payload,
 ) -> Result<HttpResponse, ErrorResponse> {
@@ -35,7 +33,7 @@ pub async fn handler(
     let has_auth = sub.is_some();
 
     // Rate limiting ----------------------------------------------------------
-    guard::apply_rate_limit(&limiter, &sub, &client_ip).await?;
+    // guard::apply_rate_limit(&limiter, &sub, &client_ip).await?;
     // ------------------------------------------------------------------------
 
     // check if the service exists --------------------------------------------

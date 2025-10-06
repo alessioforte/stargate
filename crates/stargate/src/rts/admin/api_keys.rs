@@ -4,33 +4,13 @@ use actix_web_grants::protect;
 use db::Transaction;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema, PartialEq, Eq, Hash, Clone)]
-#[serde(rename_all = "lowercase")]
-enum ResetPeriod {
-    Daily,
-    Weekly,
-    Monthly,
-    Yearly,
-    Never, // For lifetime quotas
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema, Clone)]
-#[serde(rename_all = "camelCase")]
-struct Limits {
-    pub request_per_second: u32,
-    pub burst_size: u32,
-    pub window_size_seconds: u64,
-    pub quotas: Option<std::collections::HashMap<ResetPeriod, u64>>,
-}
-
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct ApiKey {
-    owner: String,
+    account_id: String,
     label: Option<String>,
     exp: Option<String>,
     attrs: Option<serde_json::Value>,
-    limits: Option<Limits>,
 }
 
 #[utoipa::path(
@@ -57,53 +37,16 @@ pub async fn get_api_keys() -> Result<HttpResponse, ErrorResponse> {
 #[post("")]
 #[protect("SUPER_ADMIN")]
 pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, ErrorResponse> {
-    let exp = if let Some(ref exp) = payload.exp {
-        match tools::parse_duration(exp) {
-            Ok(dur) => Some((chrono::Utc::now() + dur).timestamp()),
-            Err(e) => {
-                return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-                    "Invalid exp format: {}",
-                    e
-                ))));
-            }
-        }
-    } else {
-        None
-    };
-
     let service = crate::etc::db::service();
     let secret = apiks::generate_api_key();
     let key_hash = apiks::hash_api_key(&secret);
 
-    let limits = match &payload.limits {
-        Some(l) => Some(db::ent::Limits {
-            request_per_second: l.request_per_second,
-            burst_size: l.burst_size,
-            window_size_seconds: l.window_size_seconds,
-            quotas: l.quotas.as_ref().map(|q| {
-                q.iter()
-                    .map(|(k, v)| match k {
-                        ResetPeriod::Daily => (db::ent::ResetPeriod::Daily, *v),
-                        ResetPeriod::Weekly => (db::ent::ResetPeriod::Weekly, *v),
-                        ResetPeriod::Monthly => (db::ent::ResetPeriod::Monthly, *v),
-                        ResetPeriod::Yearly => (db::ent::ResetPeriod::Yearly, *v),
-                        ResetPeriod::Never => (db::ent::ResetPeriod::Never, *v),
-                    })
-                    .collect()
-            }),
-        }),
-        None => None,
-    };
-
     let api_key = match service
         .create_api_key(
-            &payload.owner,
-            db::ent::OwnerType::User,
+            &payload.account_id,
             &key_hash,
             payload.label.clone(),
             payload.attrs.clone(),
-            limits,
-            exp,
         )
         .await
     {
@@ -117,11 +60,8 @@ pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, 
 
     let response = serde_json::json!({
         "id": api_key.id,
-        "owner": api_key.owner,
-        "owner_type": api_key.owner_type,
         "label": api_key.label,
-        "exp": payload.exp,
-        "attrs": payload.attrs,
+        "attrs": api_key.attrs,
         "api_key": secret, // Return the plain API key only once
     });
 

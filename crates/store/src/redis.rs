@@ -74,12 +74,7 @@ impl Store for RedisStore {
 
         match value {
             Some(v) => {
-                let deserialized = serde_json::from_str::<T>(&v).map_err(|e| {
-                    StoreError::DeserializationFailed(format!(
-                        "Failed to deserialize value for key '{}': {}",
-                        key, e
-                    ))
-                })?;
+                let deserialized = self.deserialize(&v)?;
                 Ok(Some(deserialized))
             }
             None => Ok(None),
@@ -102,12 +97,7 @@ impl Store for RedisStore {
 
         let mut con = self.get_connection().await?;
 
-        let serialized_value = serde_json::to_string(value).map_err(|e| {
-            StoreError::SerializationFailed(format!(
-                "Failed to serialize value for key '{}': {}",
-                key, e
-            ))
-        })?;
+        let serialized_value = self.serialize(value)?;
 
         if let Some(ttl) = ttl {
             let _: () = con.set_ex(key, serialized_value, ttl).map_err(|e| {
@@ -167,12 +157,7 @@ impl Store for RedisStore {
 
         let mut con = self.get_connection().await?;
 
-        let serialized_value = serde_json::to_string(value).map_err(|e| {
-            StoreError::SerializationFailed(format!(
-                "Failed to serialize value for key '{}', field '{}': {}",
-                key, field, e
-            ))
-        })?;
+        let serialized_value = self.serialize(value)?;
 
         let hash_field_expiration_options = if let Some(ttl) = ttl {
             HashFieldExpirationOptions::default().set_expiration(SetExpiry::EX(ttl))
@@ -212,12 +197,7 @@ impl Store for RedisStore {
 
         match value {
             Some(v) => {
-                let deserialized = serde_json::from_str::<T>(&v).map_err(|e| {
-                    StoreError::DeserializationFailed(format!(
-                        "Failed to deserialize hash field '{}' from key '{}': {}",
-                        field, key, e
-                    ))
-                })?;
+                let deserialized = self.deserialize(&v)?;
                 Ok(Some(deserialized))
             }
             None => Ok(None),
@@ -259,7 +239,7 @@ impl Store for RedisStore {
         let mut deserialization_errors = Vec::new();
 
         for (field, value) in hash_data {
-            match serde_json::from_str::<T>(&value) {
+            match self.deserialize(&value) {
                 Ok(deserialized) => {
                     result.insert(field, deserialized);
                 }
@@ -327,7 +307,7 @@ impl Store for RedisStore {
         let mut deserialization_errors = Vec::new();
 
         for (index, value) in values.iter().enumerate() {
-            match serde_json::from_str::<T>(value) {
+            match self.deserialize(&value) {
                 Ok(deserialized) => {
                     result.push(deserialized);
                 }

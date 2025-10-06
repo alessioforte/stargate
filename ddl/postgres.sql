@@ -1,11 +1,20 @@
+CREATE TABLE IF NOT EXISTS "accounts" (
+    "id" TEXT PRIMARY KEY,
+    "type" VARCHAR(50) NOT NULL, -- e.g., 'user', 'service_account  etc.'
+    "name" VARCHAR(100) NOT NULL,
+    "description" TEXT
+);
+
 CREATE TABLE IF NOT EXISTS "users" (
     "id" TEXT PRIMARY KEY,
+    "account_id" TEXT NOT NULL REFERENCES "accounts" ("id") ON DELETE CASCADE,
     "email" VARCHAR(100) NOT NULL UNIQUE,
     "first_name" VARCHAR(50),
     "last_name" VARCHAR(50),
     "nickname" VARCHAR(50) NOT NULL UNIQUE,
     "picture" TEXT,
-    "phone_number" VARCHAR(20) UNIQUE
+    "phone_number" VARCHAR(20) UNIQUE,
+    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS "credentials" (
@@ -16,10 +25,13 @@ CREATE TABLE IF NOT EXISTS "credentials" (
     "value" TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS "service_accounts" (
+CREATE TABLE IF NOT EXISTS "api_keys" (
     "id" TEXT PRIMARY KEY,
-    "name" VARCHAR(100) NOT NULL UNIQUE,
-    "description" TEXT,
+    "account_id" TEXT NOT NULL REFERENCES "accounts" ("id") ON DELETE CASCADE,
+    "key_hash" TEXT NOT NULL UNIQUE,
+    "label" VARCHAR(100) NOT NULL,
+    "revoked" BOOLEAN NOT NULL DEFAULT FALSE,
+    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS "actions" (
@@ -29,24 +41,6 @@ CREATE TABLE IF NOT EXISTS "actions" (
     "value" TEXT NOT NULL,
     "iat" bigint NOT NULL,
     "exp" bigint NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS "api_keys" (
-    "id" TEXT PRIMARY KEY,
-    "owner" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-    "owner_type" VARCHAR(50) NOT NULL,
-    "key_hash" TEXT NOT NULL UNIQUE,
-    "label" VARCHAR(100) NOT NULL,
-    "revoked" BOOLEAN NOT NULL DEFAULT FALSE,
-    "exp" bigint
-);
-
-CREATE TABLE IF NOT EXISTS "subjects" (
-    "id" TEXT PRIMARY KEY,
-    "type" VARCHAR(50) NOT NULL,
-    "sub_id" TEXT NOT NULL,
-    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb,
-    "limits" JSONB DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS "audits" (

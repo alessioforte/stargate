@@ -3,7 +3,7 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use actix_web::{HttpResponse, get, web};
 use db::Transaction;
-use db::ent::{CredentialType, User};
+use db::ent::{CredentialType, Profile};
 use jwt::Claims;
 use oauth::google::{get_google_oauth_token, get_google_user};
 use serde::{Deserialize, Serialize};
@@ -70,14 +70,14 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
     };
 
     if user.is_none() {
-        let new_user = User::new(google_user.email.clone())
+        let new_user = Profile::new(google_user.email.clone())
             .first_name(Some(google_user.name.clone()))
             .picture(Some(google_user.picture.clone()));
 
         let value = format!("google:{}", google_user.id);
         user = match svc
             .clone()
-            .create_user(new_user, CredentialType::Oauth, &value, None, None)
+            .create_user(new_user, CredentialType::Oauth, &value)
             .await
         {
             Ok(user) => Some(user),

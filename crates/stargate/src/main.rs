@@ -27,10 +27,10 @@ async fn main() -> std::io::Result<()> {
 
     etc::jwt::init();
     etc::db::init().await;
-    let store = etc::store::init();
+    etc::store::init();
     let tls = etc::tls::builder();
     let data_gate = etc::gate::init();
-    let limiter = etc::lim::init(store.clone());
+    // let limiter = etc::lim::init(store.clone());
 
     // create super admin user
     act::create_super_admin().await;
@@ -41,7 +41,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(etc::cors::configure())
             .app_data(data_gate.clone())
-            .app_data(limiter.clone())
+            // .app_data(limiter.clone())
             .configure(etc::cfg::app_data)
             .configure(rts::configure)
             .default_service(to(gtw::handler))

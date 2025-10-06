@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "crates/apiks", "crates/db", "crates/gate", "crates/jwt", "crates/lb", "crates/rl", "crates/store", "crates/oauth", "crates/pw", "crates/smtp",
+members = [ "crates/apiks", "crates/db", "crates/gate", "crates/jwt", "crates/lb", "crates/store", "crates/oauth", "crates/pw", "crates/smtp",
     "crates/stargate", "crates/ace", "crates/tools"]
 
 [workspace.package]

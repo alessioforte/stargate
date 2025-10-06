@@ -17,12 +17,13 @@ impl UserRepository {
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
             "
-            INSERT INTO users (id, email, first_name, last_name, nickname, picture, phone_number)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO users (id, account_id, email, first_name, last_name, nickname, picture, phone_number)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         ",
         )
         .bind(&user.id)
+        .bind(&user.account_id)
         .bind(&user.email)
         .bind(&user.first_name)
         .bind(&user.last_name)

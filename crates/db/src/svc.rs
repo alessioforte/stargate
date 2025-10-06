@@ -1,9 +1,8 @@
 use super::repo::{
-    ActionRepository, ApiKeyRepository, CredentialRepository, SubjectRepository, UserRepository,
+    AccountRepository, ActionRepository, ApiKeyRepository, CredentialRepository, UserRepository,
 };
 use crate::ent::{
-    Action, ActionType, ApiKey, Credential, CredentialType, Limits, OwnerType, Subject,
-    SubjectType, User,
+    AccountType, Action, ActionType, ApiKey, Credential, CredentialType, Profile, User,
 };
 use crate::tx::Transaction;
 use anyhow::Result;
@@ -18,9 +17,9 @@ pub struct Service {
     pool: sqlx::PgPool,
     #[cfg(feature = "sqlite")]
     pool: sqlx::SqlitePool,
+    account: AccountRepository,
     user: UserRepository,
     credential: CredentialRepository,
-    subject: SubjectRepository,
     action: ActionRepository,
     api_key: ApiKeyRepository,
 }
@@ -30,6 +29,7 @@ impl Service {
     pub fn new(pool: sqlx::PgPool) -> Self {
         Self {
             pool,
+            account: AccountRepository::new(),
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
             subject: SubjectRepository::new(),
@@ -42,9 +42,9 @@ impl Service {
     pub fn new(pool: sqlx::SqlitePool) -> Self {
         Self {
             pool,
+            account: AccountRepository::new(),
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
-            subject: SubjectRepository::new(),
             action: ActionRepository::new(),
             api_key: ApiKeyRepository::new(),
         }
@@ -93,24 +93,41 @@ impl Transaction for Service {
     /// * `credential_type`: The type of credential to be associated with the user.
     ///
     /// * `value`: The hashed password.
-    ///
-    /// * `attrs`: Optional attributes associated with the user.
     async fn create_user(
         &self,
-        user: User,
+        user: Profile,
         credential_type: CredentialType,
         value: &str,
-        attrs: Option<JsonValue>,
-        limits: Option<Limits>,
     ) -> Result<User> {
         let mut tx = self.pool.begin().await?;
+        let name = format!(
+            "{} {}",
+            user.first_name.clone().unwrap_or_default(),
+            user.last_name.clone().unwrap_or_default()
+        )
+        .trim()
+        .to_string();
+        let description = if name.is_empty() {
+            None
+        } else {
+            Some(name.as_str())
+        };
+        let account = self
+            .account
+            .create(&mut tx, AccountType::User, &name, description)
+            .await?;
+
+        let user = User::new(account.id, user.email)
+            .first_name(user.first_name)
+            .last_name(user.last_name)
+            .picture(user.picture)
+            .nickname(user.nickname)
+            .attrs(user.attrs);
+
         let user_id = user.id.clone();
         let record = self.user.create(&mut tx, user).await?;
         self.credential
             .create(&mut tx, &user_id, credential_type, value)
-            .await?;
-        self.subject
-            .create(&mut tx, SubjectType::User, &user_id, attrs, limits)
             .await?;
         tx.commit().await?;
         Ok(record)
@@ -182,31 +199,17 @@ impl Transaction for Service {
         Ok(action)
     }
 
-    async fn get_subject_by_id(&self, subject_id: &str) -> Result<Option<Subject>> {
-        let mut tx = self.pool.begin().await?;
-        let subject = self.subject.get_by_sub_id(&mut tx, subject_id).await?;
-        tx.commit().await?;
-        Ok(subject)
-    }
-
     async fn create_api_key(
         &self,
-        owner: &str,
-        owner_type: OwnerType,
+        account_id: &str,
         key_hash: &str,
         label: Option<String>,
         attrs: Option<JsonValue>,
-        limits: Option<Limits>,
-        exp: Option<i64>,
     ) -> Result<ApiKey> {
         let mut tx = self.pool.begin().await?;
         let api_key = self
             .api_key
-            .create(&mut tx, owner, owner_type, key_hash, label, exp)
-            .await?;
-
-        self.subject
-            .create(&mut tx, SubjectType::ApiKey, &api_key.id, attrs, limits)
+            .create(&mut tx, account_id, key_hash, label, attrs)
             .await?;
 
         tx.commit().await?;

@@ -6,7 +6,7 @@ pub mod oauth;
 pub mod signup;
 // pub mod well_known;
 
-use actix_governor::{Governor, GovernorConfigBuilder};
+// use crate::etc::lim::rate_limit_middleware;
 use actix_web::web::ServiceConfig;
 use utoipa::OpenApi;
 
@@ -35,15 +35,9 @@ pub fn configure(cfg: &mut ServiceConfig) {
         base_path = "/stargate".to_string();
     }
 
-    let config = GovernorConfigBuilder::default()
-        .seconds_per_request(4)
-        .burst_size(2)
-        .finish()
-        .unwrap();
-
     cfg.service(
         actix_web::web::scope(&base_path)
-            .wrap(Governor::new(&config))
+            // .wrap(from_fn(rate_limit_middleware))
             .service(health::get)
             .service(docs::routes())
             .service(account::routes())

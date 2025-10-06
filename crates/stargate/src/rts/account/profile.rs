@@ -37,7 +37,7 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     // Get subject from session store
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
-    let session = store.get::<db::ent::Subject>(&sid).await;
+    let session = store.get::<etc::sub::Subject>(&sid).await;
     println!("Session: {:?}", session);
 
     let service = etc::db::service();
