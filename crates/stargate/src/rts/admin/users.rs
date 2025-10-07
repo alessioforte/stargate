@@ -1,13 +1,13 @@
 use crate::err::ErrorResponse;
-use actix_web::{delete, get, patch, post, put, web, HttpResponse};
+use actix_web::{HttpResponse, delete, get, patch, post, put, web};
 use actix_web_grants::protect;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 struct User {
     email: String,
-    first_name: String,
-    last_name: String,
+    given_name: String,
+    family_name: String,
     password: String,
     nickname: String,
 }

@@ -2,7 +2,7 @@ pub mod complete;
 pub mod request;
 pub mod verification;
 
-use actix_web::{web, Scope};
+use actix_web::{Scope, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -16,8 +16,8 @@ pub fn routes() -> Scope {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SignupCompleteRequestBody {
     token: String,
-    first_name: String,
-    last_name: String,
+    given_name: String,
+    family_name: String,
     nickname: String,
     password: String,
     phone_number: Option<String>,

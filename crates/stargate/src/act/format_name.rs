@@ -1,14 +1,14 @@
-pub fn format_name(first_name: &str, last_name: &str) -> String {
-    if first_name.is_empty() && last_name.is_empty() {
+pub fn format_name(given_name: &str, family_name: &str) -> String {
+    if given_name.is_empty() && family_name.is_empty() {
         return "Anonymous".to_string();
     }
-    if first_name.is_empty() {
-        return last_name.to_string();
+    if given_name.is_empty() {
+        return family_name.to_string();
     }
 
-    if last_name.is_empty() {
-        return first_name.to_string();
+    if family_name.is_empty() {
+        return given_name.to_string();
     }
 
-    format!("{} {}", first_name, last_name).trim().to_string()
+    format!("{} {}", given_name, family_name).trim().to_string()
 }

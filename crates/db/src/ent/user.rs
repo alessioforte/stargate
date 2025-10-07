@@ -8,8 +8,8 @@ pub struct User {
     pub id: String,
     pub account_id: String,
     pub email: String,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
     pub nickname: Option<String>,
     pub picture: Option<String>,
     pub phone_number: Option<String>,
@@ -23,8 +23,8 @@ impl User {
             id,
             account_id,
             email,
-            first_name: None,
-            last_name: None,
+            given_name: None,
+            family_name: None,
             nickname: None,
             picture: None,
             phone_number: None,
@@ -32,13 +32,13 @@ impl User {
         }
     }
 
-    pub fn first_name(mut self, first_name: Option<String>) -> Self {
-        self.first_name = first_name;
+    pub fn given_name(mut self, given_name: Option<String>) -> Self {
+        self.given_name = given_name;
         self
     }
 
-    pub fn last_name(mut self, last_name: Option<String>) -> Self {
-        self.last_name = last_name;
+    pub fn family_name(mut self, family_name: Option<String>) -> Self {
+        self.family_name = family_name;
         self
     }
 
@@ -72,8 +72,8 @@ impl User {
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
     pub email: String,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
     pub nickname: Option<String>,
     pub picture: Option<String>,
     pub phone_number: Option<String>,
@@ -84,8 +84,8 @@ impl Profile {
     pub fn new(email: String) -> Self {
         Profile {
             email,
-            first_name: None,
-            last_name: None,
+            given_name: None,
+            family_name: None,
             nickname: None,
             picture: None,
             phone_number: None,
@@ -93,13 +93,13 @@ impl Profile {
         }
     }
 
-    pub fn first_name(mut self, first_name: Option<String>) -> Self {
-        self.first_name = first_name;
+    pub fn given_name(mut self, given_name: Option<String>) -> Self {
+        self.given_name = given_name;
         self
     }
 
-    pub fn last_name(mut self, last_name: Option<String>) -> Self {
-        self.last_name = last_name;
+    pub fn family_name(mut self, family_name: Option<String>) -> Self {
+        self.family_name = family_name;
         self
     }
 

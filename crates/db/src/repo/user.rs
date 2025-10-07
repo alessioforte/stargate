@@ -17,19 +17,20 @@ impl UserRepository {
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
             "
-            INSERT INTO users (id, account_id, email, first_name, last_name, nickname, picture, phone_number)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO users (id, account_id, email, given_name, family_name, nickname, picture, phone_number, attrs)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
         ",
         )
         .bind(&user.id)
         .bind(&user.account_id)
         .bind(&user.email)
-        .bind(&user.first_name)
-        .bind(&user.last_name)
+        .bind(&user.given_name)
+        .bind(&user.family_name)
         .bind(&user.nickname)
         .bind(&user.picture)
         .bind(&user.phone_number)
+        .bind(&user.attrs)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -45,7 +46,7 @@ impl UserRepository {
         let rows = sqlx::query_as::<_, User>(
             "
             SELECT * FROM users
-            WHERE email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR nickname ILIKE $1
+            WHERE email ILIKE $1 OR given_name ILIKE $1 OR family_name ILIKE $1 OR nickname ILIKE $1
             ORDER BY created_at DESC
         ",
         )
@@ -83,15 +84,15 @@ impl UserRepository {
         let row = sqlx::query_as::<_, User>(
             "
             UPDATE users
-            SET email = $2, first_name = $3, last_name = $4, nickname = $5, picture = $6, phone_number = $7
+            SET email = $2, given_name = $3, family_name = $4, nickname = $5, picture = $6, phone_number = $7
             WHERE id = $1
             RETURNING *
         ",
         )
         .bind(&user.id)
         .bind(&user.email)
-        .bind(&user.first_name)
-        .bind(&user.last_name)
+        .bind(&user.given_name)
+        .bind(&user.family_name)
         .bind(&user.nickname)
         .bind(&user.picture)
         .bind(&user.phone_number)

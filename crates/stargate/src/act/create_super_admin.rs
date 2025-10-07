@@ -11,12 +11,8 @@ pub async fn create_super_admin() {
         .unwrap();
 
     if super_admin.is_some() {
-        let admin = super_admin.unwrap();
-        let role = admin.attrs.get("role");
-        if role.is_some_and(|v| v == etc::consts::STARGATE_ADMIN) {
-            log::info!("Super admin already exists.");
-            return;
-        }
+        log::info!("Super admin already exists.");
+        return;
     }
 
     let email =
@@ -24,7 +20,7 @@ pub async fn create_super_admin() {
     let name = std::env::var("SUPER_ADMIN_NAME").unwrap_or_else(|_| "Admin".to_string());
     let password = pw::generator(40, true, true, true, false);
     let user = Profile::new(email)
-        .first_name(Some(name))
+        .given_name(Some(name))
         .nickname(Some(etc::consts::STARGATE_ADMIN.to_string()))
         .phone_number(None)
         .picture(None)

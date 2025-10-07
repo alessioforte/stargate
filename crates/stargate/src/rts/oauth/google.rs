@@ -71,7 +71,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
 
     if user.is_none() {
         let new_user = Profile::new(google_user.email.clone())
-            .first_name(Some(google_user.name.clone()))
+            .given_name(Some(google_user.name.clone()))
             .picture(Some(google_user.picture.clone()));
 
         let value = format!("google:{}", google_user.id);
@@ -103,9 +103,9 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         };
     }
 
-    let first_name = user.first_name.clone().unwrap_or_default();
-    let last_name = user.last_name.clone().unwrap_or_default();
-    let name = format_name(&first_name, &last_name);
+    let given_name = user.given_name.clone().unwrap_or_default();
+    let family_name = user.family_name.clone().unwrap_or_default();
+    let name = format_name(&given_name, &family_name);
     let claims = Claims::default()
         .subject("google-oauth2".to_string())
         .sub_id(user.id)

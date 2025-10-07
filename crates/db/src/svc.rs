@@ -95,15 +95,15 @@ impl Transaction for Service {
     /// * `value`: The hashed password.
     async fn create_user(
         &self,
-        user: Profile,
+        profile: Profile,
         credential_type: CredentialType,
         value: &str,
     ) -> Result<User> {
         let mut tx = self.pool.begin().await?;
         let name = format!(
             "{} {}",
-            user.first_name.clone().unwrap_or_default(),
-            user.last_name.clone().unwrap_or_default()
+            profile.given_name.clone().unwrap_or_default(),
+            profile.family_name.clone().unwrap_or_default()
         )
         .trim()
         .to_string();
@@ -117,12 +117,12 @@ impl Transaction for Service {
             .create(&mut tx, AccountType::User, &name, description)
             .await?;
 
-        let user = User::new(account.id, user.email)
-            .first_name(user.first_name)
-            .last_name(user.last_name)
-            .picture(user.picture)
-            .nickname(user.nickname)
-            .attrs(user.attrs);
+        let user = User::new(account.id, profile.email)
+            .given_name(profile.given_name)
+            .family_name(profile.family_name)
+            .picture(profile.picture)
+            .nickname(profile.nickname)
+            .attrs(profile.attrs);
 
         let user_id = user.id.clone();
         let record = self.user.create(&mut tx, user).await?;

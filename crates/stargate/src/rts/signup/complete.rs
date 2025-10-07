@@ -105,8 +105,8 @@ pub async fn handler(
     }
 
     let user = Profile::new(signup.sub)
-        .first_name(Some(body.first_name.clone()))
-        .last_name(Some(body.last_name.clone()))
+        .given_name(Some(body.given_name.clone()))
+        .family_name(Some(body.family_name.clone()))
         .nickname(Some(body.nickname.clone()))
         .phone_number(body.phone_number.clone())
         .picture(None);

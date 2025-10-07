@@ -2,7 +2,7 @@ use super::ChangePasswordRequestBody;
 use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
-use actix_web::{put, web, HttpResponse};
+use actix_web::{HttpResponse, put, web};
 use chrono::Utc;
 use db::Transaction;
 use pw::Hash;
@@ -27,7 +27,7 @@ pub async fn handler(
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
                 "Invalid Token".to_string(),
-            )))
+            )));
         }
     };
     let uuid = claims.uuid.clone().unwrap_or_default();
@@ -37,7 +37,7 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
@@ -59,7 +59,7 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
@@ -86,12 +86,12 @@ pub async fn handler(
         "change_password".to_string(),
     );
 
-    let first_name = user.first_name.clone().unwrap_or_default();
-    let last_name = user.last_name.clone().unwrap_or_default();
+    let given_name = user.given_name.clone().unwrap_or_default();
+    let family_name = user.family_name.clone().unwrap_or_default();
     let sender = Smtp::new()
         .template(Template::PasswordChangedNotification)
         .to(user.email.clone())
-        .name(Some(format_name(&first_name, &last_name)))
+        .name(Some(format_name(&given_name, &family_name)))
         .token(token)
         .build()
         .send();

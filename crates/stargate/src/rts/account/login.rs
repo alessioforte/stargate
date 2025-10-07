@@ -61,9 +61,9 @@ pub async fn handler(
 
     let subject = etc::sub::Subject::from(user.clone());
 
-    let first_name = user.first_name.clone().unwrap_or_default();
-    let last_name = user.last_name.clone().unwrap_or_default();
-    let name = format_name(&first_name, &last_name);
+    let given_name = user.given_name.clone().unwrap_or_default();
+    let family_name = user.family_name.clone().unwrap_or_default();
+    let name = format_name(&given_name, &family_name);
 
     let sid = uuid::Uuid::new_v4().to_string();
     let mut claims = jwt::Claims::default()

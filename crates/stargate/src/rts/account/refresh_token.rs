@@ -2,7 +2,7 @@ use super::AuthResponse;
 use super::RefreshTokenRequestBody;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::jwt::jwt_config;
-use actix_web::{put, web, HttpResponse};
+use actix_web::{HttpResponse, put, web};
 use db::Transaction;
 use jwt::Claims;
 
@@ -25,7 +25,7 @@ pub async fn handler(
         Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
                 "Invalid Token".to_string(),
-            )))
+            )));
         }
     };
 
@@ -35,15 +35,15 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
     let user = user.unwrap();
 
-    let first_name = user.first_name.clone().unwrap_or_default();
-    let last_name = user.last_name.clone().unwrap_or_default();
-    let name = crate::act::format_name(&first_name, &last_name);
+    let given_name = user.given_name.clone().unwrap_or_default();
+    let family_name = user.family_name.clone().unwrap_or_default();
+    let name = crate::act::format_name(&given_name, &family_name);
 
     let claims = Claims::default()
         .subject(user.email.to_owned())
