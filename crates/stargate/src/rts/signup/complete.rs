@@ -1,4 +1,5 @@
 use super::SignupCompleteRequestBody;
+use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
 use actix_web::{HttpResponse, put, web};
@@ -36,7 +37,8 @@ pub async fn handler(
     };
 
     let service = crate::etc::db::service();
-    let signup = match service.get_action_by_value(&uuid).await {
+
+    let signup = match act::get_signup_request(&uuid).await {
         Ok(signup) => signup,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -52,20 +54,15 @@ pub async fn handler(
     }
 
     let signup = signup.unwrap();
-    if signup.exp < chrono::Utc::now().timestamp() {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Signup request expired".to_string(),
-        )));
-    }
 
-    if claim.email.is_some() && signup.sub != claim.email.unwrap() {
+    if claim.email.is_some() && signup != claim.email.unwrap() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Email does not match".to_string(),
         )));
     }
 
     // Check if a user already exists with this email
-    let user = match service.get_user_by_username(&signup.sub).await {
+    let user = match service.get_user_by_username(&signup).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -104,7 +101,7 @@ pub async fn handler(
         return Err(ErrorResponse::from(HttpError::BadRequest(message)));
     }
 
-    let user = Profile::new(signup.sub)
+    let user = Profile::new(signup)
         .given_name(Some(body.given_name.clone()))
         .family_name(Some(body.family_name.clone()))
         .nickname(Some(body.nickname.clone()))
@@ -117,7 +114,8 @@ pub async fn handler(
         .await
     {
         Ok(_) => {
-            log::info!("User created successfully");
+            // Delete the signup request
+            let _ = act::delete_signup_request(&uuid).await;
 
             let message = MessageResponse::new(
                 "User created successfully".to_string(),

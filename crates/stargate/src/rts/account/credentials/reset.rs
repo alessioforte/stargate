@@ -1,9 +1,9 @@
 use super::ChangePasswordRequestBody;
-use crate::act::format_name;
+use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
+use crate::fun::format_name;
 use actix_web::{HttpResponse, put, web};
-use chrono::Utc;
 use db::Transaction;
 use pw::Hash;
 use smtp::{Smtp, Template};
@@ -32,8 +32,9 @@ pub async fn handler(
     };
     let uuid = claims.uuid.clone().unwrap_or_default();
     let service = etc::db::service();
-    let pra = match service.get_action_by_value(&uuid).await {
-        Ok(action) => action,
+
+    let email = match act::get_change_password_request(&uuid).await {
+        Ok(pra) => pra,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
@@ -41,20 +42,15 @@ pub async fn handler(
         }
     };
 
-    if pra.is_none() {
+    if email.is_none() {
         return Err(ErrorResponse::from(HttpError::DocumentNotFound(
             "Request not found".to_string(),
         )));
     }
 
-    let pra = pra.unwrap();
-    if pra.exp < Utc::now().timestamp() {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Request expired".to_string(),
-        )));
-    }
+    let email = email.unwrap();
 
-    let user = match service.get_user_by_username(&pra.sub).await {
+    let user = match service.get_user_by_username(&email).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(

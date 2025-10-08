@@ -1,6 +1,6 @@
-use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
+use crate::fun::format_name;
 use actix_web::{HttpResponse, get, web};
 use db::Transaction;
 use db::ent::{CredentialType, Profile};
@@ -113,7 +113,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
         .email(user.email)
         .email_verified(google_user.verified_email);
 
-    let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
+    let (access_token, refresh_token) = crate::fun::generate_tokens(claims).unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

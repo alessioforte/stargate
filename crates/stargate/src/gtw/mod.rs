@@ -1,9 +1,9 @@
 mod http;
 mod ws;
 
-use crate::act::access_control;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{ext::RequestExt, guard};
+use crate::fun::access_control;
 use actix_web::{HttpRequest, HttpResponse, web::Payload};
 use gate::Gate;
 

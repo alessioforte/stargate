@@ -1,13 +1,12 @@
-use crate::act::format_name;
+use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
+use crate::fun::format_name;
 use actix_web::{HttpResponse, post, web};
 use db::Transaction;
-use db::ent::{Action, ActionType};
 use serde::{Deserialize, Serialize};
 use smtp::{Smtp, Template};
 use utoipa::ToSchema;
-use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct ForgotPasswordRequestBody {
     email: String,
@@ -43,7 +42,16 @@ pub async fn handler(
     }
 
     let user = user.unwrap();
-    let uuid = Uuid::new_v4().to_string();
+
+    let uuid = act::create_change_password_request(&user.email)
+        .await
+        .map_err(|e| {
+            ErrorResponse::from(HttpError::InternalServerError(format!(
+                "Failed to create change password request: {}",
+                e
+            )))
+        })?;
+
     let claim = jwt::Claims::default()
         .subject(user.id.clone())
         .sub_id(user.id.clone())
@@ -60,13 +68,6 @@ pub async fn handler(
         }
     };
 
-    let action = Action::new(
-        user.email.clone(),
-        ActionType::PasswordReset,
-        60,
-        uuid.clone(),
-    );
-
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
     let sender = Smtp::new()
@@ -79,15 +80,6 @@ pub async fn handler(
 
     match sender {
         Ok(_) => {
-            match service.create_action(action).await {
-                Ok(action) => action,
-                Err(e) => {
-                    return Err(ErrorResponse::from(HttpError::InternalServerError(
-                        e.to_string(),
-                    )));
-                }
-            };
-
             let message = etc::msg::MessageResponse::new(
                 "Password reset request sent. Please check your email for the password reset link."
                     .to_string(),

@@ -1,9 +1,5 @@
-use super::repo::{
-    AccountRepository, ActionRepository, ApiKeyRepository, CredentialRepository, UserRepository,
-};
-use crate::ent::{
-    AccountType, Action, ActionType, ApiKey, Credential, CredentialType, Profile, User,
-};
+use super::repo::{AccountRepository, ApiKeyRepository, CredentialRepository, UserRepository};
+use crate::ent::{AccountType, ApiKey, Credential, CredentialType, Profile, User};
 use crate::tx::Transaction;
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -20,7 +16,6 @@ pub struct Service {
     account: AccountRepository,
     user: UserRepository,
     credential: CredentialRepository,
-    action: ActionRepository,
     api_key: ApiKeyRepository,
 }
 
@@ -45,7 +40,6 @@ impl Service {
             account: AccountRepository::new(),
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
-            action: ActionRepository::new(),
             api_key: ApiKeyRepository::new(),
         }
     }
@@ -169,34 +163,6 @@ impl Transaction for Service {
             .await?;
         tx.commit().await?;
         Ok(credential)
-    }
-
-    async fn create_action(&self, action: Action) -> Result<Action> {
-        let mut tx = self.pool.begin().await?;
-        let record = self.action.create(&mut tx, action).await?;
-        tx.commit().await?;
-        Ok(record)
-    }
-
-    async fn get_action_by_value(&self, value: &str) -> Result<Option<Action>> {
-        let mut tx = self.pool.begin().await?;
-        let action = self.action.get_by_value(&mut tx, value).await?;
-        tx.commit().await?;
-        Ok(action)
-    }
-
-    async fn get_action_by_sub_and_type(
-        &self,
-        sub: &str,
-        action_type: ActionType,
-    ) -> Result<Option<Action>> {
-        let mut tx = self.pool.begin().await?;
-        let action = self
-            .action
-            .get_by_sub_and_type(&mut tx, sub, action_type)
-            .await?;
-        tx.commit().await?;
-        Ok(action)
     }
 
     async fn create_api_key(

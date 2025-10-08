@@ -1,9 +1,7 @@
 use super::{EmailVerificationResponse, SignupVerificationParams};
+use crate::act;
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{get, web, HttpResponse};
-use db::ent::{Action, ActionType};
-use db::Transaction;
-use uuid::Uuid;
+use actix_web::{HttpResponse, get, web};
 
 #[utoipa::path(
     context_path = "/signup",
@@ -18,7 +16,6 @@ pub async fn handler(
 ) -> Result<HttpResponse, ErrorResponse> {
     let query = query.into_inner();
     let token = query.token.clone();
-    let service = crate::etc::db::service();
     let jwt = crate::etc::jwt::jwt_config();
     let claim = match jwt.validate_token(&token) {
         Ok(claim) => claim,
@@ -30,16 +27,16 @@ pub async fn handler(
         None => {
             return Err(ErrorResponse::from(HttpError::BadRequest(
                 "Invalid token".to_string(),
-            )))
+            )));
         }
     };
 
-    let request = match service.get_action_by_value(&uuid).await {
+    let request = match act::get_email_verification_request(&uuid).await {
         Ok(request) => request,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
+            )));
         }
     };
 
@@ -49,24 +46,28 @@ pub async fn handler(
         )));
     }
     let request = request.unwrap();
-    if request.exp < chrono::Utc::now().timestamp() {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Signup request expired".to_string(),
-        )));
-    }
 
-    if claim.email.is_some() && request.sub != claim.email.clone().unwrap() {
+    if claim.email.is_some() && request != claim.email.clone().unwrap() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Email does not match".to_string(),
         )));
     }
 
-    let email = claim.email.unwrap_or_default();
-    let uuid = Uuid::new_v4().to_string();
+    let uuid = match act::create_signup_request(&request).await {
+        Ok(new_uuid) => {
+            // Delete the email verification request
+            let _ = act::delete_email_verification_request(&uuid).await;
+            new_uuid
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
 
-    let claim = jwt::Claims::default()
-        .sub_id(uuid.clone())
-        .email(email.clone());
+    let email = claim.email.unwrap_or_default();
+    let claim = jwt::Claims::default().sub_id(uuid).email(email.clone());
 
     let jwt = crate::etc::jwt::jwt_config();
     let token = match jwt.generate_token(&claim) {
@@ -74,23 +75,7 @@ pub async fn handler(
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
-            )))
-        }
-    };
-
-    let action = Action::new(
-        email.clone(),
-        ActionType::Signup,
-        60 * 60, // 1 hour expiration
-        uuid.clone(),
-    );
-
-    match service.create_action(action).await {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )))
+            )));
         }
     };
 

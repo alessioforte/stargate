@@ -1,4 +1,4 @@
-use crate::ent::{Action, ActionType, ApiKey, Credential, CredentialType, Profile, User};
+use crate::ent::{ApiKey, Credential, CredentialType, Profile, User};
 use anyhow::Result;
 use serde_json::Value as JsonValue;
 
@@ -18,14 +18,15 @@ pub trait Transaction {
         user_id: &str,
         credential_type: CredentialType,
     ) -> Result<Option<Credential>>;
-    async fn create_action(&self, action: Action) -> Result<Action>;
-    async fn get_action_by_value(&self, value: &str) -> Result<Option<Action>>;
-    async fn get_action_by_sub_and_type(
-        &self,
-        sub: &str,
-        action_type: ActionType,
-    ) -> Result<Option<Action>>;
-    // async fn get_subject_by_id(&self, subject_id: &str) -> Result<Option<Subject>>;
+
+    // async fn create_action(&self, action: Action) -> Result<Action>;
+    // async fn get_action_by_value(&self, value: &str) -> Result<Option<Action>>;
+    // async fn get_action_by_sub_and_type(
+    //     &self,
+    //     sub: &str,
+    //     action_type: ActionType,
+    // ) -> Result<Option<Action>>;
+
     async fn create_api_key(
         &self,
         account_id: &str,

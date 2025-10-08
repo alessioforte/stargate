@@ -43,7 +43,7 @@ pub async fn handler(
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
-    let name = crate::act::format_name(&given_name, &family_name);
+    let name = crate::fun::format_name(&given_name, &family_name);
 
     let claims = Claims::default()
         .subject(user.email.to_owned())
@@ -52,7 +52,7 @@ pub async fn handler(
         .email(user.email.clone())
         .email_verified(true);
 
-    let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
+    let (access_token, refresh_token) = crate::fun::generate_tokens(claims).unwrap();
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

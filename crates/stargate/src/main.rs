@@ -1,6 +1,7 @@
 mod act;
 mod err;
 mod etc;
+mod fun;
 mod gtw;
 mod rts;
 
@@ -33,7 +34,7 @@ async fn main() -> std::io::Result<()> {
     // let limiter = etc::lim::init(store.clone());
 
     // create super admin user
-    act::create_super_admin().await;
+    fun::create_super_admin().await;
 
     HttpServer::new(move || {
         App::new()

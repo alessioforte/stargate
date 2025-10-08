@@ -14,6 +14,7 @@ pub fn routes() -> Scope {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SignupCompleteRequestBody {
     token: String,
     given_name: String,

@@ -1,9 +1,7 @@
-mod access_control;
-mod create_super_admin;
-mod format_name;
-mod generate_tokens;
+mod change_password;
+mod email_verification;
+mod signup_request;
 
-pub use access_control::*;
-pub use create_super_admin::*;
-pub use format_name::*;
-pub use generate_tokens::*;
+pub use change_password::*;
+pub use email_verification::*;
+pub use signup_request::*;

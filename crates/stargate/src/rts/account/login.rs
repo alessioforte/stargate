@@ -1,8 +1,8 @@
 use super::{AuthResponse, UserCredentials};
-use crate::act::format_name;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
+use crate::fun::format_name;
 use actix_web::{HttpResponse, cookie::Cookie, post, web};
 use db::Transaction;
 use db::ent::CredentialType;
@@ -79,7 +79,7 @@ pub async fn handler(
         claims = claims.role(crate::etc::consts::STARGATE_ADMIN.to_string());
     }
 
-    let (access_token, refresh_token) = crate::act::generate_tokens(claims).unwrap();
+    let (access_token, refresh_token) = crate::fun::generate_tokens(claims).unwrap();
 
     // Store the user ID in the session
     let store = etc::store::use_store();
