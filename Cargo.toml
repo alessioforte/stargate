@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/db", "crates/gate", "crates/jwt", "crates/lb", "crates/store", "crates/oauth", "crates/pw", "crates/smtp",
-    "crates/stargate", "crates/ace", "crates/tools"]
+    "crates/stargate", "crates/ace", "crates/tools", "crates/lim"]
 
 [workspace.package]
 version = "0.1.0"
