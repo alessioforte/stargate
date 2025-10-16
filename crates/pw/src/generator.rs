@@ -11,7 +11,7 @@ use rand::Rng;
 /// * A random password as a `String`.
 /// # Example
 /// ```
-/// use password::generator;
+/// use pw::generator;
 ///
 /// let password = generator(16, true, true, true, true);
 /// assert_eq!(password.len(), 16);

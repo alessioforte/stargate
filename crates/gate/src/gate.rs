@@ -1,4 +1,4 @@
-use crate::config::{Config, LoadBalancer, Service as Svc};
+use crate::cfg::{Config, load_balancer::LoadBalancer, service::Service as Svc};
 use crate::trie::{RouteNode, Service, TriePath};
 use ace::PolicyEngine;
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};

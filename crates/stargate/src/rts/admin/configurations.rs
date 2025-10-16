@@ -1,7 +1,7 @@
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{get, put, web, HttpResponse};
+use actix_web::{HttpResponse, get, put, web};
 use actix_web_grants::protect;
-use gate::{config::Config, Gate};
+use gate::{Gate, cfg::Config};
 use serde::Deserialize;
 use std::env;
 use std::fs;

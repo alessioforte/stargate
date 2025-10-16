@@ -1,6 +1,6 @@
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 
 pub struct Hash {}
@@ -13,11 +13,11 @@ impl Hash {
     /// * `Result<String, argon2::password_hash::Error>` - The hashed string on success, or an error on failure.
     /// /// # Example
     /// ```rust
-    /// use password::Hash;
-    /// 
+    /// use pw::Hash;
+    ///
     /// let hashed_value = Hash::encode("my password").unwrap();
     /// let is_valid = Hash::verify("my password", &hashed_value).is_ok();
-    /// 
+    ///
     /// assert!(is_valid);
     /// ```
     pub fn encode(value: &str) -> Result<String, argon2::password_hash::Error> {

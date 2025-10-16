@@ -12,7 +12,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<etc::sub::Subject> {
             return None;
         }
     };
-    let hash_key = apiks::hash_api_key(&api_key);
+    let hash_key = pw::hash_api_key(&api_key);
     let store = etc::store::use_store();
     let session = store
         .get::<etc::sub::Subject>(&hash_key)

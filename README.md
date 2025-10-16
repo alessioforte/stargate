@@ -131,12 +131,13 @@ OAUTH2 PROVIDERS
 PROTOCOLS
 - [x] HTTP/HTTPS
 - [x] WebSockets
+- [ ] TCP/UDP
 - [ ] MQTT - try with rumqtt crate
 - [ ] gRPC - try with tonic crate
-- [ ] ? FTP/FTPS
-- [ ] ? TCP/UDP
-- [ ] ? AMQP
-- [ ] ? SSE (Server-Sent Events)
+- [ ] FTP/FTPS
+- [ ] AMQP
+- [ ] SSE (Server-Sent Events)
+- [ ] Transforming protocols (e.g., HTTP to gRPC)
 
 ADMIN FEATURES
 - [x] Init basic configuration

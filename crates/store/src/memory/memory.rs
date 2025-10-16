@@ -1,9 +1,10 @@
 use super::stats::{AtomicOperationStats, StorageStats};
 use crate::error::{StoreError, StoreResult};
-use crate::store::Store;
+use crate::store::{AtomicStore, Store};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use portable_atomic::AtomicI64;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -15,6 +16,7 @@ pub enum StoreValue {
         DashMap<String, (String, Option<DateTime<Utc>>)>,
         Option<DateTime<Utc>>,
     ),
+    AtomicI64(Arc<AtomicI64>, Option<DateTime<Utc>>),
 }
 
 pub struct MemoryStore {
@@ -49,6 +51,7 @@ impl MemoryStore {
             let is_expired = match entry.value() {
                 StoreValue::Simple(_, exp) => self.is_expired(exp),
                 StoreValue::Hash(_, exp) => self.is_expired(exp),
+                StoreValue::AtomicI64(_, exp) => self.is_expired(exp),
             };
 
             if is_expired {
@@ -89,6 +92,10 @@ impl MemoryStore {
                 StoreValue::Hash(_, _) => {
                     self.stats.cache_misses.fetch_add(1, Ordering::Release);
                     Ok(None) // Cannot get hash as simple value
+                }
+                StoreValue::AtomicI64(_, _) => {
+                    self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                    Ok(None) // Cannot get AtomicI64 as simple value
                 }
             }
         } else {
@@ -143,6 +150,9 @@ impl MemoryStore {
                     .sum();
                 base_size + entries_size
             }
+            StoreValue::AtomicI64(_, _) => {
+                std::mem::size_of::<Arc<AtomicI64>>() + std::mem::size_of::<Option<DateTime<Utc>>>()
+            }
         }
     }
 
@@ -165,6 +175,10 @@ impl MemoryStore {
                 StoreValue::Hash(hash_map, _) => {
                     hash_keys += 1;
                     total_hash_fields += hash_map.len();
+                }
+                StoreValue::AtomicI64(_, _) => {
+                    // Count AtomicI64 as simple key for stats purposes
+                    simple_keys += 1;
                 }
             }
         }
@@ -336,6 +350,7 @@ impl Store for MemoryStore {
                 Ok(is_new)
             }
             StoreValue::Simple(_, _) => Ok(false), // Cannot set hash field on simple value
+            StoreValue::AtomicI64(_, _) => Ok(false), // Cannot set hash field on AtomicI64
         }
     }
 
@@ -394,9 +409,9 @@ impl Store for MemoryStore {
                         Ok(None)
                     }
                 }
-                StoreValue::Simple(_, _) => {
+                _ => {
                     self.stats.cache_misses.fetch_add(1, Ordering::Release);
-                    Ok(None) // Cannot get field from simple value
+                    Ok(None) // Key exists but is not a hash
                 }
             }
         } else {
@@ -430,7 +445,7 @@ impl Store for MemoryStore {
                     }
                     Ok(hash_map.remove(field).is_some())
                 }
-                StoreValue::Simple(_, _) => Ok(false), // Cannot delete field from simple value
+                _ => Ok(false),
             }
         } else {
             Ok(false)
@@ -490,7 +505,7 @@ impl Store for MemoryStore {
 
                     Ok(result)
                 }
-                StoreValue::Simple(_, _) => Ok(HashMap::new()), // Cannot get all fields from simple value
+                _ => Ok(HashMap::new()), // Cannot get all fields from simple value
             }
         } else {
             Ok(HashMap::new())
@@ -542,7 +557,7 @@ impl Store for MemoryStore {
                         Ok(false)
                     }
                 }
-                StoreValue::Simple(_, _) => Ok(false), // Cannot check field existence in simple value
+                _ => Ok(false), // Key exists but is not a hash
             }
         } else {
             Ok(false)
@@ -596,7 +611,7 @@ impl Store for MemoryStore {
 
                     Ok(keys)
                 }
-                StoreValue::Simple(_, _) => Ok(Vec::new()), // Cannot get keys from simple value
+                _ => Ok(Vec::new()), // Cannot get keys from simple value
             }
         } else {
             Ok(Vec::new())
@@ -654,7 +669,7 @@ impl Store for MemoryStore {
 
                     Ok(values)
                 }
-                StoreValue::Simple(_, _) => Ok(Vec::new()), // Cannot get values from simple value
+                _ => Ok(Vec::new()), // Cannot get values from simple value or AtomicI64
             }
         } else {
             Ok(Vec::new())
@@ -709,7 +724,7 @@ impl Store for MemoryStore {
 
                     Ok(valid_count)
                 }
-                StoreValue::Simple(_, _) => Ok(0), // Cannot get length from simple value
+                _ => Ok(0), // Cannot get length from simple value or AtomicI64
             }
         } else {
             Ok(0)
@@ -755,6 +770,266 @@ impl Store for MemoryStore {
     }
 }
 
+#[async_trait]
+impl AtomicStore for MemoryStore {
+    async fn get_i64(&self, key: &str) -> StoreResult<Option<i64>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
+        self.stats.gets.fetch_add(1, Ordering::SeqCst);
+
+        // Check if expired and remove atomically
+        if self.check_and_remove_if_expired(key) {
+            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+            return Ok(None);
+        }
+
+        if let Some(entry) = self.data.get(key) {
+            match entry.value() {
+                StoreValue::AtomicI64(atomic, exp) => {
+                    if self.is_expired(exp) {
+                        drop(entry);
+                        self.data.remove(key);
+                        self.stats
+                            .expired_entries_cleaned
+                            .fetch_add(1, Ordering::SeqCst);
+                        self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                        return Ok(None);
+                    }
+
+                    self.stats.cache_hits.fetch_add(1, Ordering::Acquire);
+                    Ok(Some(atomic.load(Ordering::SeqCst)))
+                }
+                _ => {
+                    self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                    Ok(None) // Key exists but is not an AtomicI64
+                }
+            }
+        } else {
+            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+            Ok(None)
+        }
+    }
+
+    async fn set_i64(&self, key: &str, value: i64, ttl: Option<u64>) -> StoreResult<()> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        self.stats.sets.fetch_add(1, Ordering::SeqCst);
+
+        let atomic = Arc::new(AtomicI64::new(value));
+        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        self.data
+            .insert(key.to_string(), StoreValue::AtomicI64(atomic, exp));
+        Ok(())
+    }
+
+    async fn incr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+
+        let mut entry = self
+            .data
+            .entry(key.to_string())
+            .or_insert_with(|| StoreValue::AtomicI64(Arc::new(AtomicI64::new(0)), None));
+
+        match entry.value_mut() {
+            StoreValue::AtomicI64(atomic, current_exp) => {
+                if self.is_expired(current_exp) {
+                    // If expired, reset to 'by' value
+                    let new_atomic = Arc::new(AtomicI64::new(by));
+                    *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
+                    self.stats
+                        .expired_entries_cleaned
+                        .fetch_add(1, Ordering::SeqCst);
+                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                    return Ok(Some(by));
+                }
+
+                let new_value = atomic.fetch_add(by, Ordering::SeqCst) + by;
+                // Update expiration if TTL is provided
+                if ttl.is_some() {
+                    *current_exp = exp;
+                }
+                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(new_value))
+            }
+            _ => Err(StoreError::TypeMismatch(
+                "Key exists but is not an AtomicI64".to_string(),
+            )),
+        }
+    }
+
+    async fn decr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+
+        let mut entry = self
+            .data
+            .entry(key.to_string())
+            .or_insert_with(|| StoreValue::AtomicI64(Arc::new(AtomicI64::new(0)), None));
+
+        match entry.value_mut() {
+            StoreValue::AtomicI64(atomic, current_exp) => {
+                if self.is_expired(current_exp) {
+                    // If expired, reset to -by value
+                    let new_atomic = Arc::new(AtomicI64::new(-by));
+                    *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
+                    self.stats
+                        .expired_entries_cleaned
+                        .fetch_add(1, Ordering::SeqCst);
+                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                    return Ok(Some(-by));
+                }
+
+                let new_value = atomic.fetch_sub(by, Ordering::SeqCst) - by;
+                // Update expiration if TTL is provided
+                if ttl.is_some() {
+                    *current_exp = exp;
+                }
+                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(new_value))
+            }
+            _ => Err(StoreError::TypeMismatch(
+                "Key exists but is not an AtomicI64".to_string(),
+            )),
+        }
+    }
+
+    async fn compare_and_swap_i64(
+        &self,
+        key: &str,
+        old: i64,
+        new: i64,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+
+        if let Some(mut entry) = self.data.get_mut(key) {
+            match entry.value_mut() {
+                StoreValue::AtomicI64(atomic, current_exp) => {
+                    if self.is_expired(current_exp) {
+                        // If expired, reset to new value
+                        let new_atomic = Arc::new(AtomicI64::new(new));
+                        *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
+                        self.stats
+                            .expired_entries_cleaned
+                            .fetch_add(1, Ordering::SeqCst);
+                        return Ok(true);
+                    }
+
+                    let current_value = atomic.load(Ordering::SeqCst);
+                    if current_value == old {
+                        atomic.store(new, Ordering::SeqCst);
+                        // Update expiration if TTL is provided
+                        if ttl.is_some() {
+                            *current_exp = exp;
+                        }
+                        self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                }
+                _ => Err(StoreError::TypeMismatch(
+                    "Key exists but is not an AtomicI64".to_string(),
+                )),
+            }
+        } else {
+            Ok(false)
+        }
+    }
+}
+
+impl MemoryStore {
+    pub async fn measure_and_set_i64<F>(
+        &self,
+        key: &str,
+        measure_fn: F,
+        ttl: Option<u64>,
+    ) -> StoreResult<(bool, i64)>
+    where
+        F: Fn(i64) -> (bool, i64) + Send + Sync,
+    {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+
+        let mut entry = self
+            .data
+            .entry(key.to_string())
+            .or_insert_with(|| StoreValue::AtomicI64(Arc::new(AtomicI64::new(0)), None));
+
+        match entry.value_mut() {
+            StoreValue::AtomicI64(atomic, current_exp) => {
+                if self.is_expired(current_exp) {
+                    // If expired, reset to measure_fn(0)
+                    let (res, new_value) = measure_fn(0);
+                    let new_atomic = Arc::new(AtomicI64::new(new_value));
+                    *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
+                    self.stats
+                        .expired_entries_cleaned
+                        .fetch_add(1, Ordering::SeqCst);
+                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                    return Ok((res, new_value));
+                }
+
+                let current_value = atomic.load(Ordering::SeqCst);
+                let (res, new_value) = measure_fn(current_value);
+                atomic.store(new_value, Ordering::SeqCst);
+                // Update expiration if TTL is provided
+                if ttl.is_some() {
+                    *current_exp = exp;
+                }
+                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                Ok((res, new_value))
+            }
+            _ => Err(StoreError::TypeMismatch(
+                "Key exists but is not an AtomicI64".to_string(),
+            )),
+        }
+    }
+}
+
 impl MemoryStore {
     /// Improved cleaner with better atomicity and coordination
     pub fn run_cleaner(&self, interval: u64) {
@@ -775,13 +1050,6 @@ impl MemoryStore {
                 // Use retain with atomic operations for better consistency
                 data.retain(|_, value| {
                     match value {
-                        StoreValue::Simple(_, exp) => {
-                            let keep = exp.map_or(true, |exp| exp > now);
-                            if !keep {
-                                removed += 1;
-                            }
-                            keep
-                        }
                         StoreValue::Hash(hash_map, exp) => {
                             // Clean expired fields within the hash atomically
                             let mut fields_removed = 0;
@@ -801,6 +1069,20 @@ impl MemoryStore {
                                 removed += 1;
                             }
                             keep_hash
+                        }
+                        StoreValue::Simple(_, exp) => {
+                            let keep = exp.map_or(true, |exp| exp > now);
+                            if !keep {
+                                removed += 1;
+                            }
+                            keep
+                        }
+                        StoreValue::AtomicI64(_, exp) => {
+                            let keep = exp.map_or(true, |exp| exp > now);
+                            if !keep {
+                                removed += 1;
+                            }
+                            keep
                         }
                     }
                 });

@@ -38,8 +38,8 @@ pub async fn get_api_keys() -> Result<HttpResponse, ErrorResponse> {
 #[protect("SUPER_ADMIN")]
 pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, ErrorResponse> {
     let service = crate::etc::db::service();
-    let secret = apiks::generate_api_key();
-    let key_hash = apiks::hash_api_key(&secret);
+    let secret = pw::generate_api_key();
+    let key_hash = pw::hash_api_key(&secret);
 
     let api_key = match service
         .create_api_key(

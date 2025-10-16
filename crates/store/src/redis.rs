@@ -1,8 +1,10 @@
 use crate::error::{StoreError, StoreResult};
-use crate::store::Store;
+use crate::store::{AtomicStore, Store};
 use async_trait::async_trait;
 use redis::{Commands, HashFieldExpirationOptions, SetExpiry};
 use std::collections::HashMap;
+
+pub use redis::Script as RedisScript;
 
 pub struct RedisStore {
     client: redis::Client,
@@ -33,7 +35,7 @@ impl RedisStore {
     }
 
     /// Get a Redis connection with proper error handling
-    async fn get_connection(&self) -> StoreResult<redis::Connection> {
+    pub async fn get_connection(&self) -> StoreResult<redis::Connection> {
         self.client.get_connection().map_err(|e| {
             StoreError::ConnectionFailed(format!("Failed to get Redis connection: {}", e))
         })
@@ -386,6 +388,171 @@ impl Store for RedisStore {
             .key(key)
             .arg(expected_serialized)
             .arg(new_serialized)
+            .arg(ttl_str)
+            .invoke(&mut con)
+            .map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to perform compare and swap on key '{}': {}",
+                    key, e
+                ))
+            })?;
+
+        Ok(result == 1)
+    }
+}
+
+#[async_trait]
+impl AtomicStore for RedisStore {
+    async fn get_i64(&self, key: &str) -> StoreResult<Option<i64>> {
+        self.validate_key(key)?;
+
+        let mut con = self.get_connection().await?;
+
+        let value: Option<i64> = con
+            .get(key)
+            .map_err(|e| StoreError::RedisFailed(format!("Failed to get key '{}': {}", key, e)))?;
+
+        Ok(value)
+    }
+
+    async fn set_i64(&self, key: &str, value: i64, ttl: Option<u64>) -> StoreResult<()> {
+        self.validate_key(key)?;
+
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let mut con = self.get_connection().await?;
+
+        if let Some(ttl) = ttl {
+            let _: () = con.set_ex(key, value, ttl).map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to set key '{}' with TTL {}: {}",
+                    key, ttl, e
+                ))
+            })?;
+        } else {
+            let _: () = con.set(key, value).map_err(|e| {
+                StoreError::RedisFailed(format!("Failed to set key '{}': {}", key, e))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    async fn incr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
+        self.validate_key(key)?;
+
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let mut con = self.get_connection().await?;
+
+        let script = redis::Script::new(
+            r#"
+            local new_value = redis.call("INCRBY", KEYS[1], ARGV[1])
+            if ARGV[2] ~= "nil" then
+                redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
+            end
+            return new_value
+            "#,
+        );
+        let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
+
+        let new_value: i64 = script
+            .key(key)
+            .arg(by)
+            .arg(ttl_str)
+            .invoke(&mut con)
+            .map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to increment key '{}' by {}: {}",
+                    key, by, e
+                ))
+            })?;
+
+        Ok(Some(new_value))
+    }
+
+    async fn decr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
+        self.validate_key(key)?;
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+        let mut con = self.get_connection().await?;
+
+        let script = redis::Script::new(
+            r#"
+            local new_value = redis.call("DECRBY", KEYS[1], ARGV[1])
+            if ARGV[2] ~= "nil" then
+                redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
+            end
+            return new_value
+            "#,
+        );
+
+        let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
+
+        let new_value: i64 = script
+            .key(key)
+            .arg(by)
+            .arg(ttl_str)
+            .invoke(&mut con)
+            .map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to decrement key '{}' by {}: {}",
+                    key, by, e
+                ))
+            })?;
+
+        Ok(Some(new_value))
+    }
+
+    async fn compare_and_swap_i64(
+        &self,
+        key: &str,
+        old: i64,
+        new: i64,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool> {
+        self.validate_key(key)?;
+
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let mut con = self.get_connection().await?;
+
+        let script = redis::Script::new(
+            r#"
+            local current = redis.call("GET", KEYS[1])
+            if current and tonumber(current) == tonumber(ARGV[1]) then
+                redis.call("SET", KEYS[1], ARGV[2])
+                if ARGV[3] ~= "nil" then
+                    redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
+                end
+                return 1
+            else
+                return 0
+            end
+            "#,
+        );
+
+        let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
+
+        let result: i32 = script
+            .key(key)
+            .arg(old)
+            .arg(new)
             .arg(ttl_str)
             .invoke(&mut con)
             .map_err(|e| {

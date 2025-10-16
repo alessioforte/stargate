@@ -1,4 +1,4 @@
-pub mod config;
+pub mod cfg;
 pub mod gate;
 pub mod protocols;
 pub mod trie;

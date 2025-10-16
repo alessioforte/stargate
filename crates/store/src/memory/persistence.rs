@@ -4,9 +4,11 @@ use crate::error::{StoreError, StoreResult};
 use crate::store::Store;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use portable_atomic::AtomicI64;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::fs;
 
 // Serializable data structures for JSON persistence
@@ -17,6 +19,7 @@ enum SerializableStoreValue {
         HashMap<String, (serde_json::Value, Option<DateTime<Utc>>)>,
         Option<DateTime<Utc>>,
     ),
+    AtomicI64(i64, Option<DateTime<Utc>>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +67,10 @@ impl MemoryStore {
                     }
                     SerializableStoreValue::Hash(hash_data, *exp)
                 }
+                StoreValue::AtomicI64(val, exp) => {
+                    let num: i64 = val.load(std::sync::atomic::Ordering::SeqCst);
+                    SerializableStoreValue::AtomicI64(num, *exp)
+                }
             };
             serializable_data.insert(key, value);
         }
@@ -93,6 +100,9 @@ impl MemoryStore {
                         dash_map.insert(field, (string_val, field_exp));
                     }
                     StoreValue::Hash(dash_map, exp)
+                }
+                SerializableStoreValue::AtomicI64(val, exp) => {
+                    StoreValue::AtomicI64(Arc::new(AtomicI64::new(val)), exp)
                 }
             };
             store.data.insert(key, store_value);
@@ -263,6 +273,13 @@ impl MemoryStore {
                                 serde_json::Value::Object(hash_export.into_iter().collect()),
                             );
                         }
+                    }
+                }
+                StoreValue::AtomicI64(val, exp) => {
+                    // Only include non-expired atomic values
+                    if !self.is_expired(exp) {
+                        let num: i64 = val.load(std::sync::atomic::Ordering::SeqCst);
+                        export_data.insert(key, serde_json::Value::Number(num.into()));
                     }
                 }
             }

@@ -1,51 +1,7 @@
+use super::endpoint::Endpoint;
 use lb::{BaseLoadBalancer, IpHash, Random, RoundRobin};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct Config {
-    pub access_control: Option<AccessControl>,
-    pub services: Vec<Service>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct Service {
-    pub connect_timeout: Option<u64>,
-    pub name: Option<String>,
-    pub path: String,
-    pub protocol: Option<String>,
-    pub endpoints: Vec<Endpoint>,
-    pub load_balancer: Option<LoadBalancer>,
-    pub auth_required: Option<bool>,
-    pub resource: Option<String>,
-    pub routes: Option<Vec<Route>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct Route {
-    pub path: String,
-    pub method: String,
-    pub auth_required: Option<bool>,
-    pub resource: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct Endpoint {
-    pub host: String,
-    pub port: Option<i32>,
-    pub path: Option<String>,
-}
-
-impl Endpoint {
-    pub fn format(&self) -> String {
-        let port = match self.port {
-            Some(port) => format!(":{}", port),
-            None => "".to_string(),
-        };
-        let path = self.path.clone().unwrap_or_default();
-        format!("{}{}{}", self.host, port, path)
-    }
-}
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -101,10 +57,4 @@ impl LoadBalancer {
             }
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct AccessControl {
-    pub policy_file: Option<String>,
-    pub policies: Option<String>,
 }

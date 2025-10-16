@@ -37,6 +37,9 @@ pub enum StoreError {
 
     /// Unknown error occurred
     Unknown(String),
+
+    /// Type mismatch error
+    TypeMismatch(String),
 }
 
 impl fmt::Display for StoreError {
@@ -52,6 +55,7 @@ impl fmt::Display for StoreError {
             StoreError::Timeout(msg) => write!(f, "Operation timed out: {}", msg),
             StoreError::IoError(msg) => write!(f, "I/O error: {}", msg),
             StoreError::Unknown(msg) => write!(f, "Unknown error: {}", msg),
+            StoreError::TypeMismatch(msg) => write!(f, "Type mismatch error: {}", msg),
         }
     }
 }
