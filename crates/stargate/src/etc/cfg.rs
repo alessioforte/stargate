@@ -2,9 +2,9 @@ use crate::err::{HttpError, PayloadError};
 use actix_web::error::JsonPayloadError;
 use actix_web::http::header::CONTENT_TYPE;
 use actix_web::web::ServiceConfig;
-use actix_web::{web, HttpRequest};
+use actix_web::{HttpRequest, web};
 
-pub fn app_data(cfg: &mut ServiceConfig) {
+pub fn configure(cfg: &mut ServiceConfig) {
     cfg.app_data(
         web::JsonConfig::default()
             .content_type(|mime| mime == mime::APPLICATION_JSON)

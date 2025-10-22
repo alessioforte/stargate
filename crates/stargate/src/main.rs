@@ -5,7 +5,8 @@ mod fun;
 mod gtw;
 mod rts;
 
-use actix_web::{App, HttpServer, middleware, middleware::TrailingSlash, web::to};
+use crate::etc::{cfg, cors, db, gate, jwt, logo, store, tls};
+use actix_web::{App, HttpServer, middleware, middleware::TrailingSlash};
 use dotenvy::dotenv;
 use std::env;
 
@@ -22,30 +23,27 @@ async fn main() -> std::io::Result<()> {
     let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let version = env!("CARGO_PKG_VERSION");
 
-    println!("{}", etc::logo::LOGO);
+    println!("{}", logo::LOGO);
     log::info!("Version: {}", version);
     log::info!("Starting server on port {}", port);
 
-    etc::jwt::init();
-    etc::db::init().await;
-    etc::store::init();
-    let tls = etc::tls::builder();
-    let data_gate = etc::gate::init();
-    // let limiter = etc::lim::init(store.clone());
+    jwt::init();
+    db::init().await;
+    let s = store::init();
+    let data_gate = gate::init(std::sync::Arc::new(s.clone()));
+    let tls = tls::builder();
 
-    // create super admin user
     fun::create_super_admin().await;
 
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
             .wrap(middleware::Logger::default())
-            .wrap(etc::cors::configure())
+            .wrap(cors::configure())
             .app_data(data_gate.clone())
-            // .app_data(limiter.clone())
-            .configure(etc::cfg::app_data)
+            .configure(cfg::configure)
             .configure(rts::configure)
-            .default_service(to(gtw::handler))
+            .configure(gtw::configure)
     })
     .bind_openssl(format!("0.0.0.0:{}", port), tls)?
     .run()

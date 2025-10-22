@@ -177,6 +177,8 @@ impl From<PayloadError> for actix_web::Error {
 pub struct ErrorResponse {
     #[serde(skip)]
     pub code: StatusCode,
+    #[serde(skip)]
+    pub headers: Vec<(String, String)>,
     pub message: String,
     #[serde(rename = "code")]
     error_code: String,
@@ -192,10 +194,16 @@ impl ErrorResponse {
         Self {
             code: code.http(),
             message,
+            headers: Vec::new(),
             error_code: code.name(),
             error_type: code.type_(),
             error_link: code.url(),
         }
+    }
+
+    pub fn insert_header(&mut self, key: &str, value: &str) -> &mut Self {
+        self.headers.push((key.to_string(), value.to_string()));
+        self
     }
 }
 
@@ -224,6 +232,11 @@ impl actix_web::error::ResponseError for ErrorResponse {
 
         if self.code == StatusCode::SERVICE_UNAVAILABLE {
             builder.insert_header((actix_web::http::header::RETRY_AFTER, "10"));
+        }
+
+        // Add custom headers
+        for (key, value) in &self.headers {
+            builder.insert_header((key.as_str(), value.as_str()));
         }
 
         builder.body(json)

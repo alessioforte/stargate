@@ -1,15 +1,17 @@
 mod http;
+mod mid;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ext::RequestExt, guard};
+use crate::etc::{ext::RequestExt, sub::Subject};
 use crate::fun::access_control;
-use actix_web::{HttpRequest, HttpResponse, web::Payload};
+use actix_web::{
+    HttpMessage, HttpRequest, HttpResponse, middleware::from_fn, web::Payload, web::ServiceConfig,
+};
 use gate::Gate;
 
 pub async fn handler(
     gate: actix_web::web::Data<Gate>,
-    // limiter: actix_web::web::Data<etc::lim::RateLimiter>,
     req: HttpRequest,
     stream: Payload,
 ) -> Result<HttpResponse, ErrorResponse> {
@@ -17,27 +19,11 @@ pub async fn handler(
     let query = req.query_string();
     let method = req.method().clone();
     let client_ip = req.get_client_ip();
-
-    let mut sub = match guard::verify_api_key(&req).await {
-        Some(s) => Some(s),
-        None => None,
-    };
-
-    if sub.is_none() {
-        sub = match guard::verify_jwt(&req).await {
-            Some(s) => Some(s),
-            None => None,
-        };
-    }
-
+    let sub = req.extensions().get::<Option<Subject>>().cloned().flatten();
     let has_auth = sub.is_some();
 
-    // Rate limiting ----------------------------------------------------------
-    // guard::apply_rate_limit(&limiter, &sub, &client_ip).await?;
-    // ------------------------------------------------------------------------
-
     // check if the service exists --------------------------------------------
-    let services = gate.services.read().await;
+    let services = gate.services.load();
     let protocol = req.get_protocol();
 
     let service = match services.search(&protocol, path) {
@@ -53,7 +39,7 @@ pub async fn handler(
     let mut auth_required = service.auth_required.unwrap_or(false);
     let mut resource = service.resource.clone();
 
-    // check if the service has routes
+    // check if the service has routes defined --------------------------------
     if let Some(routes) = &service.routes {
         match routes.get(method.as_str()) {
             Some(router) => {
@@ -87,7 +73,7 @@ pub async fn handler(
     if let Some(resource) = resource
         && let Some(subject) = sub
     {
-        let policy_engine = gate.policy_engine.read().await;
+        let policy_engine = gate.policy_engine.load();
         let allowed = access_control(&policy_engine, &subject, &resource);
 
         if !allowed {
@@ -120,4 +106,12 @@ pub async fn handler(
 
     // Otherwise, handle it as a regular HTTP request
     http::handler(&req, stream, &uri, service).await
+}
+
+pub fn configure(cfg: &mut ServiceConfig) {
+    cfg.service(
+        actix_web::web::scope("")
+            .wrap(from_fn(mid::middleware))
+            .default_service(actix_web::web::to(handler)),
+    );
 }

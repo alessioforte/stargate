@@ -1,13 +1,13 @@
-pub mod account;
-pub mod admin;
-pub mod docs;
-pub mod health;
-pub mod oauth;
-pub mod signup;
+mod account;
+mod admin;
+mod docs;
+mod health;
+mod mid;
+mod oauth;
+mod signup;
 // pub mod well_known;
 
-// use crate::etc::lim::rate_limit_middleware;
-use actix_web::web::ServiceConfig;
+use actix_web::{middleware::from_fn, web::ServiceConfig};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -37,7 +37,7 @@ pub fn configure(cfg: &mut ServiceConfig) {
 
     cfg.service(
         actix_web::web::scope(&base_path)
-            // .wrap(from_fn(rate_limit_middleware))
+            .wrap(from_fn(mid::middleware))
             .service(health::get)
             .service(docs::routes())
             .service(account::routes())

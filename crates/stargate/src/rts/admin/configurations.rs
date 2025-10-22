@@ -1,7 +1,7 @@
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{HttpResponse, get, put, web};
 use actix_web_grants::protect;
-use gate::{Gate, cfg::Config};
+use gate::cfg::Config;
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -39,7 +39,7 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
             .body(content)),
         _ => {
             let config: Config =
-                serde_yml::from_str(&content).expect("Unable to parse config file");
+                serde_yaml_bw::from_str(&content).expect("Unable to parse config file");
             let json_data = serde_json::to_string(&config).unwrap();
             Ok(HttpResponse::Ok()
                 .content_type("application/json")
@@ -59,10 +59,13 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
 #[protect("SUPER_ADMIN")]
 pub async fn update_configurations(
     config: web::Json<Config>,
-    gate: actix_web::web::Data<Gate>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let cfg = config.into_inner();
-    gate.to_file(&cfg);
+    cfg.to_file(&format!(
+        "{}/{}",
+        env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string()),
+        env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string())
+    ));
     Ok(HttpResponse::Ok().finish())
 }
 

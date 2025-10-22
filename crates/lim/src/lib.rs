@@ -6,3 +6,5 @@ mod state;
 pub mod strategies;
 
 pub use limiter::Limiter;
+pub use state::State;
+pub use strategies::*;

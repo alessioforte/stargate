@@ -1,37 +1,59 @@
-use crate::cfg::{Config, load_balancer::LoadBalancer, service::Service as Svc};
+use crate::cfg::access_control::AccessControl;
+use crate::cfg::{Config, limit::Limit, load_balancer::LoadBalancer, service::Service as Svc};
 use crate::trie::{RouteNode, Service, TriePath};
 use ace::PolicyEngine;
+use arc_swap::ArcSwap;
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
-use std::{collections::HashMap, path::Path, sync::Arc, thread, time::Duration};
-use tokio::{runtime::Runtime, sync::RwLock};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
+use tokio::runtime::Runtime;
 
 #[derive(Clone)]
 pub struct Gate {
-    file_path: String,
-    liveness_probe: Arc<RwLock<lb::HealthCheck>>,
-    pub services: Arc<RwLock<TriePath>>,
-    pub policy_engine: Arc<RwLock<PolicyEngine>>,
+    store: Arc<lim::State>,
+    liveness_probe: Arc<Mutex<lb::HealthCheck>>,
+    pub services: Arc<ArcSwap<TriePath>>,
+    pub policy_engine: Arc<ArcSwap<PolicyEngine>>,
+    pub limiter: Arc<ArcSwap<lim::Limiter>>, // Placeholder for rate limiter
 }
 
 impl Gate {
-    pub fn new(file_path: String) -> Self {
+    pub fn new(store: Arc<lim::State>) -> Self {
         let trie = TriePath::new();
-        let services = Arc::new(RwLock::new(trie));
-        let liveness_probe = Arc::new(RwLock::new(lb::HealthCheck::new()));
-        let policy_engine = Arc::new(RwLock::new(PolicyEngine::new()));
+        let services = Arc::new(ArcSwap::new(Arc::new(trie)));
+        let liveness_probe = Arc::new(Mutex::new(lb::HealthCheck::new()));
+        let policy_engine = Arc::new(ArcSwap::new(Arc::new(PolicyEngine::new())));
+        let limiter = Arc::new(ArcSwap::new(Arc::new(lim::Limiter::new())));
         Self {
-            file_path,
+            store,
             services,
             liveness_probe,
             policy_engine,
+            limiter,
         }
     }
 
-    pub fn build(mut self) -> Self {
-        let config = self.from_file();
-        let trie = self.create_trie(&config.services);
+    pub fn build(self, config: &Config) -> Self {
+        self.build_service(&config.services)
+            .build_policy_engine(&config.access_control)
+            .build_limiter(&config.limits)
+    }
+
+    fn build_service(mut self, svc: &Vec<Svc>) -> Self {
+        let trie = self.create_trie(&svc);
+        let services = Arc::new(ArcSwap::new(Arc::new(trie)));
+        self.services = services;
+        self
+    }
+
+    fn build_policy_engine(mut self, ac: &Option<AccessControl>) -> Self {
         let mut pe = PolicyEngine::new();
-        if let Some(ac) = config.access_control.clone() {
+        if let Some(ac) = ac.clone() {
             if ac.policy_file.is_some() {
                 let file_path = ac.policy_file.unwrap();
                 let content =
@@ -40,23 +62,74 @@ impl Gate {
                     .expect("Unable to parse policy file");
             }
         }
-        let services = Arc::new(RwLock::new(trie));
-        let policy_engine = Arc::new(RwLock::new(pe));
-        self.services = services;
+        let policy_engine = Arc::new(ArcSwap::new(Arc::new(pe)));
         self.policy_engine = policy_engine;
         self
     }
 
-    pub async fn update_config(&mut self) {
-        let liveness_prove = self.liveness_probe.clone();
-        let mut liveness_probe = liveness_prove.write().await;
-        liveness_probe.stop();
+    fn build_limiter(mut self, limits: &Option<Vec<Limit>>) -> Self {
+        if let Some(limits) = limits.clone() {
+            let mut limiter = lim::Limiter::new();
+            for item in limits {
+                let name = item.name.clone();
+                let state = Arc::clone(&self.store);
+                let limit = item.build(state);
+                limiter.add_limit(name, limit);
+            }
+            self.limiter = Arc::new(ArcSwap::new(Arc::new(limiter)));
+        }
+        self
+    }
 
-        let config = self.from_file();
-        let trie = self.create_trie(&config.services);
-        let mut services = self.services.write().await;
-        *services = trie;
+    pub async fn update_config(&mut self, config: &Config) {
+        self.update_services(&config.services).await;
+        self.update_policy_engine(&config.access_control).await;
+        self.update_limiter(&config.limits).await;
         log::info!("Gate configuration updated");
+    }
+
+    pub async fn update_services(&mut self, services: &Vec<Svc>) {
+        // Stop the old liveness probe
+        {
+            let mut probe = self.liveness_probe.lock().unwrap();
+            probe.stop();
+        }
+
+        let trie = self.create_trie(&services);
+        self.services.store(Arc::new(trie));
+
+        log::info!("Gate services updated");
+    }
+
+    pub async fn update_policy_engine(&mut self, ac: &Option<AccessControl>) {
+        let mut pe = PolicyEngine::new();
+        if let Some(ac) = ac.clone() {
+            if ac.policy_file.is_some() {
+                let file_path = ac.policy_file.unwrap();
+                let content =
+                    std::fs::read_to_string(file_path).expect("Unable to read policy file");
+                pe.parse_file(&content)
+                    .expect("Unable to parse policy file");
+            }
+        }
+        self.policy_engine.store(Arc::new(pe));
+
+        log::info!("Gate policy engine updated");
+    }
+
+    pub async fn update_limiter(&mut self, limits: &Option<Vec<Limit>>) {
+        if let Some(limits) = limits.clone() {
+            let mut limiter = lim::Limiter::new();
+            for item in limits {
+                let name = item.name.clone();
+                let state = Arc::clone(&self.store);
+                let limit = item.build(state);
+                limiter.add_limit(name, limit);
+            }
+            self.limiter.store(Arc::new(limiter));
+        }
+
+        log::info!("Gate limiter updated");
     }
 
     fn create_trie(&mut self, services: &Vec<Svc>) -> TriePath {
@@ -120,32 +193,14 @@ impl Gate {
         }
 
         liveness_probe.run();
-        self.liveness_probe = Arc::new(RwLock::new(liveness_probe));
+        self.liveness_probe = Arc::new(Mutex::new(liveness_probe));
 
         trie
     }
 
-    fn from_file(&self) -> Config {
-        let file_path = &self.file_path;
-        if !Path::new(file_path).exists() {
-            log::info!("Creating gate configuration yaml file");
-            let config = Config::default();
-            let config_str = serde_yml::to_string(&config).expect("Unable to serialize config");
-            std::fs::write(file_path, config_str).expect("Unable to write config file");
-            return config;
-        }
-        let file = std::fs::read_to_string(file_path).expect("Unable to read config file");
-        let config: Config = serde_yml::from_str(&file).expect("Unable to parse config file");
-        config
-    }
-
-    pub fn to_file(&self, cfg: &Config) {
-        let config_str = serde_yml::to_string(cfg).expect("Unable to serialize config");
-        std::fs::write(&self.file_path, config_str).expect("Unable to write config file");
-    }
-
-    pub fn watch_file(&self) {
+    pub fn watch_file(&self, file_path: &str) {
         let mut gate = self.clone();
+        let file_path = file_path.to_string();
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
@@ -155,14 +210,16 @@ impl Gate {
                 let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
                 debouncer
                     .watcher()
-                    .watch(Path::new(&gate.file_path), RecursiveMode::Recursive)
+                    .watch(Path::new(&file_path), RecursiveMode::Recursive)
                     .unwrap();
 
                 for rs in rx {
                     match rs {
                         Ok(events) => {
                             for _e in events.iter() {
-                                gate.update_config().await;
+                                log::info!("Configuration file changed, reloading...");
+                                let config = Config::from_file(&file_path);
+                                gate.update_config(&config).await;
                             }
                         }
                         Err(e) => log::error!("Error: {:?}", e),

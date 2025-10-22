@@ -18,6 +18,18 @@ impl Limiter {
         self.limits.insert(name, limit);
     }
 
+    pub fn get_limit(&self, name: &str) -> Option<&Box<dyn RateLimit>> {
+        self.limits.get(name)
+    }
+
+    pub fn limit_names(&self) -> Vec<String> {
+        self.limits.keys().cloned().collect()
+    }
+
+    pub fn has_limit(&self, name: &str) -> bool {
+        self.limits.contains_key(name)
+    }
+
     pub async fn check(&self, limiter_name: &str, key: &str) -> Result<RateLimitDecision> {
         if let Some(limiter) = self.limits.get(limiter_name) {
             limiter.check(key).await

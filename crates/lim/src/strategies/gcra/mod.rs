@@ -1,7 +1,7 @@
 mod quota;
 
 use crate::decision::RateLimitDecision;
-use crate::error::{RateLimitError, Result};
+use crate::error::Result;
 use crate::state::State;
 use crate::strategies::RateLimit;
 use async_trait::async_trait;
@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 pub use quota::Quota;
 
+#[cfg(feature = "memory")]
 pub struct Gcra {
     store: Arc<State>,
     clock: quanta::Clock,
@@ -19,6 +20,7 @@ pub struct Gcra {
     burst: u64,
 }
 
+#[cfg(feature = "memory")]
 impl Gcra {
     pub fn new(store: Arc<State>, quota: Quota) -> Self {
         let tau = cmp::max(quota.replenish_1_per, Duration::from_micros(1)).as_micros() as u64;
@@ -32,6 +34,20 @@ impl Gcra {
             tau,
             burst,
         }
+    }
+}
+
+pub struct Gcra {
+    store: Arc<State>,
+    tau: u64,
+    burst: u64,
+}
+
+impl Gcra {
+    pub fn new(store: Arc<State>, quota: Quota) -> Self {
+        let tau = cmp::max(quota.replenish_1_per, Duration::from_micros(1)).as_micros() as u64;
+        let burst = tau * (quota.max_burst.get() - 1) as u64;
+        Gcra { store, tau, burst }
     }
 }
 
@@ -67,7 +83,7 @@ impl RateLimit for Gcra {
         {
             Ok(result) => result,
             Err(e) => {
-                return Err(RateLimitError::MemoryError(format!(
+                return Err(crate::error::RateLimitError::MemoryError(format!(
                     "Failed to access in-memory store: {}",
                     e,
                 )));
