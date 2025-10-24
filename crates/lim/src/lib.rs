@@ -1,6 +1,6 @@
 mod decision;
 mod error;
-mod jitter;
+// mod jitter;
 mod limiter;
 mod state;
 pub mod strategies;

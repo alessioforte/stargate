@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Service {
-    pub connect_timeout: Option<u64>,
-    pub name: Option<String>,
+    pub name: String,
     pub path: String,
     pub protocol: Option<String>,
     pub endpoints: Vec<Endpoint>,
+    pub connect_timeout: Option<u64>,
     pub load_balancer: Option<LoadBalancer>,
     pub auth_required: Option<bool>,
     pub resource: Option<String>,

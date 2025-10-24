@@ -30,10 +30,10 @@ impl Limit {
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "strategy", content = "params", rename_all = "snake_case")]
 enum Strategy {
-    TokenBucket {
-        refill_rate: u64,
-        capacity: u64,
-    },
+    // TokenBucket {
+    //     refill_rate: u64,
+    //     capacity: u64,
+    // },
     Gcra {
         max_burst: u32,
         replenish_1_per: String,
@@ -57,13 +57,12 @@ impl Strategy {
                     replenish_1_per,
                 };
                 Box::new(lim::gcra::Gcra::new(state, quota))
-            }
-            Strategy::TokenBucket {
-                refill_rate,
-                capacity,
-            } => {
-                unimplemented!()
-            }
+            } // Strategy::TokenBucket {
+              //     refill_rate,
+              //     capacity,
+              // } => {
+              //     unimplemented!()
+              // }
         }
     }
 }

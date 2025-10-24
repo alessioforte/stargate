@@ -57,7 +57,6 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
     }
 
     let google_user = google_user.unwrap();
-    println!("Google User: {:?}", google_user);
 
     let svc = etc::db::service();
     let mut user = match svc.get_user_by_username(&google_user.email).await {

@@ -72,7 +72,6 @@ pub async fn verify_jwt(req: &HttpRequest) -> Option<etc::sub::Subject> {
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
     let session = store.get::<etc::sub::Subject>(&sid).await;
-    println!("Session: {:?}", session);
 
     if let Ok(Some(subject)) = session {
         return Some(subject);

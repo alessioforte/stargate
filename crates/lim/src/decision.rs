@@ -122,64 +122,64 @@ impl RateLimitDecision {
     }
 }
 
-/// Information about rate limiting for API responses
-///
-/// This is a simplified version of RateLimitResult suitable for
-/// including in API response headers or JSON responses.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RateLimitInfo {
-    /// The rate limit for this endpoint/user
-    pub limit: u64,
+// /// Information about rate limiting for API responses
+// ///
+// /// This is a simplified version of RateLimitResult suitable for
+// /// including in API response headers or JSON responses.
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct RateLimitInfo {
+//     /// The rate limit for this endpoint/user
+//     pub limit: u64,
 
-    /// Number of requests remaining
-    pub remaining: u64,
+//     /// Number of requests remaining
+//     pub remaining: u64,
 
-    /// Unix timestamp when the limit resets
-    pub reset_time: u64,
+//     /// Unix timestamp when the limit resets
+//     pub reset_time: u64,
 
-    /// Milliseconds to wait before retrying (if rate limited)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_after_ms: Option<u64>,
-}
+//     /// Milliseconds to wait before retrying (if rate limited)
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub retry_after_ms: Option<u64>,
+// }
 
-impl From<RateLimitDecision> for RateLimitInfo {
-    fn from(result: RateLimitDecision) -> Self {
-        Self {
-            limit: result.limit,
-            remaining: result.remaining,
-            reset_time: result.reset_time,
-            retry_after_ms: result.retry_after.map(|d| d.as_millis() as u64),
-        }
-    }
-}
+// impl From<RateLimitDecision> for RateLimitInfo {
+//     fn from(result: RateLimitDecision) -> Self {
+//         Self {
+//             limit: result.limit,
+//             remaining: result.remaining,
+//             reset_time: result.reset_time,
+//             retry_after_ms: result.retry_after.map(|d| d.as_millis() as u64),
+//         }
+//     }
+// }
 
-impl RateLimitInfo {
-    /// Creates rate limit info from individual components
-    pub fn new(limit: u64, remaining: u64, reset_time: u64) -> Self {
-        Self {
-            limit,
-            remaining,
-            reset_time,
-            retry_after_ms: None,
-        }
-    }
+// impl RateLimitInfo {
+//     /// Creates rate limit info from individual components
+//     pub fn new(limit: u64, remaining: u64, reset_time: u64) -> Self {
+//         Self {
+//             limit,
+//             remaining,
+//             reset_time,
+//             retry_after_ms: None,
+//         }
+//     }
 
-    /// Sets the retry after duration
-    pub fn with_retry_after(mut self, retry_after: Duration) -> Self {
-        self.retry_after_ms = Some(retry_after.as_millis() as u64);
-        self
-    }
+//     /// Sets the retry after duration
+//     pub fn with_retry_after(mut self, retry_after: Duration) -> Self {
+//         self.retry_after_ms = Some(retry_after.as_millis() as u64);
+//         self
+//     }
 
-    /// Returns true if there are no remaining requests
-    pub fn is_exhausted(&self) -> bool {
-        self.remaining == 0
-    }
+//     /// Returns true if there are no remaining requests
+//     pub fn is_exhausted(&self) -> bool {
+//         self.remaining == 0
+//     }
 
-    /// Returns the retry after duration, if set
-    pub fn retry_after(&self) -> Option<Duration> {
-        self.retry_after_ms.map(Duration::from_millis)
-    }
-}
+//     /// Returns the retry after duration, if set
+//     pub fn retry_after(&self) -> Option<Duration> {
+//         self.retry_after_ms.map(Duration::from_millis)
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -240,23 +240,23 @@ mod tests {
         assert!(RateLimitDecision::merge(vec![]).is_none());
     }
 
-    #[test]
-    fn test_rate_limit_info() {
-        let result =
-            RateLimitDecision::denied(100, 0, 1234567890, Some(Duration::from_millis(5500)));
+    // #[test]
+    // fn test_rate_limit_info() {
+    //     let result =
+    //         RateLimitDecision::denied(100, 0, 1234567890, Some(Duration::from_millis(5500)));
 
-        let info: RateLimitInfo = result.into();
-        assert_eq!(info.limit, 100);
-        assert_eq!(info.remaining, 0);
-        assert_eq!(info.reset_time, 1234567890);
-        assert_eq!(info.retry_after_ms, Some(5500));
-        assert!(info.is_exhausted());
-        assert_eq!(info.retry_after(), Some(Duration::from_millis(5500)));
+    //     let info: RateLimitInfo = result.into();
+    //     assert_eq!(info.limit, 100);
+    //     assert_eq!(info.remaining, 0);
+    //     assert_eq!(info.reset_time, 1234567890);
+    //     assert_eq!(info.retry_after_ms, Some(5500));
+    //     assert!(info.is_exhausted());
+    //     assert_eq!(info.retry_after(), Some(Duration::from_millis(5500)));
 
-        let info2 =
-            RateLimitInfo::new(200, 50, 1234567890).with_retry_after(Duration::from_secs(30));
-        assert_eq!(info2.retry_after_ms, Some(30000));
-    }
+    //     let info2 =
+    //         RateLimitInfo::new(200, 50, 1234567890).with_retry_after(Duration::from_secs(30));
+    //     assert_eq!(info2.retry_after_ms, Some(30000));
+    // }
 
     // #[test]
     // fn test_serialization() {

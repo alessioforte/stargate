@@ -3,15 +3,10 @@ use crate::cfg::{Config, limit::Limit, load_balancer::LoadBalancer, service::Ser
 use crate::trie::{RouteNode, Service, TriePath};
 use ace::PolicyEngine;
 use arc_swap::ArcSwap;
-use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use std::{
     collections::HashMap,
-    path::Path,
     sync::{Arc, Mutex},
-    thread,
-    time::Duration,
 };
-use tokio::runtime::Runtime;
 
 #[derive(Clone)]
 pub struct Gate {
@@ -19,16 +14,16 @@ pub struct Gate {
     liveness_probe: Arc<Mutex<lb::HealthCheck>>,
     pub services: Arc<ArcSwap<TriePath>>,
     pub policy_engine: Arc<ArcSwap<PolicyEngine>>,
-    pub limiter: Arc<ArcSwap<lim::Limiter>>, // Placeholder for rate limiter
+    pub limiter: Arc<ArcSwap<lim::Limiter>>,
 }
 
 impl Gate {
     pub fn new(store: Arc<lim::State>) -> Self {
         let trie = TriePath::new();
-        let services = Arc::new(ArcSwap::new(Arc::new(trie)));
+        let services = Arc::new(ArcSwap::from_pointee(trie));
         let liveness_probe = Arc::new(Mutex::new(lb::HealthCheck::new()));
-        let policy_engine = Arc::new(ArcSwap::new(Arc::new(PolicyEngine::new())));
-        let limiter = Arc::new(ArcSwap::new(Arc::new(lim::Limiter::new())));
+        let policy_engine = Arc::new(ArcSwap::from_pointee(PolicyEngine::new()));
+        let limiter = Arc::new(ArcSwap::from_pointee(lim::Limiter::new()));
         Self {
             store,
             services,
@@ -54,8 +49,8 @@ impl Gate {
     fn build_policy_engine(mut self, ac: &Option<AccessControl>) -> Self {
         let mut pe = PolicyEngine::new();
         if let Some(ac) = ac.clone() {
-            if ac.policy_file.is_some() {
-                let file_path = ac.policy_file.unwrap();
+            if ac.policies_path.is_some() {
+                let file_path = ac.policies_path.unwrap();
                 let content =
                     std::fs::read_to_string(file_path).expect("Unable to read policy file");
                 pe.parse_file(&content)
@@ -104,8 +99,8 @@ impl Gate {
     pub async fn update_policy_engine(&mut self, ac: &Option<AccessControl>) {
         let mut pe = PolicyEngine::new();
         if let Some(ac) = ac.clone() {
-            if ac.policy_file.is_some() {
-                let file_path = ac.policy_file.unwrap();
+            if ac.policies_path.is_some() {
+                let file_path = ac.policies_path.unwrap();
                 let content =
                     std::fs::read_to_string(file_path).expect("Unable to read policy file");
                 pe.parse_file(&content)
@@ -180,7 +175,6 @@ impl Gate {
             }
 
             let node = Service {
-                connect_timeout: service.connect_timeout,
                 auth_required: service.auth_required,
                 resource: service.resource.clone(),
                 name: service.name.clone(),
@@ -196,36 +190,5 @@ impl Gate {
         self.liveness_probe = Arc::new(Mutex::new(liveness_probe));
 
         trie
-    }
-
-    pub fn watch_file(&self, file_path: &str) {
-        let mut gate = self.clone();
-        let file_path = file_path.to_string();
-        thread::spawn(move || {
-            let rt = Runtime::new().unwrap();
-            rt.block_on(async {
-                log::info!("Watching Gate configuration file");
-                let (tx, rx) = std::sync::mpsc::channel();
-
-                let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
-                debouncer
-                    .watcher()
-                    .watch(Path::new(&file_path), RecursiveMode::Recursive)
-                    .unwrap();
-
-                for rs in rx {
-                    match rs {
-                        Ok(events) => {
-                            for _e in events.iter() {
-                                log::info!("Configuration file changed, reloading...");
-                                let config = Config::from_file(&file_path);
-                                gate.update_config(&config).await;
-                            }
-                        }
-                        Err(e) => log::error!("Error: {:?}", e),
-                    }
-                }
-            });
-        });
     }
 }

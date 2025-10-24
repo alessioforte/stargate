@@ -56,7 +56,6 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
     }
 
     let github_user = github_user.unwrap();
-    println!("Github User: {:?}", github_user);
 
     let svc = etc::db::service();
     let mut user = match svc.get_user_by_username(&github_user.email).await {

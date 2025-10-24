@@ -37,12 +37,14 @@ impl Gcra {
     }
 }
 
+#[cfg(feature = "redis")]
 pub struct Gcra {
     store: Arc<State>,
     tau: u64,
     burst: u64,
 }
 
+#[cfg(feature = "redis")]
 impl Gcra {
     pub fn new(store: Arc<State>, quota: Quota) -> Self {
         let tau = cmp::max(quota.replenish_1_per, Duration::from_micros(1)).as_micros() as u64;
@@ -123,15 +125,10 @@ impl RateLimit for Gcra {
             .arg(60)
             .invoke(&mut con)
             .map_err(|e| {
-                eprintln!("Redis script error: {}", e);
-                e
+                log::error!("Redis script error: {}", e);
             })
             .unwrap();
 
-        println!(
-            "GCRA check for key '{}': allow={}, retry_after_seconds={}, remaining_burst_seconds={}",
-            key, allow, retry_after, remaining_burst
-        );
         let limit = Duration::from_micros(tau).as_secs().max(1);
         let remaining = if remaining_burst > 0 {
             (remaining_burst as u64) / limit

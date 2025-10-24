@@ -3,7 +3,7 @@ mod mid;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ext::RequestExt, sub::Subject};
+use crate::etc::{ext::RequestExt, gate::get_client, sub::Subject};
 use crate::fun::access_control;
 use actix_web::{
     HttpMessage, HttpRequest, HttpResponse, middleware::from_fn, web::Payload, web::ServiceConfig,
@@ -101,11 +101,17 @@ pub async fn handler(
 
     // If the request is for a WebSocket connection, handle it accordingly
     if protocol == "ws" {
-        return ws::handler(&req, stream, &uri, service).await;
+        return ws::handler(&req, stream, &uri).await;
     }
 
+    let client = get_client(&service.name).ok_or_else(|| {
+        ErrorResponse::from(HttpError::InternalServerError(
+            "HTTP client not found".to_string(),
+        ))
+    })?;
+
     // Otherwise, handle it as a regular HTTP request
-    http::handler(&req, stream, &uri, service).await
+    http::handler(&req, stream, &uri, &client).await
 }
 
 pub fn configure(cfg: &mut ServiceConfig) {

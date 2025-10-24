@@ -16,7 +16,6 @@ pub fn generate_api_key_with(key_type: meta::KeyType, env: meta::KeyEnvironment)
         .map(char::from)
         .collect();
 
-    println!("Generating API key: {}", key);
     format!(
         "{}_{}_{}",
         key_type.as_str(),

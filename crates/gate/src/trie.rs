@@ -11,11 +11,10 @@ pub struct RouteNode {
 
 #[derive(Default)]
 pub struct Service {
-    pub name: Option<String>,
+    pub name: String,
     pub path: String,
     pub lb: Option<Arc<dyn LoadBalancer + Send + Sync>>,
     pub auth_required: Option<bool>,
-    pub connect_timeout: Option<u64>,
     pub resource: Option<String>,
     pub routes: Option<HashMap<String, matchit::Router<RouteNode>>>,
 }
