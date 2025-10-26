@@ -1,6 +1,6 @@
 pub mod cfg;
 pub mod gate;
-pub mod protocols;
+pub mod protocol;
 pub mod trie;
 
 pub use gate::Gate;

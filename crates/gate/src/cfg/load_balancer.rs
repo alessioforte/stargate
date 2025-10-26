@@ -28,10 +28,9 @@ pub struct LoadBalancer {
 impl LoadBalancer {
     pub fn builder(
         &self,
-        protocol: Option<String>,
+        protocol: &str,
         endpoints: &Vec<Endpoint>,
     ) -> Box<Arc<dyn lb::LoadBalancer + Send + Sync>> {
-        let protocol = protocol.unwrap_or_else(|| "http".to_string());
         let upstreams = endpoints
             .iter()
             .map(|endpoint| {

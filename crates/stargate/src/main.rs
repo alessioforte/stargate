@@ -20,8 +20,9 @@ async fn main() -> std::io::Result<()> {
     dotenv().ok();
     pretty_env_logger::init();
 
-    let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let version = env!("CARGO_PKG_VERSION");
+    let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
+    let tls_enabled = env::var("TLS_ENABLED").unwrap_or_else(|_| "true".to_string());
 
     println!("{}", logo::LOGO);
     log::info!("Version: {}", version);
@@ -35,7 +36,7 @@ async fn main() -> std::io::Result<()> {
     fun::create_super_admin().await;
     let tls = tls::builder();
 
-    HttpServer::new(move || {
+    let server = HttpServer::new(move || {
         App::new()
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
             .wrap(middleware::Logger::default())
@@ -44,8 +45,14 @@ async fn main() -> std::io::Result<()> {
             .configure(cfg::configure)
             .configure(rts::configure)
             .configure(gtw::configure)
-    })
-    .bind_openssl(format!("0.0.0.0:{}", port), tls)?
-    .run()
-    .await
+    });
+
+    if tls_enabled == "true" {
+        return server
+            .bind_openssl(format!("0.0.0.0:{}", port), tls)?
+            .run()
+            .await;
+    }
+
+    server.bind(format!("0.0.0.0:{}", port))?.run().await
 }

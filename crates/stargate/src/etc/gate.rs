@@ -2,6 +2,8 @@ use crate::etc::store::use_store;
 use actix_web::web::Data;
 use gate::{Gate, cfg::Config};
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::{
     collections::HashMap,
     env,
@@ -88,16 +90,30 @@ thread_local! {
 pub fn build_clients() -> HashMap<String, awc::Client> {
     let mut new_clients = HashMap::new();
     let cfg = get_config();
+
+    let tls_config = if let Some(mtls) = cfg.mtls {
+        Some(build_mtls(mtls))
+    } else {
+        None
+    };
+
     for svc in &cfg.services {
-        if let Some(timeout) = svc.connect_timeout {
-            let client = awc::Client::builder()
-                .timeout(Duration::from_millis(timeout as u64))
+        let timeout = svc.connect_timeout.unwrap_or(30);
+        let mut client = awc::Client::builder()
+            .timeout(Duration::from_secs(timeout))
+            .finish();
+
+        if let Some(tls_cfg) = &tls_config
+            && svc.protocol == gate::protocol::Protocol::Https
+        {
+            let connector = awc::Connector::new().rustls_0_23(Arc::new(tls_cfg.clone()));
+            client = awc::Client::builder()
+                .timeout(Duration::from_secs(timeout))
+                .connector(connector)
                 .finish();
-            new_clients.insert(svc.name.clone(), client);
-        } else {
-            let client = awc::Client::default();
-            new_clients.insert(svc.name.clone(), client);
         }
+
+        new_clients.insert(svc.name.clone(), client);
     }
     new_clients
 }
@@ -132,4 +148,53 @@ pub fn get_client(service_name: &str) -> Option<awc::Client> {
         }
     });
     client_opt
+}
+
+fn build_mtls(mtls: gate::cfg::mtls::MtlsConfig) -> ClientConfig {
+    // read ca cert file
+    let mut ca_cert_file = std::io::BufReader::new(
+        std::fs::File::open(mtls.ca_cert_path).expect("Unable to open CA cert file"),
+    );
+
+    // load ca certs
+    let ca_certs = certs(&mut ca_cert_file)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Unable to read CA certs");
+
+    // create root cert store
+    let mut root_store = RootCertStore::empty();
+    // add ca certs to root store
+    for cert in ca_certs {
+        root_store
+            .add(cert)
+            .expect("Unable to add CA cert to root store");
+    }
+
+    // read client cert file
+    let mut client_cert_file = std::io::BufReader::new(
+        std::fs::File::open(mtls.client_cert_path).expect("Unable to open client cert file"),
+    );
+    let client_certs = certs(&mut client_cert_file)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Unable to read client certs");
+
+    // read client key file
+    let mut client_key_file = std::io::BufReader::new(
+        std::fs::File::open(mtls.client_key_path).expect("Unable to open client key file"),
+    );
+    let mut client_keys = pkcs8_private_keys(&mut client_key_file)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Unable to read client private keys");
+
+    if client_keys.is_empty() {
+        panic!("No client private keys found");
+    }
+
+    // Configure TLS with mTLS
+    let tls_config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_client_auth_cert(client_certs, client_keys.remove(0).into())
+        .expect("Unable to create MTLS client config");
+
+    tls_config
 }

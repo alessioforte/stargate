@@ -132,17 +132,14 @@ impl Gate {
         let mut liveness_probe = lb::HealthCheck::new();
 
         for service in services {
-            let protocol = service
-                .protocol
-                .clone()
-                .unwrap_or_else(|| "http".to_string());
+            let protocol = service.protocol.as_str();
 
             let lb_strategy = match service.load_balancer.clone() {
                 Some(lb) => lb,
                 None => LoadBalancer::default(),
             };
 
-            let lb = lb_strategy.builder(service.protocol.clone(), &service.endpoints);
+            let lb = lb_strategy.builder(protocol, &service.endpoints);
             if lb_strategy.liveness_probe.is_some() {
                 let health_check = lb_strategy.liveness_probe.unwrap();
                 let i = health_check.interval.unwrap_or("5s".to_string());
@@ -183,7 +180,7 @@ impl Gate {
                 routes,
             };
 
-            trie.insert(&protocol, &service.path, node);
+            trie.insert(protocol, &service.path, node);
         }
 
         liveness_probe.run();

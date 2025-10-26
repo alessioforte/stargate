@@ -2,9 +2,9 @@ use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslFiletype, SslMethod};
 use std::env;
 
 pub fn builder() -> SslAcceptorBuilder {
-    let key_file_path = env::var("TLS_KEY_FILE")
+    let key_file_path = env::var("TLS_KEY")
         .unwrap_or_else(|_| ".stargate/certificate/localhost/key.pem".to_string());
-    let cert_file_path = env::var("TLS_CERT_FILE")
+    let cert_file_path = env::var("TLS_CERT")
         .unwrap_or_else(|_| ".stargate/certificate/localhost/cert.pem".to_string());
 
     // load TLS keys

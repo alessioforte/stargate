@@ -1,4 +1,4 @@
-use crate::protocols::Protocols;
+use crate::protocol::Protocol;
 use lb::LoadBalancer;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -42,7 +42,7 @@ impl TriePath {
     }
 
     pub fn insert(&mut self, protocol: &str, path: &str, service: Service) {
-        let protocol = Protocols::from_str(protocol);
+        let protocol = Protocol::from_str(protocol);
         if protocol.is_none() {
             return;
         }
