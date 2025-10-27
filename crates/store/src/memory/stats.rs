@@ -116,6 +116,30 @@ impl AtomicOperationStats {
     }
 }
 
+/// Performance metrics specific to MemoryStore
+#[derive(Debug, Clone)]
+pub struct MemoryStorePerformanceMetrics {
+    pub cache_hit_ratio: f64,
+    pub total_operations: u64,
+    pub total_hash_operations: u64,
+    pub expired_cleanup_efficiency: f64,
+    pub memory_usage_bytes: usize,
+    pub total_keys: usize,
+    pub average_key_size: usize,
+}
+
+/// Memory efficiency statistics for MemoryStore
+#[derive(Debug, Clone)]
+pub struct MemoryEfficiencyStats {
+    pub total_keys: usize,
+    pub simple_keys: usize,
+    pub hash_keys: usize,
+    pub atomic_keys: usize,
+    pub total_hash_fields: usize,
+    pub expired_keys: usize,
+    pub fragmentation_ratio: f64,
+}
+
 #[allow(dead_code)]
 pub fn print_stats(store: &MemoryStore) {
     let stats = store.get_storage_stats();

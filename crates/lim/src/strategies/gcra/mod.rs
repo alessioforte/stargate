@@ -79,7 +79,7 @@ impl RateLimit for Gcra {
                         (true, next as i64)
                     }
                 },
-                None,
+                Some(60),
             )
             .await
         {

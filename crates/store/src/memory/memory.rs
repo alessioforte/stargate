@@ -1,4 +1,7 @@
-use super::stats::{AtomicOperationStats, StorageStats};
+use super::config::MemoryStoreConfig;
+use super::stats::{
+    AtomicOperationStats, MemoryEfficiencyStats, MemoryStorePerformanceMetrics, StorageStats,
+};
 use crate::error::{StoreError, StoreResult};
 use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
@@ -9,7 +12,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-// pub type Data = String;
 pub type Data = Vec<u8>;
 
 pub const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
@@ -27,6 +29,7 @@ pub enum StoreValue {
 pub struct MemoryStore {
     pub data: Arc<DashMap<String, StoreValue>>,
     pub stats: Arc<AtomicOperationStats>,
+    config: MemoryStoreConfig,
 }
 
 impl Clone for MemoryStore {
@@ -34,20 +37,64 @@ impl Clone for MemoryStore {
         MemoryStore {
             data: Arc::clone(&self.data),
             stats: Arc::clone(&self.stats),
+            config: self.config.clone(),
         }
     }
 }
 
 impl MemoryStore {
     pub fn new() -> Self {
+        Self::with_config(MemoryStoreConfig::default())
+    }
+
+    pub fn with_config(config: MemoryStoreConfig) -> Self {
+        let data = if config.initial_capacity > 0 {
+            Arc::new(DashMap::with_capacity(config.initial_capacity))
+        } else {
+            Arc::new(DashMap::new())
+        };
+
         Self {
-            data: Arc::new(DashMap::new()),
+            data,
             stats: Arc::new(AtomicOperationStats::default()),
+            config,
         }
     }
 
+    pub fn get_config(&self) -> &MemoryStoreConfig {
+        &self.config
+    }
+
+    /// Get cached current time to reduce syscalls
+    fn get_cached_now(&self) -> DateTime<Utc> {
+        if !self.config.enable_time_caching {
+            return Utc::now();
+        }
+
+        thread_local! {
+            static CACHED_TIME: std::cell::Cell<Option<(DateTime<Utc>, std::time::Instant)>> = std::cell::Cell::new(None);
+        }
+
+        CACHED_TIME.with(|cached| {
+            let now_instant = std::time::Instant::now();
+            match cached.get() {
+                Some((cached_utc, cached_instant))
+                    if now_instant.duration_since(cached_instant)
+                        < std::time::Duration::from_millis(50) =>
+                {
+                    cached_utc
+                }
+                _ => {
+                    let now_utc = Utc::now();
+                    cached.set(Some((now_utc, now_instant)));
+                    now_utc
+                }
+            }
+        })
+    }
+
     pub fn is_expired(&self, exp: &Option<DateTime<Utc>>) -> bool {
-        exp.map_or(false, |date| Utc::now() > date)
+        exp.map_or(false, |date| self.get_cached_now() > date)
     }
 
     /// Atomically check if entry is expired and remove it if so
@@ -64,7 +111,7 @@ impl MemoryStore {
                 self.data.remove(key);
                 self.stats
                     .expired_entries_cleaned
-                    .fetch_add(1, Ordering::SeqCst);
+                    .fetch_add(1, Ordering::Relaxed);
                 return true;
             }
         }
@@ -82,30 +129,29 @@ impl MemoryStore {
                         self.data.remove(key);
                         self.stats
                             .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
-                        self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                            .fetch_add(1, Ordering::Relaxed);
+                        self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                         return Ok(None);
                     }
 
-                    self.stats.cache_hits.fetch_add(1, Ordering::Acquire);
+                    self.stats.cache_hits.fetch_add(1, Ordering::Relaxed);
                     let deserialized = self.deserialize(value)?;
                     Ok(Some(deserialized))
                 }
                 StoreValue::Hash(_, _) => {
-                    self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                    self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                     Ok(None) // Cannot get hash as simple value
                 }
                 StoreValue::AtomicI64(_, _) => {
-                    self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                    self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                     Ok(None) // Cannot get AtomicI64 as simple value
                 }
             }
         } else {
-            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+            self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
             Ok(None)
         }
     }
-
 
     fn estimate_value_size(&self, value: &StoreValue) -> usize {
         match value {
@@ -223,7 +269,7 @@ impl MemoryStore {
         let result = bincode::serde::decode_from_slice(data, BINCODE_CONFIG).map_err(|e| {
             StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
         });
-        let data: T = result.unwrap().0;
+        let data: T = result?.0;
         Ok(data)
     }
 }
@@ -235,7 +281,7 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.gets.fetch_add(1, Ordering::SeqCst);
+        self.stats.gets.fetch_add(1, Ordering::Relaxed);
         self.get_if_not_expired(key)
     }
 
@@ -255,7 +301,7 @@ impl Store for MemoryStore {
             }
         }
 
-        self.stats.sets.fetch_add(1, Ordering::SeqCst);
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
         let data = self.serialize(value)?;
 
@@ -270,7 +316,7 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.deletes.fetch_add(1, Ordering::SeqCst);
+        self.stats.deletes.fetch_add(1, Ordering::Relaxed);
         Ok(self.data.remove(key).is_some())
     }
 
@@ -279,7 +325,7 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.exists_checks.fetch_add(1, Ordering::SeqCst);
+        self.stats.exists_checks.fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
@@ -310,7 +356,7 @@ impl Store for MemoryStore {
             }
         }
 
-        self.stats.hash_sets.fetch_add(1, Ordering::SeqCst);
+        self.stats.hash_sets.fetch_add(1, Ordering::Relaxed);
 
         let serialized_value = self.serialize(value)?;
         let field_exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
@@ -333,7 +379,7 @@ impl Store for MemoryStore {
                         .insert(key.to_string(), StoreValue::Hash(new_hash_map, None));
                     self.stats
                         .expired_entries_cleaned
-                        .fetch_add(1, Ordering::SeqCst);
+                        .fetch_add(1, Ordering::Relaxed);
                     return Ok(true);
                 }
                 let is_new = !hash_map.contains_key(field);
@@ -355,7 +401,7 @@ impl Store for MemoryStore {
             ));
         }
 
-        self.stats.hash_gets.fetch_add(1, Ordering::SeqCst);
+        self.stats.hash_gets.fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
@@ -371,7 +417,7 @@ impl Store for MemoryStore {
                         self.data.remove(key);
                         self.stats
                             .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                            .fetch_add(1, Ordering::Relaxed);
                         self.stats.cache_misses.fetch_add(1, Ordering::Release);
                         return Ok(None);
                     }
@@ -417,7 +463,7 @@ impl Store for MemoryStore {
             ));
         }
 
-        self.stats.hash_deletes.fetch_add(1, Ordering::SeqCst);
+        self.stats.hash_deletes.fetch_add(1, Ordering::Relaxed);
 
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
@@ -444,7 +490,7 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.hash_getalls.fetch_add(1, Ordering::SeqCst);
+        self.stats.hash_getalls.fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
@@ -459,12 +505,17 @@ impl Store for MemoryStore {
                         self.data.remove(key);
                         self.stats
                             .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                            .fetch_add(1, Ordering::Relaxed);
                         return Ok(HashMap::new());
                     }
 
-                    let mut result = HashMap::new();
-                    let now = Utc::now();
+                    // Pre-allocate HashMap with estimated capacity for better performance
+                    let mut result = if self.config.enable_preallocation {
+                        HashMap::with_capacity(hash_map.len())
+                    } else {
+                        HashMap::new()
+                    };
+                    let now = self.get_cached_now();
 
                     // Collect expired fields to remove them atomically
                     let mut expired_fields = Vec::new();
@@ -484,7 +535,7 @@ impl Store for MemoryStore {
                         hash_map.remove(&field);
                         self.stats
                             .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                            .fetch_add(1, Ordering::Relaxed);
                     }
 
                     Ok(result)
@@ -1010,31 +1061,366 @@ impl MemoryStore {
 }
 
 impl MemoryStore {
-    /// Improved cleaner with better atomicity and coordination
-    pub fn run_cleaner(&self, interval: u64) {
+    /// Batch get operations for better performance - MemoryStore specific
+    pub async fn batch_get<T: DeserializeValue>(
+        &self,
+        keys: &[&str],
+    ) -> StoreResult<Vec<Option<T>>> {
+        let mut results = Vec::with_capacity(keys.len());
+
+        for &key in keys {
+            if key.trim().is_empty() {
+                results.push(None);
+                continue;
+            }
+
+            self.stats.gets.fetch_add(1, Ordering::Relaxed);
+
+            match self.get_if_not_expired(key) {
+                Ok(value) => results.push(value),
+                Err(_) => results.push(None), // Convert errors to None for batch operations
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Batch set operations for better performance - MemoryStore specific
+    pub async fn batch_set<T: SerializeValue>(
+        &self,
+        operations: &[(&str, &T, Option<u64>)],
+    ) -> StoreResult<Vec<bool>> {
+        let mut results = Vec::with_capacity(operations.len());
+
+        for &(key, value, ttl) in operations {
+            if key.trim().is_empty() {
+                results.push(false);
+                continue;
+            }
+
+            if let Some(ttl_val) = ttl {
+                if ttl_val == 0 {
+                    results.push(false);
+                    continue;
+                }
+            }
+
+            self.stats.sets.fetch_add(1, Ordering::Relaxed);
+
+            match self.serialize(value) {
+                Ok(data) => {
+                    let exp =
+                        ttl.map(|t| self.get_cached_now() + chrono::Duration::seconds(t as i64));
+                    self.data
+                        .insert(key.to_string(), StoreValue::Simple(data, exp));
+                    results.push(true);
+                }
+                Err(_) => results.push(false),
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Batch delete operations for better performance - MemoryStore specific
+    pub async fn batch_delete(&self, keys: &[&str]) -> StoreResult<Vec<bool>> {
+        let mut results = Vec::with_capacity(keys.len());
+
+        for &key in keys {
+            if key.trim().is_empty() {
+                results.push(false);
+                continue;
+            }
+
+            self.stats.deletes.fetch_add(1, Ordering::Relaxed);
+            results.push(self.data.remove(key).is_some());
+        }
+
+        Ok(results)
+    }
+
+    /// Batch exists operations for better performance - MemoryStore specific
+    pub async fn batch_exists(&self, keys: &[&str]) -> StoreResult<Vec<bool>> {
+        let mut results = Vec::with_capacity(keys.len());
+
+        for &key in keys {
+            if key.trim().is_empty() {
+                results.push(false);
+                continue;
+            }
+
+            self.stats.exists_checks.fetch_add(1, Ordering::Relaxed);
+
+            // Check if expired and remove atomically
+            if self.check_and_remove_if_expired(key) {
+                results.push(false);
+            } else {
+                results.push(self.data.contains_key(key));
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Batch cleanup of expired entries - MemoryStore specific
+    /// Uses config.cleanup_batch_size if no max_items specified
+    pub async fn batch_cleanup_expired(&self, max_items: Option<usize>) -> usize {
+        let effective_batch_size = max_items.unwrap_or(self.config.cleanup_batch_size);
+        let mut removed: usize = 0;
+        let mut checked = 0;
+        let now = self.get_cached_now();
+
+        // Apply memory pressure adjustment to batch size
+        let adjusted_batch_size = if self.is_memory_pressure() {
+            effective_batch_size * 2 // Clean more aggressively under memory pressure
+        } else {
+            effective_batch_size
+        };
+
+        self.data.retain(|_, value| {
+            if checked >= adjusted_batch_size {
+                return true; // Keep remaining items for next batch
+            }
+            checked += 1;
+
+            let should_keep = match value {
+                StoreValue::Simple(_, exp) => !self.is_expired(exp),
+                StoreValue::Hash(hash_map, exp) => {
+                    // Clean expired hash fields
+                    let mut fields_removed = 0;
+                    hash_map.retain(|_, (_, field_exp)| {
+                        let keep = field_exp.map_or(true, |e| e > now);
+                        if !keep {
+                            fields_removed += 1;
+                        }
+                        keep
+                    });
+                    removed += fields_removed;
+
+                    // Keep hash if not expired and has fields
+                    !self.is_expired(exp) && !hash_map.is_empty()
+                }
+                StoreValue::AtomicI64(_, exp) => !self.is_expired(exp),
+            };
+
+            if !should_keep {
+                removed += 1;
+            }
+            should_keep
+        });
+
+        self.stats
+            .expired_entries_cleaned
+            .fetch_add(removed as u64, Ordering::Relaxed);
+        removed
+    }
+
+    /// Cleanup expired entries using default config settings
+    pub async fn cleanup_expired(&self) -> usize {
+        self.batch_cleanup_expired(None).await
+    }
+
+    /// Get detailed performance metrics - MemoryStore specific
+    pub fn get_performance_metrics(&self) -> MemoryStorePerformanceMetrics {
+        let stats = self.stats.to_operation_stats();
+        let total_operations = stats.gets + stats.sets + stats.deletes + stats.exists_checks;
+        let total_hash_operations = stats.hash_gets
+            + stats.hash_sets
+            + stats.hash_deletes
+            + stats.hash_exists_checks
+            + stats.hash_getalls
+            + stats.hash_keys_calls
+            + stats.hash_vals_calls
+            + stats.hash_len_calls;
+
+        MemoryStorePerformanceMetrics {
+            cache_hit_ratio: self.get_cache_hit_ratio(),
+            total_operations,
+            total_hash_operations,
+            expired_cleanup_efficiency: if total_operations > 0 {
+                stats.expired_entries_cleaned as f64 / total_operations as f64
+            } else {
+                0.0
+            },
+            memory_usage_bytes: self.get_memory_usage_bytes(),
+            total_keys: self.get_total_keys(),
+            average_key_size: if self.get_total_keys() > 0 {
+                self.get_memory_usage_bytes() / self.get_total_keys()
+            } else {
+                0
+            },
+        }
+    }
+
+    /// Get current memory efficiency statistics - MemoryStore specific
+    pub fn get_memory_efficiency(&self) -> MemoryEfficiencyStats {
+        let total_keys = self.data.len();
+        let mut simple_keys = 0;
+        let mut hash_keys = 0;
+        let mut atomic_keys = 0;
+        let mut total_hash_fields = 0;
+        let mut expired_keys = 0;
+
+        let now = self.get_cached_now();
+
+        for entry in self.data.iter() {
+            match entry.value() {
+                StoreValue::Simple(_, exp) => {
+                    simple_keys += 1;
+                    if self.is_expired(exp) {
+                        expired_keys += 1;
+                    }
+                }
+                StoreValue::Hash(hash_map, exp) => {
+                    hash_keys += 1;
+                    total_hash_fields += hash_map.len();
+                    if self.is_expired(exp) {
+                        expired_keys += 1;
+                    } else {
+                        // Count expired fields within the hash
+                        for field_entry in hash_map.iter() {
+                            let (_, (_, field_exp)) = field_entry.pair();
+                            if field_exp.map_or(false, |exp| exp <= now) {
+                                expired_keys += 1;
+                            }
+                        }
+                    }
+                }
+                StoreValue::AtomicI64(_, exp) => {
+                    atomic_keys += 1;
+                    if self.is_expired(exp) {
+                        expired_keys += 1;
+                    }
+                }
+            }
+        }
+
+        MemoryEfficiencyStats {
+            total_keys,
+            simple_keys,
+            hash_keys,
+            atomic_keys,
+            total_hash_fields,
+            expired_keys,
+            fragmentation_ratio: if total_keys > 0 {
+                expired_keys as f64 / total_keys as f64
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// Check if memory usage exceeds configured limits - MemoryStore specific
+    pub fn is_memory_pressure(&self) -> bool {
+        if self.config.max_memory_usage == 0 {
+            return false; // Memory limiting disabled
+        }
+
+        self.get_memory_usage_bytes() > self.config.max_memory_usage
+    }
+
+    /// Get recommendations for performance optimization - MemoryStore specific
+    pub fn get_optimization_recommendations(&self) -> Vec<String> {
+        let mut recommendations = Vec::new();
+        let efficiency = self.get_memory_efficiency();
+        let perf_metrics = self.get_performance_metrics();
+
+        // Check fragmentation
+        if efficiency.fragmentation_ratio > 0.1 {
+            recommendations.push(format!(
+                "High fragmentation detected ({:.1}%). Consider running cleanup more frequently.",
+                efficiency.fragmentation_ratio * 100.0
+            ));
+        }
+
+        // Check cache hit ratio
+        if perf_metrics.cache_hit_ratio < 0.8 {
+            recommendations.push(format!(
+                "Low cache hit ratio ({:.1}%). Consider increasing cache size or reviewing access patterns.",
+                perf_metrics.cache_hit_ratio * 100.0
+            ));
+        }
+
+        // Check memory pressure
+        if self.is_memory_pressure() {
+            recommendations.push(
+                "Memory usage exceeds configured limit. Consider reducing TTL or increasing cleanup frequency.".to_string()
+            );
+        }
+
+        // Check operation distribution
+        if perf_metrics.total_hash_operations > perf_metrics.total_operations * 2 {
+            recommendations.push(
+                "Heavy hash usage detected. Consider enabling hash-specific optimizations."
+                    .to_string(),
+            );
+        }
+
+        if recommendations.is_empty() {
+            recommendations.push("Performance looks optimal!".to_string());
+        }
+
+        recommendations
+    }
+
+    /// Adaptive cleaner that uses configuration parameters effectively
+    pub fn run_adaptive_cleaner(&self, base_interval: u64) {
         let data = self.data.clone();
         let stats = self.stats.clone();
+        let config = self.config.clone();
 
         tokio::spawn(async move {
             log::info!(
-                "MemoryStore cleaner started with interval: {} seconds",
-                interval
+                "MemoryStore adaptive cleaner started with base interval: {} seconds, batch size: {}",
+                base_interval,
+                config.cleanup_batch_size
             );
-            let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(interval));
+
+            let mut current_interval = base_interval;
+            let mut ticker =
+                tokio::time::interval(tokio::time::Duration::from_secs(current_interval));
+
             loop {
                 ticker.tick().await;
 
-                let now = Utc::now();
-                let mut removed = 0;
+                let start_time = std::time::Instant::now();
+                let data_size_before = data.len();
+                let now = if config.enable_time_caching {
+                    // Use a single time for the entire cleanup cycle
+                    Utc::now()
+                } else {
+                    Utc::now()
+                };
 
-                // Use retain with atomic operations for better consistency
+                let mut removed: u64 = 0;
+                let mut processed: usize = 0;
+
+                // Adaptive batch processing
+                let effective_batch_size = if config.max_memory_usage > 0 {
+                    // Increase batch size if we're approaching memory limits
+                    let estimated_memory = data.len() * 100; // rough estimate
+                    if estimated_memory > config.max_memory_usage * 80 / 100 {
+                        config.cleanup_batch_size * 2
+                    } else {
+                        config.cleanup_batch_size
+                    }
+                } else {
+                    config.cleanup_batch_size
+                };
+
+                // Use retain with configurable batch processing
                 data.retain(|_, value| {
+                    if processed >= effective_batch_size {
+                        return true; // Keep remaining for next batch
+                    }
+                    processed += 1;
+
                     match value {
                         StoreValue::Hash(hash_map, exp) => {
                             // Clean expired fields within the hash atomically
                             let mut fields_removed = 0;
                             hash_map.retain(|_, (_, field_exp)| {
-                                let keep = field_exp.map_or(true, |exp| exp > now);
+                                let keep = field_exp.map_or(true, |exp_time| exp_time > now);
                                 if !keep {
                                     fields_removed += 1;
                                 }
@@ -1044,21 +1430,21 @@ impl MemoryStore {
 
                             // Keep the hash if it's not expired and has fields
                             let keep_hash =
-                                exp.map_or(true, |exp| exp > now) && !hash_map.is_empty();
+                                exp.map_or(true, |exp_time| exp_time > now) && !hash_map.is_empty();
                             if !keep_hash {
                                 removed += 1;
                             }
                             keep_hash
                         }
                         StoreValue::Simple(_, exp) => {
-                            let keep = exp.map_or(true, |exp| exp > now);
+                            let keep = exp.map_or(true, |exp_time| exp_time > now);
                             if !keep {
                                 removed += 1;
                             }
                             keep
                         }
                         StoreValue::AtomicI64(_, exp) => {
-                            let keep = exp.map_or(true, |exp| exp > now);
+                            let keep = exp.map_or(true, |exp_time| exp_time > now);
                             if !keep {
                                 removed += 1;
                             }
@@ -1067,14 +1453,51 @@ impl MemoryStore {
                     }
                 });
 
+                let cleanup_duration = start_time.elapsed();
+                let data_size_after = data.len();
+
+                // Adaptive interval adjustment based on effectiveness
+                if removed > (effective_batch_size / 2) as u64 {
+                    // High expiration rate, clean more frequently
+                    current_interval = std::cmp::max(base_interval / 2, 1);
+                } else if removed < (effective_batch_size / 10) as u64 {
+                    // Low expiration rate, clean less frequently
+                    current_interval = std::cmp::min(base_interval * 2, 300);
+                } else {
+                    current_interval = base_interval;
+                }
+
+                // Update ticker with new interval
+                ticker = tokio::time::interval(tokio::time::Duration::from_secs(current_interval));
+
                 if removed > 0 {
-                    // Use SeqCst for important cleaner stats
                     stats
                         .expired_entries_cleaned
-                        .fetch_add(removed, Ordering::SeqCst);
-                    log::info!("MemoryStore cleaner removed {} expired entries", removed);
+                        .fetch_add(removed as u64, Ordering::Relaxed);
+                    log::info!(
+                        "MemoryStore cleaner: removed {} expired entries, processed {}/{} items in {:?}, next interval: {}s",
+                        removed,
+                        processed,
+                        data_size_before,
+                        cleanup_duration,
+                        current_interval
+                    );
+                }
+
+                // Memory pressure check
+                if config.max_memory_usage > 0 && data_size_after > config.max_memory_usage / 100 {
+                    log::warn!(
+                        "MemoryStore approaching memory limit: {} keys (estimated {} bytes)",
+                        data_size_after,
+                        data_size_after * 100
+                    );
                 }
             }
         });
+    }
+
+    /// Legacy cleaner method - maintained for backward compatibility
+    pub fn run_cleaner(&self, interval: u64) {
+        self.run_adaptive_cleaner(interval);
     }
 }

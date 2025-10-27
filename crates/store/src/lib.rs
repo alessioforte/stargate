@@ -2,13 +2,10 @@ mod error;
 mod store;
 
 pub use error::{StoreError, StoreResult};
-pub use store::{AtomicStore, Store};
+pub use store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 
 #[cfg(feature = "memory")]
-mod memory;
-
-#[cfg(feature = "memory")]
-pub use memory::MemoryStore;
+pub mod memory;
 
 #[cfg(feature = "redis")]
 mod redis;
