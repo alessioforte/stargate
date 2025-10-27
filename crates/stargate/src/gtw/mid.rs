@@ -34,11 +34,12 @@ pub async fn middleware<B: MessageBody + 'static>(
     // Rate limiting ----------------------------------------------------------
     let limiter = gate.limiter.load();
 
+    // TODO: get limit name from subject if it exists or apply default
     let limit_name = "default";
     let key = client_ip
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-
+    let key = format!("lim:{}", key);
     // TODO: handle the case when there is no limiter configured
     let decision = match limiter.check(limit_name, &key).await {
         Ok(decision) => decision,

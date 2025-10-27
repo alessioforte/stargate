@@ -1,6 +1,6 @@
 use super::stats::{AtomicOperationStats, StorageStats};
 use crate::error::{StoreError, StoreResult};
-use crate::store::{AtomicStore, Store};
+use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
@@ -9,11 +9,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+// pub type Data = String;
+pub type Data = Vec<u8>;
+
+pub const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+
 #[derive(Debug, Clone)]
 pub enum StoreValue {
-    Simple(String, Option<DateTime<Utc>>),
+    Simple(Data, Option<DateTime<Utc>>),
     Hash(
-        DashMap<String, (String, Option<DateTime<Utc>>)>,
+        DashMap<String, (Data, Option<DateTime<Utc>>)>,
         Option<DateTime<Utc>>,
     ),
     AtomicI64(Arc<AtomicI64>, Option<DateTime<Utc>>),
@@ -67,10 +72,7 @@ impl MemoryStore {
     }
 
     /// Atomically get a value if it exists and is not expired
-    fn get_if_not_expired<T: serde::de::DeserializeOwned>(
-        &self,
-        key: &str,
-    ) -> StoreResult<Option<T>> {
+    fn get_if_not_expired<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Simple(value, exp) => {
@@ -104,28 +106,6 @@ impl MemoryStore {
         }
     }
 
-    /// Atomic multi-operation for setting multiple keys
-    pub async fn atomic_multi_set(
-        &self,
-        operations: Vec<(String, String, Option<u64>)>,
-    ) -> StoreResult<usize> {
-        let mut success_count = 0;
-
-        for (key, value, ttl) in operations {
-            if key.trim().is_empty() {
-                continue;
-            }
-
-            let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
-            self.data.insert(key, StoreValue::Simple(value, exp));
-            success_count += 1;
-        }
-
-        self.stats
-            .sets
-            .fetch_add(success_count as u64, Ordering::SeqCst);
-        Ok(success_count)
-    }
 
     fn estimate_value_size(&self, value: &StoreValue) -> usize {
         match value {
@@ -232,14 +212,25 @@ impl MemoryStore {
             hits as f64 / total as f64
         }
     }
+
+    fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<Vec<u8>> {
+        bincode::serde::encode_to_vec(value, BINCODE_CONFIG).map_err(|e| {
+            StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))
+        })
+    }
+
+    fn deserialize<T: DeserializeValue>(&self, data: &[u8]) -> StoreResult<T> {
+        let result = bincode::serde::decode_from_slice(data, BINCODE_CONFIG).map_err(|e| {
+            StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
+        });
+        let data: T = result.unwrap().0;
+        Ok(data)
+    }
 }
 
 #[async_trait]
 impl Store for MemoryStore {
-    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-    ) -> StoreResult<Option<T>> {
+    async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
@@ -248,7 +239,7 @@ impl Store for MemoryStore {
         self.get_if_not_expired(key)
     }
 
-    async fn set<T: serde::Serialize + Send + Sync>(
+    async fn set<T: SerializeValue>(
         &self,
         key: &str,
         value: &T,
@@ -298,7 +289,7 @@ impl Store for MemoryStore {
         Ok(self.data.contains_key(key))
     }
 
-    async fn hset<T: serde::Serialize + Send + Sync>(
+    async fn hset<T: SerializeValue>(
         &self,
         key: &str,
         field: &str,
@@ -354,11 +345,7 @@ impl Store for MemoryStore {
         }
     }
 
-    async fn hget<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-        field: &str,
-    ) -> StoreResult<Option<T>> {
+    async fn hget<T: DeserializeValue>(&self, key: &str, field: &str) -> StoreResult<Option<T>> {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
@@ -452,10 +439,7 @@ impl Store for MemoryStore {
         }
     }
 
-    async fn hgetall<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-    ) -> StoreResult<HashMap<String, T>> {
+    async fn hgetall<T: DeserializeValue>(&self, key: &str) -> StoreResult<HashMap<String, T>> {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
@@ -618,10 +602,7 @@ impl Store for MemoryStore {
         }
     }
 
-    async fn hvals<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-    ) -> StoreResult<Vec<T>> {
+    async fn hvals<T: DeserializeValue>(&self, key: &str) -> StoreResult<Vec<T>> {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
@@ -732,9 +713,7 @@ impl Store for MemoryStore {
     }
 
     /// Compare and swap operation for atomic updates
-    async fn compare_and_swap<
-        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Send + Sync,
-    >(
+    async fn compare_and_swap<T: SerializeValue + DeserializeValue>(
         &self,
         key: &str,
         expected: &T,
@@ -1035,6 +1014,7 @@ impl MemoryStore {
     pub fn run_cleaner(&self, interval: u64) {
         let data = self.data.clone();
         let stats = self.stats.clone();
+
         tokio::spawn(async move {
             log::info!(
                 "MemoryStore cleaner started with interval: {} seconds",

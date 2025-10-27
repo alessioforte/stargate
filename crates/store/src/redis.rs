@@ -1,5 +1,5 @@
 use crate::error::{StoreError, StoreResult};
-use crate::store::{AtomicStore, Store};
+use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
 use redis::{Commands, HashFieldExpirationOptions, SetExpiry};
 use std::collections::HashMap;
@@ -59,14 +59,23 @@ impl RedisStore {
         }
         Ok(())
     }
+
+    fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<String> {
+        serde_json::to_string(value).map_err(|e| {
+            StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))
+        })
+    }
+
+    fn deserialize<T: DeserializeValue>(&self, data: &String) -> StoreResult<T> {
+        serde_json::from_str(data).map_err(|e| {
+            StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
+        })
+    }
 }
 
 #[async_trait]
 impl Store for RedisStore {
-    async fn get<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-    ) -> StoreResult<Option<T>> {
+    async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
         self.validate_key(key)?;
 
         let mut con = self.get_connection().await?;
@@ -84,7 +93,7 @@ impl Store for RedisStore {
         }
     }
 
-    async fn set<T: serde::Serialize + Send + Sync>(
+    async fn set<T: SerializeValue>(
         &self,
         key: &str,
         value: &T,
@@ -142,7 +151,7 @@ impl Store for RedisStore {
         Ok(result)
     }
 
-    async fn hset<T: serde::Serialize + Send + Sync>(
+    async fn hset<T: SerializeValue>(
         &self,
         key: &str,
         field: &str,
@@ -181,11 +190,7 @@ impl Store for RedisStore {
         Ok(result == 1)
     }
 
-    async fn hget<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-        field: &str,
-    ) -> StoreResult<Option<T>> {
+    async fn hget<T: DeserializeValue>(&self, key: &str, field: &str) -> StoreResult<Option<T>> {
         self.validate_key(key)?;
         self.validate_field(field)?;
 
@@ -223,10 +228,7 @@ impl Store for RedisStore {
         Ok(result > 0)
     }
 
-    async fn hgetall<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-    ) -> StoreResult<HashMap<String, T>> {
+    async fn hgetall<T: DeserializeValue>(&self, key: &str) -> StoreResult<HashMap<String, T>> {
         self.validate_key(key)?;
 
         let mut con = self.get_connection().await?;
@@ -291,10 +293,7 @@ impl Store for RedisStore {
         Ok(result)
     }
 
-    async fn hvals<T: serde::de::DeserializeOwned + Send + Sync>(
-        &self,
-        key: &str,
-    ) -> StoreResult<Vec<T>> {
+    async fn hvals<T: DeserializeValue>(&self, key: &str) -> StoreResult<Vec<T>> {
         self.validate_key(key)?;
 
         let mut con = self.get_connection().await?;
@@ -346,9 +345,7 @@ impl Store for RedisStore {
         Ok(len as usize)
     }
 
-    async fn compare_and_swap<
-        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Send + Sync,
-    >(
+    async fn compare_and_swap<T: SerializeValue + DeserializeValue + PartialEq>(
         &self,
         key: &str,
         expected: &T,

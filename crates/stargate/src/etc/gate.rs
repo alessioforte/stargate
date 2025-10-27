@@ -63,6 +63,7 @@ pub fn watch_file(file_path: &str, gate: &Gate) {
                         for _e in events.iter() {
                             CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                             log::info!("Configuration file changed, reloading...");
+                            // TODO: maybe here clean memory store
                             let config = Config::from_file(&file_path);
                             gate.update_config(&config).await;
                         }

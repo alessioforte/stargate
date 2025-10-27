@@ -23,7 +23,7 @@ pub async fn middleware<B: MessageBody + 'static>(
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    // TODO: handle the case when there is no limiter configured
+    let key = format!("lim:{}", key);
     let decision = match limiter.check(limit_name, &key).await {
         Ok(decision) => decision,
         Err(e) => {

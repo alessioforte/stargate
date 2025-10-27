@@ -12,11 +12,23 @@ mod memory {
     pub fn init() -> &'static MemoryStore {
         Lazy::force(&STORE);
         log::info!("Memory store initialized");
+        run_memory_backup();
         &STORE
     }
 
     pub fn use_store() -> &'static MemoryStore {
         &STORE
+    }
+
+    fn run_memory_backup() {
+        let interval = std::time::Duration::from_secs(60);
+        tokio::spawn(async move {
+            loop {
+                let store = use_store();
+                let _ = store.export_to_simple_json(".stargate/memory.json").await;
+                tokio::time::sleep(interval).await;
+            }
+        });
     }
 }
 
