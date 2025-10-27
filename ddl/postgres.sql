@@ -1,6 +1,11 @@
+
+-- CREATE TYPE account_type AS ENUM ('user', 'service');
+-- CREATE TYPE credential_type AS ENUM ('password', 'oauth');
+
 CREATE TABLE IF NOT EXISTS "accounts" (
     "id" TEXT PRIMARY KEY,
-    "type" VARCHAR(50) NOT NULL, -- e.g., 'user', 'service_account  etc.'
+    "type" account_type NOT NULL,
+    -- "type" VARCHAR(50) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "description" TEXT
 );
@@ -21,7 +26,8 @@ CREATE TABLE IF NOT EXISTS "credentials" (
     "id" TEXT PRIMARY KEY,
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
     "timestamp" bigint NOT NULL,
-    "type" VARCHAR(50) NOT NULL,
+    -- "type" VARCHAR(50) NOT NULL,
+    "type" credential_type NOT NULL,
     "value" TEXT NOT NULL
 );
 
@@ -34,24 +40,15 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE IF NOT EXISTS "actions" (
-    "id" TEXT PRIMARY KEY,
-    "type" VARCHAR(50) NOT NULL,
-    "sub" VARCHAR(100) NOT NULL,
-    "value" TEXT NOT NULL,
-    "iat" bigint NOT NULL,
-    "exp" bigint NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS "audits" (
-    "id" TEXT PRIMARY KEY,
-    "timestamp" bigint NOT NULL,
-    "entity_type" VARCHAR(50) NOT NULL,
-    "entity_id" TEXT NOT NULL,
-    "action" VARCHAR(50) NOT NULL,
-    "performed_by" TEXT,
-    "details" JSONB NOT NULL DEFAULT '{}'::jsonb
-);
+-- CREATE TABLE IF NOT EXISTS "audits" (
+--     "id" TEXT PRIMARY KEY,
+--     "timestamp" bigint NOT NULL,
+--     "entity_type" VARCHAR(50) NOT NULL,
+--     "entity_id" TEXT NOT NULL,
+--     "action" VARCHAR(50) NOT NULL,
+--     "performed_by" TEXT,
+--     "details" JSONB NOT NULL DEFAULT '{}'::jsonb
+-- );
 
 -- Create indexes for performance optimization
 -- CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email");

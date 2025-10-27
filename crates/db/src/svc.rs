@@ -27,8 +27,6 @@ impl Service {
             account: AccountRepository::new(),
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
-            subject: SubjectRepository::new(),
-            action: ActionRepository::new(),
             api_key: ApiKeyRepository::new(),
         }
     }

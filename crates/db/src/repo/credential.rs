@@ -44,14 +44,13 @@ impl CredentialRepository {
         user_id: &str,
         credential_type: CredentialType,
     ) -> Result<Option<Credential>> {
-        let ct = credential_type.as_str();
         let row = sqlx::query_as::<_, Credential>(
             "
             SELECT * FROM credentials WHERE user_id = $1 AND type = $2
         ",
         )
         .bind(user_id)
-        .bind(ct)
+        .bind(credential_type)
         .fetch_optional(&mut **tx)
         .await?;
 

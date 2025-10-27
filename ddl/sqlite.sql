@@ -38,23 +38,13 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     PRIMARY KEY (`id`) FOREIGN KEY (`account_id`) REFERENCES "accounts" (`id`) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS "actions" (
-    `id` TEXT,
-    `type` VARCHAR(50) NOT NULL,
-    `sub` VARCHAR(100) NOT NULL,
-    `value` TEXT NOT NULL,
-    `iat` INT NOT NULL,
-    `exp` INT NOT NULL,
-    PRIMARY KEY (`id`)
-);
-
-CREATE TABLE IF NOT EXISTS "audits" (
-    `id` TEXT,
-    `timestamp` INT NOT NULL,
-    `entity_type` VARCHAR(50) NOT NULL,
-    `entity_id` TEXT NOT NULL,
-    `action` VARCHAR(50) NOT NULL,
-    `performed_by` TEXT,
-    `details` JSON NOT NULL DEFAULT '{}',
-    PRIMARY KEY (`id`)
-);
+-- CREATE TABLE IF NOT EXISTS "audits" (
+--     `id` TEXT,
+--     `timestamp` INT NOT NULL,
+--     `entity_type` VARCHAR(50) NOT NULL,
+--     `entity_id` TEXT NOT NULL,
+--     `action` VARCHAR(50) NOT NULL,
+--     `performed_by` TEXT,
+--     `details` JSON NOT NULL DEFAULT '{}',
+--     PRIMARY KEY (`id`)
+-- );
