@@ -51,10 +51,19 @@ impl Gate {
         if let Some(ac) = ac.clone() {
             if ac.policies_path.is_some() {
                 let file_path = ac.policies_path.unwrap();
-                let content =
-                    std::fs::read_to_string(file_path).expect("Unable to read policy file");
-                pe.parse_file(&content)
-                    .expect("Unable to parse policy file");
+                let content = match std::fs::read_to_string(file_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::error!("Unable to read policy file: {}", e);
+                        String::new()
+                    }
+                };
+                match pe.parse_file(&content) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::error!("Unable to parse policy file: {}", e);
+                    }
+                }
             }
         }
         let policy_engine = Arc::new(ArcSwap::new(Arc::new(pe)));
@@ -86,6 +95,7 @@ impl Gate {
     pub async fn update_services(&mut self, services: &Vec<Svc>) {
         // Stop the old liveness probe
         {
+            // TODO: poisoning? Race Condition Potential
             let mut probe = self.liveness_probe.lock().unwrap();
             probe.stop();
         }
@@ -176,7 +186,7 @@ impl Gate {
                 resource: service.resource.clone(),
                 name: service.name.clone(),
                 path: service.path.clone(),
-                lb: Some(*lb),
+                lb: Some(lb),
                 routes,
             };
 

@@ -30,7 +30,7 @@ impl LoadBalancer {
         &self,
         protocol: &str,
         endpoints: &Vec<Endpoint>,
-    ) -> Box<Arc<dyn lb::LoadBalancer + Send + Sync>> {
+    ) -> Arc<dyn lb::LoadBalancer + Send + Sync> {
         let upstreams = endpoints
             .iter()
             .map(|endpoint| {
@@ -45,15 +45,9 @@ impl LoadBalancer {
             })
             .collect::<Vec<_>>();
         match self.strategy {
-            LoadBalancerStrategy::RoundRobin => {
-                Box::new(BaseLoadBalancer::new(RoundRobin::new(), upstreams))
-            }
-            LoadBalancerStrategy::Random => {
-                Box::new(BaseLoadBalancer::new(Random::new(), upstreams))
-            }
-            LoadBalancerStrategy::IpHash => {
-                Box::new(BaseLoadBalancer::new(IpHash::new(), upstreams))
-            }
+            LoadBalancerStrategy::RoundRobin => BaseLoadBalancer::new(RoundRobin::new(), upstreams),
+            LoadBalancerStrategy::Random => BaseLoadBalancer::new(Random::new(), upstreams),
+            LoadBalancerStrategy::IpHash => BaseLoadBalancer::new(IpHash::new(), upstreams),
         }
     }
 }
