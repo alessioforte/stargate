@@ -6,6 +6,8 @@ pub use store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 
 #[cfg(feature = "memory")]
 pub mod memory;
+#[cfg(feature = "memory")]
+pub use memory::MemoryStore;
 
 #[cfg(feature = "redis")]
 mod redis;
