@@ -1,6 +1,6 @@
 use handlebars::Handlebars;
-use lettre::transport::smtp::{response::Response, Error};
-use lettre::{message::header::ContentType, Message, SmtpTransport, Transport};
+use lettre::transport::smtp::{Error, response::Response};
+use lettre::{Message, SmtpTransport, Transport, message::header::ContentType};
 use serde_json::json;
 
 pub enum Template {
@@ -95,7 +95,7 @@ impl Smtp {
             match handlebars.render(self.template.filename(), &data) {
                 Ok(body) => body,
                 Err(e) => {
-                    log::error!("build_email: {:?}", e);
+                    tracing::error!("build_email: {:?}", e);
                     "".to_string()
                 }
             }
@@ -127,7 +127,7 @@ impl Smtp {
 
         let response = mailer.send(message);
         if response.is_err() {
-            log::error!("send_email: {:?}", response);
+            tracing::error!("send_email: {:?}", response);
         }
 
         response

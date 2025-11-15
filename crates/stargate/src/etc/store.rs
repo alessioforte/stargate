@@ -11,7 +11,7 @@ mod memory {
 
     pub fn init() -> &'static MemoryStore {
         Lazy::force(&STORE);
-        log::info!("Memory store initialized");
+        tracing::info!("Memory store initialized");
         run_memory_backup();
         &STORE
     }

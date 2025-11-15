@@ -78,13 +78,6 @@ pub async fn init(conn: &str) -> Result<Service> {
 #[async_trait::async_trait]
 impl Transaction for Service {
     /// Creates a new user with the specified credential type and value.
-    ///
-    /// # Arguments
-    /// * `user`: The user to be created.
-    ///
-    /// * `credential_type`: The type of credential to be associated with the user.
-    ///
-    /// * `value`: The hashed password.
     async fn create_user(
         &self,
         profile: Profile,
@@ -125,6 +118,7 @@ impl Transaction for Service {
         Ok(record)
     }
 
+    /// Retrieves a user by their username (email).
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         let mut tx = self.pool.begin().await?;
         let user = self.user.get_by_username(&mut tx, username).await?;
@@ -132,6 +126,7 @@ impl Transaction for Service {
         Ok(user)
     }
 
+    /// Updates the information of an existing user.
     async fn update_user(&self, user: User) -> Result<User> {
         let mut tx = self.pool.begin().await?;
         let updated_user = self.user.update(&mut tx, user).await?;
@@ -139,6 +134,7 @@ impl Transaction for Service {
         Ok(updated_user)
     }
 
+    /// Changes the password for a user.
     async fn change_password(&self, user_id: &str, new_password: &str) -> Result<Credential> {
         let mut tx = self.pool.begin().await?;
         let credential = self
@@ -149,6 +145,7 @@ impl Transaction for Service {
         Ok(credential)
     }
 
+    /// Retrieves a credential for a user by credential type.
     async fn get_credential(
         &self,
         user_id: &str,
@@ -163,6 +160,7 @@ impl Transaction for Service {
         Ok(credential)
     }
 
+    /// Creates a new API key for the specified account.
     async fn create_api_key(
         &self,
         account_id: &str,
@@ -180,6 +178,7 @@ impl Transaction for Service {
         Ok(api_key)
     }
 
+    /// Retrieves an API key by its hash.
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>> {
         let mut tx = self.pool.begin().await?;
         let api_key = self.api_key.get_by_hash(&mut tx, key_hash).await?;
@@ -187,6 +186,7 @@ impl Transaction for Service {
         Ok(api_key)
     }
 
+    /// Revokes an API key by its ID.
     async fn revoke_api_key(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         self.api_key.revoke_by_id(&mut tx, id).await?;

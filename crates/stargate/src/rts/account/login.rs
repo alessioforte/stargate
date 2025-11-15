@@ -4,7 +4,6 @@ use crate::etc;
 use crate::etc::jwt::jwt_config;
 use crate::fun::format_name;
 use actix_web::{HttpResponse, cookie::Cookie, post, web};
-use db::Transaction;
 use db::ent::CredentialType;
 use pw::Hash;
 use store::Store;
@@ -22,8 +21,7 @@ pub async fn handler(
     // session: Session,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let service = etc::db::service();
-    let user = match service.get_user_by_username(&credentials.username).await {
+    let user = match crate::db::get_user_by_username(&credentials.username).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -39,9 +37,7 @@ pub async fn handler(
     }
 
     let user = user.unwrap();
-    let user_credential = match service
-        .get_credential(&user.id, CredentialType::Password)
-        .await
+    let user_credential = match crate::db::get_credential(&user.id, CredentialType::Password).await
     {
         Ok(credential) => credential,
         Err(e) => {

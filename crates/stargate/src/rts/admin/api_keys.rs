@@ -1,7 +1,6 @@
 use crate::err::{ErrorResponse, HttpError};
 use actix_web::{HttpResponse, delete, get, post, web};
 use actix_web_grants::protect;
-use db::Transaction;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -37,18 +36,16 @@ pub async fn get_api_keys() -> Result<HttpResponse, ErrorResponse> {
 #[post("")]
 #[protect("SUPER_ADMIN")]
 pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, ErrorResponse> {
-    let service = crate::etc::db::service();
     let secret = pw::generate_api_key();
     let key_hash = pw::hash_api_key(&secret);
 
-    let api_key = match service
-        .create_api_key(
-            &payload.account_id,
-            &key_hash,
-            payload.label.clone(),
-            payload.attrs.clone(),
-        )
-        .await
+    let api_key = match crate::db::create_api_key(
+        &payload.account_id,
+        &key_hash,
+        payload.label.clone(),
+        payload.attrs.clone(),
+    )
+    .await
     {
         Ok(api_key) => api_key,
         Err(e) => {

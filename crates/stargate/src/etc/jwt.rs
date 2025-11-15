@@ -2,6 +2,7 @@ use jwt::{Algorithm, JwtConfig};
 use once_cell::sync::Lazy;
 use std::env;
 use tools::parse_duration;
+use tracing::{info, warn};
 
 pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
     let algorithm = env::var("JWT_ALGORITHM")
@@ -17,11 +18,11 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
 
     let mut secret = env::var("JWT_SECRET").ok();
 
-    log::info!("JWT Algorithm: {:?}", algorithm);
+    info!("JWT Algorithm: {:?}", algorithm);
 
     if secret.is_none() && algorithm == Algorithm::HS256 {
         secret = Some(pw::generator(512, false, true, true, false));
-        log::warn!(
+        warn!(
             "JWT_SECRET not set, generating a random secret key, {}",
             secret.as_ref().unwrap()
         );

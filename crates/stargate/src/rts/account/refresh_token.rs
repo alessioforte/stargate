@@ -3,7 +3,6 @@ use super::RefreshTokenRequestBody;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::jwt::jwt_config;
 use actix_web::{HttpResponse, put, web};
-use db::Transaction;
 use jwt::Claims;
 
 #[utoipa::path(
@@ -29,8 +28,7 @@ pub async fn handler(
         }
     };
 
-    let service = crate::etc::db::service();
-    let user = match service.get_user_by_username(&claims.sub).await {
+    let user = match crate::db::get_user_by_username(&claims.sub).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(

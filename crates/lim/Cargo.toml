@@ -9,13 +9,13 @@ license.workspace = true
 
 [dependencies]
 async-trait = "0.1.89"
-log = "0.4.28"
 quanta = "0.12.6"
 rand = "0.9.2"
 redis = "0.32.7"
 serde = { version = "1.0.228", features = ["derive"] }
 store = { path = "../store" }
 thiserror = "2.0.17"
+tracing = "0.1.41"
 
 [features]
 default = []

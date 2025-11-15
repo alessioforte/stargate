@@ -1,17 +1,14 @@
 use crate::etc;
-use db::Transaction;
 use db::ent::{CredentialType, Profile};
+use tracing::{error, info};
 
 pub async fn create_super_admin() {
-    let service = etc::db::service();
-
-    let super_admin = service
-        .get_user_by_username(etc::consts::STARGATE_ADMIN)
+    let super_admin = crate::db::get_user_by_username(etc::consts::STARGATE_ADMIN)
         .await
         .unwrap();
 
     if super_admin.is_some() {
-        log::info!("Super admin already exists.");
+        info!("Super admin already exists.");
         return;
     }
 
@@ -28,15 +25,14 @@ pub async fn create_super_admin() {
             "role": etc::consts::STARGATE_ADMIN,
         }));
 
-    match service
-        .create_user(
-            user,
-            CredentialType::Password,
-            &pw::Hash::encode(&password).unwrap(),
-        )
-        .await
+    match crate::db::create_user(
+        user,
+        CredentialType::Password,
+        &pw::Hash::encode(&password).unwrap(),
+    )
+    .await
     {
-        Ok(_) => log::info!("Super admin password: {}", password),
-        Err(e) => log::error!("Failed to create super admin: {}", e),
+        Ok(_) => info!("Super admin password: {}", password),
+        Err(e) => error!("Failed to create super admin: {}", e),
     };
 }

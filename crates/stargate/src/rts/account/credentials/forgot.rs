@@ -3,7 +3,6 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::fun::format_name;
 use actix_web::{HttpResponse, post, web};
-use db::Transaction;
 use serde::{Deserialize, Serialize};
 use smtp::{Smtp, Template};
 use utoipa::ToSchema;
@@ -25,8 +24,7 @@ pub async fn handler(
 ) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
 
-    let service = etc::db::service();
-    let user = match service.get_user_by_username(&body.email).await {
+    let user = match crate::db::get_user_by_username(&body.email).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(

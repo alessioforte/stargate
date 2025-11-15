@@ -38,8 +38,9 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
             .content_type("application/yaml")
             .body(content)),
         _ => {
-            let config: Config =
-                serde_yaml_bw::from_str(&content).expect("Unable to parse config file");
+            let config: Config = serde_yaml_bw::from_str(&content).map_err(|e| {
+                HttpError::InternalServerError(format!("Failed to parse config file: {}", e))
+            })?;
             let json_data = serde_json::to_string(&config).unwrap();
             Ok(HttpResponse::Ok()
                 .content_type("application/json")

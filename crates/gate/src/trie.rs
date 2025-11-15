@@ -33,6 +33,7 @@ use crate::protocol::Protocol;
 use lb::LoadBalancer;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::warn;
 
 /// Metadata for a specific route within a service.
 ///
@@ -167,7 +168,7 @@ impl TriePath {
     pub fn insert(&mut self, protocol: &str, path: &str, service: Service) {
         let p = Protocol::from_str(protocol);
         if p.is_none() {
-            log::warn!("Unsupported protocol: {}", protocol);
+            warn!("Unsupported protocol: {}", protocol);
             return;
         }
         let protocol_node = self

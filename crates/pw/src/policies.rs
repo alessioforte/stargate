@@ -1,3 +1,5 @@
+// Not Username,
+// Not Email,
 // Expire Password
 // Hashing iterations ?
 // Not Recently Used
@@ -25,18 +27,6 @@ pub enum PasswordPolicy {
     Uppercase,
     Digits,
     SpecialChars,
-    // NotUsername,
-    // NotEmail,
-
-    // ForceExpired,
-    // HashIterations,
-    // PasswordBlacklist,
-    // RegexPattern,
-    // MaxAuthAge,
-
-    // PasswordHistory,
-    // Length,
-    // HashAlgorithm,
 }
 
 impl PasswordPolicy {

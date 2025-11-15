@@ -3,7 +3,6 @@ use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
 use actix_web::{HttpResponse, put, web};
-use db::Transaction;
 use db::ent::{CredentialType, Profile};
 use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
@@ -36,8 +35,6 @@ pub async fn handler(
         }
     };
 
-    let service = crate::etc::db::service();
-
     let signup = match act::get_signup_request(&uuid).await {
         Ok(signup) => signup,
         Err(e) => {
@@ -62,7 +59,7 @@ pub async fn handler(
     }
 
     // Check if a user already exists with this email
-    let user = match service.get_user_by_username(&signup).await {
+    let user = match crate::db::get_user_by_username(&signup).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -78,7 +75,7 @@ pub async fn handler(
         )));
     }
 
-    let user = match service.get_user_by_username(&body.nickname).await {
+    let user = match crate::db::get_user_by_username(&body.nickname).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -109,10 +106,7 @@ pub async fn handler(
         .picture(None);
 
     let password = Hash::encode(&body.password).unwrap();
-    match service
-        .create_user(user, CredentialType::Password, &password)
-        .await
-    {
+    match crate::db::create_user(user, CredentialType::Password, &password).await {
         Ok(_) => {
             // Delete the signup request
             let _ = act::delete_signup_request(&uuid).await;

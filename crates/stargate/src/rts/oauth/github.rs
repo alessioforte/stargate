@@ -1,8 +1,6 @@
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc;
 use crate::fun::format_name;
 use actix_web::{HttpResponse, get, web};
-use db::Transaction;
 use db::ent::{CredentialType, Profile};
 use jwt::Claims;
 use oauth::github::{get_github_oauth_token, get_github_user};
@@ -57,8 +55,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
 
     let github_user = github_user.unwrap();
 
-    let svc = etc::db::service();
-    let mut user = match svc.get_user_by_username(&github_user.email).await {
+    let mut user = match crate::db::get_user_by_username(&github_user.email).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -74,11 +71,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
             .picture(Some(github_user.avatar_url.clone()));
 
         let value = format!("github:{}", github_user.id);
-        user = match svc
-            .clone()
-            .create_user(new_user, CredentialType::Oauth, &value)
-            .await
-        {
+        user = match crate::db::create_user(new_user, CredentialType::Oauth, &value).await {
             Ok(user) => Some(user),
             Err(e) => {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -92,7 +85,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
 
     if user.picture.is_none() {
         user.clone().picture(Some(github_user.avatar_url.clone()));
-        match svc.update_user(user.clone()).await {
+        match crate::db::update_user(user.clone()).await {
             Ok(updated_user) => updated_user,
             Err(e) => {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(

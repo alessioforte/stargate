@@ -13,11 +13,11 @@ arc-swap = "1.7.1"
 chrono = "0.4.41"
 lb = { path = "../lb" }
 lim = { path = "../lim" }
-log = "0.4.27"
 matchit = "0.8.6"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_yaml_bw = "2.4.1"
 tools = { path = "../tools" }
+tracing = "0.1.41"
 utoipa = { version = "5.3.1", features = ["actix_extras", "yaml"] }
 
 [features]

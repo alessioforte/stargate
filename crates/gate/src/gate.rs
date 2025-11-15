@@ -7,6 +7,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
+use tracing::{error, info};
 
 #[derive(Clone)]
 pub struct Gate {
@@ -54,14 +55,14 @@ impl Gate {
                 let content = match std::fs::read_to_string(file_path) {
                     Ok(c) => c,
                     Err(e) => {
-                        log::error!("Unable to read policy file: {}", e);
+                        error!("Unable to read policy file: {}", e);
                         String::new()
                     }
                 };
                 match pe.parse_file(&content) {
                     Ok(_) => {}
                     Err(e) => {
-                        log::error!("Unable to parse policy file: {}", e);
+                        error!("Unable to parse policy file: {}", e);
                     }
                 }
             }
@@ -89,7 +90,7 @@ impl Gate {
         self.update_services(&config.services).await;
         self.update_policy_engine(&config.access_control).await;
         self.update_limiter(&config.limits).await;
-        log::info!("Gate configuration updated");
+        info!("Gate configuration updated");
     }
 
     pub async fn update_services(&mut self, services: &Vec<Svc>) {
@@ -103,7 +104,7 @@ impl Gate {
         let trie = self.create_trie(&services);
         self.services.store(Arc::new(trie));
 
-        log::info!("Gate services updated");
+        info!("Gate services updated");
     }
 
     pub async fn update_policy_engine(&mut self, ac: &Option<AccessControl>) {
@@ -119,7 +120,7 @@ impl Gate {
         }
         self.policy_engine.store(Arc::new(pe));
 
-        log::info!("Gate policy engine updated");
+        info!("Gate policy engine updated");
     }
 
     pub async fn update_limiter(&mut self, limits: &Option<Vec<Limit>>) {
@@ -134,7 +135,7 @@ impl Gate {
             self.limiter.store(Arc::new(limiter));
         }
 
-        log::info!("Gate limiter updated");
+        info!("Gate limiter updated");
     }
 
     fn create_trie(&mut self, services: &Vec<Svc>) -> TriePath {

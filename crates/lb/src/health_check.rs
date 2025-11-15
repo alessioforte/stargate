@@ -1,6 +1,7 @@
 use crate::lb::LoadBalancer;
 use chrono::Duration;
 use std::sync::Arc;
+use tracing::info;
 
 pub struct HealthCheck {
     pub lbs: dashmap::DashMap<Duration, Vec<Arc<dyn LoadBalancer + Send + Sync>>>,
@@ -25,7 +26,7 @@ impl HealthCheck {
 
     pub fn run(&mut self) {
         let lbs = self.lbs.clone();
-        log::info!("Starting liveness probes for {} load balancers", lbs.len());
+        info!("Starting liveness probes for {} load balancers", lbs.len());
         for item in lbs.iter() {
             let (interval, lbs) = item.pair();
             let interval = *interval;
@@ -46,6 +47,6 @@ impl HealthCheck {
         for handle in self.handles.drain(..) {
             handle.abort();
         }
-        log::info!("Upstreams liveness probes stopped");
+        info!("Upstreams liveness probes stopped");
     }
 }

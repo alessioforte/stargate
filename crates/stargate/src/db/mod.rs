@@ -1,7 +1,12 @@
+mod svc;
+
+pub use svc::*;
+
 #[cfg(feature = "postgres")]
 mod postgres {
     use db::svc;
     use once_cell::sync::OnceCell;
+    use tracing::{error, info};
 
     static DB: OnceCell<svc::Service> = OnceCell::new();
 
@@ -15,12 +20,12 @@ mod postgres {
         let service = svc::init(&db_url).await;
         match service {
             Ok(svc) => {
-                log::info!("PostgreSQL service initialized successfully");
+                info!("PostgreSQL service initialized successfully");
                 if DB.set(svc).is_err() {
-                    log::error!("Failed to set the PostgreSQL service instance");
+                    error!("Failed to set the PostgreSQL service instance");
                 }
             }
-            Err(e) => log::error!("Error initializing PostgreSQL service > {}", e),
+            Err(e) => error!("Error initializing PostgreSQL service > {}", e),
         }
     }
 
@@ -34,29 +39,30 @@ mod postgres {
 mod sqlite {
     use db::svc;
     use once_cell::sync::OnceCell;
+    use tracing::{error, info};
 
     static DB: OnceCell<svc::Service> = OnceCell::new();
 
     pub async fn init() {
         if std::path::Path::new(".stargate/sqlite.db").exists() {
-            log::info!("SQLite database file found, initializing service...");
+            info!("SQLite database file found, initializing service...");
         } else {
-            log::info!("SQLite database file not found, creating directory and file...");
+            info!("SQLite database file not found, creating directory and file...");
             std::fs::create_dir_all(".stargate").expect("Failed to create directory");
             std::fs::File::create(".stargate/sqlite.db")
                 .expect("Failed to create SQLite database file");
-            log::info!("SQLite database file created successfully");
+            info!("SQLite database file created successfully");
         }
 
         let service = svc::init("sqlite://.stargate/sqlite.db").await;
         match service {
             Ok(svc) => {
-                log::info!("Service initialized successfully");
+                info!("Service initialized successfully");
                 if DB.set(svc).is_err() {
-                    log::error!("Failed to set the service instance");
+                    error!("Failed to set the service instance");
                 }
             }
-            Err(e) => log::error!("Error initializing service: {}", e),
+            Err(e) => error!("Error initializing service: {}", e),
         }
     }
 

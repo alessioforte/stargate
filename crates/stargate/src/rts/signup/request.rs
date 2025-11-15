@@ -5,7 +5,6 @@ use crate::{
     etc,
 };
 use actix_web::{HttpResponse, post, web};
-use db::Transaction;
 use smtp::{Smtp, Template};
 
 #[utoipa::path(
@@ -19,8 +18,7 @@ use smtp::{Smtp, Template};
 pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse, ErrorResponse> {
     let body = body.into_inner();
 
-    let service = crate::etc::db::service();
-    let user = match service.get_user_by_username(&body.email).await {
+    let user = match crate::db::get_user_by_username(&body.email).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(

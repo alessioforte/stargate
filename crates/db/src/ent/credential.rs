@@ -8,23 +8,6 @@ pub enum CredentialType {
     Oauth,
 }
 
-impl CredentialType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            CredentialType::Password => "password",
-            CredentialType::Oauth => "oauth",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "password" => Some(CredentialType::Password),
-            "oauth" => Some(CredentialType::Oauth),
-            _ => None,
-        }
-    }
-}
-
 #[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
 pub struct Credential {
     pub id: String,

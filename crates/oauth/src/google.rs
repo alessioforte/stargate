@@ -44,7 +44,7 @@ pub async fn get_google_oauth_token(
         Ok(oauth_response)
     } else {
         let res: serde_json::Value = response.json().await?;
-        log::error!("get_google_oauth_token: {}", res);
+        tracing::error!("get_google_oauth_token: {}", res);
         let message = "An error occurred while trying to retrieve access token.";
         Err(From::from(message))
     }
@@ -70,7 +70,7 @@ pub async fn get_google_user(
         Ok(user_info)
     } else {
         let res: serde_json::Value = response.json().await?;
-        log::error!("get_google_user: {}", res);
+        tracing::error!("get_google_user: {}", res);
         let message = "An error occurred while trying to retrieve user information.";
         Err(From::from(message))
     }

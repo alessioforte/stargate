@@ -6,10 +6,7 @@ pub fn access_control(
     subject: &Subject,
     resource: &str,
 ) -> bool {
-    // TODO: remove this log
-    // policy_engine.get_policies().iter().for_each(|policy| {
-    //     log::info!("Policy: {:?}", policy);
-    // });
+    // TODO: add local cache for access control decisions
 
     let sub_type = subject.sub_type.clone();
     let context = create_context(subject);

@@ -4,9 +4,9 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::fun::format_name;
 use actix_web::{HttpResponse, put, web};
-use db::Transaction;
 use pw::Hash;
 use smtp::{Smtp, Template};
+use tracing::error;
 
 #[utoipa::path(
     context_path = "/account",
@@ -31,7 +31,6 @@ pub async fn handler(
         }
     };
     let uuid = claims.uuid.clone().unwrap_or_default();
-    let service = etc::db::service();
 
     let email = match act::get_change_password_request(&uuid).await {
         Ok(pra) => pra,
@@ -50,7 +49,7 @@ pub async fn handler(
 
     let email = email.unwrap();
 
-    let user = match service.get_user_by_username(&email).await {
+    let user = match crate::db::get_user_by_username(&email).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -67,10 +66,10 @@ pub async fn handler(
     let user = user.unwrap();
     let password = Hash::encode(&body.password).unwrap();
 
-    match service.change_password(&user.id, &password).await {
+    match crate::db::change_password(&user.id, &password).await {
         Ok(_) => {}
         Err(e) => {
-            log::error!("Could not update password: {:?}", e);
+            error!("Could not update password: {:?}", e);
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 "Could not update password".to_string(),
             )));
@@ -94,7 +93,7 @@ pub async fn handler(
 
     match sender {
         Ok(_) => {}
-        Err(e) => log::error!("Could not send email: {:?}", e),
+        Err(e) => error!("Could not send email: {:?}", e),
     }
 
     Ok(HttpResponse::Ok().json(web::Json(message)))

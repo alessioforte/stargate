@@ -79,6 +79,7 @@ pub enum Code {
     SurrealDBError, // TODO: delete
 
     TooManyRequests,
+    ServiceUnavailable,
 }
 
 impl Code {
@@ -116,6 +117,9 @@ impl Code {
             MissingParameter => ErrCode::invalid("missing_parameter", StatusCode::BAD_REQUEST),
             SurrealDBError => ErrCode::internal("surrealdb", StatusCode::INTERNAL_SERVER_ERROR),
             TooManyRequests => ErrCode::invalid("too_many_requests", StatusCode::TOO_MANY_REQUESTS),
+            ServiceUnavailable => {
+                ErrCode::internal("service_unavailable", StatusCode::SERVICE_UNAVAILABLE)
+            }
         }
     }
 

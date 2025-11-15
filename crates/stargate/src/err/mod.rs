@@ -40,6 +40,8 @@ pub enum HttpError {
     BadGateway(String),
     #[error("{0}")]
     TooManyRequests(String),
+    #[error("{0}")]
+    ServiceUnavailable(String),
 }
 
 impl ErrorCode for HttpError {
@@ -59,6 +61,7 @@ impl ErrorCode for HttpError {
             HttpError::BadRequest(_) => Code::BadRequest,
             HttpError::BadGateway(_) => Code::BadGateway,
             HttpError::TooManyRequests(_) => Code::TooManyRequests,
+            HttpError::ServiceUnavailable(_) => Code::ServiceUnavailable,
         }
     }
 }
@@ -190,7 +193,7 @@ pub struct ErrorResponse {
 
 impl ErrorResponse {
     pub fn from_msg(message: String, code: Code) -> Self {
-        log::error!("{}: {}", code.name(), message);
+        tracing::error!("{}: {}", code.name(), message);
         Self {
             code: code.http(),
             message,

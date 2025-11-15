@@ -2,7 +2,6 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
 use actix_web::{HttpRequest, HttpResponse, get, web};
-use db::Transaction;
 use etc::jwt::jwt_config;
 
 #[utoipa::path(
@@ -33,8 +32,7 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
         }
     };
 
-    let service = etc::db::service();
-    let user = match service.get_user_by_username(&claims.sub).await {
+    let user = match crate::db::get_user_by_username(&claims.sub).await {
         Ok(user) => user,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(

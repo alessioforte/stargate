@@ -9,6 +9,7 @@ pub trait RequestExt {
     fn get_api_key(&self) -> Option<String>;
     fn get_protocol(&self) -> String;
     fn get_client_ip(&self) -> Option<IpAddr>;
+    fn get_user_agent(&self) -> Option<String>;
 }
 
 impl RequestExt for HttpRequest {
@@ -82,6 +83,18 @@ impl RequestExt for HttpRequest {
             return Some(peer_addr.ip());
         }
 
+        None
+    }
+
+    fn get_user_agent(&self) -> Option<String> {
+        let user_agent = self.headers().get("User-Agent");
+        if let Some(header_value) = user_agent {
+            if let Ok(ua) = header_value.to_str() {
+                if !ua.is_empty() {
+                    return Some(ua.to_string());
+                }
+            }
+        }
         None
     }
 }

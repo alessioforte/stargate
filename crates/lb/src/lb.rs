@@ -1,8 +1,8 @@
 use std::{
     net::IpAddr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
         Arc,
+        atomic::{AtomicBool, AtomicUsize},
     },
 };
 
@@ -126,7 +126,7 @@ impl<S: Strategy + 'static> LoadBalancer for BaseLoadBalancer<S> {
                     Ok(_) => self.mark_alive(&upstream.base_url),
                     Err(e) => {
                         self.mark_dead(&upstream.base_url);
-                        log::warn!("Health check failed for {}: {}", upstream.base_url, e);
+                        tracing::warn!("Health check failed for {}: {}", upstream.base_url, e);
                     }
                 }
             }

@@ -44,7 +44,7 @@ pub async fn middleware<B: MessageBody + 'static>(
     let decision = match limiter.check(limit_name, &key).await {
         Ok(decision) => decision,
         Err(e) => {
-            log::error!("Rate limiter error: {}", e);
+            tracing::error!("Rate limiter error: {}", e);
             return Err(actix_web::error::ErrorInternalServerError(
                 "Rate limiter error",
             ));
@@ -53,7 +53,6 @@ pub async fn middleware<B: MessageBody + 'static>(
 
     let limit = decision.limit.to_string();
     let remaining = decision.remaining.to_string();
-    let reset = decision.reset_time.to_string();
 
     if decision.allowed {
         let mut res = next.call(sr).await?;
@@ -77,8 +76,7 @@ pub async fn middleware<B: MessageBody + 'static>(
             ErrorResponse::from(HttpError::TooManyRequests("Too Many Requests".to_string()));
         res.insert_header("Retry-After", &retry_after)
             .insert_header("X-RateLimit-Limit", &limit)
-            .insert_header("X-RateLimit-Remaining", &remaining)
-            .insert_header("X-RateLimit-Reset", &reset);
+            .insert_header("X-RateLimit-Remaining", &remaining);
 
         Err(res.into())
     }

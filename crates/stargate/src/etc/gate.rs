@@ -16,6 +16,7 @@ use std::{
     time::Duration,
 };
 use tokio::runtime::Runtime;
+use tracing::{error, info};
 
 fn get_config_path() -> String {
     let path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
@@ -48,7 +49,7 @@ pub fn watch_file(file_path: &str, gate: &Gate) {
     thread::spawn(move || {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
-            log::info!("Watching Gate configuration file");
+            info!("Watching Gate configuration file");
             let (tx, rx) = std::sync::mpsc::channel();
 
             let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
@@ -62,13 +63,13 @@ pub fn watch_file(file_path: &str, gate: &Gate) {
                     Ok(events) => {
                         for _e in events.iter() {
                             CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-                            log::info!("Configuration file changed, reloading...");
+                            info!("Configuration file changed, reloading...");
                             // TODO: maybe here clean memory store
                             let config = Config::from_file(&file_path);
                             gate.update_config(&config).await;
                         }
                     }
-                    Err(e) => log::error!("Error: {:?}", e),
+                    Err(e) => error!("Error: {:?}", e),
                 }
             }
         });

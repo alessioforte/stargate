@@ -91,7 +91,18 @@ pub async fn handler(
         key: None,
     };
     // get the load balancer and select an upstream
-    let upstream = service.lb.as_ref().unwrap().select(&ctx).unwrap();
+    // let upstream = service.lb.as_ref().unwrap().select(&ctx).unwrap();
+    let lb = service.lb.as_ref().ok_or_else(|| {
+        ErrorResponse::from(HttpError::InternalServerError(
+            "Load balancer not configured".to_string(),
+        ))
+    })?;
+
+    let upstream = lb.select(&ctx).ok_or_else(|| {
+        ErrorResponse::from(HttpError::ServiceUnavailable(
+            "No healthy upstream available".to_string(),
+        ))
+    })?;
 
     // format the URI
     let mut uri = format!("{}{}", upstream.base_url, subpath);

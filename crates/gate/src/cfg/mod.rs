@@ -6,6 +6,7 @@ pub mod mtls;
 pub mod service;
 
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Config {
@@ -18,7 +19,7 @@ pub struct Config {
 impl Config {
     pub fn from_file(path: &str) -> Self {
         if !std::path::Path::new(path).exists() {
-            log::info!("Creating gate configuration yaml file");
+            info!("Creating gate configuration yaml file");
             let config = Config::default();
             let config_str = serde_yaml_bw::to_string(&config).expect("Unable to serialize config");
             std::fs::write(path, config_str).expect("Unable to write config file");

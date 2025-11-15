@@ -57,12 +57,7 @@ impl Strategy {
                     replenish_1_per,
                 };
                 Box::new(lim::gcra::Gcra::new(state, quota))
-            } // Strategy::TokenBucket {
-              //     refill_rate,
-              //     capacity,
-              // } => {
-              //     unimplemented!()
-              // }
+            }
         }
     }
 }

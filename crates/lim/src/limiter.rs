@@ -1,5 +1,5 @@
 use crate::decision::RateLimitDecision;
-use crate::error::Result;
+use crate::error::{RateLimitError, Result};
 use crate::strategies::RateLimit;
 use std::collections::HashMap;
 
@@ -30,13 +30,15 @@ impl Limiter {
         self.limits.contains_key(name)
     }
 
+    // TODO: Add optional cost
     pub async fn check(&self, limiter_name: &str, key: &str) -> Result<RateLimitDecision> {
+        if key.is_empty() || key.len() > 256 {
+            return Err(RateLimitError::InvalidConfig("Invalid key".to_string()));
+        }
         if let Some(limiter) = self.limits.get(limiter_name) {
             limiter.check(key).await
         } else {
-            Err(crate::error::RateLimitError::InvalidConfig(
-                limiter_name.to_string(),
-            ))
+            Err(RateLimitError::InvalidConfig(limiter_name.to_string()))
         }
     }
 

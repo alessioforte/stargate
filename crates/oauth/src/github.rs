@@ -47,7 +47,7 @@ pub async fn get_github_oauth_token(
         Ok(oauth_response)
     } else {
         let res: serde_json::Value = response.json().await?;
-        log::error!("get_github_oauth_token: {}", res);
+        tracing::error!("get_github_oauth_token: {}", res);
         let message = "An error occurred while trying to retrieve the access token.";
         Err(From::from(message))
     }
@@ -70,7 +70,7 @@ pub async fn get_github_user(access_token: &str) -> Result<GitHubUserResult, Box
         Ok(user_info)
     } else {
         let res: serde_json::Value = response.json().await?;
-        log::error!("get_github_user: {}", res);
+        tracing::error!("get_github_user: {}", res);
         let message = "An error occurred while trying to retrieve user information.";
         Err(From::from(message))
     }
