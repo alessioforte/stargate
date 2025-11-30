@@ -97,14 +97,10 @@ impl Transaction for Service {
         )
         .trim()
         .to_string();
-        let description = if name.is_empty() {
-            None
-        } else {
-            Some(name.as_str())
-        };
+
         let account = self
             .account
-            .create(&mut tx, AccountType::User, &name, description)
+            .create(&mut tx, AccountType::User, &name, None)
             .await?;
 
         let user = User::new(account.id, profile.email)

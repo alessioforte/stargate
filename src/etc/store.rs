@@ -45,7 +45,7 @@ mod redis {
 
     pub fn init() -> &'static RedisStore {
         Lazy::force(&STORE);
-        log::info!("Redis store initialized");
+        tracing::info!("Redis store initialized");
         &STORE
     }
 

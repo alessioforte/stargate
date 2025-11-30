@@ -8,6 +8,9 @@ pub enum ActionType {
     Create,
     Update,
     Delete,
+    Read,
+    Login,
+    Logout,
 }
 
 #[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]

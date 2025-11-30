@@ -1,6 +1,6 @@
-
 -- CREATE TYPE account_type AS ENUM ('user', 'service');
 -- CREATE TYPE credential_type AS ENUM ('password', 'oauth');
+-- CREATE TYPE action_type AS ENUM ('create', 'update', 'delete', 'read', 'login', 'logout');
 
 CREATE TABLE IF NOT EXISTS "accounts" (
     "id" TEXT PRIMARY KEY,
@@ -42,9 +42,9 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
 
 CREATE TABLE IF NOT EXISTS "audits" (
     "id" TEXT PRIMARY KEY,
-    "timestamp" bigint NOT NULL,
+    "timestamp" TIMESTAMPTZ NOT NULL,
     "resource" VARCHAR(100) NOT NULL,
-    "action" VARCHAR(100) NOT NULL,
+    "action" action_type NOT NULL,
     "account_id" TEXT,
     "request_id" TEXT,
     "ip_address" VARCHAR(45),
