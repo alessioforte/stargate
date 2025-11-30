@@ -1,8 +1,8 @@
 use crate::err::{ErrorResponse, HttpError};
 
 use crate::fun::format_name;
-use actix_web::{HttpResponse, get, web};
-use db::ent::{CredentialType, Profile};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, get, web};
+use db::ent::{AuditContext, CredentialType, Profile};
 use jwt::Claims;
 use oauth::google::{get_google_oauth_token, get_google_user};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,14 @@ struct AuthResponse {
 }
 
 #[get("")]
-async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorResponse> {
+async fn login(
+    req: HttpRequest,
+    query: web::Query<QueryCode>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
     let code = &query.code;
 
     if code.is_empty() {
@@ -72,7 +79,9 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
             .picture(Some(google_user.picture.clone()));
 
         let value = format!("google:{}", google_user.id);
-        user = match crate::db::create_user(new_user, CredentialType::Oauth, &value).await {
+        user = match crate::db::create_user(new_user, CredentialType::Oauth, &value, ctx.clone())
+            .await
+        {
             Ok(user) => Some(user),
             Err(e) => {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -86,7 +95,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
 
     if user.picture.is_none() {
         user.clone().picture(Some(google_user.picture.clone()));
-        match crate::db::update_user(user.clone()).await {
+        match crate::db::update_user(user.clone(), ctx).await {
             Ok(updated_user) => updated_user,
             Err(e) => {
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -101,7 +110,7 @@ async fn login(query: web::Query<QueryCode>) -> Result<HttpResponse, ErrorRespon
     let name = format_name(&given_name, &family_name);
     let claims = Claims::default()
         .subject("google-oauth2".to_string())
-        .sub_id(user.id)
+        .sub_id(user.account_id)
         .name(name)
         .email(user.email)
         .email_verified(google_user.verified_email);

@@ -9,14 +9,18 @@ use actix_web::{
 };
 use std::time::Duration;
 
+// TODO: Add here audit logging and create audit context
+
 pub async fn middleware<B: MessageBody + 'static>(
-    req: ServiceRequest,
+    sr: ServiceRequest,
     next: Next<B>,
 ) -> Result<ServiceResponse<EitherBody<B>>, actix_web::Error> {
+    let req = sr.request();
+    // Rate limiting ----------------------------------------------------------
     let gate = req.app_data::<Data<gate::Gate>>().unwrap();
     let limiter = gate.limiter.load();
 
-    let client_ip = req.request().get_client_ip();
+    let client_ip = req.get_client_ip();
 
     let limit_name = "default";
     let key = client_ip
@@ -38,7 +42,7 @@ pub async fn middleware<B: MessageBody + 'static>(
     let remaining = decision.remaining.to_string();
 
     if decision.allowed {
-        let mut res = next.call(req).await?;
+        let mut res = next.call(sr).await?;
         res.headers_mut().insert(
             HeaderName::from_static("x-ratelimit-limit"),
             HeaderValue::from_str(&limit).unwrap(),

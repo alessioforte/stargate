@@ -1,6 +1,8 @@
 use crate::ent::{Credential, CredentialType};
 use anyhow::Result;
 
+pub const CREDENTIAL: &str = "credentials";
+
 #[derive(Clone)]
 pub struct CredentialRepository {}
 
@@ -19,20 +21,24 @@ impl CredentialRepository {
     ) -> Result<Credential> {
         let credential = Credential::new(user_id.to_string(), credential_type, value.to_string());
 
-        let query = sqlx::query_as::<_, Credential>(
-            "
-            INSERT INTO credentials (id, user_id, timestamp, type, value)
+        let row = sqlx::query_as::<_, Credential>(
+            format!(
+                "
+            INSERT INTO {credentials} (id, user_id, timestamp, type, value)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         ",
+                credentials = CREDENTIAL
+            )
+            .as_str(),
         )
         .bind(&credential.id)
         .bind(&credential.user_id)
         .bind(&credential.timestamp)
         .bind(&credential.credential_type)
-        .bind(&credential.value);
-
-        let row = query.fetch_one(&mut **tx).await?;
+        .bind(&credential.value)
+        .fetch_one(&mut **tx)
+        .await?;
 
         Ok(row)
     }
@@ -45,9 +51,13 @@ impl CredentialRepository {
         credential_type: CredentialType,
     ) -> Result<Option<Credential>> {
         let row = sqlx::query_as::<_, Credential>(
-            "
-            SELECT * FROM credentials WHERE user_id = $1 AND type = $2
+            format!(
+                "
+            SELECT * FROM {credentials} WHERE user_id = $1 AND type = $2
         ",
+                credentials = CREDENTIAL
+            )
+            .as_str(),
         )
         .bind(user_id)
         .bind(credential_type)
@@ -71,12 +81,16 @@ impl CredentialRepository {
         );
 
         let row = sqlx::query_as::<_, Credential>(
-            "
-            UPDATE credentials
+            format!(
+                "
+            UPDATE {credentials}
             SET value = $1, timestamp = $2
             WHERE user_id = $3 AND type = $4
             RETURNING *
         ",
+                credentials = CREDENTIAL
+            )
+            .as_str(),
         )
         .bind(&credential.value)
         .bind(&credential.timestamp)

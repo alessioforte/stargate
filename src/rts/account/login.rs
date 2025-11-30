@@ -64,7 +64,7 @@ pub async fn handler(
     let sid = uuid::Uuid::new_v4().to_string();
     let mut claims = jwt::Claims::default()
         .subject(user.email.to_owned())
-        .sub_id(user.id.to_owned())
+        .sub_id(user.account_id.to_owned())
         .name(name.clone())
         .email(user.email.to_owned())
         .email_verified(true)

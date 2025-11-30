@@ -27,4 +27,5 @@ pub trait Transaction {
     ) -> Result<ApiKey>;
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>>;
     async fn revoke_api_key(&self, id: &str) -> Result<()>;
+    async fn insert_audit_log_bulk(&self, logs: Vec<crate::ent::Audit>) -> Result<()>;
 }

@@ -1,5 +1,5 @@
 use crate::etc;
-use db::ent::{CredentialType, Profile};
+use db::ent::{AuditContext, CredentialType, Profile};
 use tracing::{error, info};
 
 pub async fn create_super_admin() {
@@ -29,6 +29,7 @@ pub async fn create_super_admin() {
         user,
         CredentialType::Password,
         &pw::Hash::encode(&password).unwrap(),
+        AuditContext::system(),
     )
     .await
     {

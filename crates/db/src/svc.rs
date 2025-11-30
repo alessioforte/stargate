@@ -1,4 +1,6 @@
-use super::repo::{AccountRepository, ApiKeyRepository, CredentialRepository, UserRepository};
+use super::repo::{
+    AccountRepository, ApiKeyRepository, AuditRepository, CredentialRepository, UserRepository,
+};
 use crate::ent::{AccountType, ApiKey, Credential, CredentialType, Profile, User};
 use crate::tx::Transaction;
 use anyhow::Result;
@@ -17,6 +19,7 @@ pub struct Service {
     user: UserRepository,
     credential: CredentialRepository,
     api_key: ApiKeyRepository,
+    audit: AuditRepository,
 }
 
 impl Service {
@@ -28,6 +31,7 @@ impl Service {
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
             api_key: ApiKeyRepository::new(),
+            audit: AuditRepository::new(),
         }
     }
 
@@ -39,6 +43,7 @@ impl Service {
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
             api_key: ApiKeyRepository::new(),
+            audit: AuditRepository::new(),
         }
     }
 
@@ -190,6 +195,16 @@ impl Transaction for Service {
     async fn revoke_api_key(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         self.api_key.revoke_by_id(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Inserts multiple audit logs in bulk.
+    async fn insert_audit_log_bulk(&self, logs: Vec<crate::ent::Audit>) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for log in logs {
+            self.audit.insert(&mut tx, &log).await?;
+        }
         tx.commit().await?;
         Ok(())
     }

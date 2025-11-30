@@ -1,6 +1,8 @@
 use crate::ent::{Account, AccountType};
 use anyhow::Result;
 
+pub const ACCOUNT: &str = "accounts";
+
 #[derive(Clone)]
 pub struct AccountRepository {}
 
@@ -23,19 +25,23 @@ impl AccountRepository {
             description.map(|d| d.to_string()),
         );
 
-        let query = sqlx::query_as::<_, Account>(
-            "
-            INSERT INTO accounts (id, type, name, description)
+        let row = sqlx::query_as::<_, Account>(
+            format!(
+                "
+            INSERT INTO {accounts} (id, type, name, description)
             VALUES ($1, $2, $3, $4)
             RETURNING *
         ",
+                accounts = ACCOUNT
+            )
+            .as_str(),
         )
         .bind(&account.id)
         .bind(&account.account_type)
         .bind(&account.name)
-        .bind(&account.description);
-
-        let row = query.fetch_one(&mut **tx).await?;
+        .bind(&account.description)
+        .fetch_one(&mut **tx)
+        .await?;
 
         Ok(row)
     }
@@ -47,9 +53,13 @@ impl AccountRepository {
         id: &str,
     ) -> Result<Option<Account>> {
         let row = sqlx::query_as::<_, Account>(
-            "
-            SELECT * FROM accounts WHERE id = $1
+            format!(
+                "
+            SELECT * FROM {accounts} WHERE id = $1
         ",
+                accounts = ACCOUNT
+            )
+            .as_str(),
         )
         .bind(id)
         .fetch_optional(&mut **tx)

@@ -84,6 +84,7 @@ anyhow = "1.0.100"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
+ulid = "1.2.1"
 
 [features]
 default = ["sqlite", "memory"]

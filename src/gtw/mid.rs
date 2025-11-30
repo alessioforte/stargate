@@ -1,5 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ext::RequestExt, guard};
+use crate::etc::ext::RequestExt;
 use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::{
     HttpMessage,
@@ -13,26 +13,26 @@ pub async fn middleware<B: MessageBody + 'static>(
     sr: ServiceRequest,
     next: Next<B>,
 ) -> Result<ServiceResponse<EitherBody<B>>, actix_web::Error> {
-    let gate = sr.app_data::<Data<gate::Gate>>().unwrap();
     let req = sr.request();
-    let client_ip = req.get_client_ip();
+    // let mut sub = match guard::verify_api_key(&req).await {
+    //     Some(s) => Some(s),
+    //     None => None,
+    // };
 
-    let mut sub = match guard::verify_api_key(&req).await {
-        Some(s) => Some(s),
-        None => None,
-    };
+    // if sub.is_none() {
+    //     sub = match guard::verify_jwt(&req).await {
+    //         Some(s) => Some(s),
+    //         None => None,
+    //     };
+    // }
 
-    if sub.is_none() {
-        sub = match guard::verify_jwt(&req).await {
-            Some(s) => Some(s),
-            None => None,
-        };
-    }
-
-    sr.extensions_mut().insert(sub);
+    // sr.extensions_mut().insert(sub);
 
     // Rate limiting ----------------------------------------------------------
+    let gate = sr.app_data::<Data<gate::Gate>>().unwrap();
     let limiter = gate.limiter.load();
+
+    let client_ip = req.get_client_ip();
 
     // TODO: get limit name from subject if it exists or apply default
     let limit_name = "default";

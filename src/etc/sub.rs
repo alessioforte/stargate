@@ -45,14 +45,21 @@ impl SubjectType {
 pub struct Subject {
     #[serde(rename = "type")]
     pub id: String,
+    pub account_id: String,
     pub sub_type: String,
     pub attrs: JsonValue,
 }
 
 impl Subject {
-    pub fn new(id: String, sub_type: SubjectType, attrs: Option<JsonValue>) -> Self {
+    pub fn new(
+        id: String,
+        account_id: String,
+        sub_type: SubjectType,
+        attrs: Option<JsonValue>,
+    ) -> Self {
         Subject {
             id,
+            account_id,
             sub_type: sub_type.as_str().to_string(),
             attrs: attrs.unwrap_or(JsonValue::Object(serde_json::Map::new())),
         }
@@ -66,12 +73,22 @@ impl Subject {
 
 impl From<User> for Subject {
     fn from(user: User) -> Self {
-        Subject::new(user.id, SubjectType::User, Some(user.attrs))
+        Subject::new(
+            user.id,
+            user.account_id,
+            SubjectType::User,
+            Some(user.attrs),
+        )
     }
 }
 
 impl From<ApiKey> for Subject {
     fn from(api_key: ApiKey) -> Self {
-        Subject::new(api_key.id, SubjectType::ApiKey, Some(api_key.attrs))
+        Subject::new(
+            api_key.id,
+            api_key.account_id,
+            SubjectType::ApiKey,
+            Some(api_key.attrs),
+        )
     }
 }

@@ -12,9 +12,14 @@
 //   Middleware      Repository      Service     Business Logic
 //     (Auto)       (Semi-Auto)     (Explicit)     (Explicit)
 
-use db::ent::Audit;
+pub mod audit;
+
+use crate::db::service;
+use db::{Transaction, ent::Audit};
 use std::time::Duration;
 use tokio::sync::mpsc;
+
+static AUDIT_SERVICE: once_cell::sync::OnceCell<AuditService> = once_cell::sync::OnceCell::new();
 
 pub struct AuditService {
     tx: mpsc::Sender<Audit>,
@@ -61,18 +66,30 @@ impl AuditService {
             return;
         }
 
-        // let batch = buffer.drain(..).collect::<Vec<_>>();
         let batch = std::mem::take(buffer);
         let count = buffer.len();
+
+        let svc = service();
+        match svc.insert_audit_log_bulk(batch).await {
+            Ok(_) => {
+                tracing::debug!("Successfully inserted {} audit records", count);
+            }
+            Err(e) => {
+                tracing::error!("Failed to insert audit records: {}", e);
+            }
+        }
     }
 }
 
-// // ESEMPIO 3: Macro per ridurre ulteriormente il boilerplate (opzionale)
-// #[macro_export]
-// macro_rules! audit {
-//     ($ctx:expr, $event:expr) => {
-//         let _ = $ctx.buffer.log($event.build_with_context($ctx));
-//     };
-// }
+pub fn init() {
+    let batch_size = 1000;
+    let flush_interval = Duration::from_secs(5);
+    let service = AuditService::new(batch_size, flush_interval);
+    if AUDIT_SERVICE.set(service).is_err() {
+        tracing::error!("Failed to set the AuditService instance");
+    }
+}
 
-// // Uso: audit!(ctx, event);
+pub fn get_audit_service() -> Option<&'static AuditService> {
+    AUDIT_SERVICE.get()
+}

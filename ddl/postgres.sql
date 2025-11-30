@@ -40,15 +40,17 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
--- CREATE TABLE IF NOT EXISTS "audits" (
---     "id" TEXT PRIMARY KEY,
---     "timestamp" bigint NOT NULL,
---     "entity_type" VARCHAR(50) NOT NULL,
---     "entity_id" TEXT NOT NULL,
---     "action" VARCHAR(50) NOT NULL,
---     "performed_by" TEXT,
---     "details" JSONB NOT NULL DEFAULT '{}'::jsonb
--- );
+CREATE TABLE IF NOT EXISTS "audits" (
+    "id" TEXT PRIMARY KEY,
+    "timestamp" bigint NOT NULL,
+    "resource" VARCHAR(100) NOT NULL,
+    "action" VARCHAR(100) NOT NULL,
+    "account_id" TEXT,
+    "request_id" TEXT,
+    "ip_address" VARCHAR(45),
+    "user_agent" TEXT,
+    "metadata" JSONB NOT NULL DEFAULT '{}'::jsonb
+);
 
 -- Create indexes for performance optimization
 -- CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email");

@@ -45,7 +45,7 @@ pub async fn handler(
 
     let claims = Claims::default()
         .subject(user.email.to_owned())
-        .sub_id(user.id.to_owned())
+        .sub_id(user.account_id.to_owned())
         .name(name)
         .email(user.email.clone())
         .email_verified(true);

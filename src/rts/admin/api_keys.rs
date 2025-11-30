@@ -1,6 +1,7 @@
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{HttpResponse, delete, get, post, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, web};
 use actix_web_grants::protect;
+use db::ent::AuditContext;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -35,7 +36,14 @@ pub async fn get_api_keys() -> Result<HttpResponse, ErrorResponse> {
 )]
 #[post("")]
 #[protect("SUPER_ADMIN")]
-pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, ErrorResponse> {
+pub async fn create_api_key(
+    req: HttpRequest,
+    payload: web::Json<ApiKey>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
     let secret = pw::generate_api_key();
     let key_hash = pw::hash_api_key(&secret);
 
@@ -44,6 +52,7 @@ pub async fn create_api_key(payload: web::Json<ApiKey>) -> Result<HttpResponse, 
         &key_hash,
         payload.label.clone(),
         payload.attrs.clone(),
+        ctx,
     )
     .await
     {

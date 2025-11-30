@@ -2,8 +2,8 @@ use super::SignupCompleteRequestBody;
 use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use actix_web::{HttpResponse, put, web};
-use db::ent::{CredentialType, Profile};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, put, web};
+use db::ent::{AuditContext, CredentialType, Profile};
 use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
 
@@ -16,8 +16,13 @@ use pw::{PasswordPolicy, PasswordPolicyValidator};
 )]
 #[put("")]
 pub async fn handler(
+    req: HttpRequest,
     body: web::Json<SignupCompleteRequestBody>,
 ) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
     let body = body.into_inner();
 
     let jwt = crate::etc::jwt::jwt_config();
@@ -106,7 +111,8 @@ pub async fn handler(
         .picture(None);
 
     let password = Hash::encode(&body.password).unwrap();
-    match crate::db::create_user(user, CredentialType::Password, &password).await {
+
+    match crate::db::create_user(user, CredentialType::Password, &password, ctx).await {
         Ok(_) => {
             // Delete the signup request
             let _ = act::delete_signup_request(&uuid).await;

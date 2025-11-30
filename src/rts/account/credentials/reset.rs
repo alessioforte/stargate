@@ -3,7 +3,8 @@ use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::fun::format_name;
-use actix_web::{HttpResponse, put, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, put, web};
+use db::ent::AuditContext;
 use pw::Hash;
 use smtp::{Smtp, Template};
 use tracing::error;
@@ -17,8 +18,14 @@ use tracing::error;
 )]
 #[put("")]
 pub async fn handler(
+    req: HttpRequest,
     body: web::Json<ChangePasswordRequestBody>,
 ) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
     let body = body.into_inner();
     let token = body.token.clone();
     let jwt = etc::jwt::jwt_config();
@@ -30,9 +37,19 @@ pub async fn handler(
             )));
         }
     };
-    let uuid = claims.uuid.clone().unwrap_or_default();
 
-    let email = match act::get_change_password_request(&uuid).await {
+    let email = claims.email.clone();
+    if email.is_none() {
+        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
+            // TODO: different error?
+            "Request not found".to_string(),
+        )));
+    }
+
+    let email = email.unwrap();
+    let token_uuid = claims.uuid.clone().unwrap_or_default();
+
+    let uuid = match act::get_change_password_request(&email).await {
         Ok(pra) => pra,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -41,13 +58,11 @@ pub async fn handler(
         }
     };
 
-    if email.is_none() {
-        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
-            "Request not found".to_string(),
+    if uuid.is_none() || uuid.unwrap() != token_uuid {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid or expired password reset request".to_string(),
         )));
     }
-
-    let email = email.unwrap();
 
     let user = match crate::db::get_user_by_username(&email).await {
         Ok(user) => user,
@@ -66,7 +81,9 @@ pub async fn handler(
     let user = user.unwrap();
     let password = Hash::encode(&body.password).unwrap();
 
-    match crate::db::change_password(&user.id, &password).await {
+    let ctx = ctx.with_account_id(user.account_id);
+
+    match crate::db::change_password(&user.id, &password, ctx).await {
         Ok(_) => {}
         Err(e) => {
             error!("Could not update password: {:?}", e);
@@ -76,6 +93,8 @@ pub async fn handler(
         }
     }
 
+    let _ = act::delete_change_password_request(&email).await;
+
     let message = etc::msg::MessageResponse::new(
         "Change Password".to_string(),
         "change_password".to_string(),
@@ -83,6 +102,7 @@ pub async fn handler(
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
+
     let sender = Smtp::new()
         .template(Template::PasswordChangedNotification)
         .to(user.email.clone())

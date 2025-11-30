@@ -15,11 +15,12 @@ pub async fn handler(
     req: HttpRequest,
     stream: Payload,
 ) -> Result<HttpResponse, ErrorResponse> {
+    let sub = req.extensions().get::<Subject>().cloned();
+
     let path = req.uri().path();
     let query = req.query_string();
     let method = req.method().clone();
     let client_ip = req.get_client_ip();
-    let sub = req.extensions().get::<Option<Subject>>().cloned().flatten();
     let has_auth = sub.is_some();
 
     // check if the service exists --------------------------------------------

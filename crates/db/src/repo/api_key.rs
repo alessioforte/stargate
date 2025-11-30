@@ -1,6 +1,8 @@
 use crate::ent::ApiKey;
 use anyhow::Result;
 
+pub const API_KEY: &str = "api_keys";
+
 #[derive(Clone)]
 pub struct ApiKeyRepository {}
 
@@ -25,11 +27,15 @@ impl ApiKeyRepository {
             attrs.unwrap_or(serde_json::Value::Null),
         );
         let row = sqlx::query_as::<_, ApiKey>(
-            "
-            INSERT INTO api_keys (id, account_id, key_hash, label, revoked, attrs)
+            format!(
+                "
+            INSERT INTO {api_keys} (id, account_id, key_hash, label, revoked, attrs)
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         ",
+                api_keys = API_KEY
+            )
+            .as_str(),
         )
         .bind(&api_key.id)
         .bind(&api_key.account_id)
@@ -50,9 +56,13 @@ impl ApiKeyRepository {
         key_hash: &str,
     ) -> Result<Option<ApiKey>> {
         let row = sqlx::query_as::<_, ApiKey>(
-            "
-            SELECT * FROM api_keys WHERE key_hash = $1
+            format!(
+                "
+            SELECT * FROM {api_keys} WHERE key_hash = $1
         ",
+                api_keys = API_KEY
+            )
+            .as_str(),
         )
         .bind(key_hash)
         .fetch_optional(&mut **tx)
@@ -68,9 +78,13 @@ impl ApiKeyRepository {
         id: &str,
     ) -> Result<()> {
         sqlx::query(
-            "
-            UPDATE api_keys SET revoked = TRUE WHERE id = $1
+            format!(
+                "
+            UPDATE {api_keys} SET revoked = TRUE WHERE id = $1
         ",
+                api_keys = API_KEY
+            )
+            .as_str(),
         )
         .bind(id)
         .execute(&mut **tx)
@@ -86,9 +100,13 @@ impl ApiKeyRepository {
         id: &str,
     ) -> Result<()> {
         sqlx::query(
-            "
-            DELETE FROM api_keys WHERE id = $1
+            format!(
+                "
+            DELETE FROM {api_keys} WHERE id = $1
         ",
+                api_keys = API_KEY
+            )
+            .as_str(),
         )
         .bind(id)
         .execute(&mut **tx)
