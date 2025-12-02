@@ -31,8 +31,8 @@ pub async fn handler(
         Err(e) => return Err(ErrorResponse::from(HttpError::BadRequest(e.to_string()))),
     };
 
-    let uuid = match claim.sub_id {
-        Some(uuid) => uuid,
+    let sid = match claim.sub_id {
+        Some(sid) => sid,
         None => {
             return Err(ErrorResponse::from(HttpError::BadRequest(
                 "Invalid token".to_string(),
@@ -40,7 +40,7 @@ pub async fn handler(
         }
     };
 
-    let signup = match act::get_signup_request(&uuid).await {
+    let signup = match act::get_signup_request(&sid).await {
         Ok(signup) => signup,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -115,7 +115,7 @@ pub async fn handler(
     match crate::db::create_user(user, CredentialType::Password, &password, ctx).await {
         Ok(_) => {
             // Delete the signup request
-            let _ = act::delete_signup_request(&uuid).await;
+            let _ = act::delete_signup_request(&sid).await;
 
             let message = MessageResponse::new(
                 "User created successfully".to_string(),

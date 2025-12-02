@@ -42,6 +42,7 @@ pub async fn handler(
     let user = user.unwrap();
 
     let existing_request = act::get_change_password_request(&user.email).await;
+
     if let Ok(Some(_)) = existing_request {
         let message = etc::msg::MessageResponse::new(
             "A password reset request has already been sent to this email. Please check your email for the password reset link."
@@ -51,7 +52,7 @@ pub async fn handler(
         return Ok(HttpResponse::Ok().json(web::Json(message)));
     }
 
-    let uuid = act::create_change_password_request(&user.email)
+    let sid = act::create_change_password_request(&user.email)
         .await
         .map_err(|e| {
             ErrorResponse::from(HttpError::InternalServerError(format!(
@@ -61,10 +62,9 @@ pub async fn handler(
         })?;
 
     let claim = jwt::Claims::default()
-        .subject(user.id.clone())
         .sub_id(user.account_id.clone())
         .email(user.email.clone())
-        .uuid(uuid.clone());
+        .sid(sid.clone());
 
     let jwt = etc::jwt::jwt_config();
     let token = match jwt.generate_token(&claim) {
@@ -78,11 +78,12 @@ pub async fn handler(
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
+    let name = format_name(&given_name, &family_name);
 
     let sender = Smtp::new()
         .template(Template::ChangePasswordRequest)
         .to(user.email.clone())
-        .name(Some(format_name(&given_name, &family_name)))
+        .name(Some(name))
         .token(token)
         .build()
         .send();

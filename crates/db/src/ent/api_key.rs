@@ -1,4 +1,3 @@
-use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -15,7 +14,7 @@ pub struct ApiKey {
 
 impl ApiKey {
     pub fn new(key_hash: String, account_id: String, label: Option<String>, attrs: Value) -> Self {
-        let id = ObjectId::new().unwrap().to_string();
+        let id = ulid::Ulid::new().to_string();
         ApiKey {
             id,
             account_id,

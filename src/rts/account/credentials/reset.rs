@@ -47,9 +47,9 @@ pub async fn handler(
     }
 
     let email = email.unwrap();
-    let token_uuid = claims.uuid.clone().unwrap_or_default();
+    let token_sid = claims.sid.clone().unwrap_or_default();
 
-    let uuid = match act::get_change_password_request(&email).await {
+    let sid = match act::get_change_password_request(&email).await {
         Ok(pra) => pra,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -58,7 +58,7 @@ pub async fn handler(
         }
     };
 
-    if uuid.is_none() || uuid.unwrap() != token_uuid {
+    if sid.is_none() || sid.unwrap() != token_sid {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Invalid or expired password reset request".to_string(),
         )));

@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
@@ -99,9 +98,10 @@ impl AuditContext {
     }
 
     pub fn build_audit(&self, action: ActionType) -> Audit {
+        let id = ulid::Ulid::new().to_string();
         Audit {
+            id,
             action,
-            id: ObjectId::new().unwrap().to_string(),
             timestamp: Utc::now(),
             resource: self.resource.clone(),
             account_id: self.account_id.clone(),

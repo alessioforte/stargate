@@ -1,4 +1,3 @@
-use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
@@ -21,7 +20,7 @@ pub struct Credential {
 
 impl Credential {
     pub fn new(user_id: String, credential_type: CredentialType, value: String) -> Self {
-        let id = ObjectId::new().unwrap().to_string();
+        let id = ulid::Ulid::new().to_string();
         let timestamp = chrono::Utc::now().timestamp();
         Credential {
             id,

@@ -22,8 +22,8 @@ pub async fn handler(
         Err(e) => return Err(ErrorResponse::from(HttpError::BadRequest(e.to_string()))),
     };
 
-    let uuid = match claim.sub_id {
-        Some(uuid) => uuid,
+    let sid = match claim.sid {
+        Some(sid) => sid,
         None => {
             return Err(ErrorResponse::from(HttpError::BadRequest(
                 "Invalid token".to_string(),
@@ -31,7 +31,7 @@ pub async fn handler(
         }
     };
 
-    let request = match act::get_email_verification_request(&uuid).await {
+    let request = match act::get_email_verification_request(&sid).await {
         Ok(request) => request,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -53,11 +53,11 @@ pub async fn handler(
         )));
     }
 
-    let uuid = match act::create_signup_request(&request).await {
-        Ok(new_uuid) => {
+    let sid = match act::create_signup_request(&request).await {
+        Ok(new_sid) => {
             // Delete the email verification request
-            let _ = act::delete_email_verification_request(&uuid).await;
-            new_uuid
+            let _ = act::delete_email_verification_request(&sid).await;
+            new_sid
         }
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -67,7 +67,7 @@ pub async fn handler(
     };
 
     let email = claim.email.unwrap_or_default();
-    let claim = jwt::Claims::default().sub_id(uuid).email(email.clone());
+    let claim = jwt::Claims::default().sub_id(sid).email(email.clone());
 
     let jwt = crate::etc::jwt::jwt_config();
     let token = match jwt.generate_token(&claim) {

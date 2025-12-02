@@ -25,7 +25,9 @@ mod memory {
         tokio::spawn(async move {
             loop {
                 let store = use_store();
-                let _ = store.export_to_simple_json(".stargate/memory.json").await;
+                let _ = store
+                    .export_to_simple_json(".stargate/backup/memory.json")
+                    .await;
                 tokio::time::sleep(interval).await;
             }
         });

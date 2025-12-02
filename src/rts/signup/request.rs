@@ -47,7 +47,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
         )));
     }
 
-    let uuid = act::create_email_verification_request(&body.email)
+    let sid = act::create_email_verification_request(&body.email)
         .await
         .map_err(|e| {
             ErrorResponse::from(HttpError::InternalServerError(format!(
@@ -57,7 +57,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
         })?;
 
     let claim = jwt::Claims::default()
-        .sub_id(uuid.clone())
+        .sid(sid.clone())
         .email(body.email.clone());
 
     let jwt = crate::etc::jwt::jwt_config();

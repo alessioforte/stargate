@@ -1,4 +1,3 @@
-use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -18,7 +17,7 @@ pub struct User {
 
 impl User {
     pub fn new(account_id: String, email: String) -> Self {
-        let id = ObjectId::new().unwrap().to_string();
+        let id = ulid::Ulid::new().to_string();
         User {
             id,
             account_id,

@@ -1,4 +1,3 @@
-use objectid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
@@ -21,7 +20,7 @@ pub struct Account {
 
 impl Account {
     pub fn new(name: String, account_type: AccountType, description: Option<String>) -> Self {
-        let id = ObjectId::new().unwrap().to_string();
+        let id = ulid::Ulid::new().to_string();
         Account {
             id,
             name,

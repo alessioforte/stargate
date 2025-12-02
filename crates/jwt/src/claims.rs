@@ -14,7 +14,6 @@ pub struct Claims {
     pub name: Option<String>,         // name
     pub email_verified: Option<bool>, // email_verified
     pub nickname: Option<String>,     // nickname
-    pub uuid: Option<String>,         // UUID for the user
     pub jti: Option<String>,          // JWT ID
     pub aud: Option<String>,          // audience
     pub typ: Option<String>,          // type
@@ -39,7 +38,6 @@ impl Default for Claims {
             name: None,
             email_verified: None,
             nickname: None,
-            uuid: None,
             jti: None,
             aud: None,
             typ: None,
@@ -94,11 +92,6 @@ impl Claims {
 
     pub fn nickname(mut self, nickname: String) -> Self {
         self.nickname = Some(nickname);
-        self
-    }
-
-    pub fn uuid(mut self, uuid: String) -> Self {
-        self.uuid = Some(uuid);
         self
     }
 
