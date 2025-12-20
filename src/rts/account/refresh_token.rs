@@ -8,6 +8,7 @@ use jwt::Claims;
 #[utoipa::path(
     context_path = "/account",
     path = "/refresh-token",
+    tags = ["Account"],
     responses(
         (status = 200, description = "OK")
     )

@@ -5,7 +5,8 @@ use actix_web::{HttpResponse, get, web};
 
 #[utoipa::path(
     context_path = "/signup",
-    path = "/",
+    path = "",
+    tags = ["Signup"],
     responses(
         (status = 200, description = "OK")
     )
@@ -55,7 +56,6 @@ pub async fn handler(
 
     let sid = match act::create_signup_request(&request).await {
         Ok(new_sid) => {
-            // Delete the email verification request
             let _ = act::delete_email_verification_request(&sid).await;
             new_sid
         }
@@ -67,7 +67,10 @@ pub async fn handler(
     };
 
     let email = claim.email.unwrap_or_default();
-    let claim = jwt::Claims::default().sub_id(sid).email(email.clone());
+    let claim = jwt::Claims::default()
+        .subject("signup".to_string())
+        .sub_id(sid)
+        .email(email.clone());
 
     let jwt = crate::etc::jwt::jwt_config();
     let token = match jwt.generate_token(&claim) {

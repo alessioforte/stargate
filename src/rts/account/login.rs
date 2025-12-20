@@ -11,7 +11,7 @@ use store::Store;
 #[utoipa::path(
     context_path = "/account",
     path = "/login",
-
+    tags = ["Account"],
     responses(
         (status = 200, description = "OK", body = AuthResponse)
     )

@@ -7,6 +7,7 @@ use store::Store;
 #[utoipa::path(
     context_path = "/account",
     path = "/logout",
+    tags = ["Account"],
     responses(
         (status = 200, description = "OK")
     )

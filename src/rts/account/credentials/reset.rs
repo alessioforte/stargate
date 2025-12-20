@@ -12,6 +12,7 @@ use tracing::error;
 #[utoipa::path(
     context_path = "/account",
     path = "/credentials",
+    tags = ["Account"],
     responses(
         (status = 200, description = "OK")
     )

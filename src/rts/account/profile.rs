@@ -7,6 +7,7 @@ use etc::jwt::jwt_config;
 #[utoipa::path(
     context_path = "/account",
     path = "/profile",
+    tags = ["Account"],
     responses(
         (status = 200, description = "OK")
     )

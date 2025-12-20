@@ -1,13 +1,11 @@
-use handlebars::Handlebars;
 use lettre::transport::smtp::{Error, response::Response};
 use lettre::{Message, SmtpTransport, Transport, message::header::ContentType};
-use serde_json::json;
 
 pub enum Template {
     SignupRequest,
+    SignupCompleted,
     ChangePasswordRequest,
     PasswordChangedNotification,
-    // SignupCompleted,
     // LoginWithOauthProvider,
 }
 
@@ -17,14 +15,16 @@ impl Template {
             Template::SignupRequest => "Signup Request",
             Template::ChangePasswordRequest => "Change Password Request",
             Template::PasswordChangedNotification => "Password Changed",
+            Template::SignupCompleted => "Welcome to Stargate!",
         }
     }
 
     pub fn filename(&self) -> &str {
         match self {
-            Template::SignupRequest => "signup_request",
+            Template::SignupRequest => "signup-request",
             Template::ChangePasswordRequest => "change_password_request",
             Template::PasswordChangedNotification => "password_changed_notification",
+            Template::SignupCompleted => "signup_completed",
         }
     }
 }
@@ -81,19 +81,15 @@ impl Smtp {
             std::env::var("SMTP_FROM").unwrap_or_else(|_| "NoBody <nobody@domain.tld>".to_string());
         let subject = self.template.subject();
         let header = ContentType::TEXT_HTML;
-        let body = {
-            let mut handlebars = Handlebars::new();
-            let name = self.template.filename();
-            handlebars
-                .register_template_file(name, format!(".stargate/transactional/{}.hbs", name))
-                .unwrap();
-            let data = json!({
-                "name": self.name,
-                "token": self.token,
-            });
 
-            match handlebars.render(self.template.filename(), &data) {
-                Ok(body) => body,
+        let body = {
+            let file_path = format!(".stargate/transactional/{}.html", self.template.filename());
+            match std::fs::read_to_string(file_path) {
+                Ok(content) => {
+                    let content =
+                        content.replace("{{name}}", &self.name.clone().unwrap_or("".to_string()));
+                    content.replace("{{token}}", &self.token)
+                }
                 Err(e) => {
                     tracing::error!("build_email: {:?}", e);
                     "".to_string()

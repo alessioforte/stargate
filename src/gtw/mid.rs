@@ -14,19 +14,7 @@ pub async fn middleware<B: MessageBody + 'static>(
     next: Next<B>,
 ) -> Result<ServiceResponse<EitherBody<B>>, actix_web::Error> {
     let req = sr.request();
-    // let mut sub = match guard::verify_api_key(&req).await {
-    //     Some(s) => Some(s),
-    //     None => None,
-    // };
-
-    // if sub.is_none() {
-    //     sub = match guard::verify_jwt(&req).await {
-    //         Some(s) => Some(s),
-    //         None => None,
-    //     };
-    // }
-
-    // sr.extensions_mut().insert(sub);
+    let sub = req.extensions().get::<crate::etc::sub::Subject>().cloned();
 
     // Rate limiting ----------------------------------------------------------
     let gate = sr.app_data::<Data<gate::Gate>>().unwrap();
@@ -34,14 +22,24 @@ pub async fn middleware<B: MessageBody + 'static>(
 
     let client_ip = req.get_client_ip();
 
-    // TODO: get limit name from subject if it exists or apply default
-    let limit_name = "default";
+    let limit_name = match sub {
+        Some(sub) => {
+            let limit_name = sub
+                .get_attr("rate_limit")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string();
+            limit_name
+        }
+        None => "default".to_string(),
+    };
+
     let key = client_ip
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string());
     let key = format!("lim:{}", key);
-    // TODO: handle the case when there is no limiter configured
-    let decision = match limiter.check(limit_name, &key).await {
+
+    let decision = match limiter.check(&limit_name, &key).await {
         Ok(decision) => decision,
         Err(e) => {
             tracing::error!("Rate limiter error: {}", e);

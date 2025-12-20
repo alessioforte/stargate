@@ -9,7 +9,8 @@ use smtp::{Smtp, Template};
 
 #[utoipa::path(
     context_path = "/signup",
-    path = "/",
+    path = "",
+    tags = ["Signup"],
     responses(
         (status = 200, description = "OK")
     )
@@ -57,6 +58,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
         })?;
 
     let claim = jwt::Claims::default()
+        .subject("signup_request".to_string())
         .sid(sid.clone())
         .email(body.email.clone());
 

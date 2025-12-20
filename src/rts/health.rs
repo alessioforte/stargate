@@ -1,5 +1,5 @@
 use crate::err::ErrorResponse;
-use actix_web::{get, HttpResponse};
+use actix_web::{HttpResponse, get};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -11,6 +11,7 @@ struct Health {
 
 #[utoipa::path(
     path = "/health",
+    tags = ["Health"],
     responses(
         (status = 200, description = "OK", body = Health)
     )

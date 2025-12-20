@@ -5,7 +5,8 @@ use utoipa::OpenApi;
 
 #[utoipa::path(
     context_path = "/docs",
-    path = "/",
+    path = "",
+    tags = ["Documentation"],
     responses(
         (status = 200, description = "OK")
     )

@@ -14,8 +14,11 @@ struct ForgotPasswordRequestBody {
 #[utoipa::path(
     context_path = "/account",
     path = "/credentials",
+    tags = ["Account"],
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal Server Error")
     )
 )]
 #[post("")]

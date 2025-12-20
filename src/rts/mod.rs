@@ -25,7 +25,10 @@ use utoipa::OpenApi;
         crate::rts::signup::complete::handler,
         crate::rts::docs::get_api_doc,
     ),
-    info(description = "Stargate APIs documentation")
+    info(
+        title = "Stargate APIs ✨",
+        description = "APIs for user authentication and management in Stargate.",
+    )
 )]
 pub struct ApiDoc;
 

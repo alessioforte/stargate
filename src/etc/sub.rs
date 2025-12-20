@@ -65,10 +65,15 @@ impl Subject {
         }
     }
 
-    // /// Get attrs as JsonValue
-    // pub fn get_attrs(&self) -> Result<JsonValue, serde_json::Error> {
-    //     Ok(self.attrs.clone())
-    // }
+    /// Get attrs as JsonValue
+    pub fn get_attrs(&self) -> JsonValue {
+        self.attrs.clone()
+    }
+
+    // Get attribute by key
+    pub fn get_attr(&self, key: &str) -> Option<&JsonValue> {
+        self.attrs.get(key)
+    }
 }
 
 impl From<User> for Subject {

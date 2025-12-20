@@ -1,5 +1,6 @@
 [package]
 name = "stargate"
+version = "0.1.0"
 description = "A powerful API gateway and IAM server built in Rust."
 authors = ["Alessio Forte <fortealessio@gmail.com>"]
 edition = "2024"

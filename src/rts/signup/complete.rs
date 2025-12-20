@@ -2,14 +2,18 @@ use super::SignupCompleteRequestBody;
 use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
+use crate::fun::format_name;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, put, web};
 use db::ent::{AuditContext, CredentialType, Profile};
 use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
+use smtp::Smtp;
+use tracing::error;
 
 #[utoipa::path(
     context_path = "/signup",
-    path = "/",
+    path = "",
+    tags = ["Signup"],
     responses(
         (status = 200, description = "OK")
     )
@@ -113,9 +117,23 @@ pub async fn handler(
     let password = Hash::encode(&body.password).unwrap();
 
     match crate::db::create_user(user, CredentialType::Password, &password, ctx).await {
-        Ok(_) => {
-            // Delete the signup request
+        Ok(user) => {
             let _ = act::delete_signup_request(&sid).await;
+
+            let given_name = user.given_name.clone().unwrap_or_default();
+            let family_name = user.family_name.clone().unwrap_or_default();
+
+            let sender = Smtp::new()
+                .template(smtp::Template::SignupCompleted)
+                .to(user.email)
+                .name(Some(format_name(&given_name, &family_name)))
+                .build()
+                .send();
+
+            match sender {
+                Ok(_) => {}
+                Err(e) => error!("Could not send email: {:?}", e),
+            }
 
             let message = MessageResponse::new(
                 "User created successfully".to_string(),

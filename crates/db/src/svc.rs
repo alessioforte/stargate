@@ -23,20 +23,10 @@ pub struct Service {
 }
 
 impl Service {
-    #[cfg(feature = "postgres")]
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self {
-            pool,
-            account: AccountRepository::new(),
-            user: UserRepository::new(),
-            credential: CredentialRepository::new(),
-            api_key: ApiKeyRepository::new(),
-            audit: AuditRepository::new(),
-        }
-    }
-
-    #[cfg(feature = "sqlite")]
-    pub fn new(pool: sqlx::SqlitePool) -> Self {
+    pub fn new(
+        #[cfg(feature = "sqlite")] pool: sqlx::SqlitePool,
+        #[cfg(feature = "postgres")] pool: sqlx::PgPool,
+    ) -> Self {
         Self {
             pool,
             account: AccountRepository::new(),
