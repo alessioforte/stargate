@@ -13,8 +13,13 @@ use tracing::error;
     context_path = "/account",
     path = "/credentials",
     tags = ["Account"],
+    summary = "Change Password",
+    description = "Change the user's password using a valid password reset token.",
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK"),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal Server Error")
     )
 )]
 #[put("")]

@@ -8,8 +8,12 @@ use store::Store;
     context_path = "/account",
     path = "/logout",
     tags = ["Account"],
+    summary = "User Logout",
+    description = "Log out the currently authenticated user by invalidating their session token.",
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK"),
+        (status = 401, description = "Unauthorized - Invalid Token"),
+        (status = 500, description = "Internal Server Error")
     )
 )]
 #[delete("/logout")]

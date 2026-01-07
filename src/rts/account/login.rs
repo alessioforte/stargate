@@ -12,8 +12,12 @@ use store::Store;
     context_path = "/account",
     path = "/login",
     tags = ["Account"],
+    summary = "User Login",
+    description = "Authenticate a user using their username and password. On successful authentication, an access token and a refresh token are issued.",
     responses(
-        (status = 200, description = "OK", body = AuthResponse)
+        (status = 200, description = "OK", body = AuthResponse),
+        (status = 401, description = "Unauthorized - Invalid Credentials", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
 #[post("/login")]

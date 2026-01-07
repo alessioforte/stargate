@@ -14,8 +14,9 @@ struct ApiKey {
 }
 
 #[utoipa::path(
-    context_path = "/admin/apikeys",
-    path = "/",
+    context_path = "/admin",
+    path = "/apikeys",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
@@ -28,8 +29,9 @@ pub async fn get_api_keys() -> Result<HttpResponse, ErrorResponse> {
 }
 
 #[utoipa::path(
-    context_path = "/admin/apikeys",
-    path = "/",
+    context_path = "/admin",
+    path = "/apikeys",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
@@ -75,8 +77,9 @@ pub async fn create_api_key(
 }
 
 #[utoipa::path(
-    context_path = "/admin/apikeys",
-    path = "/{id}",
+    context_path = "/admin",
+    path = "/apikeys/{id}",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )

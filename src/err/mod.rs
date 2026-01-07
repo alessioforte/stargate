@@ -5,6 +5,7 @@ use actix_web::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use types::{Code, ErrorCode};
+use utoipa::ToSchema;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
@@ -175,7 +176,7 @@ impl From<PayloadError> for actix_web::Error {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorResponse {
     #[serde(skip)]

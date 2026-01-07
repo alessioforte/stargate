@@ -9,8 +9,12 @@ use jwt::Claims;
     context_path = "/account",
     path = "/refresh-token",
     tags = ["Account"],
+    summary = "Refresh Access Token",
+    description = "Refresh the access token using a valid refresh token. This endpoint validates the provided refresh token and issues a new access token along with a new refresh token.",
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK"),
+        (status = 401, description = "Unauthorized - Invalid Token"),
+        (status = 500, description = "Internal Server Error")
     )
 )]
 #[put("/refresh-token")]

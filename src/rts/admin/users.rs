@@ -13,8 +13,9 @@ struct User {
 }
 
 #[utoipa::path(
-    context_path = "/admin/users",
-    path = "/",
+    context_path = "/admin",
+    path = "/users",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
@@ -27,8 +28,9 @@ pub async fn get_users() -> Result<HttpResponse, ErrorResponse> {
 }
 
 #[utoipa::path(
-    context_path = "/admin/users",
-    path = "/",
+    context_path = "/admin",
+    path = "/users",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
@@ -41,8 +43,9 @@ pub async fn create_user(_user: web::Json<User>) -> Result<HttpResponse, ErrorRe
 }
 
 #[utoipa::path(
-    context_path = "/admin/users",
-    path = "/{id}",
+    context_path = "/admin",
+    path = "/users/{id}",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
@@ -58,8 +61,9 @@ pub async fn update_user(
 }
 
 #[utoipa::path(
-    context_path = "/admin/users",
-    path = "/{id}",
+    context_path = "/admin",
+    path = "/users/{id}",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
@@ -75,8 +79,9 @@ pub async fn patch_user(
 }
 
 #[utoipa::path(
-    context_path = "/admin/users",
-    path = "/{id}",
+    context_path = "/admin",
+    path = "/users/{id}",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )

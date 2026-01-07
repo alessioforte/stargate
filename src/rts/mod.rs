@@ -5,7 +5,6 @@ mod health;
 mod mid;
 mod oauth;
 mod signup;
-// pub mod well_known;
 
 use actix_web::{middleware::from_fn, web::ServiceConfig};
 use utoipa::OpenApi;
@@ -14,6 +13,16 @@ use utoipa::OpenApi;
 #[openapi(
     paths(
         crate::rts::health::get,
+        crate::rts::admin::configurations::get_configurations,
+        crate::rts::admin::configurations::update_configurations,
+        crate::rts::admin::users::get_users,
+        crate::rts::admin::users::create_user,
+        crate::rts::admin::users::delete_user,
+        crate::rts::admin::users::update_user,
+        crate::rts::admin::users::patch_user,
+        crate::rts::admin::api_keys::get_api_keys,
+        crate::rts::admin::api_keys::create_api_key,
+        crate::rts::admin::api_keys::delete_api_key,
         crate::rts::account::profile::handler,
         crate::rts::account::login::handler,
         crate::rts::account::refresh_token::handler,

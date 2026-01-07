@@ -2,14 +2,19 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
 use actix_web::{HttpRequest, HttpResponse, get, web};
+use db::ent::User;
 use etc::jwt::jwt_config;
 
 #[utoipa::path(
     context_path = "/account",
     path = "/profile",
     tags = ["Account"],
+    summary = "Get User Profile",
+    description = "Retrieve the profile information of the currently authenticated user using their access token.",
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK", body = User),
+        (status = 401, description = "Unauthorized - Invalid Token"),
+        (status = 500, description = "Internal Server Error")
     )
 )]
 #[get("/profile")]

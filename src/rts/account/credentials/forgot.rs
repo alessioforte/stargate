@@ -15,6 +15,8 @@ struct ForgotPasswordRequestBody {
     context_path = "/account",
     path = "/credentials",
     tags = ["Account"],
+    summary = "Initiate Password Reset",
+    description = "Initiate a password reset request by providing the user's email address. If the email exists in the system, a password reset link will be sent to that email.",
     responses(
         (status = 200, description = "OK"),
         (status = 404, description = "User not found"),

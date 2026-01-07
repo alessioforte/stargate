@@ -12,8 +12,9 @@ struct Params {
 }
 
 #[utoipa::path(
-    context_path = "/admin/configurations",
-    path = "/",
+    context_path = "/admin",
+    path = "/configurations",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
@@ -50,8 +51,9 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
 }
 
 #[utoipa::path(
-    context_path = "/admin/configurations",
-    path = "/",
+    context_path = "/admin",
+    path = "/configurations",
+    tags = ["Admin"],
     responses(
         (status = 200, description = "OK")
     )
