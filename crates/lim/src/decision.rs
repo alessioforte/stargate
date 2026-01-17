@@ -24,26 +24,36 @@ pub struct RateLimitDecision {
 
     /// Duration to wait before retrying (if denied)
     pub retry_after: Option<Duration>,
+
+    /// Duration until the rate limit resets
+    pub reset: Option<Duration>,
 }
 
 impl RateLimitDecision {
     /// Creates a new result indicating the request was allowed
-    pub fn allowed(limit: u64, remaining: u64) -> Self {
+    pub fn allowed(limit: u64, remaining: u64, reset: Option<Duration>) -> Self {
         Self {
             allowed: true,
             limit,
             remaining,
+            reset,
             retry_after: None,
         }
     }
 
     /// Creates a new result indicating the request was denied
-    pub fn denied(limit: u64, remaining: u64, retry_after: Option<Duration>) -> Self {
+    pub fn denied(
+        limit: u64,
+        remaining: u64,
+        retry_after: Option<Duration>,
+        reset: Option<Duration>,
+    ) -> Self {
         Self {
             allowed: false,
             limit,
             remaining,
             retry_after,
+            reset,
         }
     }
 

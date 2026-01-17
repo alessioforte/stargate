@@ -49,6 +49,8 @@ pub async fn create_api_key(
     let secret = pw::generate_api_key();
     let key_hash = pw::hash_api_key(&secret);
 
+    // TODO: verify account_id exists
+
     let api_key = match crate::db::create_api_key(
         &payload.account_id,
         &key_hash,

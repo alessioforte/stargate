@@ -31,23 +31,20 @@ impl Limiter {
     }
 
     // TODO: Add optional cost
-    pub async fn check(&self, limiter_name: &str, key: &str) -> Result<RateLimitDecision> {
+    pub async fn check(
+        &self,
+        limiter_name: &str,
+        key: &str,
+        cost: Option<u64>,
+    ) -> Result<RateLimitDecision> {
         if key.is_empty() || key.len() > 256 {
             return Err(RateLimitError::InvalidConfig("Invalid key".to_string()));
         }
         if let Some(limiter) = self.limits.get(limiter_name) {
-            limiter.check(key).await
+            let cost = cost.unwrap_or(1);
+            limiter.check(key, cost).await
         } else {
             Err(RateLimitError::InvalidConfig(limiter_name.to_string()))
         }
     }
-
-    // pub async fn incr_count(&self, key: &str) -> u64 {
-    //     // Increment the count in the store and return the new value
-    //     let k = format!("rate_limit:{}", key);
-    //     match self.store.incr_i64(&k, 1, None).await {
-    //         Ok(Some(count)) => count as u64,
-    //         _ => 0,
-    //     }
-    // }
 }

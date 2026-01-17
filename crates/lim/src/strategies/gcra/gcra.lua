@@ -33,7 +33,7 @@ local tat = redis.call("GET", key)
 tat       = tonumber(tat)
 
 if not tat then
-    tat = t0 - tau
+    tat = t0
 end
 
 -- Earliest allowed arrival time
@@ -51,7 +51,9 @@ local new_tat = math.max(tat, t0) + tau
 -- Save TAT and TTL
 redis.call("SET", key, tostring(new_tat), "EX", ttl)
 
-local remaining_burst = (new_tat - t0) - tau
+local total_capacity = burst + tau
+local used_capacity = new_tat - t0
+local remaining_burst = total_capacity - used_capacity
 if remaining_burst < 0 then remaining_burst = 0 end
 
 return { 1, 0, remaining_burst }

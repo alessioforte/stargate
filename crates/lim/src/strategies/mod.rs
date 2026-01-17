@@ -1,4 +1,6 @@
 pub mod gcra;
+pub mod quota_tracker;
+pub mod token_bucket;
 
 use crate::decision::RateLimitDecision;
 use crate::error::Result;
@@ -6,7 +8,7 @@ use crate::error::Result;
 use async_trait::async_trait;
 #[async_trait]
 pub trait RateLimit: Send + Sync {
-    async fn check(&self, key: &str) -> Result<RateLimitDecision>;
+    async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision>;
 }
 
 //

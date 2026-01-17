@@ -12,6 +12,7 @@ use tracing::{error, info};
 #[derive(Clone)]
 pub struct Gate {
     store: Arc<lim::State>,
+    clock: Arc<lim::CachedClock>,
     liveness_probe: Arc<Mutex<lb::HealthCheck>>,
     pub services: Arc<ArcSwap<TriePath>>,
     pub policy_engine: Arc<ArcSwap<PolicyEngine>>,
@@ -25,8 +26,10 @@ impl Gate {
         let liveness_probe = Arc::new(Mutex::new(lb::HealthCheck::new()));
         let policy_engine = Arc::new(ArcSwap::from_pointee(PolicyEngine::new()));
         let limiter = Arc::new(ArcSwap::from_pointee(lim::Limiter::new()));
+        let clock = lim::CachedClock::new();
         Self {
             store,
+            clock,
             services,
             liveness_probe,
             policy_engine,
@@ -78,7 +81,8 @@ impl Gate {
             for item in limits {
                 let name = item.name.clone();
                 let state = Arc::clone(&self.store);
-                let limit = item.build(state);
+                let clock = Arc::clone(&self.clock);
+                let limit = item.build(state, clock);
                 limiter.add_limit(name, limit);
             }
             self.limiter = Arc::new(ArcSwap::new(Arc::new(limiter)));
@@ -124,12 +128,14 @@ impl Gate {
     }
 
     pub async fn update_limiter(&mut self, limits: &Option<Vec<Limit>>) {
+        // FIXME: Maybe the current states should be deleted from the store
         if let Some(limits) = limits.clone() {
             let mut limiter = lim::Limiter::new();
             for item in limits {
                 let name = item.name.clone();
                 let state = Arc::clone(&self.store);
-                let limit = item.build(state);
+                let clock = Arc::clone(&self.clock);
+                let limit = item.build(state, clock);
                 limiter.add_limit(name, limit);
             }
             self.limiter.store(Arc::new(limiter));

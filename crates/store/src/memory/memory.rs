@@ -1043,6 +1043,7 @@ impl MemoryStore {
                     return Ok((res, new_value));
                 }
 
+                // FIXME: Problem**: Between `load` and `store`, another thread can modify the value → lost updates, incorrect rate limiting under concurrency.
                 let current_value = atomic.load(Ordering::SeqCst);
                 let (res, new_value) = measure_fn(current_value);
                 atomic.store(new_value, Ordering::SeqCst);

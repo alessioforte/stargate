@@ -22,6 +22,7 @@ pub async fn middleware<B: MessageBody + 'static>(
 
     let client_ip = req.get_client_ip();
 
+    // find the limit to check in
     let limit_name = match sub {
         Some(sub) => {
             let limit_name = sub
@@ -39,7 +40,7 @@ pub async fn middleware<B: MessageBody + 'static>(
         .unwrap_or_else(|| "unknown".to_string());
     let key = format!("lim:{}", key);
 
-    let decision = match limiter.check(&limit_name, &key).await {
+    let decision = match limiter.check(&limit_name, &key, None).await {
         Ok(decision) => decision,
         Err(e) => {
             tracing::error!("Rate limiter error: {}", e);

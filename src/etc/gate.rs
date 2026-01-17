@@ -36,6 +36,7 @@ pub fn init() -> Data<Gate> {
     let store = use_store();
     let config = get_config();
     let config_file_path = get_config_path();
+
     let gate = Gate::new(Arc::new(store.clone())).build(&config);
     watch_file(&config_file_path, &gate);
     Data::new(gate)
