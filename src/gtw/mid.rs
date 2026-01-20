@@ -1,5 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::ext::RequestExt;
+use crate::etc::{ext::RequestExt, sub::Subject};
 use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::{
     HttpMessage,
@@ -14,7 +14,7 @@ pub async fn middleware<B: MessageBody + 'static>(
     next: Next<B>,
 ) -> Result<ServiceResponse<EitherBody<B>>, actix_web::Error> {
     let req = sr.request();
-    let sub = req.extensions().get::<crate::etc::sub::Subject>().cloned();
+    let sub = req.extensions().get::<Subject>().cloned();
 
     // Rate limiting ----------------------------------------------------------
     let gate = sr.app_data::<Data<gate::Gate>>().unwrap();

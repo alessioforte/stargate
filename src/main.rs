@@ -1,11 +1,11 @@
 mod act;
+mod api;
 mod aud;
 mod db;
 mod err;
 mod etc;
 mod fun;
 mod gtw;
-mod rts;
 
 use crate::etc::{cfg, cors, ctx, gate, jwt, log, logo, store, tls};
 use actix_web::{
@@ -54,7 +54,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(cors::middleware::configure())
             .wrap(from_fn(ctx::middleware))
             .configure(cfg::configure)
-            .configure(rts::configure)
+            .configure(api::configure)
             .configure(gtw::configure)
     });
 

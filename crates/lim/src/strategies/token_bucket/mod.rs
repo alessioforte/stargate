@@ -35,6 +35,7 @@ mod config;
 
 pub use config::TokenBucketConfig;
 
+use crate::clock::CachedClock;
 use crate::decision::RateLimitDecision;
 use crate::error::Result;
 use crate::state::State;
@@ -44,9 +45,6 @@ use core::time::Duration;
 use std::sync::Arc;
 
 // ========================== IN-MEMORY IMPLEMENTATION =========================
-
-#[cfg(feature = "memory")]
-use crate::clock::CachedClock;
 
 #[cfg(feature = "memory")]
 pub struct TokenBucket {
@@ -197,7 +195,7 @@ pub struct TokenBucket {
 
 #[cfg(feature = "redis")]
 impl TokenBucket {
-    pub fn new(store: Arc<State>, config: TokenBucketConfig) -> Self {
+    pub fn new(store: Arc<State>, _clock: Arc<CachedClock>, config: TokenBucketConfig) -> Self {
         // TTL should be long enough to cover the time to refill from empty
         let ttl = if config.refill_rate > 0 {
             ((config.capacity / config.refill_rate) + 60).max(60)

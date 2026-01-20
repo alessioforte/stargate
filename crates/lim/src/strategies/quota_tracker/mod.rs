@@ -1,5 +1,6 @@
 mod time_window;
 
+use crate::clock::CachedClock;
 use crate::decision::RateLimitDecision;
 use crate::error::Result;
 use crate::state::State;
@@ -11,9 +12,6 @@ use std::sync::Arc;
 pub use time_window::TimeWindow;
 
 // ========================== IN-MEMORY IMPLEMENTATION =========================
-
-#[cfg(feature = "memory")]
-use crate::clock::CachedClock;
 
 #[cfg(feature = "memory")]
 pub struct QuotaTracker {
@@ -96,7 +94,12 @@ pub struct QuotaTracker {
 
 #[cfg(feature = "redis")]
 impl QuotaTracker {
-    pub fn new(store: Arc<State>, limit: u64, window: TimeWindow) -> Self {
+    pub fn new(
+        store: Arc<State>,
+        _clock: Arc<CachedClock>,
+        limit: u64,
+        window: TimeWindow,
+    ) -> Self {
         Self {
             store,
             limit,

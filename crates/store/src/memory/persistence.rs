@@ -1,4 +1,4 @@
-use super::memory::{BINCODE_CONFIG, MemoryStore, StoreValue};
+use super::memory::{MemoryStore, StoreValue};
 use super::stats::OperationStats;
 use crate::error::{StoreError, StoreResult};
 use crate::store::Store;
@@ -29,13 +29,9 @@ struct SerializableStoreData {
 }
 
 impl MemoryStore {
-    /// Helper function to parse bincode value as JSON
-    fn parse_bincode_value(value: &[u8]) -> serde_json::Value {
-        let result = bincode::serde::decode_from_slice(value, BINCODE_CONFIG).map_err(|e| {
-            StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
-        });
-        let data = result.unwrap().0;
-        serde_json::Value::String(data)
+    /// Helper function to parse JSON value from bytes
+    fn parse_json_value(value: &[u8]) -> serde_json::Value {
+        serde_json::from_slice(value).unwrap_or(serde_json::Value::Null)
     }
 
     /// Converts the current store data to a serializable format
@@ -46,14 +42,14 @@ impl MemoryStore {
             let key = entry.key().clone();
             let value = match entry.value() {
                 StoreValue::Simple(val, exp) => {
-                    let json_val = Self::parse_bincode_value(val);
+                    let json_val = Self::parse_json_value(val);
                     SerializableStoreValue::Simple(json_val, *exp)
                 }
                 StoreValue::Hash(hash_map, exp) => {
                     let mut hash_data = HashMap::new();
                     for hash_entry in hash_map.iter() {
                         let (val, field_exp) = hash_entry.value();
-                        let json_val = Self::parse_bincode_value(val);
+                        let json_val = Self::parse_json_value(val);
                         hash_data.insert(hash_entry.key().clone(), (json_val, *field_exp));
                     }
                     SerializableStoreValue::Hash(hash_data, *exp)
@@ -79,13 +75,13 @@ impl MemoryStore {
         for (key, value) in data.data {
             let store_value = match value {
                 SerializableStoreValue::Simple(val, exp) => {
-                    let data = bincode::serde::encode_to_vec(val, BINCODE_CONFIG).unwrap();
+                    let data = serde_json::to_vec(&val).unwrap_or_default();
                     StoreValue::Simple(data, exp)
                 }
                 SerializableStoreValue::Hash(hash_data, exp) => {
                     let dash_map = DashMap::new();
                     for (field, (val, field_exp)) in hash_data {
-                        let data = bincode::serde::encode_to_vec(val, BINCODE_CONFIG).unwrap();
+                        let data = serde_json::to_vec(&val).unwrap_or_default();
                         dash_map.insert(field, (data, field_exp));
                     }
                     StoreValue::Hash(dash_map, exp)
@@ -241,7 +237,7 @@ impl MemoryStore {
                 StoreValue::Simple(val, exp) => {
                     // Only include non-expired simple values
                     if !self.is_expired(exp) {
-                        let json_val = Self::parse_bincode_value(val);
+                        let json_val = Self::parse_json_value(val);
                         export_data.insert(key, json_val);
                     }
                 }
@@ -252,7 +248,7 @@ impl MemoryStore {
                         for hash_entry in hash_map.iter() {
                             let (field_val, field_exp) = hash_entry.value();
                             if !self.is_expired(field_exp) {
-                                let json_val = Self::parse_bincode_value(field_val);
+                                let json_val = Self::parse_json_value(field_val);
                                 hash_export.insert(hash_entry.key().clone(), json_val);
                             }
                         }

@@ -1,10 +1,10 @@
-use crate::etc::{self, ext::RequestExt};
+use crate::etc::{self, ext::RequestExt, sub::Subject};
 use actix_web::HttpRequest;
 use store::Store;
 use tracing::error;
 
 // TODO: maybe should return a Result instead of an Option
-pub async fn verify_api_key(req: &HttpRequest) -> Option<etc::sub::Subject> {
+pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
     let api_key = match req.get_api_key() {
         Some(k) => k,
         None => {
@@ -13,10 +13,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<etc::sub::Subject> {
     };
     let hash_key = pw::hash_api_key(&api_key);
     let store = etc::store::use_store();
-    let session = store
-        .get::<etc::sub::Subject>(&hash_key)
-        .await
-        .unwrap_or(None);
+    let session = store.get::<Subject>(&hash_key).await.unwrap_or(None);
 
     if let Some(subject) = session {
         return Some(subject);
@@ -36,7 +33,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<etc::sub::Subject> {
             return None;
         }
 
-        let subject = etc::sub::Subject::from(api_key.clone());
+        let subject = Subject::from(api_key.clone());
         let ttl = Some(3600);
         match store.set(&hash_key, &subject, ttl).await {
             Ok(_) => (),
@@ -51,7 +48,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<etc::sub::Subject> {
     None
 }
 
-pub async fn verify_jwt(req: &HttpRequest) -> Option<etc::sub::Subject> {
+pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
     let token = match req.get_token() {
         Some(t) => t,
         None => {
@@ -70,11 +67,13 @@ pub async fn verify_jwt(req: &HttpRequest) -> Option<etc::sub::Subject> {
     // Get subject from session store
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
-    let session = store.get::<etc::sub::Subject>(&sid).await;
+    let session = match store.get::<Subject>(&sid).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to get subject from the session store: {}", e);
+            None
+        }
+    };
 
-    if let Ok(Some(subject)) = session {
-        return Some(subject);
-    }
-
-    None
+    session
 }

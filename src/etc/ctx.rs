@@ -41,8 +41,10 @@ pub async fn middleware(
         None => AuditContext::anonymous().with_request_context(request_id, ip_address, user_agent),
     };
 
-    sr.extensions_mut().insert(sub);
-    sr.extensions_mut().insert(ctx);
+    if let Some(s) = sub {
+        req.extensions_mut().insert(s);
+    }
+    req.extensions_mut().insert(ctx);
 
     next.call(sr).await
 }
