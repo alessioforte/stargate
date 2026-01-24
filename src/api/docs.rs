@@ -1,7 +1,8 @@
 use super::ApiDoc;
 use crate::err::ErrorResponse;
+use crate::fun::get_base_url;
 use actix_web::{HttpResponse, Scope, get};
-use utoipa::OpenApi;
+use utoipa::{OpenApi, openapi::Server};
 
 #[utoipa::path(
     context_path = "/docs",
@@ -13,7 +14,12 @@ use utoipa::OpenApi;
 )]
 #[get("")]
 pub async fn get_api_doc() -> Result<HttpResponse, ErrorResponse> {
-    Ok(HttpResponse::Ok().json(ApiDoc::openapi()))
+    let mut doc = ApiDoc::openapi();
+
+    let base_url = get_base_url();
+    doc.servers = Some(vec![Server::new(base_url)]);
+
+    Ok(HttpResponse::Ok().json(doc))
 }
 
 pub fn routes() -> Scope {

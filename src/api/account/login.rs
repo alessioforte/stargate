@@ -51,7 +51,14 @@ pub async fn handler(
         }
     };
 
-    let password = user_credential.unwrap().value;
+    let password = match user_credential {
+        Some(c) => c.value,
+        None => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Invalid password".to_string(),
+            )));
+        }
+    };
 
     if Hash::verify(&credentials.password, &password).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(

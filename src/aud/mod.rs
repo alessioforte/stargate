@@ -1,11 +1,11 @@
 // ## **🏗️ Audit Service Architecture** ##
 
-// ┌─────────────────────────────────────────┐
-// │  AuditService (Singleton)               │
-// │  - Event Bus Centralized                │
-// │  - Automatic buffering of events        │
-// │  - Flush every 5 seconds                │
-// └──────────────┬──────────────────────────┘
+//        ┌─────────────────────────────────────────┐
+//        │  AuditService (Singleton)               │
+//        │  - Event Bus Centralized                │
+//        │  - Automatic buffering of events        │
+//        │  - Flush every 5 seconds                │
+//        └───────┬─────────────────────────────────┘
 //                │
 //        ┌───────┴───────┬─────────────┬─────────────┐
 //        ▼               ▼             ▼             ▼
@@ -67,15 +67,16 @@ impl AuditService {
         }
 
         let batch = std::mem::take(buffer);
-        let count = buffer.len();
+        let count = batch.len();
 
         let svc = service();
-        match svc.insert_audit_log_bulk(batch).await {
+        match svc.insert_audit_log_bulk(batch.clone()).await {
             Ok(_) => {
                 tracing::debug!("Successfully inserted {} audit records", count);
             }
             Err(e) => {
                 tracing::error!("Failed to insert audit records: {}", e);
+                buffer.extend(batch);
             }
         }
     }

@@ -43,7 +43,6 @@ async fn main() -> std::io::Result<()> {
     let gcfg = gate::init();
 
     fun::create_super_admin().await;
-    let tls = tls::builder();
 
     let server = HttpServer::new(move || {
         App::new()
@@ -59,6 +58,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     if tls_enabled == "true" {
+        let tls = tls::builder();
         return server.bind_openssl(addrs, tls)?.run().await;
     }
 

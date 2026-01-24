@@ -76,7 +76,7 @@ pub enum Code {
     InternalServerError,
     InvalidToken,
     MissingParameter,
-    SurrealDBError, // TODO: delete
+    DBError,
 
     TooManyRequests,
     ServiceUnavailable,
@@ -115,7 +115,7 @@ impl Code {
             }
             InvalidToken => ErrCode::authentication("invalid_api_key", StatusCode::FORBIDDEN),
             MissingParameter => ErrCode::invalid("missing_parameter", StatusCode::BAD_REQUEST),
-            SurrealDBError => ErrCode::internal("surrealdb", StatusCode::INTERNAL_SERVER_ERROR),
+            DBError => ErrCode::internal("database", StatusCode::INTERNAL_SERVER_ERROR),
             TooManyRequests => ErrCode::invalid("too_many_requests", StatusCode::TOO_MANY_REQUESTS),
             ServiceUnavailable => {
                 ErrCode::internal("service_unavailable", StatusCode::SERVICE_UNAVAILABLE)

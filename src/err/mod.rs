@@ -53,7 +53,7 @@ impl ErrorCode for HttpError {
             HttpError::DocumentNotFound(_) => Code::DocumentNotFound,
             HttpError::MissingPayload(_) => Code::MissingPayload,
             HttpError::Payload(e) => e.error_code(),
-            HttpError::Db(_) => Code::SurrealDBError,
+            HttpError::Db(_) => Code::DBError,
             HttpError::Unauthorized(_) => Code::Unauthorized,
             HttpError::Forbidden(_) => Code::Forbidden,
             HttpError::InternalServerError(_) => Code::InternalServerError,

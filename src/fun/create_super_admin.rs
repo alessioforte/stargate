@@ -3,9 +3,13 @@ use db::ent::{AuditContext, CredentialType, Profile};
 use tracing::{error, info};
 
 pub async fn create_super_admin() {
-    let super_admin = crate::db::get_user_by_username(etc::consts::STARGATE_ADMIN)
-        .await
-        .unwrap();
+    let super_admin = match crate::db::get_user_by_username(etc::consts::STARGATE_ADMIN).await {
+        Ok(user) => user,
+        Err(e) => {
+            error!("Failed to get super admin: {}", e);
+            return;
+        }
+    };
 
     if super_admin.is_some() {
         info!("Super admin already exists.");
