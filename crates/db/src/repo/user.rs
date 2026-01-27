@@ -111,4 +111,118 @@ impl UserRepository {
 
         Ok(row)
     }
+
+    pub async fn get_all(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<User>> {
+        let rows = sqlx::query_as::<_, User>(
+            format!(
+                "SELECT * FROM {users} ORDER BY id LIMIT $1 OFFSET $2",
+                users = USER
+            )
+            .as_str(),
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<i64> {
+        let row: (i64,) =
+            sqlx::query_as(format!("SELECT COUNT(*) FROM {users}", users = USER).as_str())
+                .fetch_one(&mut **tx)
+                .await?;
+
+        Ok(row.0)
+    }
+
+    pub async fn search_with_pagination(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<User>> {
+        let pattern = format!("%{}%", query);
+        let rows = sqlx::query_as::<_, User>(
+            format!(
+                "SELECT * FROM {users}
+                 WHERE email ILIKE $1 OR given_name ILIKE $1 OR family_name ILIKE $1 OR nickname ILIKE $1
+                 ORDER BY id LIMIT $2 OFFSET $3",
+                users = USER
+            )
+            .as_str(),
+        )
+        .bind(&pattern)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_search(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        query: &str,
+    ) -> Result<i64> {
+        let pattern = format!("%{}%", query);
+        let row: (i64,) = sqlx::query_as(
+            format!(
+                "SELECT COUNT(*) FROM {users}
+                 WHERE email ILIKE $1 OR given_name ILIKE $1 OR family_name ILIKE $1 OR nickname ILIKE $1",
+                users = USER
+            )
+            .as_str(),
+        )
+        .bind(&pattern)
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row.0)
+    }
+
+    pub async fn get_by_id(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &str,
+    ) -> Result<Option<User>> {
+        let row = sqlx::query_as::<_, User>(
+            format!("SELECT * FROM {users} WHERE id = $1", users = USER).as_str(),
+        )
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn delete(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &str,
+    ) -> Result<()> {
+        sqlx::query(format!("DELETE FROM {users} WHERE id = $1", users = USER).as_str())
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+
+        Ok(())
+    }
 }

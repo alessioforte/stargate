@@ -1,102 +1,464 @@
-use crate::err::ErrorResponse;
-use actix_web::{HttpResponse, delete, get, patch, post, put, web};
+use crate::err::{ErrorResponse, HttpError};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use actix_web_grants::protect;
+use db::ent::{AuditContext, CredentialType, Profile, User};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-struct User {
-    email: String,
-    given_name: String,
-    family_name: String,
-    password: String,
-    nickname: String,
+const DEFAULT_LIMIT: i64 = 20;
+const MAX_LIMIT: i64 = 100;
+
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUsersQuery {
+    /// Maximum number of users to return (default: 20, max: 100)
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Number of users to skip (default: 0)
+    #[serde(default)]
+    pub offset: Option<i64>,
+    /// Search query to filter users by email, name, or nickname
+    #[serde(default)]
+    pub q: Option<String>,
 }
 
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginatedResponse<T> {
+    pub data: Vec<T>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateUserRequest {
+    pub email: String,
+    pub password: String,
+    #[serde(default)]
+    pub given_name: Option<String>,
+    #[serde(default)]
+    pub family_name: Option<String>,
+    #[serde(default)]
+    pub nickname: Option<String>,
+    #[serde(default)]
+    pub picture: Option<String>,
+    #[serde(default)]
+    pub phone_number: Option<String>,
+    #[serde(default = "default_attrs")]
+    pub attrs: Value,
+}
+
+fn default_attrs() -> Value {
+    Value::Null
+}
+
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateUserRequest {
+    pub email: String,
+    #[serde(default)]
+    pub given_name: Option<String>,
+    #[serde(default)]
+    pub family_name: Option<String>,
+    #[serde(default)]
+    pub nickname: Option<String>,
+    #[serde(default)]
+    pub picture: Option<String>,
+    #[serde(default)]
+    pub phone_number: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchUserRequest {
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub given_name: Option<String>,
+    #[serde(default)]
+    pub family_name: Option<String>,
+    #[serde(default)]
+    pub nickname: Option<String>,
+    #[serde(default)]
+    pub picture: Option<String>,
+    #[serde(default)]
+    pub phone_number: Option<String>,
+}
+
+/// Get all users with pagination and optional search
 #[utoipa::path(
     context_path = "/admin",
     path = "/users",
     tags = ["Admin"],
+    params(ListUsersQuery),
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "List of users retrieved successfully", body = PaginatedResponse<User>),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[get("")]
 #[protect("SUPER_ADMIN")]
-pub async fn get_users() -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement get users logic
-    Ok(HttpResponse::Ok().json(web::Json("List of users")))
+pub async fn get_users(query: web::Query<ListUsersQuery>) -> Result<HttpResponse, ErrorResponse> {
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let (users, total) = match &query.q {
+        Some(search_query) if !search_query.trim().is_empty() => {
+            let users = crate::db::search_users(search_query, limit, offset)
+                .await
+                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            let total = crate::db::count_search_users(search_query)
+                .await
+                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            (users, total)
+        }
+        _ => {
+            let users = crate::db::get_all_users(limit, offset)
+                .await
+                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            let total = crate::db::count_users()
+                .await
+                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            (users, total)
+        }
+    };
+
+    let response = PaginatedResponse {
+        data: users,
+        total,
+        limit,
+        offset,
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
-#[utoipa::path(
-    context_path = "/admin",
-    path = "/users",
-    tags = ["Admin"],
-    responses(
-        (status = 200, description = "OK")
-    )
-)]
-#[post("")]
-#[protect("SUPER_ADMIN")]
-pub async fn create_user(_user: web::Json<User>) -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement create user logic
-    Ok(HttpResponse::Ok().json(web::Json("User created successfully")))
-}
-
+/// Get a user by ID
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}",
     tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "User ID")
+    ),
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "User retrieved successfully"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[get("/{id}")]
+#[protect("SUPER_ADMIN")]
+pub async fn get_user(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
+    let id = params.into_inner();
+
+    let user = match crate::db::get_user_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "User with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(user))
+}
+
+/// Create a new user
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/users",
+    tags = ["Admin"],
+    request_body = CreateUserRequest,
+    responses(
+        (status = 201, description = "User created successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 409, description = "Conflict - user already exists"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[post("")]
+#[protect("SUPER_ADMIN")]
+pub async fn create_user(
+    req: HttpRequest,
+    payload: web::Json<CreateUserRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    // Check if user already exists
+    if let Ok(Some(_)) = crate::db::get_user_by_username(&payload.email).await {
+        return Err(ErrorResponse::from(HttpError::Conflict(format!(
+            "User with email '{}' already exists",
+            payload.email
+        ))));
+    }
+
+    // Hash the password
+    let hashed_password = match pw::Hash::encode(&payload.password) {
+        Ok(hash) => hash,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    // Create profile from request
+    let profile = Profile::new(payload.email.clone())
+        .given_name(payload.given_name.clone())
+        .family_name(payload.family_name.clone())
+        .nickname(payload.nickname.clone())
+        .picture(payload.picture.clone())
+        .phone_number(payload.phone_number.clone())
+        .attrs(payload.attrs.clone());
+
+    let user = match crate::db::create_user(
+        profile,
+        CredentialType::Password,
+        &hashed_password,
+        ctx,
+    )
+    .await
+    {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Created().json(user))
+}
+
+/// Update a user (full replacement)
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/users/{id}",
+    tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "User ID")
+    ),
+    request_body = UpdateUserRequest,
+    responses(
+        (status = 200, description = "User updated successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[put("/{id}")]
 #[protect("SUPER_ADMIN")]
 pub async fn update_user(
-    _params: web::Path<String>,
-    _user: web::Json<User>,
+    req: HttpRequest,
+    params: web::Path<String>,
+    payload: web::Json<UpdateUserRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement update user logic
-    Ok(HttpResponse::Ok().json(web::Json("User updated successfully")))
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Get existing user
+    let existing_user = match crate::db::get_user_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "User with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    // Create updated user with new values
+    let updated_user = db::ent::User::new(existing_user.account_id.clone(), payload.email.clone())
+        .given_name(payload.given_name.clone())
+        .family_name(payload.family_name.clone())
+        .nickname(payload.nickname.clone())
+        .picture(payload.picture.clone())
+        .phone_number(payload.phone_number.clone())
+        .attrs(existing_user.attrs.clone());
+
+    // Preserve the original ID
+    let mut updated_user = updated_user;
+    updated_user.id = existing_user.id;
+
+    let user = match crate::db::update_user(updated_user, ctx).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(user))
 }
 
+/// Patch a user (partial update)
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}",
     tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "User ID")
+    ),
+    request_body = PatchUserRequest,
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "User patched successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[patch("/{id}")]
 #[protect("SUPER_ADMIN")]
 pub async fn patch_user(
-    _params: web::Path<String>,
-    _user: web::Json<User>,
+    req: HttpRequest,
+    params: web::Path<String>,
+    payload: web::Json<PatchUserRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement patch user logic
-    Ok(HttpResponse::Ok().json(web::Json("User patched successfully")))
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Get existing user
+    let mut existing_user = match crate::db::get_user_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "User with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    // Apply partial updates
+    if let Some(email) = &payload.email {
+        existing_user.email = email.clone();
+    }
+    if payload.given_name.is_some() {
+        existing_user.given_name = payload.given_name.clone();
+    }
+    if payload.family_name.is_some() {
+        existing_user.family_name = payload.family_name.clone();
+    }
+    if payload.nickname.is_some() {
+        existing_user.nickname = payload.nickname.clone();
+    }
+    if payload.picture.is_some() {
+        existing_user.picture = payload.picture.clone();
+    }
+    if payload.phone_number.is_some() {
+        existing_user.phone_number = payload.phone_number.clone();
+    }
+
+    let user = match crate::db::update_user(existing_user, ctx).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(user))
 }
 
+/// Delete a user
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}",
     tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "User ID")
+    ),
     responses(
-        (status = 200, description = "OK")
+        (status = 204, description = "User deleted successfully"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[delete("/{id}")]
 #[protect("SUPER_ADMIN")]
-pub async fn delete_user(_params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement delete user logic
-    Ok(HttpResponse::Ok().json(web::Json("User deleted successfully")))
+pub async fn delete_user(
+    req: HttpRequest,
+    params: web::Path<String>,
+) -> Result<HttpResponse, ErrorResponse> {
+    // FIXME: Prevent deletion of usper admin
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Check if user exists
+    if let Ok(None) = crate::db::get_user_by_id(&id).await {
+        return Err(ErrorResponse::from(HttpError::NotFound(format!(
+            "User with id '{}' not found",
+            id
+        ))));
+    }
+
+    match crate::db::delete_user(&id, ctx).await {
+        Ok(()) => {}
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    }
+
+    Ok(HttpResponse::NoContent().finish())
 }
+
+// update user attrs
+// patch user attrs
 
 pub fn routes() -> actix_web::Scope {
     web::scope("/users")
         .service(get_users)
         .service(create_user)
+        .service(get_user)
         .service(update_user)
         .service(patch_user)
         .service(delete_user)

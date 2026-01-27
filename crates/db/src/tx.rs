@@ -11,7 +11,13 @@ pub trait Transaction {
         value: &str,
     ) -> Result<User>;
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
+    async fn get_user_by_id(&self, id: &str) -> Result<Option<User>>;
+    async fn get_all_users(&self, limit: i64, offset: i64) -> Result<Vec<User>>;
+    async fn count_users(&self) -> Result<i64>;
+    async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>>;
+    async fn count_search_users(&self, query: &str) -> Result<i64>;
     async fn update_user(&self, user: User) -> Result<User>;
+    async fn delete_user(&self, id: &str) -> Result<()>;
     async fn change_password(&self, user_id: &str, new_password: &str) -> Result<Credential>;
     async fn get_credential(
         &self,

@@ -117,12 +117,91 @@ impl Transaction for Service {
         Ok(user)
     }
 
+    /// Retrieves a user by their ID.
+    async fn get_user_by_id(&self, id: &str) -> Result<Option<User>> {
+        let mut tx = self.pool.begin().await?;
+        let user = self.user.get_by_id(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(user)
+    }
+
+    /// Retrieves all users with pagination.
+    async fn get_all_users(&self, limit: i64, offset: i64) -> Result<Vec<User>> {
+        let mut tx = self.pool.begin().await?;
+        let users = self.user.get_all(&mut tx, limit, offset).await?;
+        tx.commit().await?;
+        Ok(users)
+    }
+
+    /// Counts total number of users.
+    async fn count_users(&self) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.user.count(&mut tx).await?;
+        tx.commit().await?;
+        Ok(count)
+    }
+
+    /// Searches users with pagination.
+    async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>> {
+        let mut tx = self.pool.begin().await?;
+        let users = self
+            .user
+            .search_with_pagination(&mut tx, query, limit, offset)
+            .await?;
+        tx.commit().await?;
+        Ok(users)
+    }
+
+    /// Counts users matching search query.
+    async fn count_search_users(&self, query: &str) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.user.count_search(&mut tx, query).await?;
+        tx.commit().await?;
+        Ok(count)
+    }
+
     /// Updates the information of an existing user.
     async fn update_user(&self, user: User) -> Result<User> {
         let mut tx = self.pool.begin().await?;
         let updated_user = self.user.update(&mut tx, user).await?;
+        let name = format!(
+            "{} {}",
+            updated_user.given_name.clone().unwrap_or_default(),
+            updated_user.family_name.clone().unwrap_or_default()
+        )
+        .trim()
+        .to_string();
+        let _ = self
+            .account
+            .update(
+                &mut tx,
+                &updated_user.account_id,
+                AccountType::User,
+                &name,
+                None,
+            )
+            .await?;
         tx.commit().await?;
         Ok(updated_user)
+    }
+
+    /// Deletes a user and all associated data (credentials, account).
+    async fn delete_user(&self, id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Get user to find account_id
+        let user = self.user.get_by_id(&mut tx, id).await?;
+        if let Some(user) = user {
+            // Delete credentials first (foreign key constraint)
+            self.credential.delete_by_user_id(&mut tx, id).await?;
+            // Delete user
+            self.user.delete(&mut tx, id).await?;
+            // Delete account
+            self.account.delete(&mut tx, &user.account_id).await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Changes the password for a user.

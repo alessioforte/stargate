@@ -101,4 +101,24 @@ impl CredentialRepository {
 
         Ok(row)
     }
+
+    pub async fn delete_by_user_id(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user_id: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            format!(
+                "DELETE FROM {credentials} WHERE user_id = $1",
+                credentials = CREDENTIAL
+            )
+            .as_str(),
+        )
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
 }

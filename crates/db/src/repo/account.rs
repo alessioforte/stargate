@@ -11,6 +11,28 @@ impl AccountRepository {
         Self {}
     }
 
+    pub async fn get_by_id(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &str,
+    ) -> Result<Option<Account>> {
+        let row = sqlx::query_as::<_, Account>(
+            format!(
+                "
+            SELECT * FROM {accounts} WHERE id = $1
+        ",
+                accounts = ACCOUNT
+            )
+            .as_str(),
+        )
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn create(
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -46,25 +68,52 @@ impl AccountRepository {
         Ok(row)
     }
 
-    pub async fn get_by_id(
+    pub async fn update(
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         id: &str,
-    ) -> Result<Option<Account>> {
+        account_type: AccountType,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<Account> {
+        let account = Account::new(
+            name.to_string(),
+            account_type,
+            description.map(|d| d.to_string()),
+        );
+
         let row = sqlx::query_as::<_, Account>(
             format!(
                 "
-            SELECT * FROM {accounts} WHERE id = $1
+            UPDATE {accounts} SET type = $2, name = $3, description = $4 WHERE id = $1
+            RETURNING *
         ",
                 accounts = ACCOUNT
             )
             .as_str(),
         )
         .bind(id)
-        .fetch_optional(&mut **tx)
+        .bind(&account.account_type)
+        .bind(&account.name)
+        .bind(&account.description)
+        .fetch_one(&mut **tx)
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn delete(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &str,
+    ) -> Result<()> {
+        sqlx::query(format!("DELETE FROM {accounts} WHERE id = $1", accounts = ACCOUNT).as_str())
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+
+        Ok(())
     }
 }
