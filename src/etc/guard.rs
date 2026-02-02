@@ -4,6 +4,7 @@ use store::Store;
 use tracing::error;
 
 // TODO: maybe should return a Result instead of an Option
+/// Verify API key and return subject if valid from the session store
 pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
     let api_key = match req.get_api_key() {
         Some(k) => k,
@@ -48,6 +49,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
     None
 }
 
+/// Verify JWT token and return subject if valid from the session store
 pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
     let token = match req.get_token() {
         Some(t) => t,

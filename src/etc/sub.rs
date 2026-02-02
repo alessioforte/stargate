@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::str::FromStr;
 
+/// Session subject type
+///
+/// Should be matched with the subject type in the access control system.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum SubjectType {
     User,
     ApiKey,
@@ -46,7 +51,7 @@ pub struct Subject {
     #[serde(rename = "type")]
     pub id: String,
     pub account_id: String,
-    pub sub_type: String,
+    pub sub_type: SubjectType,
     pub attrs: JsonValue,
 }
 
@@ -60,12 +65,12 @@ impl Subject {
         Subject {
             id,
             account_id,
-            sub_type: sub_type.as_str().to_string(),
+            sub_type,
             attrs: attrs.unwrap_or(JsonValue::Object(serde_json::Map::new())),
         }
     }
 
-    // Get attribute by key
+    /// Get attribute by key
     pub fn get_attr(&self, key: &str) -> Option<&JsonValue> {
         self.attrs.get(key)
     }

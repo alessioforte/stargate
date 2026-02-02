@@ -17,11 +17,14 @@ pub async fn create_user(
     ctx: AuditContext,
 ) -> Result<User> {
     let svc = service();
-    let metadata = serde_json::to_value(&profile).unwrap_or_default();
     match svc.create_user(profile, credential_type, value).await {
         Ok(user) => {
+            let metadata = serde_json::to_value(&user).unwrap_or_default();
             let resource = USER.to_string();
-            let ctx = ctx.with_resource(resource).with_metadata(metadata);
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(user.id.clone())
+                .with_metadata(metadata);
             audit::creation!(ctx);
             Ok(user)
         }
@@ -64,13 +67,16 @@ pub async fn count_search_users(query: &str) -> Result<i64> {
 
 pub async fn update_user(user: User, ctx: AuditContext) -> Result<User> {
     let svc = service();
-    let metadata = serde_json::to_value(&user).unwrap_or_default();
     match svc.update_user(user).await {
-        Ok(user) => {
+        Ok(updated_user) => {
+            let metadata = serde_json::to_value(&updated_user).unwrap_or_default();
             let resource = USER.to_string();
-            let ctx = ctx.with_resource(resource).with_metadata(metadata);
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(updated_user.id.clone())
+                .with_metadata(metadata);
             audit::modification!(ctx);
-            Ok(user)
+            Ok(updated_user)
         }
         Err(e) => {
             tracing::error!("Error updating user: {:?}", e);
@@ -81,11 +87,10 @@ pub async fn update_user(user: User, ctx: AuditContext) -> Result<User> {
 
 pub async fn delete_user(id: &str, ctx: AuditContext) -> Result<()> {
     let svc = service();
-    let metadata = serde_json::to_value(&id).unwrap_or_default();
     match svc.delete_user(id).await {
         Ok(()) => {
             let resource = USER.to_string();
-            let ctx = ctx.with_resource(resource).with_metadata(metadata);
+            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
             audit::deletion!(ctx);
             Ok(())
         }
@@ -102,11 +107,12 @@ pub async fn change_password(
     ctx: AuditContext,
 ) -> Result<Credential> {
     let svc = service();
-    let metadata = serde_json::to_value(&user_id).unwrap_or_default();
     match svc.change_password(user_id, new_password).await {
         Ok(credential) => {
             let resource = CREDENTIAL.to_string();
-            let ctx = ctx.with_resource(resource).with_metadata(metadata);
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(user_id.to_string());
             audit::modification!(ctx);
             Ok(credential)
         }
@@ -133,11 +139,12 @@ pub async fn create_api_key(
     ctx: AuditContext,
 ) -> Result<ApiKey> {
     let svc = service();
-    let metadata = serde_json::to_value(&account_id).unwrap_or_default();
     match svc.create_api_key(account_id, key_hash, label, attrs).await {
         Ok(api_key) => {
             let resource = API_KEY.to_string();
-            let ctx = ctx.with_resource(resource).with_metadata(metadata);
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(api_key.id.to_string());
             audit::creation!(ctx);
             Ok(api_key)
         }

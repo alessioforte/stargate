@@ -1,11 +1,11 @@
--- CREATE TYPE account_type AS ENUM ('user', 'service');
--- CREATE TYPE credential_type AS ENUM ('password', 'oauth');
--- CREATE TYPE action_type AS ENUM ('create', 'update', 'delete', 'read', 'login', 'logout');
+CREATE TYPE account_type AS ENUM ('user', 'service');
+CREATE TYPE credential_type AS ENUM ('password', 'oauth');
+CREATE TYPE action_type AS ENUM ('create', 'update', 'delete', 'read', 'login', 'logout');
+CREATE TYPE actor_type AS ENUM ('admin', 'user', 'api_key', 'system', 'anonymous');
 
 CREATE TABLE IF NOT EXISTS "accounts" (
     "id" TEXT PRIMARY KEY,
     "type" account_type NOT NULL,
-    -- "type" VARCHAR(50) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "description" TEXT
 );
@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS "credentials" (
     "id" TEXT PRIMARY KEY,
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
     "timestamp" bigint NOT NULL,
-    -- "type" VARCHAR(50) NOT NULL,
     "type" credential_type NOT NULL,
     "value" TEXT NOT NULL
 );
@@ -43,9 +42,11 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
 CREATE TABLE IF NOT EXISTS "audits" (
     "id" TEXT PRIMARY KEY,
     "timestamp" TIMESTAMPTZ NOT NULL,
-    "resource" VARCHAR(100) NOT NULL,
+    "actor_type" actor_type NOT NULL,
+    "actor_id" TEXT,
     "action" action_type NOT NULL,
-    "account_id" TEXT,
+    "resource" VARCHAR(100) NOT NULL,
+    "resource_id" TEXT,
     "request_id" TEXT,
     "ip_address" VARCHAR(45),
     "user_agent" TEXT,

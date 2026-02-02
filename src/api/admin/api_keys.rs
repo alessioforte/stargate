@@ -1,5 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, put, web};
 use actix_web_grants::protect;
 use db::ent::AuditContext;
 use serde::{Deserialize, Serialize};
@@ -92,6 +92,25 @@ pub async fn delete_api_key(_params: web::Path<String>) -> Result<HttpResponse, 
     // TODO: implement delete api key logic
     Ok(HttpResponse::Ok().json(web::Json("API Key deleted successfully")))
 }
+
+// revoke api key
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/apikeys/{id}/revoke",
+    tags = ["Admin"],
+    responses(
+        (status = 200, description = "OK")
+    )
+)]
+#[put("/{id}/revoke")]
+#[protect("SUPER_ADMIN")]
+pub async fn revoke_api_key(_params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
+    // TODO: implement revoke api key logic
+    Ok(HttpResponse::Ok().json(web::Json("API Key revoked successfully")))
+}
+
+// update api key attributes
+// patch api key attributes
 
 pub fn routes() -> actix_web::Scope {
     web::scope("/apikeys")

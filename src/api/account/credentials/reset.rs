@@ -87,8 +87,6 @@ pub async fn handler(
     let user = user.unwrap();
     let password = Hash::encode(&body.password).unwrap();
 
-    let ctx = ctx.with_account_id(user.account_id);
-
     match crate::db::change_password(&user.id, &password, ctx).await {
         Ok(_) => {}
         Err(e) => {

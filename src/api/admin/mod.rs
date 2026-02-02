@@ -2,7 +2,8 @@ pub mod api_keys;
 pub mod configurations;
 pub mod users;
 
-use crate::etc::{consts::STARGATE_ADMIN, ext::RequestExt, jwt::jwt_config};
+use crate::etc::{ext::RequestExt, jwt::jwt_config};
+use crate::fun::check_super_admin_by_claims;
 use actix_web::{
     Error, body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
     dev::ServiceResponse, web,
@@ -29,10 +30,8 @@ async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
         }
     };
 
-    if let Some(role) = claims.role {
-        if role == STARGATE_ADMIN {
-            return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
-        }
+    if check_super_admin_by_claims(claims) {
+        return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
     }
 
     Ok(HashSet::new())

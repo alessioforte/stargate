@@ -1,11 +1,11 @@
-use crate::etc::{ext::RequestExt, guard};
+use crate::etc::{ext::RequestExt, guard, sub::SubjectType};
 use actix_web::{
     Error, HttpMessage,
     body::MessageBody,
     dev::{ServiceRequest, ServiceResponse},
     middleware::Next,
 };
-use db::ent::AuditContext;
+use db::ent::{ActorType, AuditContext};
 use ulid::Ulid;
 
 pub async fn middleware(
@@ -36,7 +36,12 @@ pub async fn middleware(
 
     let ctx = match sub.clone() {
         Some(s) => {
-            AuditContext::new(s.account_id).with_request_context(request_id, ip_address, user_agent)
+            let actor_type = match s.sub_type {
+                SubjectType::User => ActorType::User,
+                SubjectType::ApiKey => ActorType::ApiKey,
+            };
+            AuditContext::new(actor_type, Some(s.id))
+                .with_request_context(request_id, ip_address, user_agent)
         }
         None => AuditContext::anonymous().with_request_context(request_id, ip_address, user_agent),
     };

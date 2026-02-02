@@ -22,7 +22,6 @@ use store::Store;
 )]
 #[post("/login")]
 pub async fn handler(
-    // session: Session,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let user = match crate::db::get_user_by_username(&credentials.username).await {

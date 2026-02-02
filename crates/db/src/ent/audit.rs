@@ -12,14 +12,25 @@ pub enum ActionType {
     Logout,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "actor_type", rename_all = "snake_case")]
+pub enum ActorType {
+    User,
+    ApiKey,
+    System,
+    Anonymous,
+}
+
 #[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Audit {
     pub id: String,
     pub timestamp: DateTime<Utc>,
-    pub resource: Option<String>,
+    pub actor_type: ActorType,
+    pub actor_id: Option<String>,
     pub action: ActionType,
-    pub account_id: String,
+    pub resource: Option<String>,
+    pub resource_id: Option<String>,
     pub request_id: Option<String>,
     pub ip_address: Option<String>,
     pub user_agent: Option<String>,
@@ -28,50 +39,90 @@ pub struct Audit {
 
 #[derive(Debug, Clone)]
 pub struct AuditContext {
-    account_id: String,
+    actor_type: ActorType,
+    actor_id: Option<String>,
     request_id: Option<String>,
     ip_address: Option<String>,
     user_agent: Option<String>,
     resource: Option<String>,
+    resource_id: Option<String>,
     metadata: Option<serde_json::Value>,
 }
 
 impl AuditContext {
-    pub fn new(account_id: String) -> Self {
+    pub fn new(actor_type: ActorType, actor_id: Option<String>) -> Self {
         AuditContext {
-            account_id,
+            actor_type,
+            actor_id,
             request_id: None,
             ip_address: None,
             user_agent: None,
             resource: None,
+            resource_id: None,
             metadata: None,
         }
     }
 
     pub fn system() -> Self {
         AuditContext {
-            account_id: "system".to_string(),
+            actor_type: ActorType::System,
+            actor_id: None,
             request_id: None,
             ip_address: None,
             user_agent: None,
             resource: None,
+            resource_id: None,
             metadata: None,
         }
     }
 
     pub fn anonymous() -> Self {
         AuditContext {
-            account_id: "anonymous".to_string(),
+            actor_type: ActorType::Anonymous,
+            actor_id: None,
             request_id: None,
             ip_address: None,
             user_agent: None,
             resource: None,
+            resource_id: None,
             metadata: None,
         }
     }
 
-    pub fn with_account_id(mut self, account_id: String) -> Self {
-        self.account_id = account_id;
+    pub fn user() -> Self {
+        AuditContext {
+            actor_type: ActorType::User,
+            actor_id: None,
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            resource: None,
+            resource_id: None,
+            metadata: None,
+        }
+    }
+
+    pub fn api_key() -> Self {
+        AuditContext {
+            actor_type: ActorType::ApiKey,
+            actor_id: None,
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            resource: None,
+            resource_id: None,
+            metadata: None,
+        }
+    }
+
+    pub fn with_actor(mut self, actor_type: ActorType, actor_id: Option<String>) -> Self {
+        self.actor_type = actor_type;
+        self.actor_id = actor_id;
+        self
+    }
+
+    pub fn with_actor_id(mut self, actor_id: String) -> Self {
+        self.actor_id = Some(actor_id);
         self
     }
 
@@ -97,14 +148,21 @@ impl AuditContext {
         self
     }
 
+    pub fn with_resource_id(mut self, resource_id: String) -> Self {
+        self.resource_id = Some(resource_id);
+        self
+    }
+
     pub fn build_audit(&self, action: ActionType) -> Audit {
         let id = ulid::Ulid::new().to_string();
         Audit {
             id,
-            action,
             timestamp: Utc::now(),
+            actor_type: self.actor_type.clone(),
+            actor_id: self.actor_id.clone(),
+            action,
             resource: self.resource.clone(),
-            account_id: self.account_id.clone(),
+            resource_id: self.resource_id.clone(),
             request_id: self.request_id.clone(),
             ip_address: self.ip_address.clone(),
             user_agent: self.user_agent.clone(),

@@ -1,9 +1,10 @@
-use crate::etc;
+use crate::etc::consts::STARGATE_ADMIN;
 use db::ent::{AuditContext, CredentialType, Profile};
+use jwt::Claims;
 use tracing::{error, info};
 
 pub async fn create_super_admin() {
-    let super_admin = match crate::db::get_user_by_username(etc::consts::STARGATE_ADMIN).await {
+    let super_admin = match crate::db::get_user_by_username(STARGATE_ADMIN).await {
         Ok(user) => user,
         Err(e) => {
             error!("Failed to get super admin: {}", e);
@@ -22,12 +23,9 @@ pub async fn create_super_admin() {
     let password = pw::generator(40, true, true, true, false);
     let user = Profile::new(email)
         .given_name(Some(name))
-        .nickname(Some(etc::consts::STARGATE_ADMIN.to_string()))
+        .nickname(Some(STARGATE_ADMIN.to_string()))
         .phone_number(None)
-        .picture(None)
-        .attrs(serde_json::json!({
-            "role": etc::consts::STARGATE_ADMIN,
-        }));
+        .picture(None);
 
     match crate::db::create_user(
         user,
@@ -40,4 +38,13 @@ pub async fn create_super_admin() {
         Ok(_) => info!("Super admin password: {}", password),
         Err(e) => error!("Failed to create super admin: {}", e),
     };
+}
+
+pub fn check_super_admin_by_claims(claims: Claims) -> bool {
+    if let Some(role) = claims.role {
+        if role == STARGATE_ADMIN {
+            return true;
+        }
+    }
+    false
 }

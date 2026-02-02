@@ -80,12 +80,12 @@ pub fn access_control(
     subject: &Subject,
     resource: &str,
 ) -> bool {
-    let sub_type = subject.sub_type.clone();
+    let sub_type = subject.sub_type.as_str();
     let (resource_name, resource_action) = parse_resource(resource);
     let action_key = resource_action.as_ref().map(|action| action.to_string());
     let attrs_signature = attrs_signature(subject);
     let key = DecisionKey {
-        sub_type: sub_type.clone(),
+        sub_type: sub_type.to_string(),
         resource: resource_name.clone(),
         action: action_key,
         attrs_signature,
@@ -137,7 +137,7 @@ fn create_context(sub: &Subject) -> HashMap<String, ace::Value> {
     }
     let attrs = attrs.unwrap();
     let mut entries = HashMap::with_capacity(attrs.len());
-    let sub_type = sub.sub_type.clone();
+    let sub_type = sub.sub_type.as_str();
     attrs.iter().for_each(|(k, v)| {
         let key = format!("{}.{}", sub_type, k);
         let value = ace::Value::from(v.clone());

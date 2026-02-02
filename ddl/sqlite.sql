@@ -41,9 +41,11 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
 CREATE TABLE IF NOT EXISTS "audits" (
     `id` TEXT,
     `timestamp` INT NOT NULL,
-    `resource` VARCHAR(100) NOT NULL,
+    `actor_type` VARCHAR(50) NOT NULL,
+    `actor_id` TEXT,
     `action` VARCHAR(100) NOT NULL,
-    `account_id` TEXT,
+    `resource` VARCHAR(100) NOT NULL,
+    `resource_id` TEXT,
     `request_id` TEXT,
     `ip_address` VARCHAR(45),
     `user_agent` TEXT,
