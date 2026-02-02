@@ -13,41 +13,42 @@ import {
   Text,
 } from "@react-email/components";
 
-interface SignupRequestProps {
+interface ChangePasswordRequestProps {
   token: string;
 }
 
-export const SignupRequest = ({ token = "{{token}}" }: SignupRequestProps) => {
+export const ChangePasswordRequest = ({
+  token = "{{token}}",
+}: ChangePasswordRequestProps) => {
   return (
     <Html>
       <Tailwind>
         <Head />
         <Body style={main}>
-          <Preview>Signup Request</Preview>
+          <Preview>Change Password Request</Preview>
           <Container className="pt-10">
             <Section>
               <Row className="p-5">
                 <Column>
                   <Heading className="text-[32px] font-bold text-center">
-                    Signup Request
+                    Change Password Request
                   </Heading>
 
                   <Text className="text-base">
-                    We received a request to create an account associated with
-                    this email address.
+                    We received a request to change your password.
                   </Text>
                   <Text className="text-base">
                     If you made this request, please click the button below to
-                    proceed with creating your account.
+                    proceed with changing your password.
                   </Text>
 
                   <Row className="my-20">
                     <Column className="text-center" colSpan={2}>
                       <Button
                         className="bg-[#007ee6] rounded border border-solid border-black/10 text-white font-bold cursor-pointer inline-block px-[30px] py-3 no-underline"
-                        href={`https://stargate.so/signup/verify-email?token=${token}`}
+                        href={`https://stargate.so/change-password?token=${token}`}
                       >
-                        Verify Your Email
+                        Change Password
                       </Button>
                     </Column>
                   </Row>
@@ -70,7 +71,7 @@ export const SignupRequest = ({ token = "{{token}}" }: SignupRequestProps) => {
   );
 };
 
-export default SignupRequest;
+export default ChangePasswordRequest;
 
 const main = {
   fontFamily:

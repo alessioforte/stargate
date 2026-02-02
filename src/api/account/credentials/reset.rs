@@ -100,8 +100,8 @@ pub async fn handler(
     let _ = act::delete_change_password_request(&email).await;
 
     let message = etc::msg::MessageResponse::new(
-        "Change Password".to_string(),
-        "change_password".to_string(),
+        "Password changed successfully".to_string(),
+        "password_changed".to_string(),
     );
 
     let given_name = user.given_name.clone().unwrap_or_default();

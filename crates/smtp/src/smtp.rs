@@ -22,9 +22,9 @@ impl Template {
     pub fn filename(&self) -> &str {
         match self {
             Template::SignupRequest => "signup-request",
-            Template::ChangePasswordRequest => "change_password_request",
-            Template::PasswordChangedNotification => "password_changed_notification",
-            Template::SignupCompleted => "signup_completed",
+            Template::ChangePasswordRequest => "change-password-request",
+            Template::PasswordChangedNotification => "password-changed",
+            Template::SignupCompleted => "signup-completed",
         }
     }
 }
