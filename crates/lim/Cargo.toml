@@ -14,7 +14,7 @@ redis = "0.32.7"
 serde = { version = "1.0.228", features = ["derive"] }
 store = { path = "../store" }
 thiserror = "2.0.17"
-tracing = "0.1.41"
+tracing = "0.1.44"
 
 [features]
 default = []

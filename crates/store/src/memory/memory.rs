@@ -1383,7 +1383,7 @@ impl MemoryStore {
         let config = self.config.clone();
 
         tokio::spawn(async move {
-            log::info!(
+            tracing::info!(
                 "MemoryStore adaptive cleaner started with base interval: {} seconds, batch size: {}",
                 base_interval,
                 config.cleanup_batch_size
@@ -1487,7 +1487,7 @@ impl MemoryStore {
                     stats
                         .expired_entries_cleaned
                         .fetch_add(removed as u64, Ordering::Relaxed);
-                    log::info!(
+                    tracing::info!(
                         "MemoryStore cleaner: removed {} expired entries, processed {}/{} items in {:?}, next interval: {}s",
                         removed,
                         processed,
@@ -1499,7 +1499,7 @@ impl MemoryStore {
 
                 // Memory pressure check
                 if config.max_memory_usage > 0 && data_size_after > config.max_memory_usage / 100 {
-                    log::warn!(
+                    tracing::warn!(
                         "MemoryStore approaching memory limit: {} keys (estimated {} bytes)",
                         data_size_after,
                         data_size_after * 100

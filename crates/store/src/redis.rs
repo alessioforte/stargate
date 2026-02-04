@@ -30,7 +30,7 @@ impl RedisStore {
             StoreError::ConnectionFailed(format!("Failed to create Redis client: {}", e))
         })?;
 
-        log::info!("Connected to Redis at {}", url);
+        tracing::info!("Connected to Redis at {}", url);
 
         Ok(Self { client })
     }
