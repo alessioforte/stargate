@@ -8,6 +8,7 @@ use actix_web::{
 use db::ent::{ActorType, AuditContext};
 use ulid::Ulid;
 
+/// Middleware function to verify the user or api_key and create the audit context for the request
 pub async fn middleware(
     sr: ServiceRequest,
     next: Next<impl MessageBody>,

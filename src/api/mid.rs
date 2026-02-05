@@ -9,8 +9,6 @@ use actix_web::{
 };
 use std::time::Duration;
 
-// TODO: Add here audit logging and create audit context
-
 pub async fn middleware<B: MessageBody + 'static>(
     sr: ServiceRequest,
     next: Next<B>,
@@ -34,9 +32,10 @@ pub async fn middleware<B: MessageBody + 'static>(
         Ok(decision) => decision,
         Err(e) => {
             tracing::error!("Rate limiter error: {}", e);
-            return Err(actix_web::error::ErrorInternalServerError(
-                "Rate limiter error",
+            let res = ErrorResponse::from(HttpError::InternalServerError(
+                "Rate limiter error".to_string(),
             ));
+            return Err(res.into());
         }
     };
 
@@ -64,7 +63,6 @@ pub async fn middleware<B: MessageBody + 'static>(
         res.insert_header("Retry-After", &retry_after)
             .insert_header("X-RateLimit-Limit", &limit)
             .insert_header("X-RateLimit-Remaining", &remaining);
-        // .insert_header("X-RateLimit-Reset", &reset);
 
         Err(res.into())
     }

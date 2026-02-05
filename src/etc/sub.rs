@@ -48,10 +48,19 @@ impl SubjectType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Subject {
-    #[serde(rename = "type")]
+    /// The identifier of the subject (e.g., user ID, API key ID, service account ID).
     pub id: String,
+
+    /// The identifier of the account associated with the subject.
     pub account_id: String,
+
+    // /// The identifier of the organization associated with the subject.
+    // pub org_id: String,
+    /// The type of subject (e.g., "user", "api_key").
+    #[serde(rename = "type")]
     pub sub_type: SubjectType,
+
+    /// Additional attributes related to the subject.
     pub attrs: JsonValue,
 }
 

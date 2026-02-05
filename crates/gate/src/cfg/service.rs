@@ -14,6 +14,7 @@ pub struct Service {
     pub load_balancer: Option<LoadBalancer>,
     pub auth_required: Option<bool>,
     pub resource: Option<String>,
+    pub cost: Option<u64>,
     pub routes: Option<Vec<Route>>,
 }
 
@@ -23,6 +24,7 @@ pub struct Route {
     pub method: String,
     pub auth_required: Option<bool>,
     pub resource: Option<String>,
+    pub cost: Option<u64>,
 }
 
 fn default_protocol() -> Protocol {

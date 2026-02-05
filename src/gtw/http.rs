@@ -1,9 +1,12 @@
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{HttpRequest, HttpResponse, HttpResponseBuilder, web::Payload};
+use actix_web::{
+    HttpRequest, HttpResponse, HttpResponseBuilder, http::header::HeaderMap, web::Payload,
+};
 
 pub async fn handler(
     req: &HttpRequest,
     stream: Payload,
+    headers: &HeaderMap,
     uri: &String,
     client: &awc::Client,
 ) -> Result<HttpResponse, ErrorResponse> {
@@ -26,6 +29,11 @@ pub async fn handler(
         .iter()
         .filter(|(h, _)| *h != "connection")
     {
+        builder.insert_header((name, value));
+    }
+
+    // Add custom headers from the request
+    for (name, value) in headers.iter() {
         builder.insert_header((name, value));
     }
 

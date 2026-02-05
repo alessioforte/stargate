@@ -173,6 +173,7 @@ impl Gate {
                     let route = RouteNode {
                         auth_required: r.auth_required.unwrap_or(false),
                         resource: r.resource.clone(),
+                        cost: r.cost,
                     };
                     let router = map.get(&r.method);
                     if router.is_none() {
@@ -194,6 +195,7 @@ impl Gate {
                 name: service.name.clone(),
                 path: service.path.clone(),
                 lb: Some(lb),
+                cost: service.cost,
                 routes,
             };
 

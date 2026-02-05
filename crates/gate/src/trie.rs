@@ -44,6 +44,8 @@ pub struct RouteNode {
     pub auth_required: bool,
     /// Optional resource identifier for authorization (e.g., "users:read")
     pub resource: Option<String>,
+    /// Cost for the quota tracking
+    pub cost: Option<u64>,
 }
 
 /// A service registration containing routing and load balancing configuration.
@@ -61,6 +63,8 @@ pub struct Service {
     pub auth_required: Option<bool>,
     /// Optional resource identifier for service-level authorization
     pub resource: Option<String>,
+    /// Cost for the quota tracking
+    pub cost: Option<u64>,
     /// Fine-grained routing rules by HTTP method and path
     pub routes: Option<HashMap<String, matchit::Router<RouteNode>>>,
 }
@@ -256,6 +260,7 @@ mod tests {
             path: path.to_string(),
             lb: Some(lb),
             auth_required: Some(false),
+            cost: None,
             resource: None,
             routes: None,
         }
@@ -603,6 +608,7 @@ mod tests {
             lb: Some(lb),
             auth_required: Some(true),
             resource: Some("admin:read".to_string()),
+            cost: Some(1),
             routes: None,
         };
 
