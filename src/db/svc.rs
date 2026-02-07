@@ -4,7 +4,12 @@ use crate::aud::audit;
 use anyhow::Result;
 use db::{
     Transaction,
-    ent::{ActionType, ApiKey, AuditContext, Credential, CredentialType, Profile, User},
+    ent::{
+        Account, ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, Profile,
+        User,
+    },
+    repo::ACCOUNT,
+    repo::ADMIN_KEY,
     repo::API_KEY,
     repo::CREDENTIAL,
     repo::USER,
@@ -160,7 +165,254 @@ pub async fn get_api_key_by_hash(key_hash: &str) -> Result<Option<ApiKey>> {
     svc.get_api_key_by_hash(key_hash).await
 }
 
-// pub async fn revoke_api_key(id: &str) -> Result<()> {
-//     let svc = service();
-//     svc.revoke_api_key(id).await
-// }
+pub async fn get_api_key_by_id(id: &str) -> Result<Option<ApiKey>> {
+    let svc = service();
+    svc.get_api_key_by_id(id).await
+}
+
+pub async fn get_all_api_keys(limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
+    let svc = service();
+    svc.get_all_api_keys(limit, offset).await
+}
+
+pub async fn count_api_keys() -> Result<i64> {
+    let svc = service();
+    svc.count_api_keys().await
+}
+
+pub async fn update_api_key(api_key: ApiKey, ctx: AuditContext) -> Result<ApiKey> {
+    let svc = service();
+    match svc.update_api_key(api_key).await {
+        Ok(updated) => {
+            let resource = API_KEY.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(updated.id.clone());
+            audit::modification!(ctx);
+            Ok(updated)
+        }
+        Err(e) => {
+            tracing::error!("Error updating API key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn revoke_api_key(id: &str, ctx: AuditContext) -> Result<()> {
+    let svc = service();
+    match svc.revoke_api_key(id).await {
+        Ok(()) => {
+            let resource = API_KEY.to_string();
+            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
+            audit::modification!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error revoking API key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn delete_api_key(id: &str, ctx: AuditContext) -> Result<()> {
+    let svc = service();
+    match svc.delete_api_key(id).await {
+        Ok(()) => {
+            let resource = API_KEY.to_string();
+            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
+            audit::deletion!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error deleting API key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+// ── Admin Keys ──────────────────────────────────────────────────────────────
+
+pub async fn create_admin_key(
+    key_hash: &str,
+    label: Option<String>,
+    permissions: Vec<String>,
+    ctx: AuditContext,
+) -> Result<AdminKey> {
+    let svc = service();
+    match svc.create_admin_key(key_hash, label, permissions).await {
+        Ok(admin_key) => {
+            let resource = ADMIN_KEY.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(admin_key.id.to_string());
+            audit::creation!(ctx);
+            Ok(admin_key)
+        }
+        Err(e) => {
+            tracing::error!("Error creating admin key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn get_admin_key_by_hash(key_hash: &str) -> Result<Option<AdminKey>> {
+    let svc = service();
+    svc.get_admin_key_by_hash(key_hash).await
+}
+
+pub async fn get_admin_key_by_id(id: &str) -> Result<Option<AdminKey>> {
+    let svc = service();
+    svc.get_admin_key_by_id(id).await
+}
+
+pub async fn get_all_admin_keys(limit: i64, offset: i64) -> Result<Vec<AdminKey>> {
+    let svc = service();
+    svc.get_all_admin_keys(limit, offset).await
+}
+
+pub async fn count_admin_keys() -> Result<i64> {
+    let svc = service();
+    svc.count_admin_keys().await
+}
+
+pub async fn update_admin_key(admin_key: AdminKey, ctx: AuditContext) -> Result<AdminKey> {
+    let svc = service();
+    match svc.update_admin_key(admin_key).await {
+        Ok(updated) => {
+            let resource = ADMIN_KEY.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(updated.id.clone());
+            audit::modification!(ctx);
+            Ok(updated)
+        }
+        Err(e) => {
+            tracing::error!("Error updating admin key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn revoke_admin_key(id: &str, ctx: AuditContext) -> Result<()> {
+    let svc = service();
+    match svc.revoke_admin_key(id).await {
+        Ok(()) => {
+            let resource = ADMIN_KEY.to_string();
+            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
+            audit::modification!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error revoking admin key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn delete_admin_key(id: &str, ctx: AuditContext) -> Result<()> {
+    let svc = service();
+    match svc.delete_admin_key(id).await {
+        Ok(()) => {
+            let resource = ADMIN_KEY.to_string();
+            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
+            audit::deletion!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error deleting admin key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+// ── Service Accounts ────────────────────────────────────────────────────────
+
+pub async fn create_service_account(
+    name: &str,
+    description: Option<&str>,
+    ctx: AuditContext,
+) -> Result<Account> {
+    let svc = service();
+    match svc.create_service_account(name, description).await {
+        Ok(account) => {
+            let metadata = serde_json::to_value(&account).unwrap_or_default();
+            let resource = ACCOUNT.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(account.id.to_string())
+                .with_metadata(metadata);
+            audit::creation!(ctx);
+            Ok(account)
+        }
+        Err(e) => {
+            tracing::error!("Error creating service account: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn get_service_account_by_id(id: &str) -> Result<Option<Account>> {
+    let svc = service();
+    svc.get_service_account_by_id(id).await
+}
+
+pub async fn get_all_service_accounts(limit: i64, offset: i64) -> Result<Vec<Account>> {
+    let svc = service();
+    svc.get_all_service_accounts(limit, offset).await
+}
+
+pub async fn count_service_accounts() -> Result<i64> {
+    let svc = service();
+    svc.count_service_accounts().await
+}
+
+pub async fn search_service_accounts(query: &str, limit: i64, offset: i64) -> Result<Vec<Account>> {
+    let svc = service();
+    svc.search_service_accounts(query, limit, offset).await
+}
+
+pub async fn count_search_service_accounts(query: &str) -> Result<i64> {
+    let svc = service();
+    svc.count_search_service_accounts(query).await
+}
+
+pub async fn update_service_account(
+    id: &str,
+    name: &str,
+    description: Option<&str>,
+    ctx: AuditContext,
+) -> Result<Account> {
+    let svc = service();
+    match svc.update_service_account(id, name, description).await {
+        Ok(account) => {
+            let metadata = serde_json::to_value(&account).unwrap_or_default();
+            let resource = ACCOUNT.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(account.id.clone())
+                .with_metadata(metadata);
+            audit::modification!(ctx);
+            Ok(account)
+        }
+        Err(e) => {
+            tracing::error!("Error updating service account: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn delete_service_account(id: &str, ctx: AuditContext) -> Result<()> {
+    let svc = service();
+    match svc.delete_service_account(id).await {
+        Ok(()) => {
+            let resource = ACCOUNT.to_string();
+            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
+            audit::deletion!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error deleting service account: {:?}", e);
+            Err(e)
+        }
+    }
+}

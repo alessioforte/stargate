@@ -1,5 +1,7 @@
+pub mod admin_keys;
 pub mod api_keys;
 pub mod configurations;
+pub mod service_accounts;
 pub mod users;
 
 use crate::etc::{ext::RequestExt, jwt::jwt_config};
@@ -11,27 +13,25 @@ use actix_web::{
 use actix_web_grants::GrantsMiddleware;
 use std::collections::HashSet;
 
-const SUPER_ADMIN: &str = "SUPER_ADMIN";
+const SUPER_ADMIN: &str = "super_admin";
 
 async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
-    // TODO: add admin api keys support ?
-    let token = match req.request().get_token() {
-        Some(t) => t,
-        None => {
-            return Ok(HashSet::new());
+    if let Some(token) = req.request().get_token() {
+        let jwt = jwt_config();
+        if let Some(claims) = jwt.validate_token(&token).ok() {
+            if check_super_admin_by_claims(claims) {
+                return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
+            }
         }
-    };
+    }
 
-    let jwt = jwt_config();
-    let claims = match jwt.validate_token(&token) {
-        Ok(claims) => claims,
-        Err(_) => {
-            return Ok(HashSet::new());
+    if let Some(raw_key) = req.request().get_api_key() {
+        let hash = pw::hash_api_key(&raw_key);
+        if let Ok(Some(key)) = crate::db::get_admin_key_by_hash(&hash).await {
+            if !key.revoked {
+                return Ok(key.permissions.iter().map(|p| p.to_string()).collect());
+            }
         }
-    };
-
-    if check_super_admin_by_claims(claims) {
-        return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
     }
 
     Ok(HashSet::new())
@@ -51,4 +51,6 @@ pub fn routes() -> actix_web::Scope<
         .service(users::routes())
         .service(configurations::routes())
         .service(api_keys::routes())
+        .service(admin_keys::routes())
+        .service(service_accounts::routes())
 }

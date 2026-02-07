@@ -87,6 +87,12 @@ pub struct PatchUserRequest {
     pub phone_number: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserAttrsRequest {
+    pub attrs: Value,
+}
+
 /// Get all users with pagination and optional search
 #[utoipa::path(
     context_path = "/admin",
@@ -101,7 +107,7 @@ pub struct PatchUserRequest {
     )
 )]
 #[get("")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "users"))]
 pub async fn get_users(query: web::Query<ListUsersQuery>) -> Result<HttpResponse, ErrorResponse> {
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
     let offset = query.offset.unwrap_or(0).max(0);
@@ -154,7 +160,7 @@ pub async fn get_users(query: web::Query<ListUsersQuery>) -> Result<HttpResponse
     )
 )]
 #[get("/{id}")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "users"))]
 pub async fn get_user(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
     let id = params.into_inner();
 
@@ -192,7 +198,7 @@ pub async fn get_user(params: web::Path<String>) -> Result<HttpResponse, ErrorRe
     )
 )]
 #[post("")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "users"))]
 pub async fn create_user(
     req: HttpRequest,
     payload: web::Json<CreateUserRequest>,
@@ -267,7 +273,7 @@ pub async fn create_user(
     )
 )]
 #[put("/{id}")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "users"))]
 pub async fn update_user(
     req: HttpRequest,
     params: web::Path<String>,
@@ -340,7 +346,7 @@ pub async fn update_user(
     )
 )]
 #[patch("/{id}")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "users"))]
 pub async fn patch_user(
     req: HttpRequest,
     params: web::Path<String>,
@@ -401,6 +407,141 @@ pub async fn patch_user(
     Ok(HttpResponse::Ok().json(user))
 }
 
+/// Update user attrs (full replacement)
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/users/{id}/attrs",
+    tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "User ID")
+    ),
+    request_body = UserAttrsRequest,
+    responses(
+        (status = 200, description = "User attrs updated successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[put("/{id}/attrs")]
+#[protect(any("super_admin", "users"))]
+pub async fn update_user_attrs(
+    req: HttpRequest,
+    params: web::Path<String>,
+    payload: web::Json<UserAttrsRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Get existing user
+    let mut existing_user = match crate::db::get_user_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "User with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    // Replace attrs entirely
+    existing_user.attrs = payload.attrs.clone();
+
+    let user = match crate::db::update_user(existing_user, ctx).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(user))
+}
+
+/// Patch user attrs (partial update/merge)
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/users/{id}/attrs",
+    tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "User ID")
+    ),
+    request_body = UserAttrsRequest,
+    responses(
+        (status = 200, description = "User attrs patched successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[patch("/{id}/attrs")]
+#[protect(any("super_admin", "users"))]
+pub async fn patch_user_attrs(
+    req: HttpRequest,
+    params: web::Path<String>,
+    payload: web::Json<UserAttrsRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Get existing user
+    let mut existing_user = match crate::db::get_user_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "User with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    // Merge attrs: if both existing and new are objects, merge them; otherwise replace
+    existing_user.attrs = match (&existing_user.attrs, &payload.attrs) {
+        (Value::Object(existing), Value::Object(new)) => {
+            let mut merged = existing.clone();
+            for (key, value) in new {
+                merged.insert(key.clone(), value.clone());
+            }
+            Value::Object(merged)
+        }
+        _ => payload.attrs.clone(),
+    };
+
+    let user = match crate::db::update_user(existing_user, ctx).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(user))
+}
+
 /// Delete a user
 #[utoipa::path(
     context_path = "/admin",
@@ -418,7 +559,7 @@ pub async fn patch_user(
     )
 )]
 #[delete("/{id}")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "users"))]
 pub async fn delete_user(
     req: HttpRequest,
     params: web::Path<String>,
@@ -451,9 +592,6 @@ pub async fn delete_user(
     Ok(HttpResponse::NoContent().finish())
 }
 
-// update user attrs
-// patch user attrs
-
 pub fn routes() -> actix_web::Scope {
     web::scope("/users")
         .service(get_users)
@@ -461,5 +599,7 @@ pub fn routes() -> actix_web::Scope {
         .service(get_user)
         .service(update_user)
         .service(patch_user)
+        .service(update_user_attrs)
+        .service(patch_user_attrs)
         .service(delete_user)
 }

@@ -1,51 +1,152 @@
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, put, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use actix_web_grants::protect;
 use db::ent::AuditContext;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+const DEFAULT_LIMIT: i64 = 20;
+const MAX_LIMIT: i64 = 100;
+
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct ListApiKeysQuery {
+    /// Maximum number of API keys to return (default: 20, max: 100)
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Number of API keys to skip (default: 0)
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginatedResponse<T> {
+    pub data: Vec<T>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct ApiKey {
-    account_id: String,
-    label: Option<String>,
-    exp: Option<String>,
-    attrs: Option<serde_json::Value>,
+pub struct CreateApiKeyRequest {
+    pub account_id: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub attrs: Option<Value>,
 }
 
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyAttrsRequest {
+    pub attrs: Value,
+}
+
+/// Get all API keys with pagination
 #[utoipa::path(
     context_path = "/admin",
-    path = "/apikeys",
+    path = "/api-keys",
     tags = ["Admin"],
+    params(ListApiKeysQuery),
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "List of API keys retrieved successfully"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[get("")]
-#[protect("SUPER_ADMIN")]
-pub async fn get_api_keys() -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement get api keys logic
-    Ok(HttpResponse::Ok().json(web::Json("List of API keys")))
+#[protect(any("super_admin", "api_keys"))]
+pub async fn get_api_keys(
+    query: web::Query<ListApiKeysQuery>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let api_keys = crate::db::get_all_api_keys(limit, offset)
+        .await
+        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+
+    let total = crate::db::count_api_keys()
+        .await
+        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+
+    let response = PaginatedResponse {
+        data: api_keys,
+        total,
+        limit,
+        offset,
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
+/// Get an API key by ID
 #[utoipa::path(
     context_path = "/admin",
-    path = "/apikeys",
+    path = "/api-keys/{id}",
     tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "API Key ID")
+    ),
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "API key retrieved successfully"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "API key not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[get("/{id}")]
+#[protect(any("super_admin", "api_keys"))]
+pub async fn get_api_key(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
+    let id = params.into_inner();
+
+    let api_key = match crate::db::get_api_key_by_id(&id).await {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "API key with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(api_key))
+}
+
+/// Create a new API key
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/api-keys",
+    tags = ["Admin"],
+    request_body = CreateApiKeyRequest,
+    responses(
+        (status = 201, description = "API key created successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[post("")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "api_keys"))]
 pub async fn create_api_key(
     req: HttpRequest,
-    payload: web::Json<ApiKey>,
+    payload: web::Json<CreateApiKeyRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let ctx = match req.extensions().get::<AuditContext>().cloned() {
         Some(c) => c,
         None => AuditContext::anonymous(),
     };
+
     let secret = pw::generate_api_key();
     let key_hash = pw::hash_api_key(&secret);
 
@@ -70,51 +171,272 @@ pub async fn create_api_key(
 
     let response = serde_json::json!({
         "id": api_key.id,
+        "accountId": api_key.account_id,
         "label": api_key.label,
         "attrs": api_key.attrs,
-        "api_key": secret, // Return the plain API key only once
+        "revoked": api_key.revoked,
+        "apiKey": secret, // Return the plain API key only once
     });
 
-    Ok(HttpResponse::Ok().json(web::Json(response)))
+    Ok(HttpResponse::Created().json(response))
 }
 
+/// Delete an API key
 #[utoipa::path(
     context_path = "/admin",
-    path = "/apikeys/{id}",
+    path = "/api-keys/{id}",
     tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "API Key ID")
+    ),
     responses(
-        (status = 200, description = "OK")
+        (status = 204, description = "API key deleted successfully"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "API key not found"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[delete("/{id}")]
-#[protect("SUPER_ADMIN")]
-pub async fn delete_api_key(_params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement delete api key logic
-    Ok(HttpResponse::Ok().json(web::Json("API Key deleted successfully")))
+#[protect(any("super_admin", "api_keys"))]
+pub async fn delete_api_key(
+    req: HttpRequest,
+    params: web::Path<String>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Check if API key exists
+    if let Ok(None) = crate::db::get_api_key_by_id(&id).await {
+        return Err(ErrorResponse::from(HttpError::NotFound(format!(
+            "API key with id '{}' not found",
+            id
+        ))));
+    }
+
+    match crate::db::delete_api_key(&id, ctx).await {
+        Ok(()) => {}
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    }
+
+    Ok(HttpResponse::NoContent().finish())
 }
 
-// revoke api key
+/// Revoke an API key
 #[utoipa::path(
     context_path = "/admin",
-    path = "/apikeys/{id}/revoke",
+    path = "/api-keys/{id}/revoke",
     tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "API Key ID")
+    ),
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "API key revoked successfully"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "API key not found"),
+        (status = 500, description = "Internal server error")
     )
 )]
 #[put("/{id}/revoke")]
-#[protect("SUPER_ADMIN")]
-pub async fn revoke_api_key(_params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
-    // TODO: implement revoke api key logic
-    Ok(HttpResponse::Ok().json(web::Json("API Key revoked successfully")))
+#[protect(any("super_admin", "api_keys"))]
+pub async fn revoke_api_key(
+    req: HttpRequest,
+    params: web::Path<String>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Check if API key exists
+    let api_key = match crate::db::get_api_key_by_id(&id).await {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "API key with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    if api_key.revoked {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "API key is already revoked".to_string(),
+        )));
+    }
+
+    match crate::db::revoke_api_key(&id, ctx).await {
+        Ok(()) => {}
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "API key revoked successfully"
+    })))
 }
 
-// update api key attributes
-// patch api key attributes
+/// Update API key attrs (full replacement)
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/api-keys/{id}/attrs",
+    tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "API Key ID")
+    ),
+    request_body = ApiKeyAttrsRequest,
+    responses(
+        (status = 200, description = "API key attrs updated successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "API key not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[put("/{id}/attrs")]
+#[protect(any("super_admin", "api_keys"))]
+pub async fn update_api_key_attrs(
+    req: HttpRequest,
+    params: web::Path<String>,
+    payload: web::Json<ApiKeyAttrsRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Get existing API key
+    let mut existing_key = match crate::db::get_api_key_by_id(&id).await {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "API key with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    // Replace attrs entirely
+    existing_key.attrs = payload.attrs.clone();
+
+    let api_key = match crate::db::update_api_key(existing_key, ctx).await {
+        Ok(key) => key,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(api_key))
+}
+
+/// Patch API key attrs (partial update/merge)
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/api-keys/{id}/attrs",
+    tags = ["Admin"],
+    params(
+        ("id" = String, Path, description = "API Key ID")
+    ),
+    request_body = ApiKeyAttrsRequest,
+    responses(
+        (status = 200, description = "API key attrs patched successfully"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "API key not found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[patch("/{id}/attrs")]
+#[protect(any("super_admin", "api_keys"))]
+pub async fn patch_api_key_attrs(
+    req: HttpRequest,
+    params: web::Path<String>,
+    payload: web::Json<ApiKeyAttrsRequest>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let ctx = match req.extensions().get::<AuditContext>().cloned() {
+        Some(c) => c,
+        None => AuditContext::anonymous(),
+    };
+
+    let id = params.into_inner();
+
+    // Get existing API key
+    let mut existing_key = match crate::db::get_api_key_by_id(&id).await {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "API key with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    // Merge attrs: if both existing and new are objects, merge them; otherwise replace
+    existing_key.attrs = match (&existing_key.attrs, &payload.attrs) {
+        (Value::Object(existing), Value::Object(new)) => {
+            let mut merged = existing.clone();
+            for (key, value) in new {
+                merged.insert(key.clone(), value.clone());
+            }
+            Value::Object(merged)
+        }
+        _ => payload.attrs.clone(),
+    };
+
+    let api_key = match crate::db::update_api_key(existing_key, ctx).await {
+        Ok(key) => key,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(api_key))
+}
 
 pub fn routes() -> actix_web::Scope {
-    web::scope("/apikeys")
-        .service(create_api_key)
+    web::scope("/api-keys")
         .service(get_api_keys)
+        .service(create_api_key)
+        .service(get_api_key)
         .service(delete_api_key)
+        .service(revoke_api_key)
+        .service(update_api_key_attrs)
+        .service(patch_api_key_attrs)
 }

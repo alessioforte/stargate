@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS "admin_keys" (
+    "id" TEXT PRIMARY KEY,
+    "key_hash" TEXT NOT NULL UNIQUE,
+    "label" VARCHAR(100),
+    "permissions" JSONB NOT NULL DEFAULT '[]'::jsonb,
+    "revoked" BOOLEAN NOT NULL DEFAULT FALSE
+);
+
 CREATE TABLE IF NOT EXISTS "audits" (
     "id" TEXT PRIMARY KEY,
     "timestamp" TIMESTAMPTZ NOT NULL,

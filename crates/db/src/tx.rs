@@ -1,4 +1,4 @@
-use crate::ent::{ApiKey, Credential, CredentialType, Profile, User};
+use crate::ent::{Account, AdminKey, ApiKey, Credential, CredentialType, Profile, User};
 use anyhow::Result;
 use serde_json::Value as JsonValue;
 
@@ -32,6 +32,46 @@ pub trait Transaction {
         attrs: Option<JsonValue>,
     ) -> Result<ApiKey>;
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>>;
+    async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>>;
+    async fn get_all_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;
+    async fn count_api_keys(&self) -> Result<i64>;
+    async fn update_api_key(&self, api_key: ApiKey) -> Result<ApiKey>;
     async fn revoke_api_key(&self, id: &str) -> Result<()>;
+    async fn delete_api_key(&self, id: &str) -> Result<()>;
     async fn insert_audit_log_bulk(&self, logs: Vec<crate::ent::Audit>) -> Result<()>;
+    async fn create_admin_key(
+        &self,
+        key_hash: &str,
+        label: Option<String>,
+        permissions: Vec<String>,
+    ) -> Result<AdminKey>;
+    async fn get_admin_key_by_hash(&self, key_hash: &str) -> Result<Option<AdminKey>>;
+    async fn get_admin_key_by_id(&self, id: &str) -> Result<Option<AdminKey>>;
+    async fn get_all_admin_keys(&self, limit: i64, offset: i64) -> Result<Vec<AdminKey>>;
+    async fn count_admin_keys(&self) -> Result<i64>;
+    async fn update_admin_key(&self, admin_key: AdminKey) -> Result<AdminKey>;
+    async fn revoke_admin_key(&self, id: &str) -> Result<()>;
+    async fn delete_admin_key(&self, id: &str) -> Result<()>;
+    async fn create_service_account(
+        &self,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<Account>;
+    async fn get_service_account_by_id(&self, id: &str) -> Result<Option<Account>>;
+    async fn get_all_service_accounts(&self, limit: i64, offset: i64) -> Result<Vec<Account>>;
+    async fn count_service_accounts(&self) -> Result<i64>;
+    async fn search_service_accounts(
+        &self,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Account>>;
+    async fn count_search_service_accounts(&self, query: &str) -> Result<i64>;
+    async fn update_service_account(
+        &self,
+        id: &str,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<Account>;
+    async fn delete_service_account(&self, id: &str) -> Result<()>;
 }

@@ -1,12 +1,12 @@
-use crate::ent::ApiKey;
+use crate::ent::AdminKey;
 use anyhow::Result;
 
-pub const API_KEY: &str = "api_keys";
+pub const ADMIN_KEY: &str = "admin_keys";
 
 #[derive(Clone)]
-pub struct ApiKeyRepository {}
+pub struct AdminKeyRepository {}
 
-impl ApiKeyRepository {
+impl AdminKeyRepository {
     pub fn new() -> Self {
         Self {}
     }
@@ -15,34 +15,27 @@ impl ApiKeyRepository {
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        account_id: &str,
         key_hash: &str,
         label: Option<String>,
-        attrs: Option<serde_json::Value>,
-    ) -> Result<ApiKey> {
-        let api_key = ApiKey::new(
-            key_hash.to_string(),
-            account_id.to_string(),
-            label,
-            attrs.unwrap_or(serde_json::Value::Null),
-        );
-        let row = sqlx::query_as::<_, ApiKey>(
+        permissions: Vec<String>,
+    ) -> Result<AdminKey> {
+        let admin_key = AdminKey::new(key_hash.to_string(), label, permissions);
+        let row = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
-            INSERT INTO {api_keys} (id, account_id, key_hash, label, revoked, attrs)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO {admin_keys} (id, key_hash, label, permissions, revoked)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         ",
-                api_keys = API_KEY
+                admin_keys = ADMIN_KEY
             )
             .as_str(),
         )
-        .bind(&api_key.id)
-        .bind(&api_key.account_id)
-        .bind(&api_key.key_hash)
-        .bind(&api_key.label)
-        .bind(&api_key.revoked)
-        .bind(&api_key.attrs)
+        .bind(&admin_key.id)
+        .bind(&admin_key.key_hash)
+        .bind(&admin_key.label)
+        .bind(&admin_key.permissions)
+        .bind(&admin_key.revoked)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -54,13 +47,13 @@ impl ApiKeyRepository {
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         key_hash: &str,
-    ) -> Result<Option<ApiKey>> {
-        let row = sqlx::query_as::<_, ApiKey>(
+    ) -> Result<Option<AdminKey>> {
+        let row = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
-            SELECT * FROM {api_keys} WHERE key_hash = $1
+            SELECT * FROM {admin_keys} WHERE key_hash = $1
         ",
-                api_keys = API_KEY
+                admin_keys = ADMIN_KEY
             )
             .as_str(),
         )
@@ -71,62 +64,18 @@ impl ApiKeyRepository {
         Ok(row)
     }
 
-    pub async fn revoke_by_id(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
-        sqlx::query(
-            format!(
-                "
-            UPDATE {api_keys} SET revoked = TRUE WHERE id = $1
-        ",
-                api_keys = API_KEY
-            )
-            .as_str(),
-        )
-        .bind(id)
-        .execute(&mut **tx)
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn delete_by_id(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
-        sqlx::query(
-            format!(
-                "
-            DELETE FROM {api_keys} WHERE id = $1
-        ",
-                api_keys = API_KEY
-            )
-            .as_str(),
-        )
-        .bind(id)
-        .execute(&mut **tx)
-        .await?;
-
-        Ok(())
-    }
-
     pub async fn get_by_id(
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         id: &str,
-    ) -> Result<Option<ApiKey>> {
-        let row = sqlx::query_as::<_, ApiKey>(
+    ) -> Result<Option<AdminKey>> {
+        let row = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
-            SELECT * FROM {api_keys} WHERE id = $1
+            SELECT * FROM {admin_keys} WHERE id = $1
         ",
-                api_keys = API_KEY
+                admin_keys = ADMIN_KEY
             )
             .as_str(),
         )
@@ -143,13 +92,13 @@ impl ApiKeyRepository {
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<ApiKey>> {
-        let rows = sqlx::query_as::<_, ApiKey>(
+    ) -> Result<Vec<AdminKey>> {
+        let rows = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
-            SELECT * FROM {api_keys} ORDER BY id DESC LIMIT $1 OFFSET $2
+            SELECT * FROM {admin_keys} ORDER BY id DESC LIMIT $1 OFFSET $2
         ",
-                api_keys = API_KEY
+                admin_keys = ADMIN_KEY
             )
             .as_str(),
         )
@@ -169,9 +118,9 @@ impl ApiKeyRepository {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "
-            SELECT COUNT(*) FROM {api_keys}
+            SELECT COUNT(*) FROM {admin_keys}
         ",
-                api_keys = API_KEY
+                admin_keys = ADMIN_KEY
             )
             .as_str(),
         )
@@ -185,26 +134,70 @@ impl ApiKeyRepository {
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        api_key: ApiKey,
-    ) -> Result<ApiKey> {
-        let row = sqlx::query_as::<_, ApiKey>(
+        admin_key: AdminKey,
+    ) -> Result<AdminKey> {
+        let row = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
-            UPDATE {api_keys}
-            SET label = $2, attrs = $3
+            UPDATE {admin_keys}
+            SET label = $2, permissions = $3
             WHERE id = $1
             RETURNING *
         ",
-                api_keys = API_KEY
+                admin_keys = ADMIN_KEY
             )
             .as_str(),
         )
-        .bind(&api_key.id)
-        .bind(&api_key.label)
-        .bind(&api_key.attrs)
+        .bind(&admin_key.id)
+        .bind(&admin_key.label)
+        .bind(&admin_key.permissions)
         .fetch_one(&mut **tx)
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn revoke_by_id(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            format!(
+                "
+            UPDATE {admin_keys} SET revoked = TRUE WHERE id = $1
+        ",
+                admin_keys = ADMIN_KEY
+            )
+            .as_str(),
+        )
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_by_id(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            format!(
+                "
+            DELETE FROM {admin_keys} WHERE id = $1
+        ",
+                admin_keys = ADMIN_KEY
+            )
+            .as_str(),
+        )
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
     }
 }

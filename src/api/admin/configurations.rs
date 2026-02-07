@@ -20,7 +20,7 @@ struct Params {
     )
 )]
 #[get("")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "configurations"))]
 pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpResponse, ErrorResponse> {
     let format = query.format.clone().unwrap_or("json".to_string());
     let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
@@ -59,7 +59,7 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
     )
 )]
 #[put("")]
-#[protect("SUPER_ADMIN")]
+#[protect(any("super_admin", "configurations"))]
 pub async fn update_configurations(
     config: web::Json<Config>,
 ) -> Result<HttpResponse, ErrorResponse> {

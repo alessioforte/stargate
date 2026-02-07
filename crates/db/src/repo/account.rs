@@ -103,6 +103,111 @@ impl AccountRepository {
         Ok(row)
     }
 
+    pub async fn get_all_by_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        account_type: AccountType,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Account>> {
+        let rows = sqlx::query_as::<_, Account>(
+            format!(
+                "
+            SELECT * FROM {accounts} WHERE type = $1 ORDER BY id DESC LIMIT $2 OFFSET $3
+        ",
+                accounts = ACCOUNT
+            )
+            .as_str(),
+        )
+        .bind(account_type)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_by_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        account_type: AccountType,
+    ) -> Result<i64> {
+        let row: (i64,) = sqlx::query_as(
+            format!(
+                "
+            SELECT COUNT(*) FROM {accounts} WHERE type = $1
+        ",
+                accounts = ACCOUNT
+            )
+            .as_str(),
+        )
+        .bind(account_type)
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row.0)
+    }
+
+    pub async fn search_by_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        account_type: AccountType,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Account>> {
+        let pattern = format!("%{}%", query);
+        let rows = sqlx::query_as::<_, Account>(
+            format!(
+                "
+            SELECT * FROM {accounts}
+            WHERE type = $1 AND (name ILIKE $2 OR description ILIKE $2)
+            ORDER BY id DESC LIMIT $3 OFFSET $4
+        ",
+                accounts = ACCOUNT
+            )
+            .as_str(),
+        )
+        .bind(account_type)
+        .bind(&pattern)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_search_by_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        account_type: AccountType,
+        query: &str,
+    ) -> Result<i64> {
+        let pattern = format!("%{}%", query);
+        let row: (i64,) = sqlx::query_as(
+            format!(
+                "
+            SELECT COUNT(*) FROM {accounts}
+            WHERE type = $1 AND (name ILIKE $2 OR description ILIKE $2)
+        ",
+                accounts = ACCOUNT
+            )
+            .as_str(),
+        )
+        .bind(account_type)
+        .bind(&pattern)
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row.0)
+    }
+
     pub async fn delete(
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,

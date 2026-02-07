@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     PRIMARY KEY (`id`) FOREIGN KEY (`account_id`) REFERENCES "accounts" (`id`) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS "admin_keys" (
+    `id` TEXT,
+    `key_hash` TEXT NOT NULL UNIQUE,
+    `label` VARCHAR(100),
+    `permissions` JSON NOT NULL DEFAULT '[]',
+    `revoked` BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY (`id`)
+);
+
 CREATE TABLE IF NOT EXISTS "audits" (
     `id` TEXT,
     `timestamp` INT NOT NULL,
