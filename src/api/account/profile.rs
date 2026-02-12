@@ -2,8 +2,22 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
 use actix_web::{HttpRequest, HttpResponse, get, web};
-use db::ent::User;
 use etc::jwt::jwt_config;
+use serde::Serialize;
+use serde_json::Value;
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSchema {
+    pub id: String,
+    pub email: String,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
+    pub nickname: String,
+    pub picture: Option<String>,
+    pub phone_number: Option<String>,
+    pub attrs: Value,
+}
 
 #[utoipa::path(
     context_path = "/account",
@@ -12,7 +26,7 @@ use etc::jwt::jwt_config;
     summary = "Get User Profile",
     description = "Retrieve the profile information of the currently authenticated user using their access token.",
     responses(
-        (status = 200, description = "OK", body = User),
+        (status = 200, description = "OK", body = UserSchema),
         (status = 401, description = "Unauthorized - Invalid Token"),
         (status = 500, description = "Internal Server Error")
     )

@@ -23,6 +23,9 @@ use utoipa::OpenApi;
         crate::api::admin::users::update_user_attrs,
         crate::api::admin::users::patch_user_attrs,
         crate::api::admin::users::delete_user,
+        crate::api::admin::users::get_user_organizations,
+        crate::api::admin::users::add_user_to_organization,
+        crate::api::admin::users::remove_user_from_organization,
         crate::api::admin::api_keys::get_api_keys,
         crate::api::admin::api_keys::create_api_key,
         crate::api::admin::api_keys::get_api_key,
@@ -41,6 +44,11 @@ use utoipa::OpenApi;
         crate::api::admin::service_accounts::create_service_account,
         crate::api::admin::service_accounts::update_service_account,
         crate::api::admin::service_accounts::delete_service_account,
+        crate::api::admin::organizations::get_organizations,
+        crate::api::admin::organizations::get_organization,
+        crate::api::admin::organizations::create_organization,
+        crate::api::admin::organizations::update_organization,
+        crate::api::admin::organizations::delete_organization,
         crate::api::account::profile::handler,
         crate::api::account::login::handler,
         crate::api::account::refresh_token::handler,
@@ -60,11 +68,7 @@ use utoipa::OpenApi;
 pub struct ApiDoc;
 
 pub fn configure(cfg: &mut ServiceConfig) {
-    let mut base_path = std::env::var("API_BASE_PATH").unwrap_or_else(|_| "".to_string());
-    if base_path.is_empty() || base_path == "/" {
-        base_path = "/stargate".to_string();
-    }
-
+    let base_path = std::env::var("API_BASE_PATH").unwrap_or_else(|_| "".to_string());
     cfg.service(
         actix_web::web::scope(&base_path)
             .wrap(from_fn(mid::middleware))

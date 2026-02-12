@@ -72,9 +72,8 @@ async fn login(
     };
 
     if user.is_none() {
-        let new_user = Profile::new(github_user.email.clone())
+        let new_user = Profile::new(github_user.email.clone(), github_user.login.clone())
             .given_name(Some(github_user.name.clone()))
-            .nickname(Some(github_user.login.clone()))
             .picture(Some(github_user.avatar_url.clone()));
 
         let value = format!("github:{}", github_user.id);
@@ -109,7 +108,7 @@ async fn login(
     let name = format_name(&given_name, &family_name);
     let claims = Claims::default()
         .subject("github-oauth2".to_string())
-        .sub_id(user.account_id)
+        .sub_id(user.id.clone())
         .name(name.clone())
         .email(user.email.to_owned())
         .email_verified(true);

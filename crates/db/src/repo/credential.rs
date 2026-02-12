@@ -24,8 +24,8 @@ impl CredentialRepository {
         let row = sqlx::query_as::<_, Credential>(
             format!(
                 "
-            INSERT INTO {credentials} (id, user_id, timestamp, type, value)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO {credentials} (id, user_id, type, value)
+            VALUES ($1, $2, $3, $4)
             RETURNING *
         ",
                 credentials = CREDENTIAL
@@ -34,7 +34,6 @@ impl CredentialRepository {
         )
         .bind(&credential.id)
         .bind(&credential.user_id)
-        .bind(&credential.timestamp)
         .bind(&credential.credential_type)
         .bind(&credential.value)
         .fetch_one(&mut **tx)
@@ -74,28 +73,21 @@ impl CredentialRepository {
         user_id: &str,
         new_password: &str,
     ) -> Result<Credential> {
-        let credential = Credential::new(
-            user_id.to_string(),
-            CredentialType::Password, // Assuming Password type for simplicity
-            new_password.to_string(),
-        );
-
         let row = sqlx::query_as::<_, Credential>(
             format!(
                 "
             UPDATE {credentials}
-            SET value = $1, timestamp = $2
-            WHERE user_id = $3 AND type = $4
+            SET value = $1
+            WHERE user_id = $2 AND type = $3
             RETURNING *
         ",
                 credentials = CREDENTIAL
             )
             .as_str(),
         )
-        .bind(&credential.value)
-        .bind(&credential.timestamp)
-        .bind(&credential.user_id)
-        .bind(&credential.credential_type)
+        .bind(new_password)
+        .bind(user_id)
+        .bind(CredentialType::Password)
         .fetch_one(&mut **tx)
         .await?;
 

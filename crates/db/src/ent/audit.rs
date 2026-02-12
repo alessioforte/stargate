@@ -15,6 +15,7 @@ pub enum ActionType {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "actor_type", rename_all = "snake_case")]
 pub enum ActorType {
+    Admin,
     User,
     ApiKey,
     System,
@@ -79,6 +80,19 @@ impl AuditContext {
     pub fn anonymous() -> Self {
         AuditContext {
             actor_type: ActorType::Anonymous,
+            actor_id: None,
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            resource: None,
+            resource_id: None,
+            metadata: None,
+        }
+    }
+
+    pub fn admin() -> Self {
+        AuditContext {
+            actor_type: ActorType::Admin,
             actor_id: None,
             request_id: None,
             ip_address: None,

@@ -940,7 +940,6 @@ dependencies = [
  "serde_json",
  "sqlx",
  "ulid",
- "utoipa",
 ]
 
 [[package]]

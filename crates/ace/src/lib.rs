@@ -186,6 +186,7 @@ pub enum Operator {
     LessThan,
     GreaterThanOrEqual,
     LessThanOrEqual,
+    Contains,
 }
 
 impl fmt::Display for Operator {
@@ -197,17 +198,33 @@ impl fmt::Display for Operator {
             Operator::LessThan => write!(f, "<"),
             Operator::GreaterThanOrEqual => write!(f, ">="),
             Operator::LessThanOrEqual => write!(f, "<="),
+            Operator::Contains => write!(f, "CONTAINS"),
         }
     }
 }
 
 /// Represents a value in an expression
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     String(String),
     Boolean(bool),
     Number(i64),
     Float(f64),
+    Array(Vec<Value>),
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Value::Number(a), Value::Number(b)) => a.partial_cmp(b),
+            (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+            (Value::Number(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
+            (Value::Float(a), Value::Number(b)) => a.partial_cmp(&(*b as f64)),
+            (Value::String(a), Value::String(b)) => a.partial_cmp(b),
+            (Value::Boolean(a), Value::Boolean(b)) => a.partial_cmp(b),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -217,6 +234,16 @@ impl fmt::Display for Value {
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Number(n) => write!(f, "{}", n),
             Value::Float(f_val) => write!(f, "{}", f_val),
+            Value::Array(arr) => {
+                write!(f, "[")?;
+                for (i, v) in arr.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", v)?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -236,6 +263,9 @@ impl From<serde_json::Value> for Value {
                 } else {
                     Value::String(n.to_string())
                 }
+            }
+            serde_json::Value::Array(arr) => {
+                Value::Array(arr.into_iter().map(Value::from).collect())
             }
             _ => Value::String(v.to_string()),
         }
@@ -494,6 +524,11 @@ impl ContextBuilder {
         self
     }
 
+    pub fn add_array(mut self, key: &str, values: Vec<Value>) -> Self {
+        self.context.insert(key.to_string(), Value::Array(values));
+        self
+    }
+
     pub fn build(self) -> HashMap<String, Value> {
         self.context
     }
@@ -619,5 +654,93 @@ mod tests {
         assert_eq!(result.allow_count, 1);
         assert_eq!(result.deny_count, 0);
         assert!(result.has_explicit_decision());
+    }
+
+    #[test]
+    fn test_array_contains_full_workflow() {
+        let mut engine = PolicyEngine::new();
+
+        let content = r#"
+        // ALLOW user FOR "admin_panel" WHEN user.roles CONTAINS "admin";
+        // DENY user FOR "feature1" WHEN user.tags CONTAINS "banned";
+        // ALLOW user FOR "internal" WHEN user.email CONTAINS "@company.com";
+        // ALLOW user FOR "verified_feature" WHEN NOT user.tags CONTAINS "unverified";
+        "#;
+
+        engine.parse_file(content).unwrap();
+        assert_eq!(engine.get_policies().len(), 4);
+
+        // Test array contains - user has admin role
+        let ctx = context_with(vec![(
+            "user.roles",
+            Value::Array(vec![
+                Value::String("editor".to_string()),
+                Value::String("admin".to_string()),
+            ]),
+        )]);
+        assert!(engine.evaluate("user", "admin_panel", &ctx));
+
+        // Test array contains - user does NOT have admin role
+        let ctx = context_with(vec![(
+            "user.roles",
+            Value::Array(vec![Value::String("viewer".to_string())]),
+        )]);
+        assert!(!engine.evaluate("user", "admin_panel", &ctx));
+
+        // Test array contains deny - user has "banned" tag
+        let ctx = context_with(vec![(
+            "user.tags",
+            Value::Array(vec![
+                Value::String("active".to_string()),
+                Value::String("banned".to_string()),
+            ]),
+        )]);
+        assert!(!engine.evaluate("user", "feature1", &ctx));
+
+        // Test string contains
+        let ctx = context_with(vec![(
+            "user.email",
+            Value::String("alice@company.com".to_string()),
+        )]);
+        assert!(engine.evaluate("user", "internal", &ctx));
+
+        // Test NOT_CONTAINS - user without "unverified" tag
+        let ctx = context_with(vec![(
+            "user.tags",
+            Value::Array(vec![
+                Value::String("active".to_string()),
+                Value::String("verified".to_string()),
+            ]),
+        )]);
+        assert!(engine.evaluate("user", "verified_feature", &ctx));
+
+        // Test NOT_CONTAINS - user with "unverified" tag
+        let ctx = context_with(vec![(
+            "user.tags",
+            Value::Array(vec![Value::String("unverified".to_string())]),
+        )]);
+        assert!(!engine.evaluate("user", "verified_feature", &ctx));
+    }
+
+    #[test]
+    fn test_context_builder_add_array() {
+        let ctx = ContextBuilder::new()
+            .user_role("admin")
+            .add_array(
+                "user.permissions",
+                vec![
+                    Value::String("read".to_string()),
+                    Value::String("write".to_string()),
+                ],
+            )
+            .build();
+
+        assert_eq!(
+            ctx.get("user.permissions"),
+            Some(&Value::Array(vec![
+                Value::String("read".to_string()),
+                Value::String("write".to_string()),
+            ]))
+        );
     }
 }

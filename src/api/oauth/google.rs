@@ -74,7 +74,7 @@ async fn login(
     };
 
     if user.is_none() {
-        let new_user = Profile::new(google_user.email.clone())
+        let new_user = Profile::new(google_user.email.clone(), google_user.email.clone())
             .given_name(Some(google_user.name.clone()))
             .picture(Some(google_user.picture.clone()));
 
@@ -110,7 +110,7 @@ async fn login(
     let name = format_name(&given_name, &family_name);
     let claims = Claims::default()
         .subject("google-oauth2".to_string())
-        .sub_id(user.account_id)
+        .sub_id(user.id.clone())
         .name(name)
         .email(user.email)
         .email_verified(google_user.verified_email);

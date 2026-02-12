@@ -2,6 +2,8 @@ use crate::ent::ApiKey;
 use anyhow::Result;
 
 pub const API_KEY: &str = "api_keys";
+pub const USER_API_KEY: &str = "user_api_keys";
+pub const SERVICE_ACCOUNT_API_KEY: &str = "service_account_api_keys";
 
 #[derive(Clone)]
 pub struct ApiKeyRepository {}
@@ -15,22 +17,20 @@ impl ApiKeyRepository {
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        account_id: &str,
         key_hash: &str,
-        label: Option<String>,
+        label: &str,
         attrs: Option<serde_json::Value>,
     ) -> Result<ApiKey> {
         let api_key = ApiKey::new(
             key_hash.to_string(),
-            account_id.to_string(),
-            label,
-            attrs.unwrap_or(serde_json::Value::Null),
+            label.to_string(),
+            attrs.unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
         );
         let row = sqlx::query_as::<_, ApiKey>(
             format!(
                 "
-            INSERT INTO {api_keys} (id, account_id, key_hash, label, revoked, attrs)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO {api_keys} (id, key_hash, label, revoked, attrs)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         ",
                 api_keys = API_KEY
@@ -38,7 +38,6 @@ impl ApiKeyRepository {
             .as_str(),
         )
         .bind(&api_key.id)
-        .bind(&api_key.account_id)
         .bind(&api_key.key_hash)
         .bind(&api_key.label)
         .bind(&api_key.revoked)
@@ -47,6 +46,102 @@ impl ApiKeyRepository {
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn link_to_user(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        api_key_id: &str,
+        user_id: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            format!(
+                "INSERT INTO {tbl} (api_key_id, user_id) VALUES ($1, $2)",
+                tbl = USER_API_KEY
+            )
+            .as_str(),
+        )
+        .bind(api_key_id)
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn link_to_service_account(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        api_key_id: &str,
+        service_account_id: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            format!(
+                "INSERT INTO {tbl} (api_key_id, service_account_id) VALUES ($1, $2)",
+                tbl = SERVICE_ACCOUNT_API_KEY
+            )
+            .as_str(),
+        )
+        .bind(api_key_id)
+        .bind(service_account_id)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_by_user_id(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user_id: &str,
+    ) -> Result<Vec<ApiKey>> {
+        let rows = sqlx::query_as::<_, ApiKey>(
+            format!(
+                "
+            SELECT ak.* FROM {api_keys} ak
+            INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id
+            WHERE uak.user_id = $1
+            ORDER BY ak.id DESC
+        ",
+                api_keys = API_KEY,
+                user_api_keys = USER_API_KEY
+            )
+            .as_str(),
+        )
+        .bind(user_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn get_by_service_account_id(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        service_account_id: &str,
+    ) -> Result<Vec<ApiKey>> {
+        let rows = sqlx::query_as::<_, ApiKey>(
+            format!(
+                "
+            SELECT ak.* FROM {api_keys} ak
+            INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id
+            WHERE sak.service_account_id = $1
+            ORDER BY ak.id DESC
+        ",
+                api_keys = API_KEY,
+                sa_api_keys = SERVICE_ACCOUNT_API_KEY
+            )
+            .as_str(),
+        )
+        .bind(service_account_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
     }
 
     pub async fn get_by_hash(

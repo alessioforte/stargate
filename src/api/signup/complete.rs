@@ -107,10 +107,9 @@ pub async fn handler(
         return Err(ErrorResponse::from(HttpError::BadRequest(message)));
     }
 
-    let user = Profile::new(signup)
+    let user = Profile::new(signup, body.nickname.clone())
         .given_name(Some(body.given_name.clone()))
         .family_name(Some(body.family_name.clone()))
-        .nickname(Some(body.nickname.clone()))
         .phone_number(body.phone_number.clone())
         .picture(None);
 

@@ -1,34 +1,31 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use utoipa::ToSchema;
 
-#[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
     pub id: String,
-    pub account_id: String,
     pub email: String,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
-    pub nickname: Option<String>,
+    pub nickname: String,
     pub picture: Option<String>,
     pub phone_number: Option<String>,
     pub attrs: Value,
 }
 
 impl User {
-    pub fn new(account_id: String, email: String) -> Self {
+    pub fn new(email: String, nickname: String) -> Self {
         let id = ulid::Ulid::new().to_string();
         User {
             id,
-            account_id,
             email,
             given_name: None,
             family_name: None,
-            nickname: None,
+            nickname,
             picture: None,
             phone_number: None,
-            attrs: Value::Null,
+            attrs: Value::Object(serde_json::Map::new()),
         }
     }
 
@@ -47,7 +44,7 @@ impl User {
         self
     }
 
-    pub fn nickname(mut self, nickname: Option<String>) -> Self {
+    pub fn nickname(mut self, nickname: String) -> Self {
         self.nickname = nickname;
         self
     }
@@ -74,22 +71,22 @@ pub struct Profile {
     pub email: String,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
-    pub nickname: Option<String>,
+    pub nickname: String,
     pub picture: Option<String>,
     pub phone_number: Option<String>,
     pub attrs: Value,
 }
 
 impl Profile {
-    pub fn new(email: String) -> Self {
+    pub fn new(email: String, nickname: String) -> Self {
         Profile {
             email,
             given_name: None,
             family_name: None,
-            nickname: None,
+            nickname,
             picture: None,
             phone_number: None,
-            attrs: Value::Null,
+            attrs: Value::Object(serde_json::Map::new()),
         }
     }
 
@@ -103,7 +100,7 @@ impl Profile {
         self
     }
 
-    pub fn nickname(mut self, nickname: Option<String>) -> Self {
+    pub fn nickname(mut self, nickname: String) -> Self {
         self.nickname = nickname;
         self
     }

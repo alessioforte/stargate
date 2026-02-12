@@ -1,6 +1,7 @@
 pub mod admin_keys;
 pub mod api_keys;
 pub mod configurations;
+pub mod organizations;
 pub mod service_accounts;
 pub mod users;
 
@@ -52,5 +53,6 @@ pub fn routes() -> actix_web::Scope<
         .service(configurations::routes())
         .service(api_keys::routes())
         .service(admin_keys::routes())
+        .service(organizations::routes())
         .service(service_accounts::routes())
 }

@@ -67,7 +67,7 @@ pub async fn handler(
         })?;
 
     let claim = jwt::Claims::default()
-        .sub_id(user.account_id.clone())
+        .sub_id(user.id.clone())
         .email(user.email.clone())
         .sid(sid.clone());
 

@@ -5,15 +5,18 @@ use anyhow::Result;
 use db::{
     Transaction,
     ent::{
-        Account, ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, Profile,
-        User,
+        ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, Organization,
+        Profile, ServiceAccount, User,
     },
-    repo::ACCOUNT,
     repo::ADMIN_KEY,
     repo::API_KEY,
     repo::CREDENTIAL,
+    repo::ORGANIZATION,
+    repo::SERVICE_ACCOUNT,
     repo::USER,
 };
+
+// ── Users ───────────────────────────────────────────────────────────────────
 
 pub async fn create_user(
     profile: Profile,
@@ -136,15 +139,16 @@ pub async fn get_credential(
     svc.get_credential(user_id, credential_type).await
 }
 
+// ── Api Keys ────────────────────────────────────────────────────────────────
+
 pub async fn create_api_key(
-    account_id: &str,
     key_hash: &str,
-    label: Option<String>,
+    label: &str,
     attrs: Option<serde_json::Value>,
     ctx: AuditContext,
 ) -> Result<ApiKey> {
     let svc = service();
-    match svc.create_api_key(account_id, key_hash, label, attrs).await {
+    match svc.create_api_key(key_hash, label, attrs).await {
         Ok(api_key) => {
             let resource = API_KEY.to_string();
             let ctx = ctx
@@ -155,6 +159,60 @@ pub async fn create_api_key(
         }
         Err(e) => {
             tracing::error!("Error creating API key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn create_user_api_key(
+    user_id: &str,
+    key_hash: &str,
+    label: &str,
+    attrs: Option<serde_json::Value>,
+    ctx: AuditContext,
+) -> Result<ApiKey> {
+    let svc = service();
+    match svc
+        .create_user_api_key(user_id, key_hash, label, attrs)
+        .await
+    {
+        Ok(api_key) => {
+            let resource = API_KEY.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(api_key.id.to_string());
+            audit::creation!(ctx);
+            Ok(api_key)
+        }
+        Err(e) => {
+            tracing::error!("Error creating user API key: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn create_service_account_api_key(
+    service_account_id: &str,
+    key_hash: &str,
+    label: &str,
+    attrs: Option<serde_json::Value>,
+    ctx: AuditContext,
+) -> Result<ApiKey> {
+    let svc = service();
+    match svc
+        .create_service_account_api_key(service_account_id, key_hash, label, attrs)
+        .await
+    {
+        Ok(api_key) => {
+            let resource = API_KEY.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(api_key.id.to_string());
+            audit::creation!(ctx);
+            Ok(api_key)
+        }
+        Err(e) => {
+            tracing::error!("Error creating service account API key: {:?}", e);
             Err(e)
         }
     }
@@ -173,6 +231,17 @@ pub async fn get_api_key_by_id(id: &str) -> Result<Option<ApiKey>> {
 pub async fn get_all_api_keys(limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
     let svc = service();
     svc.get_all_api_keys(limit, offset).await
+}
+
+pub async fn get_api_keys_by_user_id(user_id: &str) -> Result<Vec<ApiKey>> {
+    let svc = service();
+    svc.get_api_keys_by_user_id(user_id).await
+}
+
+pub async fn get_api_keys_by_service_account_id(service_account_id: &str) -> Result<Vec<ApiKey>> {
+    let svc = service();
+    svc.get_api_keys_by_service_account_id(service_account_id)
+        .await
 }
 
 pub async fn count_api_keys() -> Result<i64> {
@@ -330,19 +399,20 @@ pub async fn delete_admin_key(id: &str, ctx: AuditContext) -> Result<()> {
 pub async fn create_service_account(
     name: &str,
     description: Option<&str>,
+    org_id: Option<&str>,
     ctx: AuditContext,
-) -> Result<Account> {
+) -> Result<ServiceAccount> {
     let svc = service();
-    match svc.create_service_account(name, description).await {
-        Ok(account) => {
-            let metadata = serde_json::to_value(&account).unwrap_or_default();
-            let resource = ACCOUNT.to_string();
+    match svc.create_service_account(name, description, org_id).await {
+        Ok(sa) => {
+            let metadata = serde_json::to_value(&sa).unwrap_or_default();
+            let resource = SERVICE_ACCOUNT.to_string();
             let ctx = ctx
                 .with_resource(resource)
-                .with_resource_id(account.id.to_string())
+                .with_resource_id(sa.id.to_string())
                 .with_metadata(metadata);
             audit::creation!(ctx);
-            Ok(account)
+            Ok(sa)
         }
         Err(e) => {
             tracing::error!("Error creating service account: {:?}", e);
@@ -351,12 +421,12 @@ pub async fn create_service_account(
     }
 }
 
-pub async fn get_service_account_by_id(id: &str) -> Result<Option<Account>> {
+pub async fn get_service_account_by_id(id: &str) -> Result<Option<ServiceAccount>> {
     let svc = service();
     svc.get_service_account_by_id(id).await
 }
 
-pub async fn get_all_service_accounts(limit: i64, offset: i64) -> Result<Vec<Account>> {
+pub async fn get_all_service_accounts(limit: i64, offset: i64) -> Result<Vec<ServiceAccount>> {
     let svc = service();
     svc.get_all_service_accounts(limit, offset).await
 }
@@ -366,7 +436,11 @@ pub async fn count_service_accounts() -> Result<i64> {
     svc.count_service_accounts().await
 }
 
-pub async fn search_service_accounts(query: &str, limit: i64, offset: i64) -> Result<Vec<Account>> {
+pub async fn search_service_accounts(
+    query: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<ServiceAccount>> {
     let svc = service();
     svc.search_service_accounts(query, limit, offset).await
 }
@@ -381,18 +455,21 @@ pub async fn update_service_account(
     name: &str,
     description: Option<&str>,
     ctx: AuditContext,
-) -> Result<Account> {
+) -> Result<ServiceAccount> {
     let svc = service();
-    match svc.update_service_account(id, name, description).await {
-        Ok(account) => {
-            let metadata = serde_json::to_value(&account).unwrap_or_default();
-            let resource = ACCOUNT.to_string();
+    match svc
+        .update_service_account(id, name, description, None)
+        .await
+    {
+        Ok(sa) => {
+            let metadata = serde_json::to_value(&sa).unwrap_or_default();
+            let resource = SERVICE_ACCOUNT.to_string();
             let ctx = ctx
                 .with_resource(resource)
-                .with_resource_id(account.id.clone())
+                .with_resource_id(sa.id.clone())
                 .with_metadata(metadata);
             audit::modification!(ctx);
-            Ok(account)
+            Ok(sa)
         }
         Err(e) => {
             tracing::error!("Error updating service account: {:?}", e);
@@ -405,7 +482,7 @@ pub async fn delete_service_account(id: &str, ctx: AuditContext) -> Result<()> {
     let svc = service();
     match svc.delete_service_account(id).await {
         Ok(()) => {
-            let resource = ACCOUNT.to_string();
+            let resource = SERVICE_ACCOUNT.to_string();
             let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
             audit::deletion!(ctx);
             Ok(())
@@ -415,4 +492,156 @@ pub async fn delete_service_account(id: &str, ctx: AuditContext) -> Result<()> {
             Err(e)
         }
     }
+}
+
+// ── Organizations ───────────────────────────────────────────────────────────
+
+pub async fn create_organization(
+    name: &str,
+    description: Option<&str>,
+    attrs: Option<&serde_json::Value>,
+    ctx: AuditContext,
+) -> Result<Organization> {
+    let svc = service();
+    match svc.create_organization(name, description, attrs).await {
+        Ok(org) => {
+            let metadata = serde_json::to_value(&org).unwrap_or_default();
+            let resource = ORGANIZATION.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(org.id.to_string())
+                .with_metadata(metadata);
+            audit::creation!(ctx);
+            Ok(org)
+        }
+        Err(e) => {
+            tracing::error!("Error creating organization: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn get_organization_by_id(id: &str) -> Result<Option<Organization>> {
+    let svc = service();
+    svc.get_organization_by_id(id).await
+}
+
+pub async fn get_all_organizations(limit: i64, offset: i64) -> Result<Vec<Organization>> {
+    let svc = service();
+    svc.get_all_organizations(limit, offset).await
+}
+
+pub async fn count_organizations() -> Result<i64> {
+    let svc = service();
+    svc.count_organizations().await
+}
+
+pub async fn search_organizations(
+    query: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Organization>> {
+    let svc = service();
+    svc.search_organizations(query, limit, offset).await
+}
+
+pub async fn count_search_organizations(query: &str) -> Result<i64> {
+    let svc = service();
+    svc.count_search_organizations(query).await
+}
+
+pub async fn update_organization(
+    id: &str,
+    name: &str,
+    description: Option<&str>,
+    attrs: Option<&serde_json::Value>,
+    ctx: AuditContext,
+) -> Result<Organization> {
+    let svc = service();
+    match svc.update_organization(id, name, description, attrs).await {
+        Ok(org) => {
+            let metadata = serde_json::to_value(&org).unwrap_or_default();
+            let resource = ORGANIZATION.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(org.id.clone())
+                .with_metadata(metadata);
+            audit::modification!(ctx);
+            Ok(org)
+        }
+        Err(e) => {
+            tracing::error!("Error updating organization: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn delete_organization(id: &str, ctx: AuditContext) -> Result<()> {
+    let svc = service();
+    match svc.delete_organization(id).await {
+        Ok(()) => {
+            let resource = ORGANIZATION.to_string();
+            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
+            audit::deletion!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error deleting organization: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn add_user_to_organization(
+    user_id: &str,
+    org_id: &str,
+    ctx: AuditContext,
+) -> Result<()> {
+    let svc = service();
+    match svc.add_user_to_organization(user_id, org_id).await {
+        Ok(()) => {
+            let resource = ORGANIZATION.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(org_id.to_string());
+            audit::modification!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error adding user to organization: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn remove_user_from_organization(
+    user_id: &str,
+    org_id: &str,
+    ctx: AuditContext,
+) -> Result<()> {
+    let svc = service();
+    match svc.remove_user_from_organization(user_id, org_id).await {
+        Ok(()) => {
+            let resource = ORGANIZATION.to_string();
+            let ctx = ctx
+                .with_resource(resource)
+                .with_resource_id(org_id.to_string());
+            audit::modification!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error removing user from organization: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn get_organization_users(org_id: &str) -> Result<Vec<User>> {
+    let svc = service();
+    svc.get_organization_users(org_id).await
+}
+
+pub async fn get_user_organizations(user_id: &str) -> Result<Vec<Organization>> {
+    let svc = service();
+    svc.get_user_organizations(user_id).await
 }

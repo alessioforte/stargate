@@ -7,6 +7,34 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
 
+/// Schema-only representation of AdminKey for OpenAPI docs
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminKeySchema {
+    pub id: String,
+    pub key_hash: String,
+    pub label: Option<String>,
+    pub permissions: Vec<String>,
+    pub revoked: bool,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAdminKeyResponse {
+    pub id: String,
+    pub label: Option<String>,
+    pub permissions: Vec<String>,
+    pub revoked: bool,
+    /// The plain API key (only returned once at creation time)
+    pub api_key: String,
+}
+
+/// Simple message response
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+pub struct MessageResponse {
+    pub message: String,
+}
+
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ListAdminKeysQuery {
@@ -50,7 +78,7 @@ pub struct UpdateAdminKeyPermissionsRequest {
     tags = ["Admin"],
     params(ListAdminKeysQuery),
     responses(
-        (status = 200, description = "List of admin keys retrieved successfully"),
+        (status = 200, description = "List of admin keys retrieved successfully", body = PaginatedResponse<AdminKeySchema>),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 500, description = "Internal server error")
@@ -64,6 +92,7 @@ pub async fn get_admin_keys(
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
     let offset = query.offset.unwrap_or(0).max(0);
 
+    // TODO: Remove keyHash from the response
     let admin_keys = crate::db::get_all_admin_keys(limit, offset)
         .await
         .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
@@ -91,7 +120,7 @@ pub async fn get_admin_keys(
         ("id" = String, Path, description = "Admin Key ID")
     ),
     responses(
-        (status = 200, description = "Admin key retrieved successfully"),
+        (status = 200, description = "Admin key retrieved successfully", body = AdminKeySchema),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 404, description = "Admin key not found"),
@@ -128,7 +157,7 @@ pub async fn get_admin_key(params: web::Path<String>) -> Result<HttpResponse, Er
     tags = ["Admin"],
     request_body = CreateAdminKeyRequest,
     responses(
-        (status = 201, description = "Admin key created successfully"),
+        (status = 201, description = "Admin key created successfully", body = CreateAdminKeyResponse),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
@@ -171,13 +200,13 @@ pub async fn create_admin_key(
         }
     };
 
-    let response = serde_json::json!({
-        "id": admin_key.id,
-        "label": admin_key.label,
-        "permissions": admin_key.permissions,
-        "revoked": admin_key.revoked,
-        "apiKey": secret, // Return the plain API key only once
-    });
+    let response = CreateAdminKeyResponse {
+        id: admin_key.id,
+        label: admin_key.label,
+        permissions: admin_key.permissions.0,
+        revoked: admin_key.revoked,
+        api_key: secret, // Return the plain API key only once
+    };
 
     Ok(HttpResponse::Created().json(response))
 }
@@ -192,7 +221,7 @@ pub async fn create_admin_key(
     ),
     request_body = UpdateAdminKeyPermissionsRequest,
     responses(
-        (status = 200, description = "Admin key permissions updated successfully"),
+        (status = 200, description = "Admin key permissions updated successfully", body = AdminKeySchema),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
@@ -264,7 +293,7 @@ pub async fn update_admin_key_permissions(
         ("id" = String, Path, description = "Admin Key ID")
     ),
     responses(
-        (status = 200, description = "Admin key revoked successfully"),
+        (status = 200, description = "Admin key revoked successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 404, description = "Admin key not found"),

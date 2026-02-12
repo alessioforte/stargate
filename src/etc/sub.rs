@@ -51,30 +51,23 @@ pub struct Subject {
     /// The identifier of the subject (e.g., user ID, API key ID, service account ID).
     pub id: String,
 
-    /// The identifier of the account associated with the subject.
-    pub account_id: String,
-
-    // /// The identifier of the organization associated with the subject.
-    // pub org_id: String,
     /// The type of subject (e.g., "user", "api_key").
     #[serde(rename = "type")]
     pub sub_type: SubjectType,
+
+    /// The organization ID associated with the subject.
+    pub org_id: Option<String>,
 
     /// Additional attributes related to the subject.
     pub attrs: JsonValue,
 }
 
 impl Subject {
-    pub fn new(
-        id: String,
-        account_id: String,
-        sub_type: SubjectType,
-        attrs: Option<JsonValue>,
-    ) -> Self {
+    pub fn new(id: String, sub_type: SubjectType, attrs: Option<JsonValue>) -> Self {
         Subject {
             id,
-            account_id,
             sub_type,
+            org_id: None,
             attrs: attrs.unwrap_or(JsonValue::Object(serde_json::Map::new())),
         }
     }
@@ -87,22 +80,12 @@ impl Subject {
 
 impl From<User> for Subject {
     fn from(user: User) -> Self {
-        Subject::new(
-            user.id,
-            user.account_id,
-            SubjectType::User,
-            Some(user.attrs),
-        )
+        Subject::new(user.id, SubjectType::User, Some(user.attrs))
     }
 }
 
 impl From<ApiKey> for Subject {
     fn from(api_key: ApiKey) -> Self {
-        Subject::new(
-            api_key.id,
-            api_key.account_id,
-            SubjectType::ApiKey,
-            Some(api_key.attrs),
-        )
+        Subject::new(api_key.id, SubjectType::ApiKey, Some(api_key.attrs))
     }
 }

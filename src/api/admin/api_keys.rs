@@ -8,6 +8,27 @@ use serde_json::Value;
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
 
+/// Schema-only representation of ApiKey for OpenAPI docs
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeySchema {
+    pub id: String,
+    pub key_hash: String,
+    pub label: String,
+    pub revoked: bool,
+    pub attrs: Value,
+}
+
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateApiKeyResponse {
+    id: String,
+    label: String,
+    attrs: Value,
+    revoked: bool,
+    api_key: String,
+}
+
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ListApiKeysQuery {
@@ -31,9 +52,9 @@ pub struct PaginatedResponse<T> {
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateApiKeyRequest {
-    pub account_id: String,
-    #[serde(default)]
-    pub label: Option<String>,
+    pub user_id: Option<String>,
+    pub service_account_id: Option<String>,
+    pub label: String,
     #[serde(default)]
     pub attrs: Option<Value>,
 }
@@ -51,7 +72,7 @@ pub struct ApiKeyAttrsRequest {
     tags = ["Admin"],
     params(ListApiKeysQuery),
     responses(
-        (status = 200, description = "List of API keys retrieved successfully"),
+        (status = 200, description = "List of API keys retrieved successfully", body = PaginatedResponse<ApiKeySchema>),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 500, description = "Internal server error")
@@ -65,6 +86,7 @@ pub async fn get_api_keys(
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
     let offset = query.offset.unwrap_or(0).max(0);
 
+    // TODO: Remove keyHash from the response
     let api_keys = crate::db::get_all_api_keys(limit, offset)
         .await
         .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
@@ -92,7 +114,7 @@ pub async fn get_api_keys(
         ("id" = String, Path, description = "API Key ID")
     ),
     responses(
-        (status = 200, description = "API key retrieved successfully"),
+        (status = 200, description = "API key retrieved successfully", body = ApiKeySchema),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 404, description = "API key not found"),
@@ -129,7 +151,7 @@ pub async fn get_api_key(params: web::Path<String>) -> Result<HttpResponse, Erro
     tags = ["Admin"],
     request_body = CreateApiKeyRequest,
     responses(
-        (status = 201, description = "API key created successfully"),
+        (status = 201, description = "API key created successfully", body = CreateApiKeyResponse),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
@@ -147,36 +169,64 @@ pub async fn create_api_key(
         None => AuditContext::anonymous(),
     };
 
+    let user_id = payload.user_id.clone();
+    let service_account_id = payload.service_account_id.clone();
+    if user_id.is_none() && service_account_id.is_none() {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "Either user_id or service_account_id must be provided".to_string(),
+        )));
+    }
+
     let secret = pw::generate_api_key();
     let key_hash = pw::hash_api_key(&secret);
 
-    // TODO: verify account_id exists
-
-    let api_key = match crate::db::create_api_key(
-        &payload.account_id,
-        &key_hash,
-        payload.label.clone(),
-        payload.attrs.clone(),
-        ctx,
-    )
-    .await
-    {
-        Ok(api_key) => api_key,
-        Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+    let api_key = if let Some(user_id) = user_id {
+        match crate::db::create_user_api_key(
+            &user_id,
+            &key_hash,
+            &payload.label,
+            payload.attrs.clone(),
+            ctx,
+        )
+        .await
+        {
+            Ok(api_key) => api_key,
+            Err(e) => {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    e.to_string(),
+                )));
+            }
         }
+    } else if let Some(service_account_id) = service_account_id {
+        match crate::db::create_service_account_api_key(
+            &service_account_id,
+            &key_hash,
+            &payload.label,
+            payload.attrs.clone(),
+            ctx,
+        )
+        .await
+        {
+            Ok(api_key) => api_key,
+            Err(e) => {
+                return Err(ErrorResponse::from(HttpError::InternalServerError(
+                    e.to_string(),
+                )));
+            }
+        }
+    } else {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "Either user_id or service_account_id must be provided".to_string(),
+        )));
     };
 
-    let response = serde_json::json!({
-        "id": api_key.id,
-        "accountId": api_key.account_id,
-        "label": api_key.label,
-        "attrs": api_key.attrs,
-        "revoked": api_key.revoked,
-        "apiKey": secret, // Return the plain API key only once
-    });
+    let response = CreateApiKeyResponse {
+        id: api_key.id,
+        label: api_key.label,
+        attrs: api_key.attrs,
+        revoked: api_key.revoked,
+        api_key: secret,
+    };
 
     Ok(HttpResponse::Created().json(response))
 }

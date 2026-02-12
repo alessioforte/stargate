@@ -174,7 +174,25 @@ impl PolicyParser {
     }
 
     fn parse_expression(&self, expr_str: &str) -> Result<Expression, ParseError> {
-        // Check for operators in order of precedence (longest first to avoid conflicts)
+        // Check for keyword operators first (case-insensitive, longest first)
+        let keyword_operators = vec![("CONTAINS", Operator::Contains)];
+
+        let upper = expr_str.to_uppercase();
+        for (op_str, operator) in keyword_operators {
+            if let Some(pos) = upper.find(&format!(" {} ", op_str)) {
+                let left = expr_str[..pos].trim().to_string();
+                let right_str = expr_str[pos + op_str.len() + 2..].trim();
+                let right = self.parse_value(right_str)?;
+
+                return Ok(Expression {
+                    left,
+                    operator,
+                    right,
+                });
+            }
+        }
+
+        // Check for symbolic operators in order of precedence (longest first to avoid conflicts)
         let operators = vec![
             (" >= ", Operator::GreaterThanOrEqual),
             (" <= ", Operator::LessThanOrEqual),
@@ -414,6 +432,60 @@ mod tests {
             assert_eq!(expr.right, Value::Float(95.5));
         } else {
             panic!("Expected expression condition");
+        }
+    }
+
+    #[test]
+    fn test_parse_contains_operator() {
+        let parser = PolicyParser::new();
+        let policy = parser
+            .parse_line(r#"// ALLOW user FOR "admin_panel" WHEN user.roles CONTAINS "admin";"#)
+            .unwrap();
+
+        if let Some(Condition::Expression(expr)) = &policy.condition {
+            assert_eq!(expr.left, "user.roles");
+            assert_eq!(expr.operator, Operator::Contains);
+            assert_eq!(expr.right, Value::String("admin".to_string()));
+        } else {
+            panic!("Expected expression condition with CONTAINS");
+        }
+    }
+
+    #[test]
+    fn test_parse_not_contains_condition() {
+        let parser = PolicyParser::new();
+        let policy = parser
+            .parse_line(r#"// DENY user FOR "feature1" WHEN NOT user.tags CONTAINS "verified";"#)
+            .unwrap();
+
+        if let Some(Condition::Not(inner)) = &policy.condition {
+            if let Condition::Expression(expr) = inner.as_ref() {
+                assert_eq!(expr.left, "user.tags");
+                assert_eq!(expr.operator, Operator::Contains);
+                assert_eq!(expr.right, Value::String("verified".to_string()));
+            } else {
+                panic!("Expected inner CONTAINS expression");
+            }
+        } else {
+            panic!("Expected NOT condition wrapping CONTAINS");
+        }
+    }
+
+    #[test]
+    fn test_parse_contains_with_and() {
+        let parser = PolicyParser::new();
+        let policy = parser
+            .parse_line(r#"// ALLOW user FOR "feature1" WHEN user.roles CONTAINS "editor" AND user.active == true;"#)
+            .unwrap();
+
+        if let Some(Condition::And(left, _right)) = &policy.condition {
+            if let Condition::Expression(expr) = left.as_ref() {
+                assert_eq!(expr.operator, Operator::Contains);
+            } else {
+                panic!("Expected left side to be CONTAINS expression");
+            }
+        } else {
+            panic!("Expected AND condition");
         }
     }
 }

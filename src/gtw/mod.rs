@@ -240,5 +240,5 @@ pub async fn handler(
 }
 
 pub fn configure(cfg: &mut ServiceConfig) {
-    cfg.service(actix_web::web::scope("").default_service(actix_web::web::to(handler)));
+    cfg.default_service(actix_web::web::to(handler));
 }

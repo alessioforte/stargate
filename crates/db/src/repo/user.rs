@@ -3,6 +3,11 @@ use anyhow::Result;
 
 pub const USER: &str = "users";
 
+#[cfg(feature = "sqlite")]
+const LIKE: &str = "LIKE";
+#[cfg(feature = "postgres")]
+const LIKE: &str = "ILIKE";
+
 #[derive(Clone)]
 pub struct UserRepository {}
 
@@ -18,14 +23,17 @@ impl UserRepository {
         user: User,
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
-            format!("
-            INSERT INTO {users} (id, account_id, email, given_name, family_name, nickname, picture, phone_number, attrs)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            format!(
+                "
+            INSERT INTO {users} (id, email, given_name, family_name, nickname, picture, phone_number, attrs)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
-        ", users = USER).as_str(),
+        ",
+                users = USER
+            )
+            .as_str(),
         )
         .bind(&user.id)
-        .bind(&user.account_id)
         .bind(&user.email)
         .bind(&user.given_name)
         .bind(&user.family_name)
@@ -49,10 +57,11 @@ impl UserRepository {
             format!(
                 "
             SELECT * FROM {users}
-            WHERE email ILIKE $1 OR given_name ILIKE $1 OR family_name ILIKE $1 OR nickname ILIKE $1
-            ORDER BY created_at DESC
+            WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
+            ORDER BY id DESC
         ",
-                users = USER
+                users = USER,
+                like = LIKE
             )
             .as_str(),
         )
@@ -92,12 +101,16 @@ impl UserRepository {
         user: User,
     ) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
-            format!("
+            format!(
+                "
             UPDATE {users}
-            SET email = $2, given_name = $3, family_name = $4, nickname = $5, picture = $6, phone_number = $7
+            SET email = $2, given_name = $3, family_name = $4, nickname = $5, picture = $6, phone_number = $7, attrs = $8
             WHERE id = $1
             RETURNING *
-        ", users = USER).as_str(),
+        ",
+                users = USER
+            )
+            .as_str(),
         )
         .bind(&user.id)
         .bind(&user.email)
@@ -106,6 +119,7 @@ impl UserRepository {
         .bind(&user.nickname)
         .bind(&user.picture)
         .bind(&user.phone_number)
+        .bind(&user.attrs)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -159,9 +173,10 @@ impl UserRepository {
         let rows = sqlx::query_as::<_, User>(
             format!(
                 "SELECT * FROM {users}
-                 WHERE email ILIKE $1 OR given_name ILIKE $1 OR family_name ILIKE $1 OR nickname ILIKE $1
+                 WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
                  ORDER BY id LIMIT $2 OFFSET $3",
-                users = USER
+                users = USER,
+                like = LIKE
             )
             .as_str(),
         )
@@ -184,8 +199,9 @@ impl UserRepository {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "SELECT COUNT(*) FROM {users}
-                 WHERE email ILIKE $1 OR given_name ILIKE $1 OR family_name ILIKE $1 OR nickname ILIKE $1",
-                users = USER
+                 WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1",
+                users = USER,
+                like = LIKE
             )
             .as_str(),
         )

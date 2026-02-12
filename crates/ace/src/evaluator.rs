@@ -42,11 +42,7 @@ impl PolicyEvaluator {
         }
 
         // Deny takes precedence over allow
-        if explicit_deny {
-            false
-        } else {
-            explicit_allow
-        }
+        if explicit_deny { false } else { explicit_allow }
     }
 
     /// Check if a policy matches the given subject, resource, and action
@@ -104,10 +100,28 @@ impl PolicyEvaluator {
                 Operator::LessThanOrEqual => {
                     self.compare_values(context_value, &expr.right, |a, b| a <= b)
                 }
+                Operator::Contains => self.check_contains(context_value, &expr.right),
             }
         } else {
             // If the context key doesn't exist, the expression is false
             false
+        }
+    }
+
+    /// Check if a value contains another value.
+    /// For arrays, checks if the array contains the item.
+    /// For strings, checks if the string contains the substring.
+    fn check_contains(&self, haystack: &Value, needle: &Value) -> bool {
+        match haystack {
+            Value::Array(arr) => arr.contains(needle),
+            Value::String(s) => {
+                if let Value::String(needle_str) = needle {
+                    s.contains(needle_str.as_str())
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
     }
 
@@ -593,5 +607,116 @@ mod tests {
             Some(&ResourceAction::Delete),
             &context
         ));
+    }
+
+    #[test]
+    fn test_array_contains() {
+        let evaluator = PolicyEvaluator::new();
+        let policies = vec![create_test_policy(
+            PolicyAction::Allow,
+            "user",
+            "admin_panel",
+            Some(Condition::Expression(Expression {
+                left: "user.roles".to_string(),
+                operator: Operator::Contains,
+                right: Value::String("admin".to_string()),
+            })),
+        )];
+
+        let mut context = HashMap::new();
+
+        // Array contains "admin"
+        context.insert(
+            "user.roles".to_string(),
+            Value::Array(vec![
+                Value::String("editor".to_string()),
+                Value::String("admin".to_string()),
+            ]),
+        );
+        assert!(evaluator.evaluate(&policies, "user", "admin_panel", None, &context));
+
+        // Array does not contain "admin"
+        context.insert(
+            "user.roles".to_string(),
+            Value::Array(vec![
+                Value::String("editor".to_string()),
+                Value::String("viewer".to_string()),
+            ]),
+        );
+        assert!(!evaluator.evaluate(&policies, "user", "admin_panel", None, &context));
+
+        // Empty array
+        context.insert("user.roles".to_string(), Value::Array(vec![]));
+        assert!(!evaluator.evaluate(&policies, "user", "admin_panel", None, &context));
+    }
+
+    #[test]
+    fn test_array_not_contains() {
+        let evaluator = PolicyEvaluator::new();
+        let policies = vec![create_test_policy(
+            PolicyAction::Allow,
+            "user",
+            "feature1",
+            Some(Condition::Not(Box::new(Condition::Expression(
+                Expression {
+                    left: "user.tags".to_string(),
+                    operator: Operator::Contains,
+                    right: Value::String("banned".to_string()),
+                },
+            )))),
+        )];
+
+        let mut context = HashMap::new();
+
+        // Array does not contain "banned" -> allowed
+        context.insert(
+            "user.tags".to_string(),
+            Value::Array(vec![
+                Value::String("verified".to_string()),
+                Value::String("active".to_string()),
+            ]),
+        );
+        assert!(evaluator.evaluate(&policies, "user", "feature1", None, &context));
+
+        // Array contains "banned" -> not allowed
+        context.insert(
+            "user.tags".to_string(),
+            Value::Array(vec![
+                Value::String("verified".to_string()),
+                Value::String("banned".to_string()),
+            ]),
+        );
+        assert!(!evaluator.evaluate(&policies, "user", "feature1", None, &context));
+    }
+
+    #[test]
+    fn test_string_contains() {
+        let evaluator = PolicyEvaluator::new();
+        let policies = vec![create_test_policy(
+            PolicyAction::Allow,
+            "user",
+            "feature1",
+            Some(Condition::Expression(Expression {
+                left: "user.email".to_string(),
+                operator: Operator::Contains,
+                right: Value::String("@company.com".to_string()),
+            })),
+        )];
+
+        let mut context = HashMap::new();
+
+        // String contains substring
+        context.insert(
+            "user.email".to_string(),
+            Value::String("alice@company.com".to_string()),
+        );
+        assert!(evaluator.evaluate(&policies, "user", "feature1", None, &context));
+
+        // String does not contain substring
+        context.insert(
+            "user.email".to_string(),
+            Value::String("alice@other.com".to_string()),
+        );
+        assert!(!evaluator.evaluate(&policies, "user", "feature1", None, &context));
     }
 }

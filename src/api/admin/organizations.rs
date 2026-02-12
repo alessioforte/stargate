@@ -9,14 +9,14 @@ const MAX_LIMIT: i64 = 100;
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
-pub struct ListServiceAccountsQuery {
-    /// Maximum number of service accounts to return (default: 20, max: 100)
+pub struct ListOrganizationsQuery {
+    /// Maximum number of organizations to return (default: 20, max: 100)
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Number of service accounts to skip (default: 0)
+    /// Number of organizations to skip (default: 0)
     #[serde(default)]
     pub offset: Option<i64>,
-    /// Search query to filter service accounts by name or description
+    /// Search query to filter organizations by name or description
     #[serde(default)]
     pub q: Option<String>,
 }
@@ -32,65 +32,66 @@ pub struct PaginatedResponse<T> {
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateServiceAccountRequest {
+pub struct CreateOrganizationRequest {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    pub org_id: Option<String>,
+    pub attrs: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateServiceAccountRequest {
+pub struct UpdateOrganizationRequest {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
+    pub attrs: Option<serde_json::Value>,
 }
 
-/// Get all service accounts with pagination and optional search
+/// Get all organizations with pagination and optional search
 #[utoipa::path(
     context_path = "/admin",
-    path = "/service-accounts",
+    path = "/organizations",
     tags = ["Admin"],
-    params(ListServiceAccountsQuery),
+    params(ListOrganizationsQuery),
     responses(
-        (status = 200, description = "List of service accounts retrieved successfully"),
+        (status = 200, description = "List of organizations retrieved successfully"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 500, description = "Internal server error")
     )
 )]
 #[get("")]
-#[protect(any("super_admin", "service_accounts"))]
-pub async fn get_service_accounts(
-    query: web::Query<ListServiceAccountsQuery>,
+#[protect(any("super_admin", "organizations"))]
+pub async fn get_organizations(
+    query: web::Query<ListOrganizationsQuery>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    let (accounts, total) = match &query.q {
+    let (organizations, total) = match &query.q {
         Some(search_query) if !search_query.trim().is_empty() => {
-            let accounts = crate::db::search_service_accounts(search_query, limit, offset)
+            let organizations = crate::db::search_organizations(search_query, limit, offset)
                 .await
                 .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
-            let total = crate::db::count_search_service_accounts(search_query)
+            let total = crate::db::count_search_organizations(search_query)
                 .await
                 .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
-            (accounts, total)
+            (organizations, total)
         }
         _ => {
-            let accounts = crate::db::get_all_service_accounts(limit, offset)
+            let organizations = crate::db::get_all_organizations(limit, offset)
                 .await
                 .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
-            let total = crate::db::count_service_accounts()
+            let total = crate::db::count_organizations()
                 .await
                 .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
-            (accounts, total)
+            (organizations, total)
         }
     };
 
     let response = PaginatedResponse {
-        data: accounts,
+        data: organizations,
         total,
         limit,
         offset,
@@ -99,32 +100,32 @@ pub async fn get_service_accounts(
     Ok(HttpResponse::Ok().json(response))
 }
 
-/// Get a service account by ID
+/// Get an organization by ID
 #[utoipa::path(
     context_path = "/admin",
-    path = "/service-accounts/{id}",
+    path = "/organizations/{id}",
     tags = ["Admin"],
     params(
-        ("id" = String, Path, description = "Service Account ID")
+        ("id" = String, Path, description = "Organization ID")
     ),
     responses(
-        (status = 200, description = "Service account retrieved successfully"),
+        (status = 200, description = "Organization retrieved successfully"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
-        (status = 404, description = "Service account not found"),
+        (status = 404, description = "Organization not found"),
         (status = 500, description = "Internal server error")
     )
 )]
 #[get("/{id}")]
-#[protect(any("super_admin", "service_accounts"))]
-pub async fn get_service_account(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
+#[protect(any("super_admin", "organizations"))]
+pub async fn get_organization(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
     let id = params.into_inner();
 
-    let account = match crate::db::get_service_account_by_id(&id).await {
-        Ok(Some(account)) => account,
+    let organization = match crate::db::get_organization_by_id(&id).await {
+        Ok(Some(org)) => org,
         Ok(None) => {
             return Err(ErrorResponse::from(HttpError::NotFound(format!(
-                "Service account with id '{}' not found",
+                "Organization with id '{}' not found",
                 id
             ))));
         }
@@ -135,17 +136,17 @@ pub async fn get_service_account(params: web::Path<String>) -> Result<HttpRespon
         }
     };
 
-    Ok(HttpResponse::Ok().json(account))
+    Ok(HttpResponse::Ok().json(organization))
 }
 
-/// Create a new service account
+/// Create a new organization
 #[utoipa::path(
     context_path = "/admin",
-    path = "/service-accounts",
+    path = "/organizations",
     tags = ["Admin"],
-    request_body = CreateServiceAccountRequest,
+    request_body = CreateOrganizationRequest,
     responses(
-        (status = 201, description = "Service account created successfully"),
+        (status = 201, description = "Organization created successfully"),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
@@ -153,10 +154,10 @@ pub async fn get_service_account(params: web::Path<String>) -> Result<HttpRespon
     )
 )]
 #[post("")]
-#[protect(any("super_admin", "service_accounts"))]
-pub async fn create_service_account(
+#[protect(any("super_admin", "organizations"))]
+pub async fn create_organization(
     req: HttpRequest,
-    payload: web::Json<CreateServiceAccountRequest>,
+    payload: web::Json<CreateOrganizationRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let ctx = match req.extensions().get::<AuditContext>().cloned() {
         Some(c) => c,
@@ -169,15 +170,15 @@ pub async fn create_service_account(
         )));
     }
 
-    let account = match crate::db::create_service_account(
+    let organization = match crate::db::create_organization(
         &payload.name,
         payload.description.as_deref(),
-        payload.org_id.as_deref(),
+        payload.attrs.as_ref(),
         ctx,
     )
     .await
     {
-        Ok(account) => account,
+        Ok(org) => org,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
@@ -185,33 +186,33 @@ pub async fn create_service_account(
         }
     };
 
-    Ok(HttpResponse::Created().json(account))
+    Ok(HttpResponse::Created().json(organization))
 }
 
-/// Update a service account
+/// Update an organization
 #[utoipa::path(
     context_path = "/admin",
-    path = "/service-accounts/{id}",
+    path = "/organizations/{id}",
     tags = ["Admin"],
     params(
-        ("id" = String, Path, description = "Service Account ID")
+        ("id" = String, Path, description = "Organization ID")
     ),
-    request_body = UpdateServiceAccountRequest,
+    request_body = UpdateOrganizationRequest,
     responses(
-        (status = 200, description = "Service account updated successfully"),
+        (status = 200, description = "Organization updated successfully"),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
-        (status = 404, description = "Service account not found"),
+        (status = 404, description = "Organization not found"),
         (status = 500, description = "Internal server error")
     )
 )]
 #[put("/{id}")]
-#[protect(any("super_admin", "service_accounts"))]
-pub async fn update_service_account(
+#[protect(any("super_admin", "organizations"))]
+pub async fn update_organization(
     req: HttpRequest,
     params: web::Path<String>,
-    payload: web::Json<UpdateServiceAccountRequest>,
+    payload: web::Json<UpdateOrganizationRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let ctx = match req.extensions().get::<AuditContext>().cloned() {
         Some(c) => c,
@@ -226,23 +227,24 @@ pub async fn update_service_account(
         )));
     }
 
-    // Check if service account exists
-    if let Ok(None) = crate::db::get_service_account_by_id(&id).await {
+    // Check if organization exists
+    if let Ok(None) = crate::db::get_organization_by_id(&id).await {
         return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Service account with id '{}' not found",
+            "Organization with id '{}' not found",
             id
         ))));
     }
 
-    let account = match crate::db::update_service_account(
+    let organization = match crate::db::update_organization(
         &id,
         &payload.name,
         payload.description.as_deref(),
+        payload.attrs.as_ref(),
         ctx,
     )
     .await
     {
-        Ok(account) => account,
+        Ok(org) => org,
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 e.to_string(),
@@ -250,28 +252,28 @@ pub async fn update_service_account(
         }
     };
 
-    Ok(HttpResponse::Ok().json(account))
+    Ok(HttpResponse::Ok().json(organization))
 }
 
-/// Delete a service account
+/// Delete an organization
 #[utoipa::path(
     context_path = "/admin",
-    path = "/service-accounts/{id}",
+    path = "/organizations/{id}",
     tags = ["Admin"],
     params(
-        ("id" = String, Path, description = "Service Account ID")
+        ("id" = String, Path, description = "Organization ID")
     ),
     responses(
-        (status = 204, description = "Service account deleted successfully"),
+        (status = 204, description = "Organization deleted successfully"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
-        (status = 404, description = "Service account not found"),
+        (status = 404, description = "Organization not found"),
         (status = 500, description = "Internal server error")
     )
 )]
 #[delete("/{id}")]
-#[protect(any("super_admin", "service_accounts"))]
-pub async fn delete_service_account(
+#[protect(any("super_admin", "organizations"))]
+pub async fn delete_organization(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
@@ -282,14 +284,14 @@ pub async fn delete_service_account(
 
     let id = params.into_inner();
 
-    if let Ok(None) = crate::db::get_service_account_by_id(&id).await {
+    if let Ok(None) = crate::db::get_organization_by_id(&id).await {
         return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Service account with id '{}' not found",
+            "Organization with id '{}' not found",
             id
         ))));
     }
 
-    match crate::db::delete_service_account(&id, ctx).await {
+    match crate::db::delete_organization(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
             return Err(ErrorResponse::from(HttpError::InternalServerError(
@@ -302,10 +304,10 @@ pub async fn delete_service_account(
 }
 
 pub fn routes() -> actix_web::Scope {
-    web::scope("/service-accounts")
-        .service(get_service_accounts)
-        .service(create_service_account)
-        .service(get_service_account)
-        .service(update_service_account)
-        .service(delete_service_account)
+    web::scope("/organizations")
+        .service(get_organizations)
+        .service(create_organization)
+        .service(get_organization)
+        .service(update_organization)
+        .service(delete_organization)
 }

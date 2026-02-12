@@ -74,14 +74,13 @@ pub async fn handler(
     let sid = ulid::Ulid::new().to_string();
     let mut claims = jwt::Claims::default()
         .subject(user.email.to_owned())
-        .sub_id(user.account_id.to_owned())
+        .sub_id(user.id.to_owned())
         .name(name.clone())
         .email(user.email.to_owned())
         .email_verified(true)
         .sid(sid.clone());
 
-    let nickname = user.nickname.clone().unwrap_or_default();
-    if nickname == crate::etc::consts::STARGATE_ADMIN {
+    if user.nickname == crate::etc::consts::STARGATE_ADMIN {
         claims = claims.role(crate::etc::consts::STARGATE_ADMIN.to_string());
     }
 

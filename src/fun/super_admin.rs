@@ -21,9 +21,8 @@ pub async fn create_super_admin() {
         std::env::var("SUPER_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost".to_string());
     let name = std::env::var("SUPER_ADMIN_NAME").unwrap_or_else(|_| "Admin".to_string());
     let password = pw::generator(40, true, true, true, false);
-    let user = Profile::new(email)
+    let user = Profile::new(email, STARGATE_ADMIN.to_string())
         .given_name(Some(name))
-        .nickname(Some(STARGATE_ADMIN.to_string()))
         .phone_number(None)
         .picture(None);
 

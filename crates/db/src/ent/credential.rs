@@ -11,21 +11,18 @@ pub enum CredentialType {
 pub struct Credential {
     pub id: String,
     pub user_id: String,
-    pub timestamp: i64,
     #[serde(rename = "type")]
     #[sqlx(rename = "type")]
     pub credential_type: CredentialType,
-    pub value: String, // hashed password, provider user id, etc.
+    pub value: String,
 }
 
 impl Credential {
     pub fn new(user_id: String, credential_type: CredentialType, value: String) -> Self {
         let id = ulid::Ulid::new().to_string();
-        let timestamp = chrono::Utc::now().timestamp();
         Credential {
             id,
             user_id,
-            timestamp,
             credential_type,
             value,
         }

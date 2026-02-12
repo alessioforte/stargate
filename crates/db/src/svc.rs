@@ -1,9 +1,9 @@
 use super::repo::{
-    AccountRepository, AdminKeyRepository, ApiKeyRepository, AuditRepository, CredentialRepository,
-    UserRepository,
+    AdminKeyRepository, ApiKeyRepository, AuditRepository, CredentialRepository,
+    OrganizationRepository, ServiceAccountRepository, UserRepository,
 };
 use crate::ent::{
-    Account, AccountType, AdminKey, ApiKey, Credential, CredentialType, Profile, User,
+    AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount, User,
 };
 use crate::tx::Transaction;
 use anyhow::Result;
@@ -18,12 +18,13 @@ pub struct Service {
     pool: sqlx::PgPool,
     #[cfg(feature = "sqlite")]
     pool: sqlx::SqlitePool,
-    account: AccountRepository,
     admin_key: AdminKeyRepository,
     user: UserRepository,
     credential: CredentialRepository,
     api_key: ApiKeyRepository,
     audit: AuditRepository,
+    service_account: ServiceAccountRepository,
+    organization: OrganizationRepository,
 }
 
 impl Service {
@@ -33,12 +34,13 @@ impl Service {
     ) -> Self {
         Self {
             pool,
-            account: AccountRepository::new(),
             admin_key: AdminKeyRepository::new(),
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
             api_key: ApiKeyRepository::new(),
             audit: AuditRepository::new(),
+            service_account: ServiceAccountRepository::new(),
+            organization: OrganizationRepository::new(),
         }
     }
 
@@ -77,7 +79,8 @@ pub async fn init(conn: &str) -> Result<Service> {
 
 #[async_trait::async_trait]
 impl Transaction for Service {
-    /// Creates a new user with the specified credential type and value.
+    // ── Users ───────────────────────────────────────────────────────────────
+
     async fn create_user(
         &self,
         profile: Profile,
@@ -85,24 +88,12 @@ impl Transaction for Service {
         value: &str,
     ) -> Result<User> {
         let mut tx = self.pool.begin().await?;
-        let name = format!(
-            "{} {}",
-            profile.given_name.clone().unwrap_or_default(),
-            profile.family_name.clone().unwrap_or_default()
-        )
-        .trim()
-        .to_string();
 
-        let account = self
-            .account
-            .create(&mut tx, AccountType::User, &name, None)
-            .await?;
-
-        let user = User::new(account.id, profile.email)
+        let user = User::new(profile.email, profile.nickname)
             .given_name(profile.given_name)
             .family_name(profile.family_name)
             .picture(profile.picture)
-            .nickname(profile.nickname)
+            .phone_number(profile.phone_number)
             .attrs(profile.attrs);
 
         let user_id = user.id.clone();
@@ -114,7 +105,6 @@ impl Transaction for Service {
         Ok(record)
     }
 
-    /// Retrieves a user by their username (email).
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         let mut tx = self.pool.begin().await?;
         let user = self.user.get_by_username(&mut tx, username).await?;
@@ -122,7 +112,6 @@ impl Transaction for Service {
         Ok(user)
     }
 
-    /// Retrieves a user by their ID.
     async fn get_user_by_id(&self, id: &str) -> Result<Option<User>> {
         let mut tx = self.pool.begin().await?;
         let user = self.user.get_by_id(&mut tx, id).await?;
@@ -130,7 +119,6 @@ impl Transaction for Service {
         Ok(user)
     }
 
-    /// Retrieves all users with pagination.
     async fn get_all_users(&self, limit: i64, offset: i64) -> Result<Vec<User>> {
         let mut tx = self.pool.begin().await?;
         let users = self.user.get_all(&mut tx, limit, offset).await?;
@@ -138,7 +126,6 @@ impl Transaction for Service {
         Ok(users)
     }
 
-    /// Counts total number of users.
     async fn count_users(&self) -> Result<i64> {
         let mut tx = self.pool.begin().await?;
         let count = self.user.count(&mut tx).await?;
@@ -146,7 +133,6 @@ impl Transaction for Service {
         Ok(count)
     }
 
-    /// Searches users with pagination.
     async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>> {
         let mut tx = self.pool.begin().await?;
         let users = self
@@ -157,7 +143,6 @@ impl Transaction for Service {
         Ok(users)
     }
 
-    /// Counts users matching search query.
     async fn count_search_users(&self, query: &str) -> Result<i64> {
         let mut tx = self.pool.begin().await?;
         let count = self.user.count_search(&mut tx, query).await?;
@@ -165,51 +150,20 @@ impl Transaction for Service {
         Ok(count)
     }
 
-    /// Updates the information of an existing user.
     async fn update_user(&self, user: User) -> Result<User> {
         let mut tx = self.pool.begin().await?;
         let updated_user = self.user.update(&mut tx, user).await?;
-        let name = format!(
-            "{} {}",
-            updated_user.given_name.clone().unwrap_or_default(),
-            updated_user.family_name.clone().unwrap_or_default()
-        )
-        .trim()
-        .to_string();
-        let _ = self
-            .account
-            .update(
-                &mut tx,
-                &updated_user.account_id,
-                AccountType::User,
-                &name,
-                None,
-            )
-            .await?;
         tx.commit().await?;
         Ok(updated_user)
     }
 
-    /// Deletes a user and all associated data (credentials, account).
     async fn delete_user(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-
-        // Get user to find account_id
-        let user = self.user.get_by_id(&mut tx, id).await?;
-        if let Some(user) = user {
-            // Delete credentials first (foreign key constraint)
-            self.credential.delete_by_user_id(&mut tx, id).await?;
-            // Delete user
-            self.user.delete(&mut tx, id).await?;
-            // Delete account
-            self.account.delete(&mut tx, &user.account_id).await?;
-        }
-
+        self.user.delete(&mut tx, id).await?;
         tx.commit().await?;
         Ok(())
     }
 
-    /// Changes the password for a user.
     async fn change_password(&self, user_id: &str, new_password: &str) -> Result<Credential> {
         let mut tx = self.pool.begin().await?;
         let credential = self
@@ -220,7 +174,6 @@ impl Transaction for Service {
         Ok(credential)
     }
 
-    /// Retrieves a credential for a user by credential type.
     async fn get_credential(
         &self,
         user_id: &str,
@@ -235,25 +188,52 @@ impl Transaction for Service {
         Ok(credential)
     }
 
-    /// Creates a new API key for the specified account.
+    // ── API Keys ────────────────────────────────────────────────────────────
+
     async fn create_api_key(
         &self,
-        account_id: &str,
         key_hash: &str,
-        label: Option<String>,
+        label: &str,
         attrs: Option<JsonValue>,
     ) -> Result<ApiKey> {
         let mut tx = self.pool.begin().await?;
-        let api_key = self
-            .api_key
-            .create(&mut tx, account_id, key_hash, label, attrs)
-            .await?;
-
+        let api_key = self.api_key.create(&mut tx, key_hash, label, attrs).await?;
         tx.commit().await?;
         Ok(api_key)
     }
 
-    /// Retrieves an API key by its hash.
+    async fn create_user_api_key(
+        &self,
+        user_id: &str,
+        key_hash: &str,
+        label: &str,
+        attrs: Option<JsonValue>,
+    ) -> Result<ApiKey> {
+        let mut tx = self.pool.begin().await?;
+        let api_key = self.api_key.create(&mut tx, key_hash, label, attrs).await?;
+        self.api_key
+            .link_to_user(&mut tx, &api_key.id, user_id)
+            .await?;
+        tx.commit().await?;
+        Ok(api_key)
+    }
+
+    async fn create_service_account_api_key(
+        &self,
+        service_account_id: &str,
+        key_hash: &str,
+        label: &str,
+        attrs: Option<JsonValue>,
+    ) -> Result<ApiKey> {
+        let mut tx = self.pool.begin().await?;
+        let api_key = self.api_key.create(&mut tx, key_hash, label, attrs).await?;
+        self.api_key
+            .link_to_service_account(&mut tx, &api_key.id, service_account_id)
+            .await?;
+        tx.commit().await?;
+        Ok(api_key)
+    }
+
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>> {
         let mut tx = self.pool.begin().await?;
         let api_key = self.api_key.get_by_hash(&mut tx, key_hash).await?;
@@ -261,7 +241,6 @@ impl Transaction for Service {
         Ok(api_key)
     }
 
-    /// Retrieves an API key by its ID.
     async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>> {
         let mut tx = self.pool.begin().await?;
         let api_key = self.api_key.get_by_id(&mut tx, id).await?;
@@ -269,7 +248,6 @@ impl Transaction for Service {
         Ok(api_key)
     }
 
-    /// Retrieves all API keys with pagination.
     async fn get_all_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
         let mut tx = self.pool.begin().await?;
         let api_keys = self.api_key.get_all(&mut tx, limit, offset).await?;
@@ -277,7 +255,26 @@ impl Transaction for Service {
         Ok(api_keys)
     }
 
-    /// Counts total number of API keys.
+    async fn get_api_keys_by_user_id(&self, user_id: &str) -> Result<Vec<ApiKey>> {
+        let mut tx = self.pool.begin().await?;
+        let api_keys = self.api_key.get_by_user_id(&mut tx, user_id).await?;
+        tx.commit().await?;
+        Ok(api_keys)
+    }
+
+    async fn get_api_keys_by_service_account_id(
+        &self,
+        service_account_id: &str,
+    ) -> Result<Vec<ApiKey>> {
+        let mut tx = self.pool.begin().await?;
+        let api_keys = self
+            .api_key
+            .get_by_service_account_id(&mut tx, service_account_id)
+            .await?;
+        tx.commit().await?;
+        Ok(api_keys)
+    }
+
     async fn count_api_keys(&self) -> Result<i64> {
         let mut tx = self.pool.begin().await?;
         let count = self.api_key.count(&mut tx).await?;
@@ -285,7 +282,6 @@ impl Transaction for Service {
         Ok(count)
     }
 
-    /// Updates an API key.
     async fn update_api_key(&self, api_key: ApiKey) -> Result<ApiKey> {
         let mut tx = self.pool.begin().await?;
         let updated = self.api_key.update(&mut tx, api_key).await?;
@@ -293,7 +289,6 @@ impl Transaction for Service {
         Ok(updated)
     }
 
-    /// Revokes an API key by its ID.
     async fn revoke_api_key(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         self.api_key.revoke_by_id(&mut tx, id).await?;
@@ -301,7 +296,6 @@ impl Transaction for Service {
         Ok(())
     }
 
-    /// Deletes an API key by its ID.
     async fn delete_api_key(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         self.api_key.delete_by_id(&mut tx, id).await?;
@@ -309,7 +303,8 @@ impl Transaction for Service {
         Ok(())
     }
 
-    /// Creates a new admin key.
+    // ── Admin Keys ──────────────────────────────────────────────────────────
+
     async fn create_admin_key(
         &self,
         key_hash: &str,
@@ -325,7 +320,6 @@ impl Transaction for Service {
         Ok(admin_key)
     }
 
-    /// Retrieves an admin key by its hash.
     async fn get_admin_key_by_hash(&self, key_hash: &str) -> Result<Option<AdminKey>> {
         let mut tx = self.pool.begin().await?;
         let admin_key = self.admin_key.get_by_hash(&mut tx, key_hash).await?;
@@ -333,7 +327,6 @@ impl Transaction for Service {
         Ok(admin_key)
     }
 
-    /// Retrieves an admin key by its ID.
     async fn get_admin_key_by_id(&self, id: &str) -> Result<Option<AdminKey>> {
         let mut tx = self.pool.begin().await?;
         let admin_key = self.admin_key.get_by_id(&mut tx, id).await?;
@@ -341,7 +334,6 @@ impl Transaction for Service {
         Ok(admin_key)
     }
 
-    /// Retrieves all admin keys with pagination.
     async fn get_all_admin_keys(&self, limit: i64, offset: i64) -> Result<Vec<AdminKey>> {
         let mut tx = self.pool.begin().await?;
         let admin_keys = self.admin_key.get_all(&mut tx, limit, offset).await?;
@@ -349,7 +341,6 @@ impl Transaction for Service {
         Ok(admin_keys)
     }
 
-    /// Counts total number of admin keys.
     async fn count_admin_keys(&self) -> Result<i64> {
         let mut tx = self.pool.begin().await?;
         let count = self.admin_key.count(&mut tx).await?;
@@ -357,7 +348,6 @@ impl Transaction for Service {
         Ok(count)
     }
 
-    /// Updates an admin key.
     async fn update_admin_key(&self, admin_key: AdminKey) -> Result<AdminKey> {
         let mut tx = self.pool.begin().await?;
         let updated = self.admin_key.update(&mut tx, admin_key).await?;
@@ -365,7 +355,6 @@ impl Transaction for Service {
         Ok(updated)
     }
 
-    /// Revokes an admin key by its ID.
     async fn revoke_admin_key(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         self.admin_key.revoke_by_id(&mut tx, id).await?;
@@ -373,7 +362,6 @@ impl Transaction for Service {
         Ok(())
     }
 
-    /// Deletes an admin key by its ID.
     async fn delete_admin_key(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         self.admin_key.delete_by_id(&mut tx, id).await?;
@@ -381,105 +369,208 @@ impl Transaction for Service {
         Ok(())
     }
 
-    /// Creates a new service account.
+    // ── Service Accounts ────────────────────────────────────────────────────
+
     async fn create_service_account(
         &self,
         name: &str,
         description: Option<&str>,
-    ) -> Result<Account> {
+        org_id: Option<&str>,
+    ) -> Result<ServiceAccount> {
         let mut tx = self.pool.begin().await?;
-        let account = self
-            .account
-            .create(&mut tx, AccountType::Service, name, description)
+        let sa = self
+            .service_account
+            .create(&mut tx, name, description, org_id)
             .await?;
         tx.commit().await?;
-        Ok(account)
+        Ok(sa)
     }
 
-    /// Retrieves a service account by its ID.
-    async fn get_service_account_by_id(&self, id: &str) -> Result<Option<Account>> {
+    async fn get_service_account_by_id(&self, id: &str) -> Result<Option<ServiceAccount>> {
         let mut tx = self.pool.begin().await?;
-        let account = self.account.get_by_id(&mut tx, id).await?;
-        // Only return if it's a service account
-        let account = account.filter(|a| matches!(a.account_type, AccountType::Service));
+        let sa = self.service_account.get_by_id(&mut tx, id).await?;
         tx.commit().await?;
-        Ok(account)
+        Ok(sa)
     }
 
-    /// Retrieves all service accounts with pagination.
-    async fn get_all_service_accounts(&self, limit: i64, offset: i64) -> Result<Vec<Account>> {
+    async fn get_all_service_accounts(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ServiceAccount>> {
         let mut tx = self.pool.begin().await?;
-        let accounts = self
-            .account
-            .get_all_by_type(&mut tx, AccountType::Service, limit, offset)
-            .await?;
+        let accounts = self.service_account.get_all(&mut tx, limit, offset).await?;
         tx.commit().await?;
         Ok(accounts)
     }
 
-    /// Counts total number of service accounts.
     async fn count_service_accounts(&self) -> Result<i64> {
         let mut tx = self.pool.begin().await?;
-        let count = self
-            .account
-            .count_by_type(&mut tx, AccountType::Service)
-            .await?;
+        let count = self.service_account.count(&mut tx).await?;
         tx.commit().await?;
         Ok(count)
     }
 
-    /// Searches service accounts with pagination.
     async fn search_service_accounts(
         &self,
         query: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<Account>> {
+    ) -> Result<Vec<ServiceAccount>> {
         let mut tx = self.pool.begin().await?;
         let accounts = self
-            .account
-            .search_by_type(&mut tx, AccountType::Service, query, limit, offset)
+            .service_account
+            .search(&mut tx, query, limit, offset)
             .await?;
         tx.commit().await?;
         Ok(accounts)
     }
 
-    /// Counts service accounts matching search query.
     async fn count_search_service_accounts(&self, query: &str) -> Result<i64> {
         let mut tx = self.pool.begin().await?;
-        let count = self
-            .account
-            .count_search_by_type(&mut tx, AccountType::Service, query)
-            .await?;
+        let count = self.service_account.count_search(&mut tx, query).await?;
         tx.commit().await?;
         Ok(count)
     }
 
-    /// Updates a service account.
     async fn update_service_account(
         &self,
         id: &str,
         name: &str,
         description: Option<&str>,
-    ) -> Result<Account> {
+        org_id: Option<&str>,
+    ) -> Result<ServiceAccount> {
         let mut tx = self.pool.begin().await?;
-        let account = self
-            .account
-            .update(&mut tx, id, AccountType::Service, name, description)
+        let sa = self
+            .service_account
+            .update(&mut tx, id, name, description, org_id)
             .await?;
         tx.commit().await?;
-        Ok(account)
+        Ok(sa)
     }
 
-    /// Deletes a service account and all associated API keys (via CASCADE).
     async fn delete_service_account(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.account.delete(&mut tx, id).await?;
+        self.service_account.delete(&mut tx, id).await?;
         tx.commit().await?;
         Ok(())
     }
 
-    /// Inserts multiple audit logs in bulk.
+    // ── Organizations ───────────────────────────────────────────────────────
+
+    async fn create_organization(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        attrs: Option<&serde_json::Value>,
+    ) -> Result<Organization> {
+        let mut tx = self.pool.begin().await?;
+        let org = self
+            .organization
+            .create(&mut tx, name, description, attrs)
+            .await?;
+        tx.commit().await?;
+        Ok(org)
+    }
+
+    async fn get_organization_by_id(&self, id: &str) -> Result<Option<Organization>> {
+        let mut tx = self.pool.begin().await?;
+        let org = self.organization.get_by_id(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(org)
+    }
+
+    async fn get_all_organizations(&self, limit: i64, offset: i64) -> Result<Vec<Organization>> {
+        let mut tx = self.pool.begin().await?;
+        let orgs = self.organization.get_all(&mut tx, limit, offset).await?;
+        tx.commit().await?;
+        Ok(orgs)
+    }
+
+    async fn count_organizations(&self) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.organization.count(&mut tx).await?;
+        tx.commit().await?;
+        Ok(count)
+    }
+
+    async fn search_organizations(
+        &self,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Organization>> {
+        let mut tx = self.pool.begin().await?;
+        let orgs = self
+            .organization
+            .search(&mut tx, query, limit, offset)
+            .await?;
+        tx.commit().await?;
+        Ok(orgs)
+    }
+
+    async fn count_search_organizations(&self, query: &str) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.organization.count_search(&mut tx, query).await?;
+        tx.commit().await?;
+        Ok(count)
+    }
+
+    async fn update_organization(
+        &self,
+        id: &str,
+        name: &str,
+        description: Option<&str>,
+        attrs: Option<&serde_json::Value>,
+    ) -> Result<Organization> {
+        let mut tx = self.pool.begin().await?;
+        let org = self
+            .organization
+            .update(&mut tx, id, name, description, attrs)
+            .await?;
+        tx.commit().await?;
+        Ok(org)
+    }
+
+    async fn delete_organization(&self, id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.organization.delete(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn add_user_to_organization(&self, user_id: &str, org_id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.organization.add_user(&mut tx, user_id, org_id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn remove_user_from_organization(&self, user_id: &str, org_id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.organization
+            .remove_user(&mut tx, user_id, org_id)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn get_organization_users(&self, org_id: &str) -> Result<Vec<User>> {
+        let mut tx = self.pool.begin().await?;
+        let users = self.organization.get_users(&mut tx, org_id).await?;
+        tx.commit().await?;
+        Ok(users)
+    }
+
+    async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<Organization>> {
+        let mut tx = self.pool.begin().await?;
+        let orgs = self.organization.get_orgs_by_user(&mut tx, user_id).await?;
+        tx.commit().await?;
+        Ok(orgs)
+    }
+
+    // ── Audit ───────────────────────────────────────────────────────────────
+
     async fn insert_audit_log_bulk(&self, logs: Vec<crate::ent::Audit>) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         for log in logs {
