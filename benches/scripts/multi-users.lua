@@ -1,5 +1,5 @@
 --[[
-Load Test Script for Multiple Users with JWT Tokens
+Load Test Script for Multiple Users with Api Keys
 File: load-test/scripts/multiple-users.lua
 
 Usage:
@@ -8,13 +8,13 @@ wrk -t8 -c400 -d30s -s load-test/scripts/multiple-users.lua http://localhost:505
 
 -- Configuration
 local config = {
-    -- Simulate different users with different JWT tokens
-    tokens = {
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3MDAwMDAwMDB9.fake_token_1",
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJyb2xlIjoidXNlciIsImV4cCI6MTcwMDAwMDAwMH0.fake_token_2",
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjozLCJyb2xlIjoiZ3Vlc3QiLCJleHAiOjE3MDAwMDAwMDB9.fake_token_3",
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo0LCJyb2xlIjoidXNlciIsImV4cCI6MTcwMDAwMDAwMH0.fake_token_4",
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo1LCJyb2xlIjoibW9kIiwiZXhwIjoxNzAwMDAwMDAwfQ.fake_token_5"
+    -- Simulate different users with different Api Keys
+    api_keys = {
+        "sk_live_a1ViRTNDdE9OSWpJTHNoZDJGT1Z2SWloSXZ4dDFIOXc",
+        "sk_live_amRtZ1NLWWJ3MEFabDRNd3NZekZzcXpNTElZbmFQdDM",
+        "sk_live_NlZXempvcExUTlZqYTgyQWFyaTQxNTZjMU9tWlo0ZzE",
+        "sk_live_QTNmM2F6NDhuTm40Y0QxZmNXbXFCdkJNT0kzMnNEM2E",
+        "sk_live_WEtLb1I1Z3dxYWJmaU15dEVUeUh0V3AzTVZuYmF3RFQ"
     },
 
     -- Additional headers
@@ -38,8 +38,8 @@ request = function()
     request_counter = request_counter + 1
 
     -- Select random token for this request
-    local random_index = math.random(1, #config.tokens)
-    local token = config.tokens[random_index]
+    local random_index = math.random(1, #config.api_keys)
+    local api_key = config.api_keys[random_index]
 
     -- Prepare headers
     local headers = {}
@@ -50,7 +50,7 @@ request = function()
     end
 
     -- Add authorization header
-    headers["Authorization"] = "Bearer " .. token
+    headers["x-api-key"] = api_key
     headers["X-User-ID"] = tostring(random_index)
     headers["X-Request-ID"] = string.format("req_%d_%d", request_counter, random_index)
 
@@ -81,11 +81,12 @@ done = function(summary, latency, requests)
     io.write(string.rep("=", 50) .. "\n")
 
     -- Basic metrics
+    local duration_s = summary.duration / 1000000
     io.write(string.format("Total Requests:     %d\n", summary.requests))
-    io.write(string.format("Duration:           %.2f seconds\n", summary.duration))
-    io.write(string.format("Requests/sec:       %.2f\n", summary.requests / summary.duration))
+    io.write(string.format("Duration:           %.2f seconds\n", duration_s))
+    io.write(string.format("Requests/sec:       %.2f\n", summary.requests / duration_s))
     io.write(string.format("Transfer rate:      %.2f MB/s\n",
-        summary.bytes / (1024 * 1024) / summary.duration))
+        summary.bytes / (1024 * 1024) / duration_s))
 
     -- Error reporting
     local total_errors = summary.errors.connect + summary.errors.read +
@@ -119,5 +120,5 @@ end
 Setup function - called before test starts
 ]]
 setup = function(thread)
-    io.write(string.format("Starting thread %d\n", thread.id))
+    io.write(string.format("Starting thread %s\n", tostring(thread.id)))
 end

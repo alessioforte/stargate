@@ -38,7 +38,7 @@ async fn main() -> std::io::Result<()> {
     info!("Starting server on port {}", port);
 
     jwt::init();
-    store::init();
+    store::init().await;
     db::init().await;
     let gcfg = gate::init();
 

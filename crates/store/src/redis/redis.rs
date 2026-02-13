@@ -1,25 +1,170 @@
+use super::scripts::{CAS_I64_SCRIPT, CAS_SCRIPT, DECR_SCRIPT, INCR_SCRIPT};
 use crate::error::{StoreError, StoreResult};
 use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
-use redis::{Commands, HashFieldExpirationOptions, SetExpiry};
+use redis::aio::ConnectionManager;
+use redis::{AsyncCommands, HashFieldExpirationOptions, SetExpiry};
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub use redis::Script as RedisScript;
 
-pub struct RedisStore {
-    client: redis::Client,
+// =============================================================================
+// Pool Configuration
+// =============================================================================
+
+/// Configuration for the Redis connection pool.
+///
+/// The pool maintains multiple `ConnectionManager` instances, each backed by its
+/// own TCP socket to the Redis server. This enables truly parallel I/O across
+/// connections rather than multiplexing everything through a single socket.
+#[derive(Debug, Clone)]
+pub struct RedisPoolConfig {
+    /// Number of connections to maintain in the pool.
+    ///
+    /// Each connection is a separate `ConnectionManager` with its own TCP socket.
+    /// A higher value allows more parallel I/O but consumes more file descriptors
+    /// and Redis server connections.
+    ///
+    /// Defaults to `4`.
+    pub pool_size: usize,
 }
 
-impl Clone for RedisStore {
-    fn clone(&self) -> Self {
-        RedisStore {
-            client: self.client.clone(),
-        }
+impl Default for RedisPoolConfig {
+    fn default() -> Self {
+        Self { pool_size: 4 }
     }
 }
 
+impl RedisPoolConfig {
+    /// Create a new pool configuration with the given pool size.
+    ///
+    /// # Panics
+    ///
+    /// Will not panic here, but a pool size of 0 will be rejected at pool creation time.
+    pub fn new(pool_size: usize) -> Self {
+        Self { pool_size }
+    }
+}
+
+// =============================================================================
+// Connection Pool
+// =============================================================================
+
+/// A lightweight, lock-free connection pool that distributes work across N
+/// `ConnectionManager` instances using round-robin selection.
+///
+/// Each `ConnectionManager` internally manages a single multiplexed TCP
+/// connection with automatic reconnection. Cloning a `ConnectionManager` is
+/// cheap (Arc-based) and shares the same underlying socket. By maintaining N
+/// *separate* managers we get N distinct TCP sockets, enabling truly parallel
+/// I/O to the Redis server.
+///
+/// The round-robin counter uses relaxed atomic ordering which is sufficient —
+/// perfect distribution is not required, only reasonable spread.
+#[derive(Clone)]
+struct RedisPool {
+    connections: Arc<Vec<ConnectionManager>>,
+    next: Arc<AtomicUsize>,
+}
+
+impl RedisPool {
+    /// Create a new pool with `pool_size` connections to the given Redis client.
+    async fn new(client: &redis::Client, pool_size: usize) -> StoreResult<Self> {
+        if pool_size == 0 {
+            return Err(StoreError::InvalidInput(
+                "Pool size must be at least 1".to_string(),
+            ));
+        }
+
+        let mut connections = Vec::with_capacity(pool_size);
+        for i in 0..pool_size {
+            let conn = ConnectionManager::new(client.clone()).await.map_err(|e| {
+                StoreError::ConnectionFailed(format!(
+                    "Failed to create Redis connection {} of {}: {}",
+                    i + 1,
+                    pool_size,
+                    e
+                ))
+            })?;
+            connections.push(conn);
+        }
+
+        tracing::debug!(
+            "Redis connection pool created with {} connection(s)",
+            pool_size
+        );
+
+        Ok(Self {
+            connections: Arc::new(connections),
+            next: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+
+    /// Acquire a connection from the pool using round-robin selection.
+    ///
+    /// This is a non-blocking, lock-free operation. The returned
+    /// `ConnectionManager` is a cheap clone (Arc bump) of one of the pooled
+    /// managers, so the caller gets its own handle while the pool retains
+    /// ownership.
+    fn get(&self) -> ConnectionManager {
+        let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.connections.len();
+        self.connections[idx].clone()
+    }
+
+    /// Return the number of connections in the pool.
+    fn size(&self) -> usize {
+        self.connections.len()
+    }
+}
+
+// =============================================================================
+// RedisStore
+// =============================================================================
+
+/// Redis-backed implementation of the [`Store`] and [`AtomicStore`] traits.
+///
+/// `RedisStore` maintains a pool of Redis connections for high-throughput,
+/// parallel I/O. By default, the pool contains 4 connections; this can be
+/// customised via [`RedisPoolConfig`] when using [`RedisStore::with_config`].
+///
+/// ## Connection Pool
+///
+/// Under the hood, each pool slot is a `redis::aio::ConnectionManager` — a
+/// multiplexed, auto-reconnecting connection. Multiple slots mean multiple TCP
+/// sockets, which allows the OS and Redis server to process requests in parallel
+/// rather than serialising them through a single socket.
+///
+/// ## Examples
+///
+/// ```rust,no_run
+/// use store::RedisStore;
+/// use store::redis::RedisPoolConfig;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// // Default pool (4 connections)
+/// let store = RedisStore::new("redis://localhost:6379").await?;
+///
+/// // Custom pool size
+/// let config = RedisPoolConfig::new(8);
+/// let store = RedisStore::with_config("redis://localhost:6379", config).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone)]
+pub struct RedisStore {
+    pool: RedisPool,
+}
+
 impl RedisStore {
-    pub fn new(url: &str) -> StoreResult<Self> {
+    /// Create a new `RedisStore` with the default pool configuration (4 connections).
+    pub async fn new(url: &str) -> StoreResult<Self> {
+        Self::with_config(url, RedisPoolConfig::default()).await
+    }
+
+    /// Create a new `RedisStore` with a custom pool configuration.
+    pub async fn with_config(url: &str, config: RedisPoolConfig) -> StoreResult<Self> {
         if url.trim().is_empty() {
             return Err(StoreError::InvalidInput(
                 "Redis URL cannot be empty".to_string(),
@@ -30,16 +175,29 @@ impl RedisStore {
             StoreError::ConnectionFailed(format!("Failed to create Redis client: {}", e))
         })?;
 
-        tracing::info!("Connected to Redis at {}", url);
+        let pool = RedisPool::new(&client, config.pool_size).await?;
 
-        Ok(Self { client })
+        tracing::info!(
+            "Redis store created with pool of {} connection(s) for {}",
+            pool.size(),
+            url
+        );
+
+        Ok(Self { pool })
     }
 
-    /// Get a Redis connection with proper error handling
-    pub async fn get_connection(&self) -> StoreResult<redis::Connection> {
-        self.client.get_connection().map_err(|e| {
-            StoreError::ConnectionFailed(format!("Failed to get Redis connection: {}", e))
-        })
+    /// Get a connection from the pool for use with Lua scripts or raw commands.
+    ///
+    /// The returned `ConnectionManager` is a cheap Arc-clone of one of the
+    /// pooled connections, selected via round-robin. It can be used directly
+    /// with the `redis` crate's async command API.
+    pub fn get_connection(&self) -> ConnectionManager {
+        self.pool.get()
+    }
+
+    /// Return the number of connections in the pool.
+    pub fn pool_size(&self) -> usize {
+        self.pool.size()
     }
 
     /// Validate key is not empty
@@ -60,28 +218,33 @@ impl RedisStore {
         Ok(())
     }
 
-    fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<String> {
-        serde_json::to_string(value).map_err(|e| {
+    fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<Vec<u8>> {
+        rmp_serde::to_vec(value).map_err(|e| {
             StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))
         })
     }
 
-    fn deserialize<T: DeserializeValue>(&self, data: &String) -> StoreResult<T> {
-        serde_json::from_str(data).map_err(|e| {
+    fn deserialize<T: DeserializeValue>(&self, data: &[u8]) -> StoreResult<T> {
+        rmp_serde::from_slice(data).map_err(|e| {
             StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
         })
     }
 }
+
+// =============================================================================
+// Store trait implementation
+// =============================================================================
 
 #[async_trait]
 impl Store for RedisStore {
     async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let value: Option<String> = con
+        let value: Option<Vec<u8>> = con
             .get(key)
+            .await
             .map_err(|e| StoreError::RedisFailed(format!("Failed to get key '{}': {}", key, e)))?;
 
         match value {
@@ -107,19 +270,19 @@ impl Store for RedisStore {
             }
         }
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
         let serialized_value = self.serialize(value)?;
 
         if let Some(ttl) = ttl {
-            let _: () = con.set_ex(key, serialized_value, ttl).map_err(|e| {
+            let _: () = con.set_ex(key, serialized_value, ttl).await.map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to set key '{}' with TTL {}: {}",
                     key, ttl, e
                 ))
             })?;
         } else {
-            let _: () = con.set(key, serialized_value).map_err(|e| {
+            let _: () = con.set(key, serialized_value).await.map_err(|e| {
                 StoreError::RedisFailed(format!("Failed to set key '{}': {}", key, e))
             })?;
         }
@@ -130,9 +293,9 @@ impl Store for RedisStore {
     async fn delete(&self, key: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let result: i32 = con.del(key).map_err(|e| {
+        let result: i32 = con.del(key).await.map_err(|e| {
             StoreError::RedisFailed(format!("Failed to delete key '{}': {}", key, e))
         })?;
 
@@ -142,9 +305,9 @@ impl Store for RedisStore {
     async fn exists(&self, key: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let result: bool = con.exists(key).map_err(|e| {
+        let result: bool = con.exists(key).await.map_err(|e| {
             StoreError::RedisFailed(format!("Failed to check existence of key '{}': {}", key, e))
         })?;
 
@@ -167,7 +330,7 @@ impl Store for RedisStore {
             }
         }
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
         let serialized_value = self.serialize(value)?;
 
@@ -180,6 +343,7 @@ impl Store for RedisStore {
         let fields_values = vec![(field, &serialized_value)];
         let result: i32 = con
             .hset_ex(key, &hash_field_expiration_options, &fields_values)
+            .await
             .map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to set hash field '{}' in key '{}': {}",
@@ -194,9 +358,9 @@ impl Store for RedisStore {
         self.validate_key(key)?;
         self.validate_field(field)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let value: Option<String> = con.hget(key, field).map_err(|e| {
+        let value: Option<Vec<u8>> = con.hget(key, field).await.map_err(|e| {
             StoreError::RedisFailed(format!(
                 "Failed to get hash field '{}' from key '{}': {}",
                 field, key, e
@@ -216,9 +380,9 @@ impl Store for RedisStore {
         self.validate_key(key)?;
         self.validate_field(field)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let result: i32 = con.hdel(key, field).map_err(|e| {
+        let result: i32 = con.hdel(key, field).await.map_err(|e| {
             StoreError::RedisFailed(format!(
                 "Failed to delete hash field '{}' from key '{}': {}",
                 field, key, e
@@ -231,9 +395,9 @@ impl Store for RedisStore {
     async fn hgetall<T: DeserializeValue>(&self, key: &str) -> StoreResult<HashMap<String, T>> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let hash_data: HashMap<String, String> = con.hgetall(key).map_err(|e| {
+        let hash_data: HashMap<String, Vec<u8>> = con.hgetall(key).await.map_err(|e| {
             StoreError::RedisFailed(format!(
                 "Failed to get all hash fields from key '{}': {}",
                 key, e
@@ -243,10 +407,10 @@ impl Store for RedisStore {
         let mut result = HashMap::new();
         let mut deserialization_errors = Vec::new();
 
-        for (field, value) in hash_data {
-            match self.deserialize(&value) {
+        for (field, value) in &hash_data {
+            match self.deserialize(value) {
                 Ok(deserialized) => {
-                    result.insert(field, deserialized);
+                    result.insert(field.clone(), deserialized);
                 }
                 Err(e) => {
                     deserialization_errors.push(format!("field '{}': {}", field, e));
@@ -269,9 +433,9 @@ impl Store for RedisStore {
         self.validate_key(key)?;
         self.validate_field(field)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let result: bool = con.hexists(key, field).map_err(|e| {
+        let result: bool = con.hexists(key, field).await.map_err(|e| {
             StoreError::RedisFailed(format!(
                 "Failed to check existence of hash field '{}' in key '{}': {}",
                 field, key, e
@@ -284,9 +448,9 @@ impl Store for RedisStore {
     async fn hkeys(&self, key: &str) -> StoreResult<Vec<String>> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let result: Vec<String> = con.hkeys(key).map_err(|e| {
+        let result: Vec<String> = con.hkeys(key).await.map_err(|e| {
             StoreError::RedisFailed(format!("Failed to get hash keys from key '{}': {}", key, e))
         })?;
 
@@ -296,9 +460,9 @@ impl Store for RedisStore {
     async fn hvals<T: DeserializeValue>(&self, key: &str) -> StoreResult<Vec<T>> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let values: Vec<String> = con.hvals(key).map_err(|e| {
+        let values: Vec<Vec<u8>> = con.hvals(key).await.map_err(|e| {
             StoreError::RedisFailed(format!(
                 "Failed to get hash values from key '{}': {}",
                 key, e
@@ -309,7 +473,7 @@ impl Store for RedisStore {
         let mut deserialization_errors = Vec::new();
 
         for (index, value) in values.iter().enumerate() {
-            match self.deserialize(&value) {
+            match self.deserialize(value.as_slice()) {
                 Ok(deserialized) => {
                     result.push(deserialized);
                 }
@@ -333,16 +497,16 @@ impl Store for RedisStore {
     async fn hlen(&self, key: &str) -> StoreResult<usize> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let len: i32 = con.hlen(key).map_err(|e| {
+        let len: usize = con.hlen(key).await.map_err(|e| {
             StoreError::RedisFailed(format!(
                 "Failed to get hash length from key '{}': {}",
                 key, e
             ))
         })?;
 
-        Ok(len as usize)
+        Ok(len)
     }
 
     async fn compare_and_swap<T: SerializeValue + DeserializeValue + PartialEq>(
@@ -360,34 +524,20 @@ impl Store for RedisStore {
             }
         }
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
         let expected_serialized = self.serialize(expected)?;
         let new_serialized = self.serialize(new)?;
 
-        let script = redis::Script::new(
-            r#"
-            local current = redis.call("GET", KEYS[1])
-            if current == ARGV[1] then
-                redis.call("SET", KEYS[1], ARGV[2])
-                if ARGV[3] ~= "nil" then
-                    redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
-                end
-                return 1
-            else
-                return 0
-            end
-            "#,
-        );
-
         let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
 
-        let result: i32 = script
+        let result: i32 = CAS_SCRIPT
             .key(key)
             .arg(expected_serialized)
             .arg(new_serialized)
             .arg(ttl_str)
-            .invoke(&mut con)
+            .invoke_async(&mut con)
+            .await
             .map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to perform compare and swap on key '{}': {}",
@@ -399,15 +549,20 @@ impl Store for RedisStore {
     }
 }
 
+// =============================================================================
+// AtomicStore trait implementation
+// =============================================================================
+
 #[async_trait]
 impl AtomicStore for RedisStore {
     async fn get_i64(&self, key: &str) -> StoreResult<Option<i64>> {
         self.validate_key(key)?;
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
         let value: Option<i64> = con
             .get(key)
+            .await
             .map_err(|e| StoreError::RedisFailed(format!("Failed to get key '{}': {}", key, e)))?;
 
         Ok(value)
@@ -422,17 +577,17 @@ impl AtomicStore for RedisStore {
             }
         }
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
         if let Some(ttl) = ttl {
-            let _: () = con.set_ex(key, value, ttl).map_err(|e| {
+            let _: () = con.set_ex(key, value, ttl).await.map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to set key '{}' with TTL {}: {}",
                     key, ttl, e
                 ))
             })?;
         } else {
-            let _: () = con.set(key, value).map_err(|e| {
+            let _: () = con.set(key, value).await.map_err(|e| {
                 StoreError::RedisFailed(format!("Failed to set key '{}': {}", key, e))
             })?;
         }
@@ -449,24 +604,28 @@ impl AtomicStore for RedisStore {
             }
         }
 
-        let mut con = self.get_connection().await?;
+        let mut con = self.pool.get();
 
-        let script = redis::Script::new(
-            r#"
-            local new_value = redis.call("INCRBY", KEYS[1], ARGV[1])
-            if ARGV[2] ~= "nil" then
-                redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
-            end
-            return new_value
-            "#,
-        );
+        // Fast path: use native INCRBY when no TTL is needed (avoids Lua overhead)
+        if ttl.is_none() {
+            let new_value: i64 = con.incr(key, by).await.map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to increment key '{}' by {}: {}",
+                    key, by, e
+                ))
+            })?;
+            return Ok(Some(new_value));
+        }
+
+        // Slow path: use Lua script for atomic INCRBY + EXPIRE
         let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
 
-        let new_value: i64 = script
+        let new_value: i64 = INCR_SCRIPT
             .key(key)
             .arg(by)
             .arg(ttl_str)
-            .invoke(&mut con)
+            .invoke_async(&mut con)
+            .await
             .map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to increment key '{}' by {}: {}",
@@ -479,30 +638,35 @@ impl AtomicStore for RedisStore {
 
     async fn decr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
         self.validate_key(key)?;
+
         if let Some(ttl_val) = ttl {
             if ttl_val == 0 {
                 return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
             }
         }
-        let mut con = self.get_connection().await?;
 
-        let script = redis::Script::new(
-            r#"
-            local new_value = redis.call("DECRBY", KEYS[1], ARGV[1])
-            if ARGV[2] ~= "nil" then
-                redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
-            end
-            return new_value
-            "#,
-        );
+        let mut con = self.pool.get();
 
+        // Fast path: use native DECRBY when no TTL is needed (avoids Lua overhead)
+        if ttl.is_none() {
+            let new_value: i64 = con.decr(key, by).await.map_err(|e| {
+                StoreError::RedisFailed(format!(
+                    "Failed to decrement key '{}' by {}: {}",
+                    key, by, e
+                ))
+            })?;
+            return Ok(Some(new_value));
+        }
+
+        // Slow path: use Lua script for atomic DECRBY + EXPIRE
         let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
 
-        let new_value: i64 = script
+        let new_value: i64 = DECR_SCRIPT
             .key(key)
             .arg(by)
             .arg(ttl_str)
-            .invoke(&mut con)
+            .invoke_async(&mut con)
+            .await
             .map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to decrement key '{}' by {}: {}",
@@ -528,31 +692,17 @@ impl AtomicStore for RedisStore {
             }
         }
 
-        let mut con = self.get_connection().await?;
-
-        let script = redis::Script::new(
-            r#"
-            local current = redis.call("GET", KEYS[1])
-            if current and tonumber(current) == tonumber(ARGV[1]) then
-                redis.call("SET", KEYS[1], ARGV[2])
-                if ARGV[3] ~= "nil" then
-                    redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
-                end
-                return 1
-            else
-                return 0
-            end
-            "#,
-        );
+        let mut con = self.pool.get();
 
         let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
 
-        let result: i32 = script
+        let result: i32 = CAS_I64_SCRIPT
             .key(key)
             .arg(old)
             .arg(new)
             .arg(ttl_str)
-            .invoke(&mut con)
+            .invoke_async(&mut con)
+            .await
             .map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to perform compare and swap on key '{}': {}",

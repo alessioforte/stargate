@@ -112,12 +112,7 @@ impl QuotaTracker {
 #[async_trait]
 impl RateLimit for QuotaTracker {
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
-        let mut con = self.store.get_connection().await.map_err(|e| {
-            crate::error::RateLimitError::BackendError(format!(
-                "Failed to get Redis connection: {}",
-                e
-            ))
-        })?;
+        let mut con = self.store.get_connection();
 
         let script = store::RedisScript::new(include_str!("quota_tracker.lua"));
 
@@ -129,7 +124,8 @@ impl RateLimit for QuotaTracker {
             .arg(limit)
             .arg(window)
             .arg(cost)
-            .invoke(&mut con)
+            .invoke_async(&mut con)
+            .await
             .map_err(|e| {
                 crate::error::RateLimitError::BackendError(format!("Redis script error: {}", e))
             })?;

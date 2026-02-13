@@ -14,8 +14,6 @@ use std::sync::atomic::Ordering;
 
 pub type Data = Vec<u8>;
 
-// pub const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
-
 #[derive(Debug, Clone)]
 pub enum StoreValue {
     Simple(Data, Option<DateTime<Utc>>),
@@ -259,28 +257,14 @@ impl MemoryStore {
         }
     }
 
-    // fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<Vec<u8>> {
-    //     bincode::serde::encode_to_vec(value, BINCODE_CONFIG).map_err(|e| {
-    //         StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))
-    //     })
-    // }
-
-    // fn deserialize<T: DeserializeValue>(&self, data: &[u8]) -> StoreResult<T> {
-    //     let result = bincode::serde::decode_from_slice(data, BINCODE_CONFIG).map_err(|e| {
-    //         StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
-    //     });
-    //     let data: T = result?.0;
-    //     Ok(data)
-    // }
-
     fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<Vec<u8>> {
-        serde_json::to_vec(value).map_err(|e| {
+        rmp_serde::to_vec(value).map_err(|e| {
             StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))
         })
     }
 
     fn deserialize<T: DeserializeValue>(&self, data: &[u8]) -> StoreResult<T> {
-        serde_json::from_slice(data).map_err(|e| {
+        rmp_serde::from_slice(data).map_err(|e| {
             StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
         })
     }

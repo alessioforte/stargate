@@ -12,6 +12,8 @@ pub use memory::MemoryStore;
 #[cfg(feature = "redis")]
 mod redis;
 #[cfg(feature = "redis")]
+pub use redis::RedisPoolConfig;
+#[cfg(feature = "redis")]
 pub use redis::RedisScript;
 #[cfg(feature = "redis")]
 pub use redis::RedisStore;

@@ -1,5 +1,7 @@
 -- generate_users.lua
 
+local RECORDS = os.getenv("RECORDS") or 10000
+
 local names = {
     "Luca", "Giulia", "Marco", "Sofia", "Alessandro", "Francesca", "Matteo", "Chiara", "Davide", "Elena",
     "John", "Emily", "Michael", "Olivia", "James", "Emma", "Daniel", "Sophia", "William", "Ava",
@@ -28,7 +30,6 @@ local surnames = {
 
 math.randomseed(os.time())
 
-local total_records = 1000000
 local file = io.open("users.csv", "w")
 
 -- header
@@ -44,7 +45,7 @@ local function random_string(length)
     return table.concat(result)
 end
 
-for i = 1, total_records do
+for i = 1, RECORDS do
     local givenName = names[math.random(#names)]
     local familyName = surnames[math.random(#surnames)]
 

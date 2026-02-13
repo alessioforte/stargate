@@ -202,12 +202,7 @@ impl Gcra {
 #[async_trait]
 impl RateLimit for Gcra {
     async fn check(&self, key: &str, _cost: u64) -> Result<RateLimitDecision> {
-        let mut con = self.store.get_connection().await.map_err(|e| {
-            crate::error::RateLimitError::BackendError(format!(
-                "Failed to get Redis connection: {}",
-                e
-            ))
-        })?;
+        let mut con = self.store.get_connection();
 
         let script = store::RedisScript::new(include_str!("gcra.lua"));
 
@@ -220,7 +215,8 @@ impl RateLimit for Gcra {
             .arg(tau)
             .arg(burst)
             .arg(ttl)
-            .invoke(&mut con)
+            .invoke_async(&mut con)
+            .await
             .map_err(|e| {
                 crate::error::RateLimitError::BackendError(format!("Redis script error: {}", e))
             })?;

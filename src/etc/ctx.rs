@@ -8,12 +8,22 @@ use actix_web::{
 use db::ent::{ActorType, AuditContext};
 use ulid::Ulid;
 
+/// Paths that skip authentication and full audit context creation
+const SKIP_AUTH_PATHS: &[&str] = &["/health"];
+
 /// Middleware function to verify the user or api_key and create the audit context for the request
 pub async fn middleware(
     sr: ServiceRequest,
     next: Next<impl MessageBody>,
 ) -> Result<ServiceResponse<impl MessageBody>, Error> {
     let req = sr.request();
+    let path = req.path();
+
+    // Fast path: skip auth for lightweight endpoints
+    if SKIP_AUTH_PATHS.iter().any(|p| path == *p) {
+        return next.call(sr).await;
+    }
+
     let mut sub = match guard::verify_api_key(&req).await {
         Some(s) => Some(s),
         None => None,

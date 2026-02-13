@@ -25,10 +25,73 @@ pub async fn handler(
     let client_ip = req.get_client_ip();
     let has_auth = sub.is_some();
 
-    let mut cost;
     let mut headers = HeaderMap::new();
 
-    // Rate limit -------------------------------------------------------------
+    // 1. Service lookup (cheap, in-memory) -----------------------------------
+    let path = req.uri().path();
+    let protocol = req.get_protocol();
+    let services = gate.services.load();
+
+    let service = match services.search(&protocol, path) {
+        Some(service) => service,
+        None => {
+            return Err(ErrorResponse::from(HttpError::NotFound(
+                "Service not found".to_string(),
+            )));
+        }
+    };
+
+    let mut cost = service.cost.unwrap_or(1);
+    let subpath = path.replacen(&service.path, "", 1);
+    let mut auth_required = service.auth_required.unwrap_or(false);
+    let mut resource = service.resource.clone();
+
+    // 2. Route matching (cheap, in-memory) -----------------------------------
+    if let Some(routes) = &service.routes {
+        match routes.get(method.as_str()) {
+            Some(router) => {
+                let route = router.at(&subpath);
+                if route.is_err() {
+                    return Err(ErrorResponse::from(HttpError::NotFound(
+                        "Route not found".to_string(),
+                    )));
+                }
+                let route = route.unwrap();
+                cost = route.value.cost.unwrap_or(cost);
+                auth_required = route.value.auth_required;
+                resource = route.value.resource.clone();
+            }
+            None => {
+                return Err(ErrorResponse::from(HttpError::NotFound(
+                    "Method not allowed".to_string(),
+                )));
+            }
+        }
+    }
+
+    // 3. Auth check (cheap, already resolved by ctx::middleware) --------------
+    if auth_required && !has_auth {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Unauthorized".to_string(),
+        )));
+    }
+
+    // 4. Access control (cheap, in-memory policy evaluation) -----------------
+    if let Some(r) = resource
+        && let Some(s) = sub
+    {
+        let pe = gate.policy_engine.load();
+        let allowed = access_control(&pe, &s, &r);
+
+        if !allowed {
+            return Err(ErrorResponse::from(HttpError::Forbidden(
+                "Forbidden".to_string(),
+            )));
+        }
+    }
+
+    // 5. Rate limit + quota (expensive, store round-trips) -------------------
+    // Only reached by requests that passed all cheap checks above.
     let limiter = gate.limiter.load();
     let mut limit_name = "default".to_string();
     let mut quota_name: Option<String> = None;
@@ -79,7 +142,6 @@ pub async fn handler(
         return Err(res);
     }
 
-    // append headers
     headers.insert(
         HeaderName::from_static("x-ratelimit-limit"),
         HeaderValue::from_str(&limit).unwrap(),
@@ -89,74 +151,8 @@ pub async fn handler(
         HeaderValue::from_str(&remaining).unwrap(),
     );
 
-    // check if the service exists --------------------------------------------
-    let path = req.uri().path();
-    let protocol = req.get_protocol();
-    let services = gate.services.load();
-
-    let service = match services.search(&protocol, path) {
-        Some(service) => service,
-        None => {
-            return Err(ErrorResponse::from(HttpError::NotFound(
-                "Service not found".to_string(),
-            )));
-        }
-    };
-
-    cost = service.cost.unwrap_or(1);
-    let subpath = path.replacen(&service.path, "", 1);
-    let mut auth_required = service.auth_required.unwrap_or(false);
-    let mut resource = service.resource.clone();
-
-    // check if the service has routes defined --------------------------------
-    if let Some(routes) = &service.routes {
-        match routes.get(method.as_str()) {
-            Some(router) => {
-                let route = router.at(&subpath);
-                if route.is_err() {
-                    return Err(ErrorResponse::from(HttpError::NotFound(
-                        "Route not found".to_string(),
-                    )));
-                }
-                let route = route.unwrap();
-                cost = route.value.cost.unwrap_or(cost);
-                auth_required = route.value.auth_required;
-                resource = route.value.resource.clone();
-            }
-            None => {
-                return Err(ErrorResponse::from(HttpError::NotFound(
-                    "Method not allowed".to_string(),
-                )));
-            }
-        }
-    }
-    // ------------------------------------------------------------------------
-
-    // if auth is required and no subject is found return unauthorized
-    if auth_required && !has_auth {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Unauthorized".to_string(),
-        )));
-    }
-
-    // Access control ---------------------------------------------------------
-    // if a resource is define and subject is found check access control
-    if let Some(r) = resource
-        && let Some(s) = sub
-    {
-        let pe = gate.policy_engine.load();
-        let allowed = access_control(&pe, &s, &r);
-
-        if !allowed {
-            return Err(ErrorResponse::from(HttpError::Forbidden(
-                "Forbidden".to_string(),
-            )));
-        }
-    }
-
-    // Quota tracking ---------------------------------------------------------
-    if quota_name.is_some() {
-        let quota_name = quota_name.unwrap();
+    // Quota tracking (only if subject has a quota configured) ----------------
+    if let Some(quota_name) = quota_name {
         let quota_key = format!("quota:{}", sub_key);
         let decision = match limiter.check(&quota_name, &quota_key, Some(cost)).await {
             Ok(decision) => decision,
@@ -186,7 +182,6 @@ pub async fn handler(
             return Err(res);
         }
 
-        // append headers
         headers.insert(
             HeaderName::from_static("x-quota-limit"),
             HeaderValue::from_str(&quota_limit).unwrap(),
@@ -197,15 +192,14 @@ pub async fn handler(
         );
     }
 
-    // Load balancing ---------------------------------------------------------
-    // create the request context for the load balancer
+    // 6. Load balancing + proxy (the actual work) ----------------------------
     let ctx = lb::RequestContext {
         client_ip,
         path: path.to_string(),
         method: method.as_str().to_string(),
         key: None,
     };
-    // get the load balancer and select an upstream
+
     let lb = service.lb.as_ref().ok_or_else(|| {
         ErrorResponse::from(HttpError::InternalServerError(
             "Load balancer not configured".to_string(),
@@ -218,13 +212,11 @@ pub async fn handler(
         ))
     })?;
 
-    // format the URI
     let mut uri = format!("{}{}", upstream.base_url, subpath);
     if !query.is_empty() {
         uri.push_str(&format!("?{}", query));
     }
 
-    // If the request is for a WebSocket connection, handle it accordingly
     if protocol == "ws" {
         return ws::handler(&req, stream, &uri).await;
     }
@@ -235,7 +227,6 @@ pub async fn handler(
         ))
     })?;
 
-    // Otherwise, handle it as a regular HTTP request
     http::handler(&req, stream, &headers, &uri, &client).await
 }
 

@@ -216,12 +216,7 @@ impl TokenBucket {
 #[async_trait]
 impl RateLimit for TokenBucket {
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
-        let mut con = self.store.get_connection().await.map_err(|e| {
-            crate::error::RateLimitError::BackendError(format!(
-                "Failed to get Redis connection: {}",
-                e
-            ))
-        })?;
+        let mut con = self.store.get_connection();
 
         let script = store::RedisScript::new(include_str!("token_bucket.lua"));
 
@@ -235,7 +230,8 @@ impl RateLimit for TokenBucket {
             .arg(refill_rate)
             .arg(cost)
             .arg(ttl)
-            .invoke(&mut con)
+            .invoke_async(&mut con)
+            .await
             .map_err(|e| {
                 crate::error::RateLimitError::BackendError(format!("Redis script error: {}", e))
             })?;

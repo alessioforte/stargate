@@ -6,7 +6,7 @@ mod mid;
 mod oauth;
 mod signup;
 
-use actix_web::{middleware::from_fn, web::ServiceConfig};
+use actix_web::{guard, middleware::from_fn, web::ServiceConfig};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -67,16 +67,31 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
+const API_PREFIXES: &[&str] = &[
+    "/health", "/docs", "/account", "/oauth", "/signup", "/admin",
+];
+
 pub fn configure(cfg: &mut ServiceConfig) {
     let base_path = std::env::var("API_BASE_PATH").unwrap_or_else(|_| "".to_string());
-    cfg.service(
-        actix_web::web::scope(&base_path)
-            .wrap(from_fn(mid::middleware))
-            .service(health::get)
-            .service(docs::routes())
-            .service(account::routes())
-            .service(oauth::routes())
-            .service(signup::routes())
-            .service(admin::routes()),
-    );
+
+    let mut scope = actix_web::web::scope(&base_path)
+        .wrap(from_fn(mid::middleware))
+        .service(health::get)
+        .service(docs::routes())
+        .service(account::routes())
+        .service(oauth::routes())
+        .service(signup::routes())
+        .service(admin::routes());
+
+    // When the base path is empty, the scope matches all requests, which causes
+    // gateway requests to go through the API middleware. Add a guard so only
+    // requests targeting known API paths enter this scope.
+    if base_path.is_empty() {
+        scope = scope.guard(guard::fn_guard(|ctx| {
+            let path = ctx.head().uri.path();
+            API_PREFIXES.iter().any(|prefix| path.starts_with(prefix))
+        }));
+    }
+
+    cfg.service(scope);
 }

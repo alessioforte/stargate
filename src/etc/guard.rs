@@ -1,7 +1,31 @@
 use crate::etc::{self, ext::RequestExt, sub::Subject};
 use actix_web::HttpRequest;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use store::Store;
 use tracing::error;
+
+const HASH_CACHE_MAX_SIZE: usize = 256;
+
+thread_local! {
+    static HASH_CACHE: RefCell<HashMap<String, String>> =
+        RefCell::new(HashMap::with_capacity(32));
+}
+
+fn cached_hash_api_key(api_key: &str) -> String {
+    HASH_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(hash) = cache.get(api_key) {
+            return hash.clone();
+        }
+        let hash = pw::hash_api_key(api_key);
+        if cache.len() >= HASH_CACHE_MAX_SIZE {
+            cache.clear();
+        }
+        cache.insert(api_key.to_string(), hash.clone());
+        hash
+    })
+}
 
 // TODO: maybe should return a Result instead of an Option
 /// Verify API key and return subject if valid from the session store
@@ -12,7 +36,7 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
             return None;
         }
     };
-    let hash_key = pw::hash_api_key(&api_key);
+    let hash_key = cached_hash_api_key(&api_key);
     let store = etc::store::use_store();
     let session = store.get::<Subject>(&hash_key).await.unwrap_or(None);
 
