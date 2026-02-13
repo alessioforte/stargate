@@ -11,6 +11,105 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub use redis::Script as RedisScript;
 
 // =============================================================================
+// Compression
+// =============================================================================
+
+/// Compression algorithm used for serialized values before storing in Redis.
+///
+/// When enabled, values are compressed after serialization and decompressed
+/// before deserialization. This reduces network traffic and Redis memory usage
+/// at the cost of some CPU overhead.
+///
+/// **Important:** all readers and writers for a given key must agree on the
+/// compression setting. Changing the compression algorithm without migrating
+/// existing data will cause deserialization failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Compression {
+    /// No compression (default). Values are stored as raw serialized bytes.
+    #[default]
+    None,
+
+    /// LZ4 compression via `lz4_flex`. Very fast with reasonable compression
+    /// ratios – well suited for low-latency workloads.
+    ///
+    /// Requires the `compression` feature flag.
+    #[cfg(feature = "compression")]
+    Lz4,
+}
+
+/// Configuration that controls when compression is applied.
+#[derive(Debug, Clone)]
+pub struct CompressionConfig {
+    /// The compression algorithm to use.
+    pub algorithm: Compression,
+
+    /// Minimum payload size (in bytes, *after* serialization) below which
+    /// compression is skipped. Small values rarely benefit from compression
+    /// and the overhead can actually make them larger.
+    ///
+    /// Defaults to `256` bytes.
+    pub min_size: usize,
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self {
+            algorithm: Compression::None,
+            min_size: 256,
+        }
+    }
+}
+
+impl CompressionConfig {
+    /// Create a new compression config with the given algorithm and default
+    /// minimum size (256 bytes).
+    pub fn new(algorithm: Compression) -> Self {
+        Self {
+            algorithm,
+            ..Default::default()
+        }
+    }
+
+    /// Set the minimum payload size for compression.
+    pub fn with_min_size(mut self, min_size: usize) -> Self {
+        self.min_size = min_size;
+        self
+    }
+
+    /// Compress a byte buffer according to this configuration.
+    fn compress(&self, data: Vec<u8>) -> StoreResult<Vec<u8>> {
+        match self.algorithm {
+            Compression::None => Ok(data),
+            #[cfg(feature = "compression")]
+            Compression::Lz4 => {
+                if data.len() < self.min_size {
+                    return Ok(data);
+                }
+                Ok(lz4_flex::compress_prepend_size(&data))
+            }
+        }
+    }
+
+    /// Decompress a byte buffer according to this configuration.
+    fn decompress(&self, data: &[u8]) -> StoreResult<Vec<u8>> {
+        match self.algorithm {
+            Compression::None => Ok(data.to_vec()),
+            #[cfg(feature = "compression")]
+            Compression::Lz4 => {
+                if data.len() < self.min_size {
+                    // Data was below the threshold at write time, so it was
+                    // stored uncompressed. Return as-is.
+                    return Ok(data.to_vec());
+                }
+                lz4_flex::decompress_size_prepended(data).map_err(|e| {
+                    StoreError::DeserializationFailed(format!("LZ4 decompression failed: {}", e))
+                })
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Pool Configuration
 // =============================================================================
 
@@ -139,8 +238,7 @@ impl RedisPool {
 /// ## Examples
 ///
 /// ```rust,no_run
-/// use store::RedisStore;
-/// use store::redis::RedisPoolConfig;
+/// use store::{RedisStore, RedisPoolConfig};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Default pool (4 connections)
@@ -155,15 +253,17 @@ impl RedisPool {
 #[derive(Clone)]
 pub struct RedisStore {
     pool: RedisPool,
+    compression: CompressionConfig,
 }
 
 impl RedisStore {
-    /// Create a new `RedisStore` with the default pool configuration (4 connections).
+    /// Create a new `RedisStore` with the default pool configuration (4 connections)
+    /// and no compression.
     pub async fn new(url: &str) -> StoreResult<Self> {
         Self::with_config(url, RedisPoolConfig::default()).await
     }
 
-    /// Create a new `RedisStore` with a custom pool configuration.
+    /// Create a new `RedisStore` with a custom pool configuration and no compression.
     pub async fn with_config(url: &str, config: RedisPoolConfig) -> StoreResult<Self> {
         if url.trim().is_empty() {
             return Err(StoreError::InvalidInput(
@@ -183,7 +283,33 @@ impl RedisStore {
             url
         );
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            compression: CompressionConfig::default(),
+        })
+    }
+
+    /// Enable compression on this store.
+    ///
+    /// Returns `self` for builder-style chaining:
+    ///
+    /// ```rust,no_run
+    /// # use store::{RedisStore, CompressionConfig, Compression};
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let store = RedisStore::new("redis://localhost:6379")
+    ///     .await?
+    ///     .with_compression(CompressionConfig::new(Compression::None));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_compression(mut self, config: CompressionConfig) -> Self {
+        self.compression = config;
+        self
+    }
+
+    /// Return a reference to the current compression configuration.
+    pub fn compression(&self) -> &CompressionConfig {
+        &self.compression
     }
 
     /// Get a connection from the pool for use with Lua scripts or raw commands.
@@ -219,13 +345,15 @@ impl RedisStore {
     }
 
     fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<Vec<u8>> {
-        rmp_serde::to_vec(value).map_err(|e| {
+        let raw = rmp_serde::to_vec(value).map_err(|e| {
             StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))
-        })
+        })?;
+        self.compression.compress(raw)
     }
 
     fn deserialize<T: DeserializeValue>(&self, data: &[u8]) -> StoreResult<T> {
-        rmp_serde::from_slice(data).map_err(|e| {
+        let decompressed = self.compression.decompress(data)?;
+        rmp_serde::from_slice(&decompressed).map_err(|e| {
             StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
         })
     }
@@ -404,26 +532,16 @@ impl Store for RedisStore {
             ))
         })?;
 
-        let mut result = HashMap::new();
-        let mut deserialization_errors = Vec::new();
+        let mut result = HashMap::with_capacity(hash_data.len());
 
         for (field, value) in &hash_data {
-            match self.deserialize(value) {
-                Ok(deserialized) => {
-                    result.insert(field.clone(), deserialized);
-                }
-                Err(e) => {
-                    deserialization_errors.push(format!("field '{}': {}", field, e));
-                }
-            }
-        }
-
-        if !deserialization_errors.is_empty() {
-            return Err(StoreError::DeserializationFailed(format!(
-                "Failed to deserialize some fields from key '{}': {}",
-                key,
-                deserialization_errors.join(", ")
-            )));
+            let deserialized = self.deserialize(value).map_err(|e| {
+                StoreError::DeserializationFailed(format!(
+                    "Failed to deserialize field '{}' from key '{}': {}",
+                    field, key, e
+                ))
+            })?;
+            result.insert(field.clone(), deserialized);
         }
 
         Ok(result)
@@ -469,26 +587,16 @@ impl Store for RedisStore {
             ))
         })?;
 
-        let mut result = Vec::new();
-        let mut deserialization_errors = Vec::new();
+        let mut result = Vec::with_capacity(values.len());
 
         for (index, value) in values.iter().enumerate() {
-            match self.deserialize(value.as_slice()) {
-                Ok(deserialized) => {
-                    result.push(deserialized);
-                }
-                Err(e) => {
-                    deserialization_errors.push(format!("index {}: {}", index, e));
-                }
-            }
-        }
-
-        if !deserialization_errors.is_empty() {
-            return Err(StoreError::DeserializationFailed(format!(
-                "Failed to deserialize some values from key '{}': {}",
-                key,
-                deserialization_errors.join(", ")
-            )));
+            let deserialized = self.deserialize(value.as_slice()).map_err(|e| {
+                StoreError::DeserializationFailed(format!(
+                    "Failed to deserialize value at index {} from key '{}': {}",
+                    index, key, e
+                ))
+            })?;
+            result.push(deserialized);
         }
 
         Ok(result)

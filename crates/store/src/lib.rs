@@ -17,3 +17,5 @@ pub use redis::RedisPoolConfig;
 pub use redis::RedisScript;
 #[cfg(feature = "redis")]
 pub use redis::RedisStore;
+#[cfg(feature = "redis")]
+pub use redis::{Compression, CompressionConfig};
