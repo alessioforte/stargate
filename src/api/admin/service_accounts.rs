@@ -1,4 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::msg::MessageResponse;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, put, web};
 use actix_web_grants::protect;
 use db::ent::AuditContext;
@@ -6,6 +7,16 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
+
+/// Schema only representation of ServiceAccount for OpenAPI docs
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ServiceAccountSchema {
+    id: String,
+    name: String,
+    description: Option<String>,
+    org_id: Option<String>,
+}
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
@@ -51,13 +62,13 @@ pub struct UpdateServiceAccountRequest {
 #[utoipa::path(
     context_path = "/admin",
     path = "/service-accounts",
-    tags = ["Admin"],
+    tags = ["Admin", "Service Accounts"],
     params(ListServiceAccountsQuery),
     responses(
-        (status = 200, description = "List of service accounts retrieved successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "List of service accounts retrieved successfully", body = PaginatedResponse<ServiceAccountSchema>),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("")]
@@ -103,16 +114,16 @@ pub async fn get_service_accounts(
 #[utoipa::path(
     context_path = "/admin",
     path = "/service-accounts/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Service Accounts"],
     params(
         ("id" = String, Path, description = "Service Account ID")
     ),
     responses(
-        (status = 200, description = "Service account retrieved successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Service account not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "Service account retrieved successfully", body = ServiceAccountSchema),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Service account not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("/{id}")]
@@ -142,14 +153,14 @@ pub async fn get_service_account(params: web::Path<String>) -> Result<HttpRespon
 #[utoipa::path(
     context_path = "/admin",
     path = "/service-accounts",
-    tags = ["Admin"],
+    tags = ["Admin", "Service Accounts"],
     request_body = CreateServiceAccountRequest,
     responses(
-        (status = 201, description = "Service account created successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 201, description = "Service account created successfully", body = ServiceAccountSchema),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[post("")]
@@ -192,18 +203,18 @@ pub async fn create_service_account(
 #[utoipa::path(
     context_path = "/admin",
     path = "/service-accounts/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Service Accounts"],
     params(
         ("id" = String, Path, description = "Service Account ID")
     ),
     request_body = UpdateServiceAccountRequest,
     responses(
-        (status = 200, description = "Service account updated successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Service account not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "Service account updated successfully", body = ServiceAccountSchema),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Service account not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}")]
@@ -257,16 +268,16 @@ pub async fn update_service_account(
 #[utoipa::path(
     context_path = "/admin",
     path = "/service-accounts/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Service Accounts"],
     params(
         ("id" = String, Path, description = "Service Account ID")
     ),
     responses(
-        (status = 204, description = "Service account deleted successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Service account not found"),
-        (status = 500, description = "Internal server error")
+        (status = 204, description = "Service account deleted successfully", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Service account not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[delete("/{id}")]
@@ -298,7 +309,12 @@ pub async fn delete_service_account(
         }
     }
 
-    Ok(HttpResponse::NoContent().finish())
+    let message = MessageResponse::new(
+        "Service account deleted successfully",
+        "service_account_deleted",
+    );
+
+    Ok(HttpResponse::Ok().json(message))
 }
 
 pub fn routes() -> actix_web::Scope {

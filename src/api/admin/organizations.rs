@@ -1,4 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::msg::MessageResponse;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, put, web};
 use actix_web_grants::protect;
 use db::ent::AuditContext;
@@ -6,6 +7,16 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
+
+/// Schema only representation of Organization for OpenAPI docs
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct OrganizationSchema {
+    id: i64,
+    name: String,
+    description: Option<String>,
+    attrs: Option<serde_json::Value>,
+}
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
@@ -52,13 +63,13 @@ pub struct UpdateOrganizationRequest {
 #[utoipa::path(
     context_path = "/admin",
     path = "/organizations",
-    tags = ["Admin"],
+    tags = ["Admin", "Organizations"],
     params(ListOrganizationsQuery),
     responses(
-        (status = 200, description = "List of organizations retrieved successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "List of organizations retrieved successfully", body = PaginatedResponse<OrganizationSchema>),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("")]
@@ -104,16 +115,16 @@ pub async fn get_organizations(
 #[utoipa::path(
     context_path = "/admin",
     path = "/organizations/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Organizations"],
     params(
         ("id" = String, Path, description = "Organization ID")
     ),
     responses(
-        (status = 200, description = "Organization retrieved successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Organization not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "Organization retrieved successfully", body = OrganizationSchema),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Organization not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("/{id}")]
@@ -143,14 +154,14 @@ pub async fn get_organization(params: web::Path<String>) -> Result<HttpResponse,
 #[utoipa::path(
     context_path = "/admin",
     path = "/organizations",
-    tags = ["Admin"],
+    tags = ["Admin", "Organizations"],
     request_body = CreateOrganizationRequest,
     responses(
-        (status = 201, description = "Organization created successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 201, description = "Organization created successfully", body = OrganizationSchema),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[post("")]
@@ -193,18 +204,18 @@ pub async fn create_organization(
 #[utoipa::path(
     context_path = "/admin",
     path = "/organizations/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Organizations"],
     params(
         ("id" = String, Path, description = "Organization ID")
     ),
     request_body = UpdateOrganizationRequest,
     responses(
-        (status = 200, description = "Organization updated successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Organization not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "Organization updated successfully", body = OrganizationSchema),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Organization not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}")]
@@ -259,7 +270,7 @@ pub async fn update_organization(
 #[utoipa::path(
     context_path = "/admin",
     path = "/organizations/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Organizations"],
     params(
         ("id" = String, Path, description = "Organization ID")
     ),
@@ -300,7 +311,9 @@ pub async fn delete_organization(
         }
     }
 
-    Ok(HttpResponse::NoContent().finish())
+    let message = MessageResponse::new("Organization deleted successfully", "organization_deleted");
+
+    Ok(HttpResponse::NoContent().json(message))
 }
 
 pub fn routes() -> actix_web::Scope {

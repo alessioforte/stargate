@@ -1,4 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::msg::MessageResponse;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use actix_web_grants::protect;
 use db::ent::{AuditContext, CredentialType, Profile};
@@ -120,13 +121,13 @@ pub struct UserAttrsRequest {
 #[utoipa::path(
     context_path = "/admin",
     path = "/users",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(ListUsersQuery),
     responses(
         (status = 200, description = "List of users retrieved successfully", body = PaginatedResponse<UserSchema>),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("")]
@@ -174,16 +175,16 @@ pub async fn get_users(query: web::Query<ListUsersQuery>) -> Result<HttpResponse
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID")
     ),
     responses(
         (status = 200, description = "User retrieved successfully", body = UserSchema),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("/{id}")]
@@ -213,15 +214,15 @@ pub async fn get_user(params: web::Path<String>) -> Result<HttpResponse, ErrorRe
 #[utoipa::path(
     context_path = "/admin",
     path = "/users",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     request_body = CreateUserRequest,
     responses(
         (status = 201, description = "User created successfully", body = UserSchema),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 409, description = "Conflict - user already exists"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 409, description = "Conflict - user already exists", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[post("")]
@@ -288,18 +289,18 @@ pub async fn create_user(
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID")
     ),
     request_body = UpdateUserRequest,
     responses(
         (status = 200, description = "User updated successfully", body = UserSchema),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}")]
@@ -366,18 +367,18 @@ pub async fn update_user(
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID")
     ),
     request_body = PatchUserRequest,
     responses(
         (status = 200, description = "User patched successfully", body = UserSchema),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[patch("/{id}")]
@@ -446,18 +447,18 @@ pub async fn patch_user(
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}/attrs",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID")
     ),
     request_body = UserAttrsRequest,
     responses(
         (status = 200, description = "User attrs updated successfully", body = UserSchema),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}/attrs")]
@@ -509,18 +510,18 @@ pub async fn update_user_attrs(
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}/attrs",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID")
     ),
     request_body = UserAttrsRequest,
     responses(
         (status = 200, description = "User attrs patched successfully", body = UserSchema),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[patch("/{id}/attrs")]
@@ -581,16 +582,16 @@ pub async fn patch_user_attrs(
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID")
     ),
     responses(
-        (status = 204, description = "User deleted successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal server error")
+        (status = 204, description = "User deleted successfully", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[delete("/{id}")]
@@ -624,23 +625,25 @@ pub async fn delete_user(
         }
     }
 
-    Ok(HttpResponse::NoContent().finish())
+    let message = MessageResponse::new("User deleted successfully", "user_deleted");
+
+    Ok(HttpResponse::Ok().json(message))
 }
 
 /// Get organizations for a user
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}/organizations",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID")
     ),
     responses(
         (status = 200, description = "User organizations retrieved successfully", body = Vec<OrganizationSchema>),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("/{id}/organizations")]
@@ -669,17 +672,17 @@ pub async fn get_user_organizations(
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}/organizations/{org_id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID"),
         ("org_id" = String, Path, description = "Organization ID")
     ),
     responses(
-        (status = 204, description = "User added to organization successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User or organization not found"),
-        (status = 500, description = "Internal server error")
+        (status = 204, description = "User added to organization successfully", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User or organization not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}/organizations/{org_id}")]
@@ -720,24 +723,29 @@ pub async fn add_user_to_organization(
         }
     }
 
-    Ok(HttpResponse::NoContent().finish())
+    let message = MessageResponse::new(
+        "User added to organization successfully",
+        "user_added_to_organization",
+    );
+
+    Ok(HttpResponse::Ok().json(message))
 }
 
 /// Remove a user from an organization
 #[utoipa::path(
     context_path = "/admin",
     path = "/users/{id}/organizations/{org_id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Users"],
     params(
         ("id" = String, Path, description = "User ID"),
         ("org_id" = String, Path, description = "Organization ID")
     ),
     responses(
-        (status = 204, description = "User removed from organization successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "User or organization not found"),
-        (status = 500, description = "Internal server error")
+        (status = 204, description = "User removed from organization successfully", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "User or organization not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[delete("/{id}/organizations/{org_id}")]
@@ -778,7 +786,12 @@ pub async fn remove_user_from_organization(
         }
     }
 
-    Ok(HttpResponse::NoContent().finish())
+    let message = MessageResponse::new(
+        "User removed from organization successfully",
+        "user_removed_from_organization",
+    );
+
+    Ok(HttpResponse::Ok().json(message))
 }
 
 pub fn routes() -> actix_web::Scope {

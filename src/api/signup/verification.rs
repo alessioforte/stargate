@@ -8,7 +8,10 @@ use actix_web::{HttpResponse, get, web};
     path = "",
     tags = ["Signup"],
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK", body = EmailVerificationResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 #[get("")]

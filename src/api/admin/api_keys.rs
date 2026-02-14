@@ -1,4 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::msg::MessageResponse;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use actix_web_grants::protect;
 use db::ent::AuditContext;
@@ -11,12 +12,12 @@ const MAX_LIMIT: i64 = 100;
 /// Schema-only representation of ApiKey for OpenAPI docs
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiKeySchema {
-    pub id: String,
-    pub key_hash: String,
-    pub label: String,
-    pub revoked: bool,
-    pub attrs: Value,
+struct ApiKeySchema {
+    id: String,
+    key_hash: String,
+    label: String,
+    revoked: bool,
+    attrs: Value,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -69,13 +70,13 @@ pub struct ApiKeyAttrsRequest {
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys",
-    tags = ["Admin"],
+    tags = ["Admin", "API Keys"],
     params(ListApiKeysQuery),
     responses(
         (status = 200, description = "List of API keys retrieved successfully", body = PaginatedResponse<ApiKeySchema>),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("")]
@@ -109,16 +110,16 @@ pub async fn get_api_keys(
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "API Keys"],
     params(
         ("id" = String, Path, description = "API Key ID")
     ),
     responses(
         (status = 200, description = "API key retrieved successfully", body = ApiKeySchema),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "API key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "API key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("/{id}")]
@@ -148,14 +149,14 @@ pub async fn get_api_key(params: web::Path<String>) -> Result<HttpResponse, Erro
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys",
-    tags = ["Admin"],
+    tags = ["Admin", "API Keys"],
     request_body = CreateApiKeyRequest,
     responses(
         (status = 201, description = "API key created successfully", body = CreateApiKeyResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[post("")]
@@ -235,16 +236,16 @@ pub async fn create_api_key(
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "API Keys"],
     params(
         ("id" = String, Path, description = "API Key ID")
     ),
     responses(
-        (status = 204, description = "API key deleted successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "API key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 204, description = "API key deleted successfully", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "API key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[delete("/{id}")]
@@ -277,23 +278,25 @@ pub async fn delete_api_key(
         }
     }
 
-    Ok(HttpResponse::NoContent().finish())
+    let message = MessageResponse::new("API key revoked successfully", "api_key_revoked");
+
+    Ok(HttpResponse::Ok().json(message))
 }
 
 /// Revoke an API key
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys/{id}/revoke",
-    tags = ["Admin"],
+    tags = ["Admin", "API Keys"],
     params(
         ("id" = String, Path, description = "API Key ID")
     ),
     responses(
-        (status = 200, description = "API key revoked successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "API key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "API key revoked successfully", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "API key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}/revoke")]
@@ -340,27 +343,27 @@ pub async fn revoke_api_key(
         }
     }
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "API key revoked successfully"
-    })))
+    let message = MessageResponse::new("API key revoked successfully", "api_key_revoked");
+
+    Ok(HttpResponse::Ok().json(message))
 }
 
 /// Update API key attrs (full replacement)
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys/{id}/attrs",
-    tags = ["Admin"],
+    tags = ["Admin", "API Keys"],
     params(
         ("id" = String, Path, description = "API Key ID")
     ),
     request_body = ApiKeyAttrsRequest,
     responses(
-        (status = 200, description = "API key attrs updated successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "API key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "API key attrs updated successfully", body = ApiKeySchema),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "API key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}/attrs")]
@@ -412,18 +415,18 @@ pub async fn update_api_key_attrs(
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys/{id}/attrs",
-    tags = ["Admin"],
+    tags = ["Admin", "API Keys"],
     params(
         ("id" = String, Path, description = "API Key ID")
     ),
     request_body = ApiKeyAttrsRequest,
     responses(
-        (status = 200, description = "API key attrs patched successfully"),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "API key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "API key attrs patched successfully", body = ApiKeySchema),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "API key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[patch("/{id}/attrs")]

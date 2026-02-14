@@ -1,4 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::msg::MessageResponse;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, put, web};
 use actix_web_grants::protect;
 use db::ent::AuditContext;
@@ -10,12 +11,12 @@ const MAX_LIMIT: i64 = 100;
 /// Schema-only representation of AdminKey for OpenAPI docs
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct AdminKeySchema {
-    pub id: String,
-    pub key_hash: String,
-    pub label: Option<String>,
-    pub permissions: Vec<String>,
-    pub revoked: bool,
+struct AdminKeySchema {
+    id: String,
+    key_hash: String,
+    label: Option<String>,
+    permissions: Vec<String>,
+    revoked: bool,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -27,12 +28,6 @@ pub struct CreateAdminKeyResponse {
     pub revoked: bool,
     /// The plain API key (only returned once at creation time)
     pub api_key: String,
-}
-
-/// Simple message response
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct MessageResponse {
-    pub message: String,
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
@@ -75,13 +70,13 @@ pub struct UpdateAdminKeyPermissionsRequest {
 #[utoipa::path(
     context_path = "/admin",
     path = "/admin-keys",
-    tags = ["Admin"],
+    tags = ["Admin", "Admin Keys"],
     params(ListAdminKeysQuery),
     responses(
         (status = 200, description = "List of admin keys retrieved successfully", body = PaginatedResponse<AdminKeySchema>),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("")]
@@ -115,16 +110,16 @@ pub async fn get_admin_keys(
 #[utoipa::path(
     context_path = "/admin",
     path = "/admin-keys/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Admin Keys"],
     params(
         ("id" = String, Path, description = "Admin Key ID")
     ),
     responses(
         (status = 200, description = "Admin key retrieved successfully", body = AdminKeySchema),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Admin key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Admin key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("/{id}")]
@@ -154,14 +149,14 @@ pub async fn get_admin_key(params: web::Path<String>) -> Result<HttpResponse, Er
 #[utoipa::path(
     context_path = "/admin",
     path = "/admin-keys",
-    tags = ["Admin"],
+    tags = ["Admin", "Admin Keys"],
     request_body = CreateAdminKeyRequest,
     responses(
         (status = 201, description = "Admin key created successfully", body = CreateAdminKeyResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[post("")]
@@ -215,18 +210,18 @@ pub async fn create_admin_key(
 #[utoipa::path(
     context_path = "/admin",
     path = "/admin-keys/{id}/permissions",
-    tags = ["Admin"],
+    tags = ["Admin", "Admin Keys"],
     params(
         ("id" = String, Path, description = "Admin Key ID")
     ),
     request_body = UpdateAdminKeyPermissionsRequest,
     responses(
         (status = 200, description = "Admin key permissions updated successfully", body = AdminKeySchema),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Admin key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Admin key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}/permissions")]
@@ -288,16 +283,16 @@ pub async fn update_admin_key_permissions(
 #[utoipa::path(
     context_path = "/admin",
     path = "/admin-keys/{id}/revoke",
-    tags = ["Admin"],
+    tags = ["Admin", "Admin Keys"],
     params(
         ("id" = String, Path, description = "Admin Key ID")
     ),
     responses(
         (status = 200, description = "Admin key revoked successfully", body = MessageResponse),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Admin key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Admin key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("/{id}/revoke")]
@@ -352,16 +347,16 @@ pub async fn revoke_admin_key(
 #[utoipa::path(
     context_path = "/admin",
     path = "/admin-keys/{id}",
-    tags = ["Admin"],
+    tags = ["Admin", "Admin Keys"],
     params(
         ("id" = String, Path, description = "Admin Key ID")
     ),
     responses(
-        (status = 204, description = "Admin key deleted successfully"),
-        (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden"),
-        (status = 404, description = "Admin key not found"),
-        (status = 500, description = "Internal server error")
+        (status = 204, description = "Admin key deleted successfully", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Admin key not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[delete("/{id}")]
@@ -393,7 +388,9 @@ pub async fn delete_admin_key(
         }
     }
 
-    Ok(HttpResponse::NoContent().finish())
+    let message = MessageResponse::new("Admin key deleted successfully", "admin_key_deleted");
+
+    Ok(HttpResponse::Ok().json(web::Json(message)))
 }
 
 pub fn routes() -> actix_web::Scope {

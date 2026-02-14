@@ -2,7 +2,7 @@ use super::SignupRequestBody;
 use crate::{
     act,
     err::{ErrorResponse, HttpError},
-    etc,
+    etc::{self, msg::MessageResponse},
 };
 use actix_web::{HttpResponse, post, web};
 use smtp::{Smtp, Template};
@@ -12,7 +12,11 @@ use smtp::{Smtp, Template};
     path = "",
     tags = ["Signup"],
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK", body = MessageResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 409, description = "Conflict", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
+
     )
 )]
 #[post("")]
@@ -82,9 +86,8 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
     match sender {
         Ok(_) => {
             let message = etc::msg::MessageResponse::new(
-                "A signup request has been sent to your email. Please check your inbox."
-                    .to_string(),
-                "signup_request".to_string(),
+                "A signup request has been sent to your email. Please check your inbox.",
+                "signup_request",
             );
 
             Ok(HttpResponse::Ok().json(web::Json(message)))

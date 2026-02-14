@@ -12,9 +12,9 @@ use jwt::Claims;
     summary = "Refresh Access Token",
     description = "Refresh the access token using a valid refresh token. This endpoint validates the provided refresh token and issues a new access token along with a new refresh token.",
     responses(
-        (status = 200, description = "OK"),
-        (status = 401, description = "Unauthorized - Invalid Token"),
-        (status = 500, description = "Internal Server Error")
+        (status = 200, description = "OK", body = AuthResponse),
+        (status = 401, description = "Unauthorized - Invalid Token", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
 #[put("/refresh-token")]

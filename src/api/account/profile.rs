@@ -27,8 +27,9 @@ pub struct UserSchema {
     description = "Retrieve the profile information of the currently authenticated user using their access token.",
     responses(
         (status = 200, description = "OK", body = UserSchema),
-        (status = 401, description = "Unauthorized - Invalid Token"),
-        (status = 500, description = "Internal Server Error")
+        (status = 401, description = "Unauthorized - Invalid Token", body = ErrorResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
 #[get("/profile")]

@@ -55,6 +55,8 @@ use utoipa::OpenApi;
         crate::api::account::logout::handler,
         crate::api::account::credentials::forgot::handler,
         crate::api::account::credentials::reset::handler,
+        crate::api::oauth::github::login,
+        crate::api::oauth::google::login,
         crate::api::signup::request::handler,
         crate::api::signup::verification::handler,
         crate::api::signup::complete::handler,

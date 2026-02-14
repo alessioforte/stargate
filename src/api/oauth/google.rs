@@ -14,15 +14,27 @@ pub struct QueryCode {
     // pub state: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AuthResponse {
     access_token: String,
     refresh_token: String,
 }
 
+#[utoipa::path(
+    context_path = "/oauth",
+    path = "/google",
+    tags = ["OAuth"],
+    description = "Login with Google",
+    responses(
+        (status = 200, description = "OK", body = AuthResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
+        (status = 502, description = "Bad Gateway", body = ErrorResponse),
+    )
+)]
 #[get("")]
-async fn login(
+pub async fn login(
     req: HttpRequest,
     query: web::Query<QueryCode>,
 ) -> Result<HttpResponse, ErrorResponse> {

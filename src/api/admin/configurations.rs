@@ -14,9 +14,14 @@ struct Params {
 #[utoipa::path(
     context_path = "/admin",
     path = "/configurations",
-    tags = ["Admin"],
+    tags = ["Admin", "Configurations"],
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK", body = Config),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Config file not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[get("")]
@@ -53,9 +58,14 @@ pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpRespons
 #[utoipa::path(
     context_path = "/admin",
     path = "/configurations",
-    tags = ["Admin"],
+    tags = ["Admin", "Configurations"],
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK"),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Config file not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 #[put("")]

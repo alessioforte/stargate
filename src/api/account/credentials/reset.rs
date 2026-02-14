@@ -5,6 +5,7 @@ use crate::etc;
 use crate::fun::format_name;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, put, web};
 use db::ent::AuditContext;
+use etc::msg::MessageResponse;
 use pw::Hash;
 use smtp::{Smtp, Template};
 use tracing::error;
@@ -16,10 +17,10 @@ use tracing::error;
     summary = "Change Password",
     description = "Change the user's password using a valid password reset token.",
     responses(
-        (status = 200, description = "OK"),
-        (status = 401, description = "Unauthorized"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal Server Error")
+        (status = 200, description = "OK", body = MessageResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
 #[put("")]
@@ -99,10 +100,8 @@ pub async fn handler(
 
     let _ = act::delete_change_password_request(&email).await;
 
-    let message = etc::msg::MessageResponse::new(
-        "Password changed successfully".to_string(),
-        "password_changed".to_string(),
-    );
+    let message =
+        etc::msg::MessageResponse::new("Password changed successfully", "password_changed");
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();

@@ -3,6 +3,7 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::fun::format_name;
 use actix_web::{HttpResponse, post, web};
+use etc::msg::MessageResponse;
 use serde::{Deserialize, Serialize};
 use smtp::{Smtp, Template};
 use utoipa::ToSchema;
@@ -18,9 +19,9 @@ struct ForgotPasswordRequestBody {
     summary = "Initiate Password Reset",
     description = "Initiate a password reset request by providing the user's email address. If the email exists in the system, a password reset link will be sent to that email.",
     responses(
-        (status = 200, description = "OK"),
-        (status = 404, description = "User not found"),
-        (status = 500, description = "Internal Server Error")
+        (status = 200, description = "OK", body = MessageResponse),
+        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 #[post("")]
@@ -49,10 +50,9 @@ pub async fn handler(
     let existing_request = act::get_change_password_request(&user.email).await;
 
     if let Ok(Some(_)) = existing_request {
-        let message = etc::msg::MessageResponse::new(
-            "A password reset request has already been sent to this email. Please check your email for the password reset link."
-                .to_string(),
-            "password_reset_existing".to_string(),
+        let message = MessageResponse::new(
+            "A password reset request has already been sent to this email. Please check your email for the password reset link.",
+            "password_reset_existing",
         );
         return Ok(HttpResponse::Ok().json(web::Json(message)));
     }
@@ -96,9 +96,8 @@ pub async fn handler(
     match sender {
         Ok(_) => {
             let message = etc::msg::MessageResponse::new(
-                "Password reset request sent. Please check your email for the password reset link."
-                    .to_string(),
-                "password_reset".to_string(),
+                "Password reset request sent. Please check your email for the password reset link.",
+                "password_reset",
             );
             Ok(HttpResponse::Ok().json(web::Json(message)))
         }

@@ -15,7 +15,11 @@ use tracing::error;
     path = "",
     tags = ["Signup"],
     responses(
-        (status = 200, description = "OK")
+        (status = 200, description = "OK", body = MessageResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 409, description = "Conflict", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 #[put("")]
@@ -134,10 +138,7 @@ pub async fn handler(
                 Err(e) => error!("Could not send email: {:?}", e),
             }
 
-            let message = MessageResponse::new(
-                "User created successfully".to_string(),
-                "signup_completed".to_string(),
-            );
+            let message = MessageResponse::new("User created successfully", "signup_completed");
 
             Ok(HttpResponse::Ok().json(web::Json(message)))
         }

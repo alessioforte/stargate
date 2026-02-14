@@ -11,9 +11,9 @@ use store::Store;
     summary = "User Logout",
     description = "Log out the currently authenticated user by invalidating their session token.",
     responses(
-        (status = 200, description = "OK"),
-        (status = 401, description = "Unauthorized - Invalid Token"),
-        (status = 500, description = "Internal Server Error")
+        (status = 200, description = "OK", body = MessageResponse),
+        (status = 401, description = "Unauthorized - Invalid Token", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
 #[delete("/logout")]
@@ -49,10 +49,7 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
         }
     };
 
-    let message = MessageResponse::new(
-        "User logged out successfully".to_string(),
-        "logout_success".to_string(),
-    );
+    let message = MessageResponse::new("User logged out successfully", "logout_success");
 
     Ok(HttpResponse::Ok().json(web::Json(message)))
 }
