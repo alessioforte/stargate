@@ -9,9 +9,9 @@ const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
 
 /// Schema only representation of ServiceAccount for OpenAPI docs
-#[derive(Deserialize, utoipa::ToSchema)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct ServiceAccountSchema {
+struct ServiceAccount {
     id: String,
     name: String,
     description: Option<String>,
@@ -65,7 +65,7 @@ pub struct UpdateServiceAccountRequest {
     tags = ["Admin", "Service Accounts"],
     params(ListServiceAccountsQuery),
     responses(
-        (status = 200, description = "List of service accounts retrieved successfully", body = PaginatedResponse<ServiceAccountSchema>),
+        (status = 200, description = "List of service accounts retrieved successfully", body = PaginatedResponse<ServiceAccount>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -119,7 +119,7 @@ pub async fn get_service_accounts(
         ("id" = String, Path, description = "Service Account ID")
     ),
     responses(
-        (status = 200, description = "Service account retrieved successfully", body = ServiceAccountSchema),
+        (status = 200, description = "Service account retrieved successfully", body = ServiceAccount),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Service account not found", body = ErrorResponse),
@@ -156,7 +156,7 @@ pub async fn get_service_account(params: web::Path<String>) -> Result<HttpRespon
     tags = ["Admin", "Service Accounts"],
     request_body = CreateServiceAccountRequest,
     responses(
-        (status = 201, description = "Service account created successfully", body = ServiceAccountSchema),
+        (status = 201, description = "Service account created successfully", body = ServiceAccount),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -209,7 +209,7 @@ pub async fn create_service_account(
     ),
     request_body = UpdateServiceAccountRequest,
     responses(
-        (status = 200, description = "Service account updated successfully", body = ServiceAccountSchema),
+        (status = 200, description = "Service account updated successfully", body = ServiceAccount),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

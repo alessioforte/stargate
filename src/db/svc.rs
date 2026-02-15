@@ -141,29 +141,6 @@ pub async fn get_credential(
 
 // ── Api Keys ────────────────────────────────────────────────────────────────
 
-pub async fn create_api_key(
-    key_hash: &str,
-    label: &str,
-    attrs: Option<serde_json::Value>,
-    ctx: AuditContext,
-) -> Result<ApiKey> {
-    let svc = service();
-    match svc.create_api_key(key_hash, label, attrs).await {
-        Ok(api_key) => {
-            let resource = API_KEY.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(api_key.id.to_string());
-            audit::creation!(ctx);
-            Ok(api_key)
-        }
-        Err(e) => {
-            tracing::error!("Error creating API key: {:?}", e);
-            Err(e)
-        }
-    }
-}
-
 pub async fn create_user_api_key(
     user_id: &str,
     key_hash: &str,

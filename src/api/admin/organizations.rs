@@ -9,9 +9,9 @@ const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
 
 /// Schema only representation of Organization for OpenAPI docs
-#[derive(Deserialize, utoipa::ToSchema)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct OrganizationSchema {
+struct Organization {
     id: i64,
     name: String,
     description: Option<String>,
@@ -66,7 +66,7 @@ pub struct UpdateOrganizationRequest {
     tags = ["Admin", "Organizations"],
     params(ListOrganizationsQuery),
     responses(
-        (status = 200, description = "List of organizations retrieved successfully", body = PaginatedResponse<OrganizationSchema>),
+        (status = 200, description = "List of organizations retrieved successfully", body = PaginatedResponse<Organization>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -120,7 +120,7 @@ pub async fn get_organizations(
         ("id" = String, Path, description = "Organization ID")
     ),
     responses(
-        (status = 200, description = "Organization retrieved successfully", body = OrganizationSchema),
+        (status = 200, description = "Organization retrieved successfully", body = Organization),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Organization not found", body = ErrorResponse),
@@ -157,7 +157,7 @@ pub async fn get_organization(params: web::Path<String>) -> Result<HttpResponse,
     tags = ["Admin", "Organizations"],
     request_body = CreateOrganizationRequest,
     responses(
-        (status = 201, description = "Organization created successfully", body = OrganizationSchema),
+        (status = 201, description = "Organization created successfully", body = Organization),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -210,7 +210,7 @@ pub async fn create_organization(
     ),
     request_body = UpdateOrganizationRequest,
     responses(
-        (status = 200, description = "Organization updated successfully", body = OrganizationSchema),
+        (status = 200, description = "Organization updated successfully", body = Organization),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

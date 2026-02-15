@@ -9,9 +9,9 @@ const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
 
 /// Schema-only representation of AdminKey for OpenAPI docs
-#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct AdminKeySchema {
+struct AdminKey {
     id: String,
     key_hash: String,
     label: Option<String>,
@@ -73,7 +73,7 @@ pub struct UpdateAdminKeyPermissionsRequest {
     tags = ["Admin", "Admin Keys"],
     params(ListAdminKeysQuery),
     responses(
-        (status = 200, description = "List of admin keys retrieved successfully", body = PaginatedResponse<AdminKeySchema>),
+        (status = 200, description = "List of admin keys retrieved successfully", body = PaginatedResponse<AdminKey>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -115,7 +115,7 @@ pub async fn get_admin_keys(
         ("id" = String, Path, description = "Admin Key ID")
     ),
     responses(
-        (status = 200, description = "Admin key retrieved successfully", body = AdminKeySchema),
+        (status = 200, description = "Admin key retrieved successfully", body = AdminKey),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Admin key not found", body = ErrorResponse),
@@ -216,7 +216,7 @@ pub async fn create_admin_key(
     ),
     request_body = UpdateAdminKeyPermissionsRequest,
     responses(
-        (status = 200, description = "Admin key permissions updated successfully", body = AdminKeySchema),
+        (status = 200, description = "Admin key permissions updated successfully", body = AdminKey),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

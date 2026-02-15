@@ -12,9 +12,9 @@ const MAX_LIMIT: i64 = 100;
 /// Schema-only representation of ApiKey for OpenAPI docs
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct ApiKeySchema {
+struct ApiKey {
     id: String,
-    key_hash: String,
+    // key_hash: String,
     label: String,
     revoked: bool,
     attrs: Value,
@@ -73,7 +73,7 @@ pub struct ApiKeyAttrsRequest {
     tags = ["Admin", "API Keys"],
     params(ListApiKeysQuery),
     responses(
-        (status = 200, description = "List of API keys retrieved successfully", body = PaginatedResponse<ApiKeySchema>),
+        (status = 200, description = "List of API keys retrieved successfully", body = PaginatedResponse<ApiKey>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -115,7 +115,7 @@ pub async fn get_api_keys(
         ("id" = String, Path, description = "API Key ID")
     ),
     responses(
-        (status = 200, description = "API key retrieved successfully", body = ApiKeySchema),
+        (status = 200, description = "API key retrieved successfully", body = ApiKey),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "API key not found", body = ErrorResponse),
@@ -358,7 +358,7 @@ pub async fn revoke_api_key(
     ),
     request_body = ApiKeyAttrsRequest,
     responses(
-        (status = 200, description = "API key attrs updated successfully", body = ApiKeySchema),
+        (status = 200, description = "API key attrs updated successfully", body = ApiKey),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -421,7 +421,7 @@ pub async fn update_api_key_attrs(
     ),
     request_body = ApiKeyAttrsRequest,
     responses(
-        (status = 200, description = "API key attrs patched successfully", body = ApiKeySchema),
+        (status = 200, description = "API key attrs patched successfully", body = ApiKey),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
