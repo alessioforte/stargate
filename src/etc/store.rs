@@ -21,7 +21,7 @@ mod memory {
     }
 
     fn run_memory_backup() {
-        let interval = std::time::Duration::from_secs(60);
+        let interval = std::time::Duration::from_secs(5);
         tokio::spawn(async move {
             loop {
                 let store = use_store();

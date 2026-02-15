@@ -53,10 +53,18 @@ pub trait Transaction {
     async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>>;
     async fn get_all_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;
     async fn get_api_keys_by_user_id(&self, user_id: &str) -> Result<Vec<ApiKey>>;
+    async fn get_all_user_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;
+    async fn count_user_api_keys(&self) -> Result<i64>;
     async fn get_api_keys_by_service_account_id(
         &self,
         service_account_id: &str,
     ) -> Result<Vec<ApiKey>>;
+    async fn get_all_service_account_api_keys(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ApiKey>>;
+    async fn count_service_account_api_keys(&self) -> Result<i64>;
     async fn count_api_keys(&self) -> Result<i64>;
     async fn update_api_key(&self, api_key: ApiKey) -> Result<ApiKey>;
     async fn revoke_api_key(&self, id: &str) -> Result<()>;
@@ -135,6 +143,13 @@ pub trait Transaction {
     async fn add_user_to_organization(&self, user_id: &str, org_id: &str) -> Result<()>;
     async fn remove_user_from_organization(&self, user_id: &str, org_id: &str) -> Result<()>;
     async fn get_organization_users(&self, org_id: &str) -> Result<Vec<User>>;
+    async fn get_organization_users_paginated(
+        &self,
+        org_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<User>>;
+    async fn count_organization_users(&self, org_id: &str) -> Result<i64>;
     async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<Organization>>;
 
     // ── Audit ───────────────────────────────────────────────────────────────

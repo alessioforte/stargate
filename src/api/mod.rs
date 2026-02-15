@@ -24,6 +24,7 @@ use utoipa::OpenApi;
         crate::api::admin::users::patch_user_attrs,
         crate::api::admin::users::delete_user,
         crate::api::admin::users::get_user_organizations,
+        crate::api::admin::users::get_organization_users,
         crate::api::admin::users::add_user_to_organization,
         crate::api::admin::users::remove_user_from_organization,
         crate::api::admin::api_keys::get_api_keys,

@@ -668,6 +668,58 @@ pub async fn get_user_organizations(
     Ok(HttpResponse::Ok().json(organizations))
 }
 
+/// Get all users in an organization with pagination
+#[utoipa::path(
+    context_path = "/admin",
+    path = "/users/organizations/{org_id}",
+    tags = ["Admin", "Users"],
+    params(
+        ("org_id" = String, Path, description = "Organization ID"),
+        ListUsersQuery
+    ),
+    responses(
+        (status = 200, description = "Organization users retrieved successfully", body = PaginatedResponse<UserSchema>),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Organization not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+#[get("/organizations/{org_id}")]
+#[protect(any("super_admin", "users"))]
+pub async fn get_organization_users(
+    params: web::Path<String>,
+    query: web::Query<ListUsersQuery>,
+) -> Result<HttpResponse, ErrorResponse> {
+    let org_id = params.into_inner();
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    if let Ok(None) = crate::db::get_organization_by_id(&org_id).await {
+        return Err(ErrorResponse::from(HttpError::NotFound(format!(
+            "Organization with id '{}' not found",
+            org_id
+        ))));
+    }
+
+    let users = crate::db::get_organization_users_paginated(&org_id, limit, offset)
+        .await
+        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+
+    let total = crate::db::count_organization_users(&org_id)
+        .await
+        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+
+    let response = PaginatedResponse {
+        data: users,
+        total,
+        limit,
+        offset,
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
 /// Add a user to an organization
 #[utoipa::path(
     context_path = "/admin",
@@ -798,6 +850,7 @@ pub fn routes() -> actix_web::Scope {
     web::scope("/users")
         .service(get_users)
         .service(create_user)
+        .service(get_organization_users)
         .service(get_user)
         .service(update_user)
         .service(patch_user)

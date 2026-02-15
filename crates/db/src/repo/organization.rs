@@ -1,6 +1,6 @@
+use super::USER;
 use crate::ent::{Organization, User};
 use anyhow::Result;
-
 pub const ORGANIZATION: &str = "organizations";
 pub const USER_ORGANIZATION: &str = "user_organizations";
 
@@ -250,11 +250,12 @@ impl OrganizationRepository {
         let rows = sqlx::query_as::<_, User>(
             format!(
                 "
-            SELECT u.* FROM users u
+            SELECT u.* FROM {users} u
             INNER JOIN {tbl} uo ON u.id = uo.user_id
             WHERE uo.org_id = $1
             ORDER BY u.id
         ",
+                users = USER,
                 tbl = USER_ORGANIZATION
             )
             .as_str(),
@@ -264,6 +265,57 @@ impl OrganizationRepository {
         .await?;
 
         Ok(rows)
+    }
+
+    pub async fn get_users_paginated(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        org_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<User>> {
+        let rows = sqlx::query_as::<_, User>(
+            format!(
+                "SELECT u.* FROM {users} u
+                INNER JOIN {tbl} uo ON u.id = uo.user_id
+                WHERE uo.org_id = $1
+                ORDER BY u.id DESC LIMIT $2 OFFSET $3",
+                users = USER,
+                tbl = USER_ORGANIZATION
+            )
+            .as_str(),
+        )
+        .bind(org_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_users(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        org_id: &str,
+    ) -> Result<i64> {
+        let row: (i64,) = sqlx::query_as(
+            format!(
+                "SELECT COUNT(*) FROM {users} u
+                INNER JOIN {tbl} uo ON u.id = uo.user_id
+                WHERE uo.org_id = $1",
+                users = USER,
+                tbl = USER_ORGANIZATION
+            )
+            .as_str(),
+        )
+        .bind(org_id)
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row.0)
     }
 
     pub async fn get_orgs_by_user(

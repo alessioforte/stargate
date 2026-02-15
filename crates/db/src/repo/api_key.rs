@@ -118,6 +118,51 @@ impl ApiKeyRepository {
         Ok(rows)
     }
 
+    pub async fn get_all_by_user_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ApiKey>> {
+        let rows = sqlx::query_as::<_, ApiKey>(
+            format!(
+                "SELECT ak.* FROM {api_keys} ak
+                INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id
+                ORDER BY ak.id DESC LIMIT $1 OFFSET $2",
+                api_keys = API_KEY,
+                user_api_keys = USER_API_KEY
+            )
+            .as_str(),
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_by_user_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<i64> {
+        let row: (i64,) = sqlx::query_as(
+            format!(
+                "SELECT COUNT(*) FROM {api_keys} ak
+                INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id",
+                api_keys = API_KEY,
+                user_api_keys = USER_API_KEY
+            )
+            .as_str(),
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row.0)
+    }
+
     pub async fn get_by_service_account_id(
         &self,
         #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -142,6 +187,51 @@ impl ApiKeyRepository {
         .await?;
 
         Ok(rows)
+    }
+
+    pub async fn get_all_by_service_account_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ApiKey>> {
+        let rows = sqlx::query_as::<_, ApiKey>(
+            format!(
+                "SELECT ak.* FROM {api_keys} ak
+                INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id
+                ORDER BY ak.id DESC LIMIT $1 OFFSET $2",
+                api_keys = API_KEY,
+                sa_api_keys = SERVICE_ACCOUNT_API_KEY
+            )
+            .as_str(),
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_by_service_account_type(
+        &self,
+        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<i64> {
+        let row: (i64,) = sqlx::query_as(
+            format!(
+                "SELECT COUNT(*) FROM {api_keys} ak
+                INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id",
+                api_keys = API_KEY,
+                sa_api_keys = SERVICE_ACCOUNT_API_KEY
+            )
+            .as_str(),
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row.0)
     }
 
     pub async fn get_by_hash(

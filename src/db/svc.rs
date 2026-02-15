@@ -215,10 +215,30 @@ pub async fn get_api_keys_by_user_id(user_id: &str) -> Result<Vec<ApiKey>> {
     svc.get_api_keys_by_user_id(user_id).await
 }
 
+pub async fn get_all_user_api_keys(limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
+    let svc = service();
+    svc.get_all_user_api_keys(limit, offset).await
+}
+
+pub async fn count_user_api_keys() -> Result<i64> {
+    let svc = service();
+    svc.count_user_api_keys().await
+}
+
 pub async fn get_api_keys_by_service_account_id(service_account_id: &str) -> Result<Vec<ApiKey>> {
     let svc = service();
     svc.get_api_keys_by_service_account_id(service_account_id)
         .await
+}
+
+pub async fn get_all_service_account_api_keys(limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
+    let svc = service();
+    svc.get_all_service_account_api_keys(limit, offset).await
+}
+
+pub async fn count_service_account_api_keys() -> Result<i64> {
+    let svc = service();
+    svc.count_service_account_api_keys().await
 }
 
 pub async fn count_api_keys() -> Result<i64> {
@@ -616,6 +636,21 @@ pub async fn remove_user_from_organization(
 pub async fn get_organization_users(org_id: &str) -> Result<Vec<User>> {
     let svc = service();
     svc.get_organization_users(org_id).await
+}
+
+pub async fn get_organization_users_paginated(
+    org_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<User>> {
+    let svc = service();
+    svc.get_organization_users_paginated(org_id, limit, offset)
+        .await
+}
+
+pub async fn count_organization_users(org_id: &str) -> Result<i64> {
+    let svc = service();
+    svc.count_organization_users(org_id).await
 }
 
 pub async fn get_user_organizations(user_id: &str) -> Result<Vec<Organization>> {

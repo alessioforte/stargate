@@ -262,6 +262,23 @@ impl Transaction for Service {
         Ok(api_keys)
     }
 
+    async fn get_all_user_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
+        let mut tx = self.pool.begin().await?;
+        let api_keys = self
+            .api_key
+            .get_all_by_user_type(&mut tx, limit, offset)
+            .await?;
+        tx.commit().await?;
+        Ok(api_keys)
+    }
+
+    async fn count_user_api_keys(&self) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.api_key.count_by_user_type(&mut tx).await?;
+        tx.commit().await?;
+        Ok(count)
+    }
+
     async fn get_api_keys_by_service_account_id(
         &self,
         service_account_id: &str,
@@ -273,6 +290,27 @@ impl Transaction for Service {
             .await?;
         tx.commit().await?;
         Ok(api_keys)
+    }
+
+    async fn get_all_service_account_api_keys(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ApiKey>> {
+        let mut tx = self.pool.begin().await?;
+        let api_keys = self
+            .api_key
+            .get_all_by_service_account_type(&mut tx, limit, offset)
+            .await?;
+        tx.commit().await?;
+        Ok(api_keys)
+    }
+
+    async fn count_service_account_api_keys(&self) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.api_key.count_by_service_account_type(&mut tx).await?;
+        tx.commit().await?;
+        Ok(count)
     }
 
     async fn count_api_keys(&self) -> Result<i64> {
@@ -560,6 +598,28 @@ impl Transaction for Service {
         let users = self.organization.get_users(&mut tx, org_id).await?;
         tx.commit().await?;
         Ok(users)
+    }
+
+    async fn get_organization_users_paginated(
+        &self,
+        org_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<User>> {
+        let mut tx = self.pool.begin().await?;
+        let users = self
+            .organization
+            .get_users_paginated(&mut tx, org_id, limit, offset)
+            .await?;
+        tx.commit().await?;
+        Ok(users)
+    }
+
+    async fn count_organization_users(&self, org_id: &str) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.organization.count_users(&mut tx, org_id).await?;
+        tx.commit().await?;
+        Ok(count)
     }
 
     async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<Organization>> {

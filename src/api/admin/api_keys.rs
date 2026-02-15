@@ -39,6 +39,15 @@ pub struct ListApiKeysQuery {
     /// Number of API keys to skip (default: 0)
     #[serde(default)]
     pub offset: Option<i64>,
+    /// Filter by owner type: "user" or "service_account"
+    #[serde(default)]
+    pub owner_type: Option<String>,
+    /// Filter API keys by user ID
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Filter API keys by service account ID
+    #[serde(default)]
+    pub service_account_id: Option<String>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -66,7 +75,10 @@ pub struct ApiKeyAttrsRequest {
     pub attrs: Value,
 }
 
-/// Get all API keys with pagination
+/// Get all API keys with pagination and optional filtering
+///
+/// Filter by owner type (`ownerType=user` or `ownerType=service_account`),
+/// or by specific owner (`userId` or `serviceAccountId`).
 #[utoipa::path(
     context_path = "/admin",
     path = "/api-keys",
@@ -74,6 +86,7 @@ pub struct ApiKeyAttrsRequest {
     params(ListApiKeysQuery),
     responses(
         (status = 200, description = "List of API keys retrieved successfully", body = PaginatedResponse<ApiKey>),
+        (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
@@ -87,14 +100,59 @@ pub async fn get_api_keys(
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    // TODO: Remove keyHash from the response
-    let api_keys = crate::db::get_all_api_keys(limit, offset)
-        .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
-
-    let total = crate::db::count_api_keys()
-        .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+    let (api_keys, total) = if let Some(user_id) = &query.user_id {
+        let keys = crate::db::get_api_keys_by_user_id(user_id)
+            .await
+            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        let total = keys.len() as i64;
+        (keys, total)
+    } else if let Some(service_account_id) = &query.service_account_id {
+        let keys = crate::db::get_api_keys_by_service_account_id(service_account_id)
+            .await
+            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        let total = keys.len() as i64;
+        (keys, total)
+    } else if let Some(owner_type) = &query.owner_type {
+        match owner_type.as_str() {
+            "user" => {
+                let keys = crate::db::get_all_user_api_keys(limit, offset)
+                    .await
+                    .map_err(|e| {
+                        ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
+                    })?;
+                let total = crate::db::count_user_api_keys().await.map_err(|e| {
+                    ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
+                })?;
+                (keys, total)
+            }
+            "service_account" => {
+                let keys = crate::db::get_all_service_account_api_keys(limit, offset)
+                    .await
+                    .map_err(|e| {
+                        ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
+                    })?;
+                let total = crate::db::count_service_account_api_keys()
+                    .await
+                    .map_err(|e| {
+                        ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
+                    })?;
+                (keys, total)
+            }
+            _ => {
+                return Err(ErrorResponse::from(HttpError::BadRequest(
+                    "Invalid owner_type: must be 'user' or 'service_account'".to_string(),
+                )));
+            }
+        }
+    } else {
+        let keys = crate::db::get_all_api_keys(limit, offset)
+            .await
+            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        let total = crate::db::count_api_keys()
+            .await
+            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        (keys, total)
+    };
 
     let response = PaginatedResponse {
         data: api_keys,
