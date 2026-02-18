@@ -41,14 +41,14 @@ pub struct Audit {
 
 #[derive(Debug, Clone)]
 pub struct AuditContext {
-    actor_type: ActorType,
-    actor_id: Option<String>,
-    request_id: Option<String>,
-    ip_address: Option<String>,
-    user_agent: Option<String>,
-    resource: Option<String>,
-    resource_id: Option<String>,
-    metadata: Option<serde_json::Value>,
+    pub actor_type: ActorType,
+    pub actor_id: Option<String>,
+    pub request_id: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub resource: Option<String>,
+    pub resource_id: Option<String>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl AuditContext {

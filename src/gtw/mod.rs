@@ -13,6 +13,7 @@ use actix_web::{
 };
 use db::ent::AuditContext;
 use gate::Gate;
+use ulid::Ulid;
 
 pub async fn handler(
     gate: actix_web::web::Data<Gate>,
@@ -42,6 +43,10 @@ pub async fn handler(
         };
     }
 
+    let request_id = ctx
+        .request_id
+        .clone()
+        .unwrap_or_else(|| Ulid::new().to_string());
     req.extensions_mut().insert(ctx);
 
     let query = req.query_string();
@@ -50,6 +55,10 @@ pub async fn handler(
     let has_auth = sub.is_some();
 
     let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("x-request-id"),
+        HeaderValue::from_str(&request_id).unwrap(),
+    );
 
     // 1. Service lookup (cheap, in-memory) -----------------------------------
     let path = req.uri().path();
