@@ -7,14 +7,15 @@ mod etc;
 mod fun;
 mod gtw;
 
-use crate::etc::{cfg, cors, ctx, gate, jwt, log, logo, store, tls};
+use crate::etc::{cfg, cors, gate, jwt, log, logo, store, tls};
 use actix_web::{
     App, HttpServer,
-    middleware::{self, TrailingSlash, from_fn},
+    middleware::{self, TrailingSlash},
 };
 use dotenvy::dotenv;
 use std::env;
 use tracing::info;
+use tracing_actix_web::TracingLogger;
 
 // =^.^=
 // 🦀
@@ -26,7 +27,7 @@ async fn main() -> std::io::Result<()> {
     println!("{}", logo::LOGO);
 
     dotenv().ok();
-    log::init();
+    let _guard = log::init();
     aud::init();
 
     let version = env!("CARGO_PKG_VERSION");
@@ -49,9 +50,8 @@ async fn main() -> std::io::Result<()> {
             .app_data(gcfg.clone())
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
             .wrap(middleware::Compress::default())
-            .wrap(middleware::Logger::default())
+            .wrap(TracingLogger::<log::StargateRootSpanBuilder>::new())
             .wrap(cors::middleware::configure())
-            .wrap(from_fn(ctx::middleware))
             .configure(cfg::configure)
             .configure(api::configure)
             .configure(gtw::configure)

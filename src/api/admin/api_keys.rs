@@ -223,10 +223,10 @@ pub async fn create_api_key(
     req: HttpRequest,
     payload: web::Json<CreateApiKeyRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     let user_id = payload.user_id.clone();
     let service_account_id = payload.service_account_id.clone();
@@ -312,10 +312,10 @@ pub async fn delete_api_key(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     let id = params.into_inner();
 
@@ -363,10 +363,10 @@ pub async fn revoke_api_key(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     let id = params.into_inner();
 
@@ -431,10 +431,10 @@ pub async fn update_api_key_attrs(
     params: web::Path<String>,
     payload: web::Json<ApiKeyAttrsRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     let id = params.into_inner();
 
@@ -494,10 +494,10 @@ pub async fn patch_api_key_attrs(
     params: web::Path<String>,
     payload: web::Json<ApiKeyAttrsRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     let id = params.into_inner();
 

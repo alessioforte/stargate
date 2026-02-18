@@ -7,20 +7,28 @@ pub mod users;
 
 use crate::etc::{ext::RequestExt, jwt::jwt_config};
 use crate::fun::check_super_admin_by_claims;
+use actix_web::HttpMessage;
 use actix_web::{
     Error, body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
     dev::ServiceResponse, web,
 };
 use actix_web_grants::GrantsMiddleware;
+use db::ent::AuditContext;
 use std::collections::HashSet;
 
 const SUPER_ADMIN: &str = "super_admin";
 
 async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
+    let mut ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
     if let Some(token) = req.request().get_token() {
         let jwt = jwt_config();
         if let Some(claims) = jwt.validate_token(&token).ok() {
-            if check_super_admin_by_claims(claims) {
+            if check_super_admin_by_claims(&claims) {
+                ctx = ctx.with_actor(db::ent::ActorType::Admin, claims.sub_id);
+                req.extensions_mut().insert(ctx);
                 return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
             }
         }
@@ -30,6 +38,8 @@ async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
         let hash = pw::hash_api_key(&raw_key);
         if let Ok(Some(key)) = crate::db::get_admin_key_by_hash(&hash).await {
             if !key.revoked {
+                ctx = ctx.with_actor(db::ent::ActorType::AdminKey, Some(key.id));
+                req.extensions_mut().insert(ctx);
                 return Ok(key.permissions.iter().map(|p| p.to_string()).collect());
             }
         }

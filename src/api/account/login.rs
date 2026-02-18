@@ -3,7 +3,8 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
 use crate::fun::format_name;
-use actix_web::{HttpResponse, cookie::Cookie, post, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, cookie::Cookie, post, web};
+use db::ent::AuditContext;
 use db::ent::CredentialType;
 use pw::Hash;
 use store::Store;
@@ -22,6 +23,7 @@ use store::Store;
 )]
 #[post("/login")]
 pub async fn handler(
+    req: HttpRequest,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
     let user = match crate::db::get_user_by_username(&credentials.username).await {
@@ -65,6 +67,13 @@ pub async fn handler(
         )));
     }
 
+    let mut ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
+    ctx = ctx.with_actor(db::ent::ActorType::User, Some(user.id.clone()));
+    req.extensions_mut().insert(ctx);
+
     let subject = etc::sub::Subject::from(user.clone());
 
     let given_name = user.given_name.clone().unwrap_or_default();
@@ -84,7 +93,14 @@ pub async fn handler(
         claims = claims.role(crate::etc::consts::STARGATE_ADMIN.to_string());
     }
 
-    let (access_token, refresh_token) = crate::fun::generate_tokens(claims).unwrap();
+    let (access_token, refresh_token) = match crate::fun::generate_tokens(claims) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            return Err(ErrorResponse::from(HttpError::InternalServerError(
+                e.to_string(),
+            )));
+        }
+    };
 
     // Store the user ID in the session
     let store = etc::store::use_store();

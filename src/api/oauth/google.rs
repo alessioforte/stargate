@@ -38,10 +38,10 @@ pub async fn login(
     req: HttpRequest,
     query: web::Query<QueryCode>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
     let code = &query.code;
 
     if code.is_empty() {

@@ -16,6 +16,7 @@ pub enum ActionType {
 #[sqlx(type_name = "actor_type", rename_all = "snake_case")]
 pub enum ActorType {
     Admin,
+    AdminKey,
     User,
     ApiKey,
     System,

@@ -39,8 +39,8 @@ pub async fn create_super_admin() {
     };
 }
 
-pub fn check_super_admin_by_claims(claims: Claims) -> bool {
-    if let Some(role) = claims.role {
+pub fn check_super_admin_by_claims(claims: &Claims) -> bool {
+    if let Some(role) = claims.role.as_ref() {
         if role == STARGATE_ADMIN {
             return true;
         }

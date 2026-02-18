@@ -1,7 +1,6 @@
 pub mod cfg;
 pub mod consts;
 pub mod cors;
-pub mod ctx;
 pub mod ext;
 pub mod gate;
 pub mod guard;

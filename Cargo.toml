@@ -81,10 +81,11 @@ tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "time"] }
 rustls = "0.23.36"
 rustls-pemfile = "2.2.0"
 anyhow = "1.0.100"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json", "time"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.3"
 ulid = "1.2.1"
+tracing-actix-web = "0.7.21"
 
 [features]
 default = ["sqlite", "redis"]

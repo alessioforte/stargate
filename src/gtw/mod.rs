@@ -2,14 +2,16 @@ mod http;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ext::RequestExt, gate::get_client, sub::Subject};
+use crate::etc::{ext::RequestExt, gate::get_client, guard};
 use crate::fun::access_control;
+use actix_web::HttpMessage;
 use actix_web::{
-    HttpMessage, HttpRequest, HttpResponse,
+    HttpRequest, HttpResponse,
     http::header::{HeaderMap, HeaderName, HeaderValue},
     web::Payload,
     web::ServiceConfig,
 };
+use db::ent::AuditContext;
 use gate::Gate;
 
 pub async fn handler(
@@ -17,8 +19,30 @@ pub async fn handler(
     req: HttpRequest,
     stream: Payload,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ex = req.extensions();
-    let sub = ex.get::<Subject>();
+    let mut ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
+
+    let mut sub = match guard::verify_api_key(&req).await {
+        Some(s) => {
+            ctx = ctx.with_actor(db::ent::ActorType::AdminKey, Some(s.id.clone()));
+            Some(s)
+        }
+        None => None,
+    };
+
+    if sub.is_none() {
+        sub = match guard::verify_jwt(&req).await {
+            Some(s) => {
+                ctx = ctx.with_actor(db::ent::ActorType::User, Some(s.id.clone()));
+                Some(s)
+            }
+            None => None,
+        };
+    }
+
+    req.extensions_mut().insert(ctx);
 
     let query = req.query_string();
     let method = req.method().clone();
@@ -78,8 +102,9 @@ pub async fn handler(
 
     // 4. Access control (cheap, in-memory policy evaluation) -----------------
     if let Some(r) = resource
-        && let Some(s) = sub
+        && has_auth
     {
+        let s = sub.clone().unwrap();
         let pe = gate.policy_engine.load();
         let allowed = access_control(&pe, &s, &r);
 
@@ -99,7 +124,8 @@ pub async fn handler(
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    if let Some(sub) = sub {
+    if has_auth {
+        let sub = sub.unwrap();
         if let Some(rate_limit) = sub.get_attr("rate_limit") {
             if let Some(rate_limit_str) = rate_limit.as_str() {
                 limit_name = rate_limit_str.to_string();

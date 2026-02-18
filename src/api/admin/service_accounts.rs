@@ -169,10 +169,10 @@ pub async fn create_service_account(
     req: HttpRequest,
     payload: web::Json<CreateServiceAccountRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     if payload.name.trim().is_empty() {
         return Err(ErrorResponse::from(HttpError::BadRequest(
@@ -224,10 +224,10 @@ pub async fn update_service_account(
     params: web::Path<String>,
     payload: web::Json<UpdateServiceAccountRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     let id = params.into_inner();
 
@@ -286,10 +286,10 @@ pub async fn delete_service_account(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = match req.extensions().get::<AuditContext>().cloned() {
-        Some(c) => c,
-        None => AuditContext::anonymous(),
-    };
+    let ctx = req
+        .extensions_mut()
+        .remove::<AuditContext>()
+        .unwrap_or_else(AuditContext::anonymous);
 
     let id = params.into_inner();
 
