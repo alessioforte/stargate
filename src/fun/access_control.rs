@@ -1,8 +1,6 @@
 use crate::etc::sub::Subject;
-use std::{
-    cell::RefCell,
-    collections::{HashMap, VecDeque},
-};
+use lru::LruCache;
+use std::{cell::RefCell, collections::HashMap, num::NonZeroUsize};
 
 const DECISION_CACHE_CAPACITY: usize = 1024;
 
@@ -16,45 +14,28 @@ struct DecisionKey {
 
 struct DecisionCache {
     version: u64,
-    entries: HashMap<DecisionKey, bool>,
-    order: VecDeque<DecisionKey>,
+    entries: LruCache<DecisionKey, bool>,
 }
 
 impl DecisionCache {
     fn new(version: u64) -> Self {
         Self {
             version,
-            entries: HashMap::new(),
-            order: VecDeque::new(),
+            entries: LruCache::new(NonZeroUsize::new(DECISION_CACHE_CAPACITY).unwrap()),
         }
     }
 
     fn reset(&mut self, version: u64) {
         self.version = version;
         self.entries.clear();
-        self.order.clear();
     }
 
-    fn get(&self, key: &DecisionKey) -> Option<bool> {
+    fn get(&mut self, key: &DecisionKey) -> Option<bool> {
         self.entries.get(key).copied()
     }
 
     fn insert(&mut self, key: DecisionKey, allowed: bool) {
-        let is_new = self.entries.insert(key.clone(), allowed).is_none();
-        if is_new {
-            self.order.push_back(key);
-        }
-        self.evict_if_needed();
-    }
-
-    fn evict_if_needed(&mut self) {
-        while self.entries.len() > DECISION_CACHE_CAPACITY {
-            if let Some(oldest) = self.order.pop_front() {
-                self.entries.remove(&oldest);
-            } else {
-                break;
-            }
-        }
+        self.entries.put(key, allowed);
     }
 }
 

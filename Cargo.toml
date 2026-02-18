@@ -86,6 +86,7 @@ tracing = "0.1.44"
 tracing-appender = "0.2.3"
 ulid = "1.2.1"
 tracing-actix-web = "0.7.21"
+lru = "0.12"
 
 [features]
 default = ["sqlite", "redis"]

@@ -1,15 +1,16 @@
 use crate::etc::{self, ext::RequestExt, sub::Subject};
 use actix_web::HttpRequest;
+use lru::LruCache;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use store::Store;
 use tracing::error;
 
 const HASH_CACHE_MAX_SIZE: usize = 256;
 
 thread_local! {
-    static HASH_CACHE: RefCell<HashMap<String, String>> =
-        RefCell::new(HashMap::with_capacity(32));
+    static HASH_CACHE: RefCell<LruCache<String, String>> =
+        RefCell::new(LruCache::new(NonZeroUsize::new(HASH_CACHE_MAX_SIZE).unwrap()));
 }
 
 fn cached_hash_api_key(api_key: &str) -> String {
@@ -19,10 +20,7 @@ fn cached_hash_api_key(api_key: &str) -> String {
             return hash.clone();
         }
         let hash = pw::hash_api_key(api_key);
-        if cache.len() >= HASH_CACHE_MAX_SIZE {
-            cache.clear();
-        }
-        cache.insert(api_key.to_string(), hash.clone());
+        cache.put(api_key.to_string(), hash.clone());
         hash
     })
 }
