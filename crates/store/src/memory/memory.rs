@@ -357,34 +357,43 @@ impl Store for MemoryStore {
         let serialized_value = self.serialize(value)?;
         let field_exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
 
-        // Use atomic entry operation to avoid race conditions
-        let entry = self
-            .data
-            .entry(key.to_string())
-            .or_insert_with(|| StoreValue::Hash(DashMap::new(), None));
-
-        match entry.value() {
-            StoreValue::Hash(hash_map, exp) => {
-                if self.is_expired(exp) {
-                    // If the hash itself is expired, remove it and create a new one
-                    drop(entry);
-                    self.data.remove(key);
-                    let new_hash_map = DashMap::new();
-                    new_hash_map.insert(field.to_string(), (serialized_value, field_exp));
-                    self.data
-                        .insert(key.to_string(), StoreValue::Hash(new_hash_map, None));
-                    self.stats
-                        .expired_entries_cleaned
-                        .fetch_add(1, Ordering::Relaxed);
-                    return Ok(true);
+        // Check if the key already exists before inserting, to detect type mismatches
+        // and handle expired hashes correctly.
+        if let Some(existing) = self.data.get(key) {
+            match existing.value() {
+                StoreValue::Hash(_, exp) => {
+                    if self.is_expired(exp) {
+                        // Expired hash: drop the read guard, remove the key, and fall through
+                        // to create a fresh hash below (same as if key didn't exist).
+                        drop(existing);
+                        self.data.remove(key);
+                        self.stats
+                            .expired_entries_cleaned
+                            .fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        // Key exists and is a live hash — insert the field directly.
+                        if let StoreValue::Hash(hash_map, _) = existing.value() {
+                            let is_new = !hash_map.contains_key(field);
+                            hash_map.insert(field.to_string(), (serialized_value, field_exp));
+                            return Ok(is_new);
+                        }
+                    }
                 }
-                let is_new = !hash_map.contains_key(field);
-                hash_map.insert(field.to_string(), (serialized_value, field_exp));
-                Ok(is_new)
+                StoreValue::Simple(_, _) | StoreValue::AtomicI64(_, _) => {
+                    return Err(StoreError::TypeMismatch(
+                        "WRONGTYPE Operation against a key holding the wrong kind of value"
+                            .to_string(),
+                    ));
+                }
             }
-            StoreValue::Simple(_, _) => Ok(false), // Cannot set hash field on simple value
-            StoreValue::AtomicI64(_, _) => Ok(false), // Cannot set hash field on AtomicI64
         }
+
+        // Key does not exist (or was just removed as expired): create a new hash.
+        let new_hash_map = DashMap::new();
+        new_hash_map.insert(field.to_string(), (serialized_value, field_exp));
+        self.data
+            .insert(key.to_string(), StoreValue::Hash(new_hash_map, None));
+        Ok(true)
     }
 
     async fn hget<T: DeserializeValue>(&self, key: &str, field: &str) -> StoreResult<Option<T>> {
