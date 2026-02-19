@@ -6,10 +6,10 @@ const DECISION_CACHE_CAPACITY: usize = 1024;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 struct DecisionKey {
-    sub_type: String,
-    resource: String,
-    action: Option<String>,
-    attrs_signature: String,
+    sub_type: Box<str>,
+    resource: Box<str>,
+    action: Option<Box<str>>,
+    attrs_signature: Box<str>,
 }
 
 struct DecisionCache {
@@ -63,11 +63,11 @@ pub fn access_control(
 ) -> bool {
     let sub_type = subject.sub_type.as_str();
     let (resource_name, resource_action) = parse_resource(resource);
-    let action_key = resource_action.as_ref().map(|action| action.to_string());
+    let action_key = resource_action.as_ref().map(|action| action.to_string().into_boxed_str());
     let attrs_signature = attrs_signature(subject);
     let key = DecisionKey {
-        sub_type: sub_type.to_string(),
-        resource: resource_name.clone(),
+        sub_type: Box::from(sub_type),
+        resource: resource_name.clone().into_boxed_str(),
         action: action_key,
         attrs_signature,
     };
@@ -99,16 +99,18 @@ fn parse_resource(resource: &str) -> (String, Option<ace::ResourceAction>) {
     (resource.to_string(), None)
 }
 
-fn attrs_signature(subject: &Subject) -> String {
+fn attrs_signature(subject: &Subject) -> Box<str> {
     if subject.attrs.is_null() {
-        return String::new();
+        return Box::from("");
     }
     if let Some(attrs) = subject.attrs.as_object() {
         if attrs.is_empty() {
-            return String::new();
+            return Box::from("");
         }
     }
-    serde_json::to_string(&subject.attrs).unwrap_or_default()
+    serde_json::to_string(&subject.attrs)
+        .unwrap_or_default()
+        .into_boxed_str()
 }
 
 fn create_context(sub: &Subject) -> HashMap<String, ace::Value> {

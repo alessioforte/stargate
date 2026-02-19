@@ -9,7 +9,7 @@ use tracing::error;
 const HASH_CACHE_MAX_SIZE: usize = 256;
 
 thread_local! {
-    static HASH_CACHE: RefCell<LruCache<String, String>> =
+    static HASH_CACHE: RefCell<LruCache<Box<str>, Box<str>>> =
         RefCell::new(LruCache::new(NonZeroUsize::new(HASH_CACHE_MAX_SIZE).unwrap()));
 }
 
@@ -17,10 +17,10 @@ fn cached_hash_api_key(api_key: &str) -> String {
     HASH_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(hash) = cache.get(api_key) {
-            return hash.clone();
+            return hash.to_string();
         }
         let hash = pw::hash_api_key(api_key);
-        cache.put(api_key.to_string(), hash.clone());
+        cache.put(Box::from(api_key), Box::from(hash.as_str()));
         hash
     })
 }
