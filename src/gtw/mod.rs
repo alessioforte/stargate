@@ -129,9 +129,7 @@ pub async fn handler(
     let limiter = gate.limiter.load();
     let mut limit_name = "default".to_string();
     let mut quota_name: Option<String> = None;
-    let mut sub_key = client_ip
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+    let mut sub_key = client_ip.clone();
 
     if has_auth {
         let sub = sub.unwrap();

@@ -87,6 +87,8 @@ tracing-appender = "0.2.3"
 ulid = "1.2.1"
 tracing-actix-web = "0.7.21"
 lru = "0.12"
+maxminddb = { version = "0.27.3", features = ["simdutf8"] }
+moka = { version = "0.12.13", features = ["sync"] }
 
 [features]
 default = ["sqlite", "redis"]

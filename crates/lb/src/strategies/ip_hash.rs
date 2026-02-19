@@ -12,10 +12,10 @@ impl IpHash {
 
 impl Strategy for IpHash {
     fn select<'a>(&self, alive: &Vec<&'a Upstream>, ctx: &RequestContext) -> Option<&'a Upstream> {
-        if alive.is_empty() || ctx.client_ip.is_none() {
+        if alive.is_empty() {
             return None;
         }
-        let ip = ctx.client_ip.unwrap();
+        let ip = ctx.client_ip.clone();
         let mut hasher = DefaultHasher::new();
         ip.hash(&mut hasher);
         let hash = hasher.finish();

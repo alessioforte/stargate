@@ -7,7 +7,7 @@ mod etc;
 mod fun;
 mod gtw;
 
-use crate::etc::{cfg, cors, gate, jwt, log, logo, store, tls};
+use crate::etc::{cfg, cors, gate, geoip, jwt, log, logo, store, tls};
 use actix_web::{
     App, HttpServer,
     middleware::{self, TrailingSlash},
@@ -39,8 +39,10 @@ async fn main() -> std::io::Result<()> {
     info!("Starting server on port {}", port);
 
     jwt::init();
+    geoip::init();
     store::init().await;
     db::init().await;
+
     let gcfg = gate::init();
 
     fun::create_super_admin().await;

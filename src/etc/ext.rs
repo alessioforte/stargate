@@ -1,6 +1,6 @@
 use actix_web::{HttpRequest, http::header::Header, web::Query};
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 const KEYS: &[&str] = &["token", "access_token", "jwt"];
 
@@ -8,7 +8,8 @@ pub trait RequestExt {
     fn get_token(&self) -> Option<String>;
     fn get_api_key(&self) -> Option<String>;
     fn get_protocol(&self) -> String;
-    fn get_client_ip(&self) -> Option<IpAddr>;
+    fn get_client_ip(&self) -> String;
+    fn get_client_ip_addr(&self) -> Option<IpAddr>;
     fn get_user_agent(&self) -> Option<String>;
 }
 
@@ -66,21 +67,29 @@ impl RequestExt for HttpRequest {
         }
     }
 
-    fn get_client_ip(&self) -> Option<IpAddr> {
-        // Check X-Forwarded-For header first
-        if let Some(forwarded_for) = self.headers().get("X-Forwarded-For") {
-            if let Ok(forwarded_for_str) = forwarded_for.to_str() {
-                if let Some(first_ip) = forwarded_for_str.split(',').next() {
-                    if let Ok(ip) = first_ip.trim().parse() {
-                        return Some(ip);
-                    }
-                }
-            }
+    fn get_client_ip(&self) -> String {
+        self.get_client_ip_addr()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn get_client_ip_addr(&self) -> Option<IpAddr> {
+        let conn = self.connection_info();
+        let raw = conn.realip_remote_addr()?;
+
+        // Usually contains a single client IP; if a list is present, use the first hop.
+        let first = raw.split(',').next()?.trim();
+        let unbracketed = first
+            .strip_prefix('[')
+            .and_then(|v| v.strip_suffix(']'))
+            .unwrap_or(first);
+
+        if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+            return Some(ip);
         }
 
-        // Fallback to peer address
-        if let Some(peer_addr) = self.peer_addr() {
-            return Some(peer_addr.ip());
+        if let Ok(sock) = first.parse::<SocketAddr>() {
+            return Some(sock.ip());
         }
 
         None

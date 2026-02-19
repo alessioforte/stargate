@@ -33,7 +33,7 @@ impl Upstream {
 }
 
 pub struct RequestContext {
-    pub client_ip: Option<IpAddr>,
+    pub client_ip: String,
     pub path: String,
     pub method: String,
     // pub headers: Option<http::HeaderMap>,

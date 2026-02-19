@@ -1,4 +1,4 @@
-use crate::etc::ext::RequestExt;
+use crate::etc::{ext::RequestExt, geoip};
 use actix_web::HttpMessage;
 use db::ent::AuditContext;
 use tracing::info;
@@ -75,10 +75,15 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
             .unwrap_or("unknown")
             .to_string();
 
-        let ip_address = match req.get_client_ip() {
-            Some(ip) => ip.to_string(),
-            None => "unknown".to_string(),
-        };
+        let ip_addr = req.get_client_ip_addr();
+        let ip_address = ip_addr
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // geoip lookup
+        let geo_info = ip_addr
+            .and_then(geoip::lookup)
+            .unwrap_or_else(geoip::GeoInfo::unknown);
 
         // Initialize the audit context with the request context
         // this is a bridge between the tracing context and the audit context
@@ -96,9 +101,13 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
             http.query = %query,
             http.user_agent = %user_agent,
             http.peer_ip = %peer_ip,
-            http.ip_address = %ip_address,
+            http.client_ip = %ip_address,
             http.status_code = tracing::field::Empty,
-            // http.latency_ms = tracing::field::Empty,
+            geoip.country_code = %geo_info.country_code.as_deref().unwrap_or("unknown"),
+            geoip.country_name = %geo_info.country_name.as_deref().unwrap_or("unknown"),
+            geoip.city_name = %geo_info.city_name.as_deref().unwrap_or("unknown"),
+            geoip.latitude = geo_info.latitude.unwrap_or(0.0),
+            geoip.longitude = geo_info.longitude.unwrap_or(0.0),
         )
     }
 

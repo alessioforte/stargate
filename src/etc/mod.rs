@@ -3,6 +3,7 @@ pub mod consts;
 pub mod cors;
 pub mod ext;
 pub mod gate;
+pub mod geoip;
 pub mod guard;
 pub mod jwt;
 pub mod log;
