@@ -1,6 +1,5 @@
 use crate::ent::Audit;
 use anyhow::Result;
-// use chrono::{DateTime, Utc};
 
 pub const AUDIT: &str = "audits";
 
@@ -21,8 +20,8 @@ impl AuditRepository {
         let row = sqlx::query_as::<_, Audit>(
             format!(
                 "
-            INSERT INTO {audits} (id, timestamp, actor_type, actor_id, action, resource, resource_id, request_id, ip_address, user_agent, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO {audits} (id, timestamp, actor_type, actor_id, action, resource, resource_id, request_id, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
         ",
                 audits = AUDIT
@@ -37,8 +36,6 @@ impl AuditRepository {
         .bind(&log.resource)
         .bind(&log.resource_id)
         .bind(&log.request_id)
-        .bind(&log.ip_address)
-        .bind(&log.user_agent)
         .bind(&log.metadata)
         .fetch_one(&mut **tx)
         .await?;

@@ -59,8 +59,6 @@ CREATE TABLE IF NOT EXISTS "audits" (
     "resource" VARCHAR(100) NOT NULL,
     "resource_id" TEXT,
     "request_id" TEXT,
-    "ip_address" VARCHAR(45),
-    "user_agent" TEXT,
     "metadata" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 

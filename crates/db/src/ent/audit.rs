@@ -34,8 +34,6 @@ pub struct Audit {
     pub resource: Option<String>,
     pub resource_id: Option<String>,
     pub request_id: Option<String>,
-    pub ip_address: Option<String>,
-    pub user_agent: Option<String>,
     pub metadata: serde_json::Value,
 }
 
@@ -44,8 +42,6 @@ pub struct AuditContext {
     pub actor_type: ActorType,
     pub actor_id: Option<String>,
     pub request_id: Option<String>,
-    pub ip_address: Option<String>,
-    pub user_agent: Option<String>,
     pub resource: Option<String>,
     pub resource_id: Option<String>,
     pub metadata: Option<serde_json::Value>,
@@ -57,8 +53,6 @@ impl AuditContext {
             actor_type,
             actor_id,
             request_id: None,
-            ip_address: None,
-            user_agent: None,
             resource: None,
             resource_id: None,
             metadata: None,
@@ -70,8 +64,6 @@ impl AuditContext {
             actor_type: ActorType::System,
             actor_id: None,
             request_id: None,
-            ip_address: None,
-            user_agent: None,
             resource: None,
             resource_id: None,
             metadata: None,
@@ -83,8 +75,6 @@ impl AuditContext {
             actor_type: ActorType::Anonymous,
             actor_id: None,
             request_id: None,
-            ip_address: None,
-            user_agent: None,
             resource: None,
             resource_id: None,
             metadata: None,
@@ -96,8 +86,6 @@ impl AuditContext {
             actor_type: ActorType::Admin,
             actor_id: None,
             request_id: None,
-            ip_address: None,
-            user_agent: None,
             resource: None,
             resource_id: None,
             metadata: None,
@@ -109,8 +97,6 @@ impl AuditContext {
             actor_type: ActorType::User,
             actor_id: None,
             request_id: None,
-            ip_address: None,
-            user_agent: None,
             resource: None,
             resource_id: None,
             metadata: None,
@@ -122,8 +108,6 @@ impl AuditContext {
             actor_type: ActorType::ApiKey,
             actor_id: None,
             request_id: None,
-            ip_address: None,
-            user_agent: None,
             resource: None,
             resource_id: None,
             metadata: None,
@@ -141,15 +125,8 @@ impl AuditContext {
         self
     }
 
-    pub fn with_request_context(
-        mut self,
-        request_id: String,
-        ip_address: String,
-        user_agent: String,
-    ) -> Self {
+    pub fn with_request_id(mut self, request_id: String) -> Self {
         self.request_id = Some(request_id);
-        self.ip_address = Some(ip_address);
-        self.user_agent = Some(user_agent);
         self
     }
 
@@ -179,8 +156,6 @@ impl AuditContext {
             resource: self.resource.clone(),
             resource_id: self.resource_id.clone(),
             request_id: self.request_id.clone(),
-            ip_address: self.ip_address.clone(),
-            user_agent: self.user_agent.clone(),
             metadata: self
                 .metadata
                 .clone()

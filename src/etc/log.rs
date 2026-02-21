@@ -61,17 +61,19 @@ pub struct StargateRootSpanBuilder;
 
 impl RootSpanBuilder for StargateRootSpanBuilder {
     fn on_request_start(sr: &actix_web::dev::ServiceRequest) -> tracing::Span {
+        let request_id = Ulid::new().to_string();
+
         let req = sr.request();
         let gate = req.app_data::<actix_web::web::Data<gate::Gate>>().unwrap();
         let ts = gate.clock.now_millis() as i64;
         // FIXME: Evaluate a more performant way to get the current time, this is used in the audit context and in the logs, we should avoid calling chrono::Utc::now() multiple times per request
         // let now = chrono::Utc::now();
         let now: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap_or_else(|| Utc::now());
+        println!("Current time: {}", now);
         let date = now.format("%Y-%m-%d").to_string();
         let time = now.format("%H:%M").to_string();
         let day_of_week = now.format("%A").to_string();
 
-        let request_id = Ulid::new().to_string();
         let user_agent = req
             .get_user_agent()
             .unwrap_or_else(|| "unknown".to_string());
@@ -96,11 +98,7 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
 
         // Initialize the audit context with the request context
         // this is a bridge between the tracing context and the audit context
-        let ctx = AuditContext::anonymous().with_request_context(
-            request_id.clone(),
-            ip_address.clone(),
-            user_agent.clone(),
-        );
+        let ctx = AuditContext::anonymous().with_request_id(request_id.clone());
         req.extensions_mut().insert(ctx);
 
         let env = Env {
