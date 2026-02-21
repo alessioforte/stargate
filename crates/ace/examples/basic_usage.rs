@@ -7,16 +7,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Define some policies as comments (like they would appear in source code)
     let policy_content = r#"
-        // Basic policies for user access control
-        // ALLOW user FOR "dashboard" WHEN user.role == "admin" OR user.role == "manager";
-        // ALLOW user FOR "reports" WHEN user.role == "admin" OR user.role == "analyst";
-        // DENY user FOR "admin_panel" WHEN user.department == "guest";
-        // ALLOW user FOR "profile" WHEN user.active == true;
+        ALLOW user FOR "dashboard" WHEN user.role == "admin" OR user.role == "manager";
+        ALLOW user FOR "reports" WHEN user.role == "admin" OR user.role == "analyst";
+        DENY user FOR "admin_panel" WHEN user.department == "guest";
+        ALLOW user FOR "profile" WHEN user.active == true;
 
-        // API key policies
-        // ALLOW api_key FOR "read_data" WHEN api_key.valid == true AND api_key.scope == "read";
-        // ALLOW api_key FOR "write_data" WHEN api_key.valid == true AND api_key.scope == "write";
-        // DENY api_key FOR "delete_data" WHEN api_key.scope != "admin";
+        ALLOW api_key FOR "read_data" WHEN api_key.valid == true AND api_key.scope == "read";
+        ALLOW api_key FOR "write_data" WHEN api_key.valid == true AND api_key.scope == "write";
+        DENY api_key FOR "delete_data" WHEN api_key.scope != "admin";
     "#;
 
     // Parse the policies

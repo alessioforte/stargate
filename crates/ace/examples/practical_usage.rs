@@ -8,40 +8,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Original syntax from your file, enhanced with new features
     let practical_policies = r#"
-        // Original basic policies with enhancements
-        // ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";
-        // DENY user FOR "feature2" WHEN user.role == "guest";
-        // ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
-        // DENY api_key FOR "feature4" WHEN api_key.valid == false OR api_key.scope != "write";
+        ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";
+        DENY user FOR "feature2" WHEN user.role == "guest";
+        ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
+        DENY api_key FOR "feature4" WHEN api_key.valid == false OR api_key.scope != "write";
 
-        // Extended with resource actions
-        // ALLOW user FOR "user_management:READ" WHEN user.role == "admin" OR user.role == "manager";
-        // ALLOW user FOR "user_management:WRITE" WHEN user.role == "admin";
-        // ALLOW user FOR "user_management:DELETE" WHEN user.role == "admin" AND user.mfa_enabled == true;
+        ALLOW user FOR "user_management:READ" WHEN user.role == "admin" OR user.role == "manager";
+        ALLOW user FOR "user_management:WRITE" WHEN user.role == "admin";
+        ALLOW user FOR "user_management:DELETE" WHEN user.role == "admin" AND user.mfa_enabled == true;
 
-        // Age-based content access
-        // ALLOW user FOR "mature_content" WHEN user.age >= 18 AND user.verified == true;
-        // DENY user FOR "mature_content" WHEN user.parental_controls == true;
+        ALLOW user FOR "mature_content" WHEN user.age >= 18 AND user.verified == true;
+        DENY user FOR "mature_content" WHEN user.parental_controls == true;
 
-        // Location and time-based policies
-        // ALLOW user FOR "office_printer:*" WHEN location == "office" OR (location == "remote" AND user.vpn_connected == true);
-        // DENY user FOR "after_hours_systems" WHEN time.of_day == "night" AND NOT user.emergency_access == true;
+        ALLOW user FOR "office_printer:*" WHEN location == "office" OR (location == "remote" AND user.vpn_connected == true);
+        DENY user FOR "after_hours_systems" WHEN time.of_day == "night" AND NOT user.emergency_access == true;
 
-        // Security clearance with NOT conditions
-        // ALLOW user FOR "classified_docs:READ" WHEN user.clearance_level >= 3 AND NOT user.under_investigation == true;
-        // ALLOW user FOR "classified_docs:WRITE" WHEN user.clearance_level >= 4 AND user.dual_approval == true;
+        ALLOW user FOR "classified_docs:READ" WHEN user.clearance_level >= 3 AND NOT user.under_investigation == true;
+        ALLOW user FOR "classified_docs:WRITE" WHEN user.clearance_level >= 4 AND user.dual_approval == true;
 
-        // Score-based premium features
-        // ALLOW user FOR "premium_api:*" WHEN user.credit_score >= 750 OR user.premium_member == true;
-        // ALLOW user FOR "high_limit_transactions" WHEN user.account_balance > 10000 AND user.transaction_history_months >= 12;
+        ALLOW user FOR "premium_api:*" WHEN user.credit_score >= 750 OR user.premium_member == true;
+        ALLOW user FOR "high_limit_transactions" WHEN user.account_balance > 10000 AND user.transaction_history_months >= 12;
 
-        // Device security policies
-        // ALLOW user FOR "mobile_app:READ" WHEN device.type == "mobile" AND device.app_version >= 2.0;
-        // DENY user FOR "mobile_app:WRITE" WHEN device.type == "mobile" AND device.rooted == true;
+        ALLOW user FOR "mobile_app:READ" WHEN device.type == "mobile" AND device.app_version >= 2.0;
+        DENY user FOR "mobile_app:WRITE" WHEN device.type == "mobile" AND device.rooted == true;
 
-        // Rate limiting and abuse prevention
-        // DENY api_key FOR "bulk_operations:*" WHEN api_key.requests_per_hour > 1000;
-        // ALLOW api_key FOR "batch_processing" WHEN api_key.tier == "enterprise" AND api_key.concurrent_jobs <= 5;
+        DENY api_key FOR "bulk_operations:*" WHEN api_key.requests_per_hour > 1000;
+        ALLOW api_key FOR "batch_processing" WHEN api_key.tier == "enterprise" AND api_key.concurrent_jobs <= 5;
     "#;
 
     engine.parse_file(practical_policies)?;

@@ -5,10 +5,10 @@
 //!
 //! # Policy Syntax
 //!
-//! Policies are defined as comments with the following syntax:
+//! Policies are defined with the following syntax:
 //!
 //! ```text
-//! // ALLOW|DENY subject FOR "resource" [WHEN condition];
+//! ALLOW|DENY subject FOR "resource" [WHEN condition];
 //! ```
 //!
 //! Where:
@@ -20,9 +20,9 @@
 //! # Examples
 //!
 //! ```text
-//! // ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";
-//! // DENY user FOR "feature2" WHEN user.role == "guest";
-//! // ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
+//! ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";
+//! DENY user FOR "feature2" WHEN user.role == "guest";
+//! ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
 //! ```
 
 use std::collections::HashMap;
@@ -315,8 +315,8 @@ impl PolicyEngine {
         for line in content.lines() {
             let line = line.trim();
 
-            // Skip empty lines and non-comment lines
-            if line.is_empty() || !line.starts_with("//") {
+            // Skip empty lines and comment lines
+            if line.is_empty() || line.starts_with('#') {
                 continue;
             }
 
@@ -435,7 +435,7 @@ impl PolicyEngine {
 
     /// Export policies as formatted strings
     pub fn export_policies(&self) -> Vec<String> {
-        self.policies.iter().map(|p| format!("// {}", p)).collect()
+        self.policies.iter().map(|p| format!("{}", p)).collect()
     }
 }
 
@@ -549,10 +549,10 @@ mod tests {
         let mut engine = PolicyEngine::new();
 
         let content = r#"
-        // ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";
-        // DENY user FOR "feature2" WHEN user.role == "guest";
-        // ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
-        // DENY api_key FOR "feature4" WHEN api_key.valid == false OR api_key.scope != "write";
+        ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";
+        DENY user FOR "feature2" WHEN user.role == "guest";
+        ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
+        DENY api_key FOR "feature4" WHEN api_key.valid == false OR api_key.scope != "write";
         "#;
 
         engine.parse_file(content).unwrap();
@@ -623,15 +623,15 @@ mod tests {
 
         let exported = engine.export_policies();
         assert_eq!(exported.len(), 1);
-        assert!(exported[0].contains("// ALLOW user FOR \"test\";"));
+        assert!(exported[0].contains("ALLOW user FOR \"test\";"));
     }
 
     #[test]
     fn test_multiple_sources() {
         let mut engine = PolicyEngine::new();
 
-        let source1 = "// ALLOW user FOR \"feature1\";";
-        let source2 = "// DENY user FOR \"feature2\";";
+        let source1 = "ALLOW user FOR \"feature1\";";
+        let source2 = "DENY user FOR \"feature2\";";
 
         engine.load_from_sources(vec![source1, source2]).unwrap();
 
@@ -661,10 +661,10 @@ mod tests {
         let mut engine = PolicyEngine::new();
 
         let content = r#"
-        // ALLOW user FOR "admin_panel" WHEN user.roles CONTAINS "admin";
-        // DENY user FOR "feature1" WHEN user.tags CONTAINS "banned";
-        // ALLOW user FOR "internal" WHEN user.email CONTAINS "@company.com";
-        // ALLOW user FOR "verified_feature" WHEN NOT user.tags CONTAINS "unverified";
+        ALLOW user FOR "admin_panel" WHEN user.roles CONTAINS "admin";
+        DENY user FOR "feature1" WHEN user.tags CONTAINS "banned";
+        ALLOW user FOR "internal" WHEN user.email CONTAINS "@company.com";
+        ALLOW user FOR "verified_feature" WHEN NOT user.tags CONTAINS "unverified";
         "#;
 
         engine.parse_file(content).unwrap();

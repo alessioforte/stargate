@@ -1,181 +1,182 @@
-// Sample Policy Configuration File for Stargate ACE
-// ================================================
-//
-// This file demonstrates the policy syntax supported by the ACE engine.
-// Policies are defined as comments using the following syntax:
-//
-// // ALLOW|DENY subject FOR "resource" [WHEN condition];
-//
-// Where:
-// - ALLOW/DENY: The action to take
-// - subject: The entity requesting access (user, api_key, service, etc.)
-// - resource: The resource being accessed (quoted string)
-// - condition: Optional boolean expression with AND/OR logic
-//
-// Examples of supported operators:
-// - == (equals)
-// - != (not equals)
-// - AND (logical and)
-// - OR (logical or)
-//
-// Values can be:
-// - Strings: "admin", "read", etc.
-// - Booleans: true, false
-// - Numbers: 1, 42, -10
+# Sample Policy Configuration File for Stargate ACE
+# ================================================
+#
+# This file demonstrates the policy syntax supported by the ACE engine.
+# Policies are declared directly without any prefix.
+#
+# Syntax:
+#   ALLOW|DENY subject FOR "resource" [WHEN condition];
+#
+# Where:
+# - ALLOW/DENY: The action to take
+# - subject: The entity requesting access (user, api_key, service, etc.)
+# - resource: The resource being accessed (quoted string)
+# - condition: Optional boolean expression with AND/OR logic
+#
+# Supported operators:
+# - == (equals)
+# - != (not equals)
+# - AND (logical and)
+# - OR (logical or)
+#
+# Values can be:
+# - Strings: "admin", "read", etc.
+# - Booleans: true, false
+# - Numbers: 1, 42, -10
 
-// =============================================================================
-// USER ACCESS POLICIES
-// =============================================================================
+# =============================================================================
+# USER ACCESS POLICIES
+# =============================================================================
 
-// Basic role-based access
-// ALLOW user FOR "dashboard" WHEN user.role == "admin";
-// ALLOW user FOR "dashboard" WHEN user.role == "manager";
-// ALLOW user FOR "dashboard" WHEN user.role == "analyst";
+# Basic role-based access
+ALLOW user FOR "dashboard" WHEN user.role == "admin";
+ALLOW user FOR "dashboard" WHEN user.role == "manager";
+ALLOW user FOR "dashboard" WHEN user.role == "analyst";
 
-// Profile access for active users
-// ALLOW user FOR "profile" WHEN user.active == true;
-// DENY user FOR "profile" WHEN user.suspended == true;
+# Profile access for active users
+ALLOW user FOR "profile" WHEN user.active == true;
+DENY user FOR "profile" WHEN user.suspended == true;
 
-// Administrative functions
-// ALLOW user FOR "admin_panel" WHEN user.role == "admin" AND user.mfa_enabled == true;
-// ALLOW user FOR "user_management" WHEN user.role == "admin" AND user.department == "it";
-// DENY user FOR "admin_panel" WHEN user.role != "admin";
+# Administrative functions
+ALLOW user FOR "admin_panel" WHEN user.role == "admin" AND user.mfa_enabled == true;
+ALLOW user FOR "user_management" WHEN user.role == "admin" AND user.department == "it";
+DENY user FOR "admin_panel" WHEN user.role != "admin";
 
-// Department-specific access
-// ALLOW user FOR "hr_data" WHEN user.department == "hr" AND (user.role == "manager" OR user.role == "admin");
-// ALLOW user FOR "financial_reports" WHEN user.department == "finance" OR user.role == "cfo";
-// ALLOW user FOR "engineering_tools" WHEN user.department == "engineering";
+# Department-specific access
+ALLOW user FOR "hr_data" WHEN user.department == "hr" AND (user.role == "manager" OR user.role == "admin");
+ALLOW user FOR "financial_reports" WHEN user.department == "finance" OR user.role == "cfo";
+ALLOW user FOR "engineering_tools" WHEN user.department == "engineering";
 
-// Conditional access based on multiple factors
-// ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.clearance_level == "confidential" AND user.location == "office";
-// ALLOW user FOR "work_from_home" WHEN user.remote_approved == true AND user.device_secure == true;
+# Conditional access based on multiple factors
+ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.clearance_level == "confidential" AND user.location == "office";
+ALLOW user FOR "work_from_home" WHEN user.remote_approved == true AND user.device_secure == true;
 
-// Time and context-based restrictions
-// ALLOW user FOR "after_hours_access" WHEN user.emergency_contact == true OR user.role == "admin";
-// DENY user FOR "restricted_weekend" WHEN user.weekend_access != true AND user.role != "admin";
+# Time and context-based restrictions
+ALLOW user FOR "after_hours_access" WHEN user.emergency_contact == true OR user.role == "admin";
+DENY user FOR "restricted_weekend" WHEN user.weekend_access != true AND user.role != "admin";
 
-// Guest and external user policies
-// ALLOW user FOR "public_content" WHEN user.role == "guest";
-// DENY user FOR "internal_data" WHEN user.external == true;
-// ALLOW user FOR "contractor_tools" WHEN user.contractor == true AND user.project_assigned == true;
+# Guest and external user policies
+ALLOW user FOR "public_content" WHEN user.role == "guest";
+DENY user FOR "internal_data" WHEN user.external == true;
+ALLOW user FOR "contractor_tools" WHEN user.contractor == true AND user.project_assigned == true;
 
-// =============================================================================
-// API KEY POLICIES
-// =============================================================================
+# =============================================================================
+# API KEY POLICIES
+# =============================================================================
 
-// Basic API access
-// ALLOW api_key FOR "public_api" WHEN api_key.valid == true;
-// ALLOW api_key FOR "read_api" WHEN api_key.valid == true AND api_key.scope == "read";
-// ALLOW api_key FOR "write_api" WHEN api_key.valid == true AND api_key.scope == "write";
+# Basic API access
+ALLOW api_key FOR "public_api" WHEN api_key.valid == true;
+ALLOW api_key FOR "read_api" WHEN api_key.valid == true AND api_key.scope == "read";
+ALLOW api_key FOR "write_api" WHEN api_key.valid == true AND api_key.scope == "write";
 
-// Administrative API access
-// ALLOW api_key FOR "admin_api" WHEN api_key.valid == true AND api_key.scope == "admin";
-// DENY api_key FOR "admin_api" WHEN api_key.rate_limited == true;
+# Administrative API access
+ALLOW api_key FOR "admin_api" WHEN api_key.valid == true AND api_key.scope == "admin";
+DENY api_key FOR "admin_api" WHEN api_key.rate_limited == true;
 
-// Service-to-service communication
-// ALLOW api_key FOR "internal_service" WHEN api_key.service_account == true AND api_key.environment == "production";
-// ALLOW api_key FOR "monitoring_api" WHEN api_key.service == "monitoring" AND api_key.valid == true;
+# Service-to-service communication
+ALLOW api_key FOR "internal_service" WHEN api_key.service_account == true AND api_key.environment == "production";
+ALLOW api_key FOR "monitoring_api" WHEN api_key.service == "monitoring" AND api_key.valid == true;
 
-// Third-party integrations
-// ALLOW api_key FOR "webhook_endpoint" WHEN api_key.webhook_enabled == true AND api_key.source == "trusted";
-// DENY api_key FOR "webhook_endpoint" WHEN api_key.source == "untrusted" OR api_key.expired == true;
+# Third-party integrations
+ALLOW api_key FOR "webhook_endpoint" WHEN api_key.webhook_enabled == true AND api_key.source == "trusted";
+DENY api_key FOR "webhook_endpoint" WHEN api_key.source == "untrusted" OR api_key.expired == true;
 
-// Enterprise tier access
-// ALLOW api_key FOR "enterprise_features" WHEN api_key.tier == "enterprise" AND api_key.valid == true;
-// ALLOW api_key FOR "analytics_api" WHEN api_key.tier == "enterprise" OR api_key.tier == "professional";
+# Enterprise tier access
+ALLOW api_key FOR "enterprise_features" WHEN api_key.tier == "enterprise" AND api_key.valid == true;
+ALLOW api_key FOR "analytics_api" WHEN api_key.tier == "enterprise" OR api_key.tier == "professional";
 
-// Development and testing
-// ALLOW api_key FOR "dev_api" WHEN api_key.environment == "development" OR api_key.environment == "staging";
-// DENY api_key FOR "production_data" WHEN api_key.environment != "production";
+# Development and testing
+ALLOW api_key FOR "dev_api" WHEN api_key.environment == "development" OR api_key.environment == "staging";
+DENY api_key FOR "production_data" WHEN api_key.environment != "production";
 
-// =============================================================================
-// SERVICE ACCOUNT POLICIES
-// =============================================================================
+# =============================================================================
+# SERVICE ACCOUNT POLICIES
+# =============================================================================
 
-// Inter-service communication
-// ALLOW service FOR "user_service" WHEN service.name == "auth_service" AND service.verified == true;
-// ALLOW service FOR "payment_service" WHEN service.name == "order_service" AND service.ssl_enabled == true;
-// ALLOW service FOR "notification_service" WHEN service.priority == "high" OR service.name == "critical_service";
+# Inter-service communication
+ALLOW service FOR "user_service" WHEN service.name == "auth_service" AND service.verified == true;
+ALLOW service FOR "payment_service" WHEN service.name == "order_service" AND service.ssl_enabled == true;
+ALLOW service FOR "notification_service" WHEN service.priority == "high" OR service.name == "critical_service";
 
-// Database access
-// ALLOW service FOR "user_db" WHEN service.name == "user_service" AND service.connection_encrypted == true;
-// ALLOW service FOR "analytics_db" WHEN service.name == "reporting_service" OR service.name == "dashboard_service";
-// DENY service FOR "financial_db" WHEN service.audit_log != true;
+# Database access
+ALLOW service FOR "user_db" WHEN service.name == "user_service" AND service.connection_encrypted == true;
+ALLOW service FOR "analytics_db" WHEN service.name == "reporting_service" OR service.name == "dashboard_service";
+DENY service FOR "financial_db" WHEN service.audit_log != true;
 
-// External integrations
-// ALLOW service FOR "payment_gateway" WHEN service.pci_compliant == true AND service.name == "payment_service";
-// ALLOW service FOR "email_provider" WHEN service.name == "notification_service" AND service.smtp_auth == true;
+# External integrations
+ALLOW service FOR "payment_gateway" WHEN service.pci_compliant == true AND service.name == "payment_service";
+ALLOW service FOR "email_provider" WHEN service.name == "notification_service" AND service.smtp_auth == true;
 
-// =============================================================================
-// ADVANCED CONDITIONAL POLICIES
-// =============================================================================
+# =============================================================================
+# ADVANCED CONDITIONAL POLICIES
+# =============================================================================
 
-// Complex multi-condition policies
-// ALLOW user FOR "executive_dashboard" WHEN (user.role == "ceo" OR user.role == "cto" OR user.role == "cfo") AND user.board_member == true;
+# Complex multi-condition policies
+ALLOW user FOR "executive_dashboard" WHEN (user.role == "ceo" OR user.role == "cto" OR user.role == "cfo") AND user.board_member == true;
 
-// Nested conditions with precedence
-// ALLOW user FOR "emergency_override" WHEN user.emergency_role == true AND (user.location == "datacenter" OR user.vpn_connected == true) AND user.incident_response_team == true;
+# Nested conditions with precedence
+ALLOW user FOR "emergency_override" WHEN user.emergency_role == true AND (user.location == "datacenter" OR user.vpn_connected == true) AND user.incident_response_team == true;
 
-// Multi-factor authentication requirements
-// ALLOW user FOR "financial_transactions" WHEN user.role == "finance_manager" AND user.mfa_enabled == true AND user.ip_whitelisted == true;
+# Multi-factor authentication requirements
+ALLOW user FOR "financial_transactions" WHEN user.role == "finance_manager" AND user.mfa_enabled == true AND user.ip_whitelisted == true;
 
-// Geographic and time-based restrictions
-// ALLOW user FOR "global_admin" WHEN user.role == "global_admin" AND (user.timezone == "UTC" OR user.timezone == "EST" OR user.timezone == "PST");
-// DENY user FOR "restricted_country" WHEN user.country == "blocked" OR user.export_restricted == true;
+# Geographic and time-based restrictions
+ALLOW user FOR "global_admin" WHEN user.role == "global_admin" AND (user.timezone == "UTC" OR user.timezone == "EST" OR user.timezone == "PST");
+DENY user FOR "restricted_country" WHEN user.country == "blocked" OR user.export_restricted == true;
 
-// Device and security context
-// ALLOW user FOR "mobile_banking" WHEN user.device_type == "mobile" AND user.device_registered == true AND user.biometric_enabled == true;
-// DENY user FOR "sensitive_mobile" WHEN user.device_type == "mobile" AND (user.device_jailbroken == true OR user.device_encrypted == false);
+# Device and security context
+ALLOW user FOR "mobile_banking" WHEN user.device_type == "mobile" AND user.device_registered == true AND user.biometric_enabled == true;
+DENY user FOR "sensitive_mobile" WHEN user.device_type == "mobile" AND (user.device_jailbroken == true OR user.device_encrypted == false);
 
-// Session and activity-based policies
-// ALLOW user FOR "extended_session" WHEN user.session_duration <= 480 AND user.activity_recent == true;
-// DENY user FOR "concurrent_sessions" WHEN user.session_count > 3 AND user.role != "admin";
+# Session and activity-based policies
+ALLOW user FOR "extended_session" WHEN user.session_duration <= 480 AND user.activity_recent == true;
+DENY user FOR "concurrent_sessions" WHEN user.session_count > 3 AND user.role != "admin";
 
-// =============================================================================
-// BETA FEATURES AND FEATURE FLAGS
-// =============================================================================
+# =============================================================================
+# BETA FEATURES AND FEATURE FLAGS
+# =============================================================================
 
-// Beta testing access
-// ALLOW user FOR "beta_features" WHEN user.beta_tester == true;
-// ALLOW user FOR "experimental_ui" WHEN user.beta_tester == true AND user.feedback_enabled == true;
+# Beta testing access
+ALLOW user FOR "beta_features" WHEN user.beta_tester == true;
+ALLOW user FOR "experimental_ui" WHEN user.beta_tester == true AND user.feedback_enabled == true;
 
-// Feature rollout based on user segments
-// ALLOW user FOR "new_dashboard" WHEN user.segment == "early_adopter" OR user.employee == true;
-// ALLOW user FOR "premium_features" WHEN user.subscription == "premium" OR user.subscription == "enterprise";
+# Feature rollout based on user segments
+ALLOW user FOR "new_dashboard" WHEN user.segment == "early_adopter" OR user.employee == true;
+ALLOW user FOR "premium_features" WHEN user.subscription == "premium" OR user.subscription == "enterprise";
 
-// A/B testing scenarios
-// ALLOW user FOR "variant_a" WHEN user.test_group == "a" AND user.experiment_eligible == true;
-// ALLOW user FOR "variant_b" WHEN user.test_group == "b" AND user.experiment_eligible == true;
+# A/B testing scenarios
+ALLOW user FOR "variant_a" WHEN user.test_group == "a" AND user.experiment_eligible == true;
+ALLOW user FOR "variant_b" WHEN user.test_group == "b" AND user.experiment_eligible == true;
 
-// =============================================================================
-// COMPLIANCE AND AUDIT POLICIES
-// =============================================================================
+# =============================================================================
+# COMPLIANCE AND AUDIT POLICIES
+# =============================================================================
 
-// SOX compliance
-// ALLOW user FOR "financial_controls" WHEN user.sox_trained == true AND user.role == "financial_controller";
-// DENY user FOR "financial_data" WHEN user.sox_certified != true AND user.department == "finance";
+# SOX compliance
+ALLOW user FOR "financial_controls" WHEN user.sox_trained == true AND user.role == "financial_controller";
+DENY user FOR "financial_data" WHEN user.sox_certified != true AND user.department == "finance";
 
-// GDPR compliance
-// ALLOW user FOR "eu_user_data" WHEN user.gdpr_trained == true AND (user.location == "EU" OR user.role == "privacy_officer");
-// DENY user FOR "eu_user_data" WHEN user.location != "EU" AND user.data_processor != true;
+# GDPR compliance
+ALLOW user FOR "eu_user_data" WHEN user.gdpr_trained == true AND (user.location == "EU" OR user.role == "privacy_officer");
+DENY user FOR "eu_user_data" WHEN user.location != "EU" AND user.data_processor != true;
 
-// Healthcare compliance (HIPAA)
-// ALLOW user FOR "patient_data" WHEN user.hipaa_certified == true AND user.department == "healthcare";
-// DENY user FOR "patient_data" WHEN user.background_check != "completed" OR user.hipaa_certified != true;
+# Healthcare compliance (HIPAA)
+ALLOW user FOR "patient_data" WHEN user.hipaa_certified == true AND user.department == "healthcare";
+DENY user FOR "patient_data" WHEN user.background_check != "completed" OR user.hipaa_certified != true;
 
-// Audit trail requirements
-// ALLOW user FOR "audit_logs" WHEN user.role == "auditor" OR user.role == "compliance_officer";
-// DENY user FOR "log_deletion" WHEN user.role != "system_admin" OR user.audit_approval != true;
+# Audit trail requirements
+ALLOW user FOR "audit_logs" WHEN user.role == "auditor" OR user.role == "compliance_officer";
+DENY user FOR "log_deletion" WHEN user.role != "system_admin" OR user.audit_approval != true;
 
-// =============================================================================
-// DEFAULT DENY POLICIES
-// =============================================================================
+# =============================================================================
+# DEFAULT DENY POLICIES
+# =============================================================================
 
-// Catch-all deny policies for sensitive resources
-// DENY user FOR "nuclear_codes" WHEN user.role != "president";
-// DENY user FOR "root_access" WHEN user.role != "system_admin" OR user.emergency_break_glass != true;
-// DENY user FOR "production_delete" WHEN user.change_management_approval != true;
+# Catch-all deny policies for sensitive resources
+DENY user FOR "nuclear_codes" WHEN user.role != "president";
+DENY user FOR "root_access" WHEN user.role != "system_admin" OR user.emergency_break_glass != true;
+DENY user FOR "production_delete" WHEN user.change_management_approval != true;
 
-// Security boundaries
-// DENY api_key FOR "cross_tenant_access" WHEN api_key.tenant_id != api_key.requested_tenant_id;
-// DENY service FOR "external_network" WHEN service.network_policy != "allow_egress";
+# Security boundaries
+DENY api_key FOR "cross_tenant_access" WHEN api_key.tenant_id != api_key.requested_tenant_id;
+DENY service FOR "external_network" WHEN service.network_policy != "allow_egress";

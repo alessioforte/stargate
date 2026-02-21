@@ -12,19 +12,11 @@ impl PolicyParser {
     pub fn parse_line(&self, line: &str) -> Result<Policy, ParseError> {
         let line = line.trim();
 
-        // Skip empty lines and non-comment lines
-        if line.is_empty() || !line.starts_with("//") {
-            return Err(ParseError::InvalidSyntax("Not a policy line".to_string()));
-        }
-
-        // Remove the comment markers and trim
-        let policy_line = line.trim_start_matches("//").trim();
-
-        if policy_line.is_empty() {
+        if line.is_empty() {
             return Err(ParseError::InvalidSyntax("Empty policy".to_string()));
         }
 
-        self.parse_policy(policy_line)
+        self.parse_policy(line)
     }
 
     fn parse_policy(&self, line: &str) -> Result<Policy, ParseError> {
@@ -272,7 +264,7 @@ mod tests {
     fn test_parse_simple_policy() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "feature1" WHEN user.role == "admin";"#)
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN user.role == "admin";"#)
             .unwrap();
 
         assert_eq!(policy.action, PolicyAction::Allow);
@@ -286,7 +278,7 @@ mod tests {
     fn test_parse_complex_condition() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";"#)
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";"#)
             .unwrap();
 
         if let Some(Condition::Or(_, _)) = &policy.condition {
@@ -300,7 +292,7 @@ mod tests {
     fn test_parse_and_condition() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";"#)
+            .parse_line(r#"ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";"#)
             .unwrap();
 
         if let Some(Condition::And(_, _)) = &policy.condition {
@@ -314,7 +306,7 @@ mod tests {
     fn test_parse_boolean_values() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW api_key FOR "feature3" WHEN api_key.valid == true;"#)
+            .parse_line(r#"ALLOW api_key FOR "feature3" WHEN api_key.valid == true;"#)
             .unwrap();
 
         if let Some(Condition::Expression(expr)) = &policy.condition {
@@ -328,7 +320,7 @@ mod tests {
     fn test_parse_not_equal_operator() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// DENY api_key FOR "feature4" WHEN api_key.scope != "write";"#)
+            .parse_line(r#"DENY api_key FOR "feature4" WHEN api_key.scope != "write";"#)
             .unwrap();
 
         if let Some(Condition::Expression(expr)) = &policy.condition {
@@ -343,7 +335,7 @@ mod tests {
     fn test_parse_without_condition() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "public_feature";"#)
+            .parse_line(r#"ALLOW user FOR "public_feature";"#)
             .unwrap();
 
         assert_eq!(policy.action, PolicyAction::Allow);
@@ -357,15 +349,15 @@ mod tests {
         let parser = PolicyParser::new();
 
         // Missing FOR keyword
-        let result = parser.parse_line(r#"// ALLOW user "feature1";"#);
+        let result = parser.parse_line(r#"ALLOW user "feature1";"#);
         assert!(result.is_err());
 
         // Invalid action
-        let result = parser.parse_line(r#"// INVALID user FOR "feature1";"#);
+        let result = parser.parse_line(r#"INVALID user FOR "feature1";"#);
         assert!(result.is_err());
 
         // Empty policy
-        let result = parser.parse_line(r#"//"#);
+        let result = parser.parse_line(r#""#);
         assert!(result.is_err());
     }
 
@@ -373,7 +365,7 @@ mod tests {
     fn test_parse_resource_with_action() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "database:READ" WHEN user.role == "analyst";"#)
+            .parse_line(r#"ALLOW user FOR "database:READ" WHEN user.role == "analyst";"#)
             .unwrap();
 
         assert_eq!(policy.action, PolicyAction::Allow);
@@ -386,7 +378,7 @@ mod tests {
     fn test_parse_not_condition() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// DENY user FOR "feature1" WHEN NOT user.active == true;"#)
+            .parse_line(r#"DENY user FOR "feature1" WHEN NOT user.active == true;"#)
             .unwrap();
 
         if let Some(Condition::Not(_)) = &policy.condition {
@@ -402,7 +394,7 @@ mod tests {
 
         // Test greater than
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "feature1" WHEN user.age > 18;"#)
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN user.age > 18;"#)
             .unwrap();
         if let Some(Condition::Expression(expr)) = &policy.condition {
             assert_eq!(expr.operator, Operator::GreaterThan);
@@ -412,7 +404,7 @@ mod tests {
 
         // Test less than or equal
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "feature1" WHEN user.score <= 100;"#)
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN user.score <= 100;"#)
             .unwrap();
         if let Some(Condition::Expression(expr)) = &policy.condition {
             assert_eq!(expr.operator, Operator::LessThanOrEqual);
@@ -425,7 +417,7 @@ mod tests {
     fn test_parse_float_values() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "feature1" WHEN user.score >= 95.5;"#)
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN user.score >= 95.5;"#)
             .unwrap();
 
         if let Some(Condition::Expression(expr)) = &policy.condition {
@@ -439,7 +431,7 @@ mod tests {
     fn test_parse_contains_operator() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "admin_panel" WHEN user.roles CONTAINS "admin";"#)
+            .parse_line(r#"ALLOW user FOR "admin_panel" WHEN user.roles CONTAINS "admin";"#)
             .unwrap();
 
         if let Some(Condition::Expression(expr)) = &policy.condition {
@@ -455,7 +447,7 @@ mod tests {
     fn test_parse_not_contains_condition() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// DENY user FOR "feature1" WHEN NOT user.tags CONTAINS "verified";"#)
+            .parse_line(r#"DENY user FOR "feature1" WHEN NOT user.tags CONTAINS "verified";"#)
             .unwrap();
 
         if let Some(Condition::Not(inner)) = &policy.condition {
@@ -475,7 +467,7 @@ mod tests {
     fn test_parse_contains_with_and() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"// ALLOW user FOR "feature1" WHEN user.roles CONTAINS "editor" AND user.active == true;"#)
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN user.roles CONTAINS "editor" AND user.active == true;"#)
             .unwrap();
 
         if let Some(Condition::And(left, _right)) = &policy.condition {

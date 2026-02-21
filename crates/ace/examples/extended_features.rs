@@ -9,44 +9,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Define comprehensive policies using all new features
     let extended_policies = r#"
-        // Age-based access control with comparison operators
-        // ALLOW user FOR "adult_content" WHEN user.age >= 18;
-        // ALLOW user FOR "senior_discount" WHEN user.age > 65;
-        // DENY user FOR "teen_content" WHEN user.age > 17;
+        ALLOW user FOR "adult_content" WHEN user.age >= 18;
+        ALLOW user FOR "senior_discount" WHEN user.age > 65;
+        DENY user FOR "teen_content" WHEN user.age > 17;
 
-        // Resource actions - database operations
-        // ALLOW user FOR "database:READ" WHEN user.role == "analyst" OR user.role == "admin";
-        // ALLOW user FOR "database:WRITE" WHEN user.role == "editor" OR user.role == "admin";
-        // ALLOW user FOR "database:DELETE" WHEN user.role == "admin";
-        // DENY user FOR "database:DELETE" WHEN user.probation == true;
+        ALLOW user FOR "database:READ" WHEN user.role == "analyst" OR user.role == "admin";
+        ALLOW user FOR "database:WRITE" WHEN user.role == "editor" OR user.role == "admin";
+        ALLOW user FOR "database:DELETE" WHEN user.role == "admin";
+        DENY user FOR "database:DELETE" WHEN user.probation == true;
 
-        // NOT conditions for security
-        // ALLOW user FOR "secure_area" WHEN NOT user.suspended == true;
-        // ALLOW user FOR "vpn_access" WHEN NOT (user.location == "restricted" OR user.device_untrusted == true);
+        ALLOW user FOR "secure_area" WHEN NOT user.suspended == true;
+        ALLOW user FOR "vpn_access" WHEN NOT (user.location == "restricted" OR user.device_untrusted == true);
 
-        // Time-based access with complex conditions
-        // ALLOW user FOR "after_hours_access" WHEN user.emergency_contact == true OR (user.role == "admin" AND time.of_day != "night");
-        // DENY user FOR "business_hours_only" WHEN time.of_day == "night" AND NOT user.on_call == true;
+        ALLOW user FOR "after_hours_access" WHEN user.emergency_contact == true OR (user.role == "admin" AND time.of_day != "night");
+        DENY user FOR "business_hours_only" WHEN time.of_day == "night" AND NOT user.on_call == true;
 
-        // Location and device-based policies
-        // ALLOW user FOR "mobile_banking:READ" WHEN device.type == "mobile" AND device.secure == true;
-        // DENY user FOR "mobile_banking:WRITE" WHEN device.type == "mobile" AND device.biometric_enabled != true;
+        ALLOW user FOR "mobile_banking:READ" WHEN device.type == "mobile" AND device.secure == true;
+        DENY user FOR "mobile_banking:WRITE" WHEN device.type == "mobile" AND device.biometric_enabled != true;
 
-        // Score and performance based access
-        // ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND user.subscription == "premium";
-        // ALLOW user FOR "beta_program" WHEN user.engagement_score > 80.0 OR user.beta_tester == true;
+        ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND user.subscription == "premium";
+        ALLOW user FOR "beta_program" WHEN user.engagement_score > 80.0 OR user.beta_tester == true;
 
-        // Multi-factor conditions with security levels
-        // ALLOW user FOR "classified:READ" WHEN security.level >= 3 AND user.clearance == "secret" AND NOT user.foreign_national == true;
-        // ALLOW user FOR "classified:WRITE" WHEN security.level >= 4 AND user.clearance == "top_secret";
+        ALLOW user FOR "classified:READ" WHEN security.level >= 3 AND user.clearance == "secret" AND NOT user.foreign_national == true;
+        ALLOW user FOR "classified:WRITE" WHEN security.level >= 4 AND user.clearance == "top_secret";
 
-        // IP and geographic restrictions
-        // DENY user FOR "geo_restricted" WHEN request.country == "blocked" OR request.ip_suspicious == true;
-        // ALLOW user FOR "region_specific" WHEN request.country == "US" AND user.citizenship == "US";
+        DENY user FOR "geo_restricted" WHEN request.country == "blocked" OR request.ip_suspicious == true;
+        ALLOW user FOR "region_specific" WHEN request.country == "US" AND user.citizenship == "US";
 
-        // Session and activity-based
-        // ALLOW user FOR "extended_session" WHEN user.session_duration <= 480 AND user.activity_recent == true;
-        // DENY user FOR "concurrent_limit" WHEN user.active_sessions > 3 AND user.role != "admin";
+        ALLOW user FOR "extended_session" WHEN user.session_duration <= 480 AND user.activity_recent == true;
+        DENY user FOR "concurrent_limit" WHEN user.active_sessions > 3 AND user.role != "admin";
     "#;
 
     // Parse the policies

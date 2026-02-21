@@ -1,10 +1,10 @@
 # ACE (Access Control Engine) for Stargate
 
-A powerful, flexible policy-based access control engine that parses policy definitions from comments and evaluates them against runtime context.
+A powerful, flexible policy-based access control engine that parses policy definitions and evaluates them against runtime context.
 
 ## Features
 
-- **Comment-based Policy Syntax**: Define policies directly in your code as comments
+- **Simple Policy Syntax**: Define policies in plain text files or inline strings
 - **Flexible Conditions**: Support for complex boolean expressions with AND/OR logic
 - **Multiple Value Types**: String, boolean, and numeric values
 - **Detailed Evaluation**: Get detailed results about which policies matched and applied
@@ -13,10 +13,10 @@ A powerful, flexible policy-based access control engine that parses policy defin
 
 ## Policy Syntax
 
-Policies are defined as comments using the following syntax:
+Policies are defined using the following syntax:
 
 ```text
-// ALLOW|DENY subject FOR "resource" [WHEN condition];
+ALLOW|DENY subject FOR "resource" [WHEN condition];
 ```
 
 Where:
@@ -70,11 +70,10 @@ use ace::{PolicyEngine, context_with, Value};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = PolicyEngine::new();
 
-    // Define policies as comments
     let policies = r#"
-        // ALLOW user FOR "dashboard" WHEN user.role == "admin";
-        // ALLOW user FOR "reports" WHEN user.role == "admin" OR user.role == "analyst";
-        // DENY user FOR "admin_panel" WHEN user.suspended == true;
+        ALLOW user FOR "dashboard" WHEN user.role == "admin";
+        ALLOW user FOR "reports" WHEN user.role == "admin" OR user.role == "analyst";
+        DENY user FOR "admin_panel" WHEN user.suspended == true;
     "#;
 
     // Parse the policies
@@ -97,25 +96,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Complex Conditions
 
 ```text
-// Multi-factor authentication requirement
-// ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.mfa_enabled == true;
+ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.mfa_enabled == true;
 
-// NOT conditions for security
-// ALLOW user FOR "secure_area" WHEN NOT user.suspended == true;
-// DENY user FOR "restricted" WHEN NOT (user.clearance == "secret" AND user.location == "office");
+ALLOW user FOR "secure_area" WHEN NOT user.suspended == true;
+DENY user FOR "restricted" WHEN NOT (user.clearance == "secret" AND user.location == "office");
 
-// Age and score-based access with comparison operators
-// ALLOW user FOR "adult_content" WHEN user.age >= 18;
-// ALLOW user FOR "premium_features" WHEN user.score > 95.0 AND user.subscription == "premium";
+ALLOW user FOR "adult_content" WHEN user.age >= 18;
+ALLOW user FOR "premium_features" WHEN user.score > 95.0 AND user.subscription == "premium";
 
-// Resource-specific actions
-// ALLOW user FOR "database:READ" WHEN user.role == "analyst";
-// ALLOW user FOR "database:WRITE" WHEN user.role == "admin" AND user.mfa_enabled == true;
-// DENY user FOR "database:DELETE" WHEN user.probation == true;
+ALLOW user FOR "database:READ" WHEN user.role == "analyst";
+ALLOW user FOR "database:WRITE" WHEN user.role == "admin" AND user.mfa_enabled == true;
+DENY user FOR "database:DELETE" WHEN user.probation == true;
 
-// Time and location-based policies
-// ALLOW user FOR "after_hours_access" WHEN time.of_day == "night" AND user.on_call == true;
-// DENY user FOR "office_resources" WHEN location != "office" AND NOT user.vpn_connected == true;
+ALLOW user FOR "after_hours_access" WHEN time.of_day == "night" AND user.on_call == true;
+DENY user FOR "office_resources" WHEN location != "office" AND NOT user.vpn_connected == true;
 ```
 
 ### Working with API Keys
@@ -126,9 +120,9 @@ use ace::{PolicyEngine, context_with, Value};
 let mut engine = PolicyEngine::new();
 
 let api_policies = r#"
-    // ALLOW api_key FOR "public_api" WHEN api_key.valid == true;
-    // ALLOW api_key FOR "admin_api" WHEN api_key.valid == true AND api_key.scope == "admin";
-    // DENY api_key FOR "rate_limited" WHEN api_key.rate_limited == true;
+    ALLOW api_key FOR "public_api" WHEN api_key.valid == true;
+    ALLOW api_key FOR "admin_api" WHEN api_key.valid == true AND api_key.scope == "admin";
+    DENY api_key FOR "rate_limited" WHEN api_key.rate_limited == true;
 "#;
 
 engine.parse_file(api_policies)?;
@@ -232,8 +226,8 @@ let allowed = engine.evaluate("user", "classified_data", &context);
 Load policies from multiple sources:
 
 ```rust
-let base_policies = "// ALLOW user FOR \"login\" WHEN user.active == true;";
-let admin_policies = "// ALLOW user FOR \"admin\" WHEN user.role == \"admin\";";
+let base_policies = "ALLOW user FOR \"login\" WHEN user.active == true;";
+let admin_policies = "ALLOW user FOR \"admin\" WHEN user.role == \"admin\";";
 
 engine.load_from_sources(vec![base_policies, admin_policies])?;
 ```
@@ -259,53 +253,42 @@ The engine follows these rules for policy resolution:
 ### Web Application Authorization
 
 ```text
-// Role-based dashboard access with actions
-// ALLOW user FOR "dashboard:READ" WHEN user.role == "admin" OR user.role == "manager";
-// ALLOW user FOR "dashboard:WRITE" WHEN user.role == "admin";
+ALLOW user FOR "dashboard:READ" WHEN user.role == "admin" OR user.role == "manager";
+ALLOW user FOR "dashboard:WRITE" WHEN user.role == "admin";
 
-// Age-gated content
-// ALLOW user FOR "adult_content" WHEN user.age >= 18;
-// DENY user FOR "teen_content" WHEN user.age > 17;
+ALLOW user FOR "adult_content" WHEN user.age >= 18;
+DENY user FOR "teen_content" WHEN user.age > 17;
 
-// Feature flags with NOT conditions
-// ALLOW user FOR "beta_features" WHEN user.beta_tester == true AND NOT user.banned == true;
+ALLOW user FOR "beta_features" WHEN user.beta_tester == true AND NOT user.banned == true;
 
-// Score-based premium access
-// ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND user.subscription == "premium";
+ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND user.subscription == "premium";
 ```
 
 ### API Access Control
 
 ```text
-// Resource-specific API access
-// ALLOW api_key FOR "users:READ" WHEN api_key.valid == true AND api_key.scope == "read";
-// ALLOW api_key FOR "users:WRITE" WHEN api_key.valid == true AND api_key.scope == "write";
-// ALLOW api_key FOR "users:DELETE" WHEN api_key.valid == true AND api_key.scope == "admin";
+ALLOW api_key FOR "users:READ" WHEN api_key.valid == true AND api_key.scope == "read";
+ALLOW api_key FOR "users:WRITE" WHEN api_key.valid == true AND api_key.scope == "write";
+ALLOW api_key FOR "users:DELETE" WHEN api_key.valid == true AND api_key.scope == "admin";
 
-// Rate limiting with comparison operators
-// DENY api_key FOR "high_volume_api" WHEN api_key.requests_per_minute > 100;
+DENY api_key FOR "high_volume_api" WHEN api_key.requests_per_minute > 100;
 
-// Security level-based access
-// ALLOW service FOR "internal_api" WHEN service.verified == true AND security.level >= 3;
+ALLOW service FOR "internal_api" WHEN service.verified == true AND security.level >= 3;
 ```
 
 ### Compliance and Security
 
 ```text
-// SOX compliance with NOT conditions
-// ALLOW user FOR "financial_data:READ" WHEN user.sox_certified == true AND NOT user.foreign_national == true;
-// ALLOW user FOR "financial_data:WRITE" WHEN user.sox_certified == true AND user.clearance_level >= 3;
+ALLOW user FOR "financial_data:READ" WHEN user.sox_certified == true AND NOT user.foreign_national == true;
+ALLOW user FOR "financial_data:WRITE" WHEN user.sox_certified == true AND user.clearance_level >= 3;
 
-// HIPAA compliance
-// ALLOW user FOR "patient_data:READ" WHEN user.hipaa_certified == true AND user.department == "healthcare";
-// DENY user FOR "patient_data:*" WHEN user.background_check != "completed";
+ALLOW user FOR "patient_data:READ" WHEN user.hipaa_certified == true AND user.department == "healthcare";
+DENY user FOR "patient_data:*" WHEN user.background_check != "completed";
 
-// Geographic and time restrictions
-// DENY user FOR "restricted_content" WHEN request.country == "blocked" OR request.ip_suspicious == true;
-// ALLOW user FOR "after_hours_access" WHEN time.of_day == "night" AND (user.on_call == true OR user.role == "admin");
+DENY user FOR "restricted_content" WHEN request.country == "blocked" OR request.ip_suspicious == true;
+ALLOW user FOR "after_hours_access" WHEN time.of_day == "night" AND (user.on_call == true OR user.role == "admin");
 
-// Multi-factor security
-// ALLOW user FOR "classified:READ" WHEN security.level >= 3 AND user.mfa_enabled == true AND NOT user.suspended == true;
+ALLOW user FOR "classified:READ" WHEN security.level >= 3 AND user.mfa_enabled == true AND NOT user.suspended == true;
 ```
 
 ## Running Examples
@@ -382,26 +365,20 @@ For more information about Stargate, see the main project documentation.
 ### Complete Policy Examples
 
 ```text
-// Age verification with comparison operators
-// ALLOW user FOR "alcohol_purchase" WHEN user.age >= 21 AND user.id_verified == true;
+ALLOW user FOR "alcohol_purchase" WHEN user.age >= 21 AND user.id_verified == true;
 
-// Complex security clearance
-// ALLOW user FOR "classified:READ" WHEN user.clearance == "secret" AND security.level >= 3 AND NOT user.foreign_national == true;
+ALLOW user FOR "classified:READ" WHEN user.clearance == "secret" AND security.level >= 3 AND NOT user.foreign_national == true;
 
-// Time and location-based mobile banking
-// ALLOW user FOR "mobile_banking:WRITE" WHEN device.type == "mobile" AND device.biometric_enabled == true AND NOT (time.of_day == "night" AND location != "home");
+ALLOW user FOR "mobile_banking:WRITE" WHEN device.type == "mobile" AND device.biometric_enabled == true AND NOT (time.of_day == "night" AND location != "home");
 
-// Resource actions with probation checks
-// ALLOW user FOR "database:READ" WHEN user.role == "analyst" OR user.role == "admin";
-// ALLOW user FOR "database:WRITE" WHEN user.role == "admin" AND NOT user.probation == true;
-// DENY user FOR "database:DELETE" WHEN user.experience_months < 12 OR user.approval_required == true;
+ALLOW user FOR "database:READ" WHEN user.role == "analyst" OR user.role == "admin";
+ALLOW user FOR "database:WRITE" WHEN user.role == "admin" AND NOT user.probation == true;
+DENY user FOR "database:DELETE" WHEN user.experience_months < 12 OR user.approval_required == true;
 
-// Score-based premium access
-// ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND (user.subscription == "premium" OR user.subscription == "enterprise");
+ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND (user.subscription == "premium" OR user.subscription == "enterprise");
 
-// Geographic compliance
-// DENY user FOR "eu_data:*" WHEN request.country != "EU" AND NOT user.gdpr_authorized == true;
-// ALLOW user FOR "us_only:*" WHEN request.country == "US" AND user.citizenship == "US";
+DENY user FOR "eu_data:*" WHEN request.country != "EU" AND NOT user.gdpr_authorized == true;
+ALLOW user FOR "us_only:*" WHEN request.country == "US" AND user.citizenship == "US";
 ```
 
 ### Context Variables

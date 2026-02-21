@@ -38,11 +38,10 @@ fn demonstrate_nested_conditions() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = PolicyEngine::new();
 
     let complex_policies = r#"
-        // Complex nested conditions with AND/OR combinations
-        // ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.department == "security" AND user.clearance_level == "top_secret";
-        // ALLOW user FOR "financial_reports" WHEN (user.role == "cfo" OR user.role == "finance_manager") AND user.active == true;
-        // DENY user FOR "hr_records" WHEN user.department == "external" OR user.contractor == true;
-        // ALLOW user FOR "development_tools" WHEN user.role == "developer" AND (user.team == "backend" OR user.team == "frontend") AND user.experience_years >= 2;
+        ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.department == "security" AND user.clearance_level == "top_secret";
+        ALLOW user FOR "financial_reports" WHEN (user.role == "cfo" OR user.role == "finance_manager") AND user.active == true;
+        DENY user FOR "hr_records" WHEN user.department == "external" OR user.contractor == true;
+        ALLOW user FOR "development_tools" WHEN user.role == "developer" AND (user.team == "backend" OR user.team == "frontend") AND user.experience_years >= 2;
     "#;
 
     engine.parse_file(complex_policies)?;
@@ -95,22 +94,19 @@ fn demonstrate_dynamic_loading() -> Result<(), Box<dyn std::error::Error>> {
 
     // Simulate loading from multiple configuration sources
     let base_policies = r#"
-        // Base security policies
-        // ALLOW user FOR "login" WHEN user.active == true;
-        // DENY user FOR "admin_access" WHEN user.suspended == true;
+        ALLOW user FOR "login" WHEN user.active == true;
+        DENY user FOR "admin_access" WHEN user.suspended == true;
     "#;
 
     let feature_policies = r#"
-        // Feature-specific policies
-        // ALLOW user FOR "beta_features" WHEN user.beta_tester == true;
-        // ALLOW user FOR "premium_features" WHEN user.subscription == "premium";
+        ALLOW user FOR "beta_features" WHEN user.beta_tester == true;
+        ALLOW user FOR "premium_features" WHEN user.subscription == "premium";
     "#;
 
     let api_policies = r#"
-        // API access policies
-        // ALLOW api_key FOR "public_api" WHEN api_key.valid == true;
-        // ALLOW api_key FOR "private_api" WHEN api_key.valid == true AND api_key.tier == "enterprise";
-        // DENY api_key FOR "admin_api" WHEN api_key.rate_limited == true;
+        ALLOW api_key FOR "public_api" WHEN api_key.valid == true;
+        ALLOW api_key FOR "private_api" WHEN api_key.valid == true AND api_key.tier == "enterprise";
+        DENY api_key FOR "admin_api" WHEN api_key.rate_limited == true;
     "#;
 
     // Load policies from multiple sources
@@ -183,14 +179,12 @@ fn demonstrate_policy_conflicts() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = PolicyEngine::new();
 
     let conflicting_policies = r#"
-        // Conflicting policies - DENY should take precedence
-        // ALLOW user FOR "disputed_resource" WHEN user.role == "manager";
-        // DENY user FOR "disputed_resource" WHEN user.on_probation == true;
+        ALLOW user FOR "disputed_resource" WHEN user.role == "manager";
+        DENY user FOR "disputed_resource" WHEN user.on_probation == true;
 
-        // Multiple allow policies
-        // ALLOW user FOR "shared_resource" WHEN user.department == "engineering";
-        // ALLOW user FOR "shared_resource" WHEN user.department == "product";
-        // ALLOW user FOR "shared_resource" WHEN user.role == "admin";
+        ALLOW user FOR "shared_resource" WHEN user.department == "engineering";
+        ALLOW user FOR "shared_resource" WHEN user.department == "product";
+        ALLOW user FOR "shared_resource" WHEN user.role == "admin";
     "#;
 
     engine.parse_file(conflicting_policies)?;
@@ -387,15 +381,13 @@ fn demonstrate_role_hierarchies() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = PolicyEngine::new();
 
     let hierarchy_policies = r#"
-        // Role hierarchy: admin > manager > employee > intern
-        // ALLOW user FOR "basic_access" WHEN user.role == "intern" OR user.role == "employee" OR user.role == "manager" OR user.role == "admin";
-        // ALLOW user FOR "employee_data" WHEN user.role == "manager" OR user.role == "admin";
-        // ALLOW user FOR "financial_data" WHEN user.role == "admin";
-        // ALLOW user FOR "system_config" WHEN user.role == "admin" AND user.system_admin == true;
+        ALLOW user FOR "basic_access" WHEN user.role == "intern" OR user.role == "employee" OR user.role == "manager" OR user.role == "admin";
+        ALLOW user FOR "employee_data" WHEN user.role == "manager" OR user.role == "admin";
+        ALLOW user FOR "financial_data" WHEN user.role == "admin";
+        ALLOW user FOR "system_config" WHEN user.role == "admin" AND user.system_admin == true;
 
-        // Department-specific access
-        // ALLOW user FOR "hr_data" WHEN user.department == "hr" AND (user.role == "manager" OR user.role == "admin");
-        // ALLOW user FOR "engineering_tools" WHEN user.department == "engineering";
+        ALLOW user FOR "hr_data" WHEN user.department == "hr" AND (user.role == "manager" OR user.role == "admin");
+        ALLOW user FOR "engineering_tools" WHEN user.department == "engineering";
     "#;
 
     engine.parse_file(hierarchy_policies)?;
@@ -471,18 +463,15 @@ fn demonstrate_contextual_access() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = PolicyEngine::new();
 
     let contextual_policies = r#"
-        // Time and location based policies (simulated with context values)
-        // ALLOW user FOR "work_resources" WHEN user.time_of_day == "business_hours" AND user.location == "office";
-        // ALLOW user FOR "emergency_access" WHEN user.emergency_override == true;
-        // DENY user FOR "restricted_hours" WHEN user.time_of_day == "after_hours" AND user.location != "office";
+        ALLOW user FOR "work_resources" WHEN user.time_of_day == "business_hours" AND user.location == "office";
+        ALLOW user FOR "emergency_access" WHEN user.emergency_override == true;
+        DENY user FOR "restricted_hours" WHEN user.time_of_day == "after_hours" AND user.location != "office";
 
-        // Device and security context
-        // ALLOW user FOR "mobile_access" WHEN user.device_type == "mobile" AND user.device_registered == true;
-        // DENY user FOR "sensitive_mobile" WHEN user.device_type == "mobile" AND user.device_encrypted == false;
+        ALLOW user FOR "mobile_access" WHEN user.device_type == "mobile" AND user.device_registered == true;
+        DENY user FOR "sensitive_mobile" WHEN user.device_type == "mobile" AND user.device_encrypted == false;
 
-        // IP and geographic restrictions
-        // ALLOW user FOR "geo_restricted" WHEN user.country == "US" OR user.country == "CA";
-        // DENY user FOR "ip_blocked" WHEN user.ip_suspicious == true;
+        ALLOW user FOR "geo_restricted" WHEN user.country == "US" OR user.country == "CA";
+        DENY user FOR "ip_blocked" WHEN user.ip_suspicious == true;
     "#;
 
     engine.parse_file(contextual_policies)?;
