@@ -1,9 +1,6 @@
-use std::{
-    net::IpAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicUsize},
 };
 
 use reqwest::Client;

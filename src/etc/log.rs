@@ -1,4 +1,4 @@
-use crate::etc::{ext::RequestExt, geoip};
+use crate::etc::{ac::Env, ext::RequestExt, geoip};
 use actix_web::HttpMessage;
 use db::ent::AuditContext;
 use tracing::info;
@@ -93,6 +93,24 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
             user_agent.clone(),
         );
         req.extensions_mut().insert(ctx);
+
+        let env = Env {
+            ip_address: ip_address.clone().into_boxed_str(),
+            user_agent: user_agent.clone().into_boxed_str(),
+            country_code: geo_info
+                .country_code
+                .clone()
+                .unwrap_or_else(|| "unknown".into()),
+            country_name: geo_info
+                .country_name
+                .clone()
+                .unwrap_or_else(|| "unknown".into()),
+            city_name: geo_info
+                .city_name
+                .clone()
+                .unwrap_or_else(|| "unknown".into()),
+        };
+        req.extensions_mut().insert(env);
 
         tracing::info_span!("http_request",
             request_id = %request_id,

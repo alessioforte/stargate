@@ -2,8 +2,12 @@ mod http;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ext::RequestExt, gate::get_client, guard};
-use crate::fun::access_control;
+use crate::etc::{
+    ac::{Env, access_control},
+    ext::RequestExt,
+    gate::get_client,
+    guard,
+};
 use actix_web::HttpMessage;
 use actix_web::{
     HttpRequest, HttpResponse,
@@ -113,9 +117,13 @@ pub async fn handler(
     if let Some(r) = resource
         && has_auth
     {
-        let s = sub.clone().unwrap();
         let pe = gate.policy_engine.load();
-        let allowed = access_control(&pe, &s, &r);
+        let s = sub.clone().unwrap();
+        let env = req
+            .extensions_mut()
+            .remove::<Env>()
+            .unwrap_or_else(Env::default);
+        let allowed = access_control(&pe, &s, &env, &r);
 
         if !allowed {
             return Err(ErrorResponse::from(HttpError::Forbidden(

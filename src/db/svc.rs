@@ -633,11 +633,6 @@ pub async fn remove_user_from_organization(
     }
 }
 
-pub async fn get_organization_users(org_id: &str) -> Result<Vec<User>> {
-    let svc = service();
-    svc.get_organization_users(org_id).await
-}
-
 pub async fn get_organization_users_paginated(
     org_id: &str,
     limit: i64,

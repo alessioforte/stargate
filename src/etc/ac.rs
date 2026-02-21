@@ -59,11 +59,14 @@ where
 pub fn access_control(
     policy_engine: &ace::PolicyEngine,
     subject: &Subject,
+    env: &Env,
     resource: &str,
 ) -> bool {
     let sub_type = subject.sub_type.as_str();
     let (resource_name, resource_action) = parse_resource(resource);
-    let action_key = resource_action.as_ref().map(|action| action.to_string().into_boxed_str());
+    let action_key = resource_action
+        .as_ref()
+        .map(|action| action.to_string().into_boxed_str());
     let attrs_signature = attrs_signature(subject);
     let key = DecisionKey {
         sub_type: Box::from(sub_type),
@@ -77,7 +80,7 @@ pub fn access_control(
         return allowed;
     }
 
-    let context = create_context(subject);
+    let context = create_context(subject, env);
     let allowed = match resource_action {
         None => policy_engine.evaluate(&sub_type, &resource_name, &context),
         Some(action) => {
@@ -113,13 +116,13 @@ fn attrs_signature(subject: &Subject) -> Box<str> {
         .into_boxed_str()
 }
 
-fn create_context(sub: &Subject) -> HashMap<String, ace::Value> {
+fn create_context(sub: &Subject, env: &Env) -> HashMap<String, ace::Value> {
     let attrs = sub.attrs.as_object();
     if attrs.is_none() {
         return ace::ContextBuilder::new().build();
     }
     let attrs = attrs.unwrap();
-    let mut entries = HashMap::with_capacity(attrs.len());
+    let mut entries = HashMap::with_capacity(attrs.len() + env.len());
     let sub_type = sub.sub_type.as_str();
     attrs.iter().for_each(|(k, v)| {
         let key = format!("{}.{}", sub_type, k);
@@ -127,5 +130,38 @@ fn create_context(sub: &Subject) -> HashMap<String, ace::Value> {
         entries.insert(key, value);
     });
 
+    env.iter().for_each(|(k, v)| {
+        let key = format!("env.{}", k);
+        // FIXME: this is a bit hacky, we should have a proper way to convert env values to ace::Value
+        let value = ace::Value::from(serde_json::Value::String(v.to_string()));
+        entries.insert(key, value);
+    });
+
     entries
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Env {
+    pub ip_address: Box<str>,
+    pub user_agent: Box<str>,
+    pub country_code: Box<str>,
+    pub country_name: Box<str>,
+    pub city_name: Box<str>,
+}
+
+impl Env {
+    fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        [
+            ("ip_address", self.ip_address.as_ref()),
+            ("user_agent", self.user_agent.as_ref()),
+            ("country_code", self.country_code.as_ref()),
+            ("country_name", self.country_name.as_ref()),
+            ("city_name", self.city_name.as_ref()),
+        ]
+        .into_iter()
+    }
+
+    fn len(&self) -> usize {
+        5
+    }
 }
