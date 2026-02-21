@@ -12,8 +12,8 @@ use tracing::{error, info};
 #[derive(Clone)]
 pub struct Gate {
     store: Arc<lim::State>,
-    clock: Arc<lim::CachedClock>,
     liveness_probe: Arc<Mutex<lb::HealthCheck>>,
+    pub clock: Arc<lim::CachedClock>,
     pub services: Arc<ArcSwap<TriePath>>,
     pub policy_engine: Arc<ArcSwap<PolicyEngine>>,
     pub limiter: Arc<ArcSwap<lim::Limiter>>,

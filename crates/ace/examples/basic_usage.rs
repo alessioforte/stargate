@@ -1,4 +1,4 @@
-use ace::{context_with, PolicyEngine, Value};
+use ace::{PolicyEngine, Value, context_with};
 use std::collections::HashMap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,5 +1,6 @@
 use crate::{
     Condition, Expression, Operator, ParseError, Policy, PolicyAction, ResourceAction, Value,
+    parse_iso_date, parse_time_of_day,
 };
 
 pub struct PolicyParser;
@@ -220,12 +221,24 @@ impl PolicyParser {
         // String value (quoted)
         if value_str.starts_with('"') && value_str.ends_with('"') {
             let content = &value_str[1..value_str.len() - 1];
+            if let Some(date) = parse_iso_date(content) {
+                return Ok(Value::Date(date));
+            }
+            if let Some(time) = parse_time_of_day(content) {
+                return Ok(Value::Time(time));
+            }
             return Ok(Value::String(content.to_string()));
         }
 
         // Single quoted strings
         if value_str.starts_with('\'') && value_str.ends_with('\'') {
             let content = &value_str[1..value_str.len() - 1];
+            if let Some(date) = parse_iso_date(content) {
+                return Ok(Value::Date(date));
+            }
+            if let Some(time) = parse_time_of_day(content) {
+                return Ok(Value::Time(time));
+            }
             return Ok(Value::String(content.to_string()));
         }
 
@@ -235,6 +248,14 @@ impl PolicyParser {
         }
         if value_str == "false" {
             return Ok(Value::Boolean(false));
+        }
+
+        // Date and time values (ISO-8601 date, HH:MM[:SS] time)
+        if let Some(date) = parse_iso_date(value_str) {
+            return Ok(Value::Date(date));
+        }
+        if let Some(time) = parse_time_of_day(value_str) {
+            return Ok(Value::Time(time));
         }
 
         // Number value (try integer first, then float)
@@ -278,7 +299,9 @@ mod tests {
     fn test_parse_complex_condition() {
         let parser = PolicyParser::new();
         let policy = parser
-            .parse_line(r#"ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";"#)
+            .parse_line(
+                r#"ALLOW user FOR "feature1" WHEN user.role == "admin" OR user.role == "editor";"#,
+            )
             .unwrap();
 
         if let Some(Condition::Or(_, _)) = &policy.condition {
@@ -478,6 +501,37 @@ mod tests {
             }
         } else {
             panic!("Expected AND condition");
+        }
+    }
+
+    #[test]
+    fn test_parse_date_value() {
+        let parser = PolicyParser::new();
+        let policy = parser
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN time.date >= 2026-01-01;"#)
+            .unwrap();
+
+        if let Some(Condition::Expression(expr)) = &policy.condition {
+            assert_eq!(
+                expr.right,
+                Value::Date(parse_iso_date("2026-01-01").unwrap())
+            );
+        } else {
+            panic!("Expected expression condition");
+        }
+    }
+
+    #[test]
+    fn test_parse_time_value() {
+        let parser = PolicyParser::new();
+        let policy = parser
+            .parse_line(r#"ALLOW user FOR "feature1" WHEN time.time < "18:30";"#)
+            .unwrap();
+
+        if let Some(Condition::Expression(expr)) = &policy.condition {
+            assert_eq!(expr.right, Value::Time(parse_time_of_day("18:30").unwrap()));
+        } else {
+            panic!("Expected expression condition");
         }
     }
 }

@@ -1,4 +1,7 @@
-use crate::{Condition, Expression, Operator, Policy, PolicyAction, ResourceAction, Value};
+use crate::{
+    Condition, Expression, Operator, Policy, PolicyAction, ResourceAction, Value, parse_iso_date,
+    parse_time_of_day,
+};
 use std::collections::HashMap;
 
 pub struct PolicyEvaluator;
@@ -88,8 +91,8 @@ impl PolicyEvaluator {
     fn evaluate_expression(&self, expr: &Expression, context: &HashMap<String, Value>) -> bool {
         if let Some(context_value) = context.get(&expr.left) {
             match expr.operator {
-                Operator::Equal => context_value == &expr.right,
-                Operator::NotEqual => context_value != &expr.right,
+                Operator::Equal => self.values_equal(context_value, &expr.right),
+                Operator::NotEqual => !self.values_equal(context_value, &expr.right),
                 Operator::GreaterThan => {
                     self.compare_values(context_value, &expr.right, |a, b| a > b)
                 }
@@ -105,6 +108,20 @@ impl PolicyEvaluator {
         } else {
             // If the context key doesn't exist, the expression is false
             false
+        }
+    }
+
+    fn values_equal(&self, left: &Value, right: &Value) -> bool {
+        if left == right {
+            return true;
+        }
+
+        match (left, right) {
+            (Value::String(l), Value::Date(r)) => parse_iso_date(l) == Some(*r),
+            (Value::Date(l), Value::String(r)) => parse_iso_date(r) == Some(*l),
+            (Value::String(l), Value::Time(r)) => parse_time_of_day(l) == Some(*r),
+            (Value::Time(l), Value::String(r)) => parse_time_of_day(r) == Some(*l),
+            _ => false,
         }
     }
 
@@ -130,18 +147,30 @@ impl PolicyEvaluator {
     where
         F: Fn(f64, f64) -> bool,
     {
+        if let Some(ordering) = self.partial_cmp_with_coercion(left, right) {
+            match ordering {
+                std::cmp::Ordering::Greater => op(1.0, 0.0),
+                std::cmp::Ordering::Less => op(0.0, 1.0),
+                std::cmp::Ordering::Equal => op(0.0, 0.0),
+            }
+        } else {
+            false
+        }
+    }
+
+    fn partial_cmp_with_coercion(&self, left: &Value, right: &Value) -> Option<std::cmp::Ordering> {
         match (left, right) {
-            (Value::Number(l), Value::Number(r)) => op(*l as f64, *r as f64),
-            (Value::Number(l), Value::Float(r)) => op(*l as f64, *r),
-            (Value::Float(l), Value::Number(r)) => op(*l, *r as f64),
-            (Value::Float(l), Value::Float(r)) => op(*l, *r),
-            // For non-numeric values, fall back to partial ordering
-            _ => match left.partial_cmp(right) {
-                Some(std::cmp::Ordering::Greater) => op(1.0, 0.0),
-                Some(std::cmp::Ordering::Less) => op(0.0, 1.0),
-                Some(std::cmp::Ordering::Equal) => op(0.0, 0.0),
-                None => false,
-            },
+            (Value::Number(l), Value::Number(r)) => (*l as f64).partial_cmp(&(*r as f64)),
+            (Value::Number(l), Value::Float(r)) => (*l as f64).partial_cmp(r),
+            (Value::Float(l), Value::Number(r)) => l.partial_cmp(&(*r as f64)),
+            (Value::Float(l), Value::Float(r)) => l.partial_cmp(r),
+            (Value::Date(l), Value::Date(r)) => Some(l.cmp(r)),
+            (Value::Date(l), Value::String(r)) => parse_iso_date(r).map(|date| l.cmp(&date)),
+            (Value::String(l), Value::Date(r)) => parse_iso_date(l).map(|date| date.cmp(r)),
+            (Value::Time(l), Value::Time(r)) => Some(l.cmp(r)),
+            (Value::Time(l), Value::String(r)) => parse_time_of_day(r).map(|time| l.cmp(&time)),
+            (Value::String(l), Value::Time(r)) => parse_time_of_day(l).map(|time| time.cmp(r)),
+            _ => left.partial_cmp(right),
         }
     }
 
@@ -717,6 +746,56 @@ mod tests {
             "user.email".to_string(),
             Value::String("alice@other.com".to_string()),
         );
+        assert!(!evaluator.evaluate(&policies, "user", "feature1", None, &context));
+    }
+
+    #[test]
+    fn test_date_conditions_with_string_context() {
+        let evaluator = PolicyEvaluator::new();
+        let policies = vec![create_test_policy(
+            PolicyAction::Allow,
+            "user",
+            "feature1",
+            Some(Condition::Expression(Expression {
+                left: "time.date".to_string(),
+                operator: Operator::GreaterThanOrEqual,
+                right: Value::Date(parse_iso_date("2026-01-01").unwrap()),
+            })),
+        )];
+
+        let mut context = HashMap::new();
+        context.insert(
+            "time.date".to_string(),
+            Value::String("2026-02-15".to_string()),
+        );
+        assert!(evaluator.evaluate(&policies, "user", "feature1", None, &context));
+
+        context.insert(
+            "time.date".to_string(),
+            Value::String("2025-12-31".to_string()),
+        );
+        assert!(!evaluator.evaluate(&policies, "user", "feature1", None, &context));
+    }
+
+    #[test]
+    fn test_time_conditions_with_string_context() {
+        let evaluator = PolicyEvaluator::new();
+        let policies = vec![create_test_policy(
+            PolicyAction::Allow,
+            "user",
+            "feature1",
+            Some(Condition::Expression(Expression {
+                left: "time.time".to_string(),
+                operator: Operator::LessThan,
+                right: Value::Time(parse_time_of_day("18:00").unwrap()),
+            })),
+        )];
+
+        let mut context = HashMap::new();
+        context.insert("time.time".to_string(), Value::String("17:30".to_string()));
+        assert!(evaluator.evaluate(&policies, "user", "feature1", None, &context));
+
+        context.insert("time.time".to_string(), Value::String("18:30".to_string()));
         assert!(!evaluator.evaluate(&policies, "user", "feature1", None, &context));
     }
 }

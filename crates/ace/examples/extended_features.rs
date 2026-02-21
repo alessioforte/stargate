@@ -1,4 +1,4 @@
-use ace::{context_with, ContextBuilder, PolicyEngine, ResourceAction, Value};
+use ace::{ContextBuilder, PolicyEngine, ResourceAction, Value, context_with};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Extended ACE Features Demonstration");

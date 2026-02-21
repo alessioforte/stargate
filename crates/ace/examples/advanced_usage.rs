@@ -1,5 +1,5 @@
 use ace::{
-    context_with, Condition, Expression, Operator, Policy, PolicyAction, PolicyEngine, Value,
+    Condition, Expression, Operator, Policy, PolicyAction, PolicyEngine, Value, context_with,
 };
 use std::collections::HashMap;
 

@@ -25,6 +25,7 @@
 //! ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
 //! ```
 
+use chrono::{NaiveDate, NaiveTime};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -210,6 +211,8 @@ pub enum Value {
     Boolean(bool),
     Number(i64),
     Float(f64),
+    Date(NaiveDate),
+    Time(NaiveTime),
     Array(Vec<Value>),
 }
 
@@ -220,6 +223,8 @@ impl PartialOrd for Value {
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
             (Value::Number(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
             (Value::Float(a), Value::Number(b)) => a.partial_cmp(&(*b as f64)),
+            (Value::Date(a), Value::Date(b)) => a.partial_cmp(b),
+            (Value::Time(a), Value::Time(b)) => a.partial_cmp(b),
             (Value::String(a), Value::String(b)) => a.partial_cmp(b),
             (Value::Boolean(a), Value::Boolean(b)) => a.partial_cmp(b),
             _ => None,
@@ -234,6 +239,8 @@ impl fmt::Display for Value {
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Number(n) => write!(f, "{}", n),
             Value::Float(f_val) => write!(f, "{}", f_val),
+            Value::Date(date) => write!(f, "{}", date),
+            Value::Time(time) => write!(f, "{}", time.format("%H:%M:%S")),
             Value::Array(arr) => {
                 write!(f, "[")?;
                 for (i, v) in arr.iter().enumerate() {
@@ -270,6 +277,16 @@ impl From<serde_json::Value> for Value {
             _ => Value::String(v.to_string()),
         }
     }
+}
+
+pub(crate) fn parse_iso_date(input: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(input, "%Y-%m-%d").ok()
+}
+
+pub(crate) fn parse_time_of_day(input: &str) -> Option<NaiveTime> {
+    NaiveTime::parse_from_str(input, "%H:%M:%S")
+        .ok()
+        .or_else(|| NaiveTime::parse_from_str(input, "%H:%M").ok())
 }
 /// Errors that can occur during policy parsing
 #[derive(Debug, Clone)]
@@ -490,6 +507,22 @@ impl ContextBuilder {
     pub fn time_of_day(mut self, time: &str) -> Self {
         self.context
             .insert("time.of_day".to_string(), Value::String(time.to_string()));
+        self
+    }
+
+    pub fn date(mut self, date: &str) -> Self {
+        let value = parse_iso_date(date)
+            .map(Value::Date)
+            .unwrap_or_else(|| Value::String(date.to_string()));
+        self.context.insert("time.date".to_string(), value);
+        self
+    }
+
+    pub fn time(mut self, time: &str) -> Self {
+        let value = parse_time_of_day(time)
+            .map(Value::Time)
+            .unwrap_or_else(|| Value::String(time.to_string()));
+        self.context.insert("time.time".to_string(), value);
         self
     }
 

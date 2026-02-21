@@ -1,5 +1,6 @@
 use crate::etc::{ac::Env, ext::RequestExt, geoip};
 use actix_web::HttpMessage;
+use chrono::{DateTime, Utc};
 use db::ent::AuditContext;
 use tracing::info;
 use tracing_actix_web::{DefaultRootSpanBuilder, RootSpanBuilder};
@@ -61,6 +62,14 @@ pub struct StargateRootSpanBuilder;
 impl RootSpanBuilder for StargateRootSpanBuilder {
     fn on_request_start(sr: &actix_web::dev::ServiceRequest) -> tracing::Span {
         let req = sr.request();
+        let gate = req.app_data::<actix_web::web::Data<gate::Gate>>().unwrap();
+        let ts = gate.clock.now_millis() as i64;
+        // FIXME: Evaluate a more performant way to get the current time, this is used in the audit context and in the logs, we should avoid calling chrono::Utc::now() multiple times per request
+        // let now = chrono::Utc::now();
+        let now: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap_or_else(|| Utc::now());
+        let date = now.format("%Y-%m-%d").to_string();
+        let time = now.format("%H:%M").to_string();
+        let day_of_week = now.format("%A").to_string();
 
         let request_id = Ulid::new().to_string();
         let user_agent = req
@@ -109,6 +118,9 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
                 .city_name
                 .clone()
                 .unwrap_or_else(|| "unknown".into()),
+            date: date.into_boxed_str(),
+            time: time.into_boxed_str(),
+            day_of_week: day_of_week.into_boxed_str(),
         };
         req.extensions_mut().insert(env);
 

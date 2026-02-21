@@ -147,6 +147,9 @@ pub struct Env {
     pub country_code: Box<str>,
     pub country_name: Box<str>,
     pub city_name: Box<str>,
+    pub date: Box<str>,
+    pub time: Box<str>,
+    pub day_of_week: Box<str>,
 }
 
 impl Env {
@@ -157,11 +160,14 @@ impl Env {
             ("country_code", self.country_code.as_ref()),
             ("country_name", self.country_name.as_ref()),
             ("city_name", self.city_name.as_ref()),
+            ("date", self.date.as_ref()),
+            ("time", self.time.as_ref()),
+            ("day_of_week", self.day_of_week.as_ref()),
         ]
         .into_iter()
     }
 
     fn len(&self) -> usize {
-        5
+        self.iter().filter(|(_, v)| !v.is_empty()).count()
     }
 }
