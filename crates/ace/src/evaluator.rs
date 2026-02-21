@@ -22,30 +22,61 @@ impl PolicyEvaluator {
         context: &HashMap<String, Value>,
     ) -> bool {
         let mut explicit_allow = false;
-        let mut explicit_deny = false;
-
-        // Process policies in order
         for policy in policies {
             if self.policy_matches(policy, subject, resource, resource_action) {
                 if let Some(ref condition) = policy.condition {
                     if self.evaluate_condition(condition, context) {
                         match policy.action {
                             PolicyAction::Allow => explicit_allow = true,
-                            PolicyAction::Deny => explicit_deny = true,
+                            PolicyAction::Deny => return false,
                         }
                     }
                 } else {
                     // No condition means the policy applies unconditionally
                     match policy.action {
                         PolicyAction::Allow => explicit_allow = true,
-                        PolicyAction::Deny => explicit_deny = true,
+                        PolicyAction::Deny => return false,
                     }
                 }
             }
         }
 
-        // Deny takes precedence over allow
-        if explicit_deny { false } else { explicit_allow }
+        explicit_allow
+    }
+
+    /// Evaluate only pre-matched (subject/resource) policy indices.
+    pub fn evaluate_indexed(
+        &self,
+        policies: &[Policy],
+        candidate_indices: &[usize],
+        resource_action: Option<&ResourceAction>,
+        context: &HashMap<String, Value>,
+    ) -> bool {
+        let mut explicit_allow = false;
+
+        for &index in candidate_indices {
+            let policy = &policies[index];
+            if !self.policy_action_matches(policy, resource_action) {
+                continue;
+            }
+
+            let condition_result = if let Some(ref condition) = policy.condition {
+                self.evaluate_condition(condition, context)
+            } else {
+                true
+            };
+
+            if !condition_result {
+                continue;
+            }
+
+            match policy.action {
+                PolicyAction::Allow => explicit_allow = true,
+                PolicyAction::Deny => return false,
+            }
+        }
+
+        explicit_allow
     }
 
     /// Check if a policy matches the given subject, resource, and action
@@ -58,15 +89,20 @@ impl PolicyEvaluator {
     ) -> bool {
         let subject_matches = policy.subject == subject;
         let resource_matches = policy.resource == resource;
+        subject_matches && resource_matches && self.policy_action_matches(policy, resource_action)
+    }
 
-        let action_matches = match (&policy.resource_action, resource_action) {
+    pub(crate) fn policy_action_matches(
+        &self,
+        policy: &Policy,
+        resource_action: Option<&ResourceAction>,
+    ) -> bool {
+        match (&policy.resource_action, resource_action) {
             (None, _) => true,                      // Policy without action matches any action
             (Some(ResourceAction::Any), _) => true, // Policy with ANY action matches any action
             (Some(policy_action), Some(requested_action)) => policy_action == requested_action,
             (Some(_), None) => false, // Policy with specific action doesn't match request without action
-        };
-
-        subject_matches && resource_matches && action_matches
+        }
     }
 
     /// Evaluate a condition against the provided context
@@ -218,6 +254,57 @@ impl PolicyEvaluator {
                         PolicyAction::Allow => allow_count += 1,
                         PolicyAction::Deny => deny_count += 1,
                     }
+                }
+            }
+        }
+
+        let final_decision = if deny_count > 0 {
+            false
+        } else {
+            allow_count > 0
+        };
+
+        EvaluationResult {
+            decision: final_decision,
+            matched_policies,
+            applied_policies,
+            allow_count,
+            deny_count,
+        }
+    }
+
+    /// Evaluate with details using pre-matched (subject/resource) policy indices.
+    pub fn evaluate_with_details_indexed(
+        &self,
+        policies: &[Policy],
+        candidate_indices: &[usize],
+        resource_action: Option<&ResourceAction>,
+        context: &HashMap<String, Value>,
+    ) -> EvaluationResult {
+        let mut matched_policies = Vec::new();
+        let mut applied_policies = Vec::new();
+        let mut allow_count = 0;
+        let mut deny_count = 0;
+
+        for &index in candidate_indices {
+            let policy = &policies[index];
+            if !self.policy_action_matches(policy, resource_action) {
+                continue;
+            }
+
+            matched_policies.push(index);
+
+            let condition_result = if let Some(ref condition) = policy.condition {
+                self.evaluate_condition(condition, context)
+            } else {
+                true
+            };
+
+            if condition_result {
+                applied_policies.push(index);
+                match policy.action {
+                    PolicyAction::Allow => allow_count += 1,
+                    PolicyAction::Deny => deny_count += 1,
                 }
             }
         }

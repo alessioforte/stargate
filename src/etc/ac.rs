@@ -1,6 +1,12 @@
 use crate::etc::sub::Subject;
+use chrono::{NaiveDate, NaiveTime};
 use lru::LruCache;
-use std::{cell::RefCell, collections::HashMap, num::NonZeroUsize};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
+    num::NonZeroUsize,
+};
 
 const DECISION_CACHE_CAPACITY: usize = 1024;
 
@@ -8,8 +14,8 @@ const DECISION_CACHE_CAPACITY: usize = 1024;
 struct DecisionKey {
     sub_type: Box<str>,
     resource: Box<str>,
-    action: Option<Box<str>>,
-    attrs_signature: Box<str>,
+    action: Option<ace::ResourceAction>,
+    attrs_hash: u64,
 }
 
 struct DecisionCache {
@@ -64,15 +70,11 @@ pub fn access_control(
 ) -> bool {
     let sub_type = subject.sub_type.as_str();
     let (resource_name, resource_action) = parse_resource(resource);
-    let action_key = resource_action
-        .as_ref()
-        .map(|action| action.to_string().into_boxed_str());
-    let attrs_signature = attrs_signature(subject);
     let key = DecisionKey {
         sub_type: Box::from(sub_type),
-        resource: resource_name.clone().into_boxed_str(),
-        action: action_key,
-        attrs_signature,
+        resource: Box::from(resource_name),
+        action: resource_action,
+        attrs_hash: attrs_hash(subject),
     };
 
     let version = crate::etc::gate::get_config_version();
@@ -82,9 +84,9 @@ pub fn access_control(
 
     let context = create_context(subject, env);
     let allowed = match resource_action {
-        None => policy_engine.evaluate(&sub_type, &resource_name, &context),
+        None => policy_engine.evaluate(sub_type, resource_name, &context),
         Some(action) => {
-            policy_engine.evaluate_with_action(&sub_type, &resource_name, &action, &context)
+            policy_engine.evaluate_with_action(sub_type, resource_name, &action, &context)
         }
     };
 
@@ -92,52 +94,114 @@ pub fn access_control(
     allowed
 }
 
-fn parse_resource(resource: &str) -> (String, Option<ace::ResourceAction>) {
-    if let Some(colon_pos) = resource.find(':') {
-        let (res_name, action_str) = resource.split_at(colon_pos);
-        let action_str = &action_str[1..]; // Remove the colon
-        let action = ace::ResourceAction::from_str(action_str);
-        return (res_name.to_string(), action);
+fn parse_resource(resource: &str) -> (&str, Option<ace::ResourceAction>) {
+    if let Some((res_name, action_str)) = resource.split_once(':') {
+        return (res_name, ace::ResourceAction::from_str(action_str));
     }
-    (resource.to_string(), None)
+    (resource, None)
 }
 
-fn attrs_signature(subject: &Subject) -> Box<str> {
+fn attrs_hash(subject: &Subject) -> u64 {
     if subject.attrs.is_null() {
-        return Box::from("");
+        return 0;
     }
     if let Some(attrs) = subject.attrs.as_object() {
         if attrs.is_empty() {
-            return Box::from("");
+            return 0;
         }
     }
-    serde_json::to_string(&subject.attrs)
-        .unwrap_or_default()
-        .into_boxed_str()
+    let mut hasher = DefaultHasher::new();
+    hash_json_value(&subject.attrs, &mut hasher);
+    hasher.finish()
+}
+
+fn hash_json_value(value: &serde_json::Value, hasher: &mut DefaultHasher) {
+    match value {
+        serde_json::Value::Null => {
+            0_u8.hash(hasher);
+        }
+        serde_json::Value::Bool(v) => {
+            1_u8.hash(hasher);
+            v.hash(hasher);
+        }
+        serde_json::Value::Number(v) => {
+            2_u8.hash(hasher);
+            if let Some(i) = v.as_i64() {
+                i.hash(hasher);
+            } else if let Some(u) = v.as_u64() {
+                u.hash(hasher);
+            } else if let Some(f) = v.as_f64() {
+                f.to_bits().hash(hasher);
+            } else {
+                v.to_string().hash(hasher);
+            }
+        }
+        serde_json::Value::String(v) => {
+            3_u8.hash(hasher);
+            v.hash(hasher);
+        }
+        serde_json::Value::Array(v) => {
+            4_u8.hash(hasher);
+            v.len().hash(hasher);
+            for item in v {
+                hash_json_value(item, hasher);
+            }
+        }
+        serde_json::Value::Object(v) => {
+            5_u8.hash(hasher);
+            v.len().hash(hasher);
+            let mut entries: Vec<_> = v.iter().collect();
+            entries.sort_unstable_by(|(ka, _), (kb, _)| ka.cmp(kb));
+            for (k, item) in entries {
+                k.hash(hasher);
+                hash_json_value(item, hasher);
+            }
+        }
+    }
 }
 
 fn create_context(sub: &Subject, env: &Env) -> HashMap<String, ace::Value> {
     let attrs = sub.attrs.as_object();
-    if attrs.is_none() {
-        return ace::ContextBuilder::new().build();
+    let attrs_len = attrs.map(|a| a.len()).unwrap_or(0);
+    let env_len = env.len();
+    if attrs_len == 0 && env_len == 0 {
+        return HashMap::new();
     }
-    let attrs = attrs.unwrap();
-    let mut entries = HashMap::with_capacity(attrs.len() + env.len());
-    let sub_type = sub.sub_type.as_str();
-    attrs.iter().for_each(|(k, v)| {
-        let key = format!("{}.{}", sub_type, k);
-        let value = ace::Value::from(v.clone());
-        entries.insert(key, value);
-    });
 
-    env.iter().for_each(|(k, v)| {
-        let key = format!("env.{}", k);
-        // FIXME: this is a bit hacky, we should have a proper way to convert env values to ace::Value
-        let value = ace::Value::from(serde_json::Value::String(v.to_string()));
-        entries.insert(key, value);
-    });
+    let mut entries = HashMap::with_capacity(attrs_len + env_len);
+    let sub_type = sub.sub_type.as_str();
+
+    if let Some(attrs) = attrs {
+        for (k, v) in attrs {
+            let mut key = String::with_capacity(sub_type.len() + 1 + k.len());
+            key.push_str(sub_type);
+            key.push('.');
+            key.push_str(k);
+            entries.insert(key, ace::Value::from(v));
+        }
+    }
+
+    for (k, v) in env.iter() {
+        let mut key = String::with_capacity(4 + k.len());
+        key.push_str("env.");
+        key.push_str(k);
+        entries.insert(key, normalize_env_value(k, v));
+    }
 
     entries
+}
+
+fn normalize_env_value(key: &str, value: &str) -> ace::Value {
+    match key {
+        "date" => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map(ace::Value::Date)
+            .unwrap_or_else(|_| ace::Value::String(value.to_string())),
+        "time" => NaiveTime::parse_from_str(value, "%H:%M:%S")
+            .or_else(|_| NaiveTime::parse_from_str(value, "%H:%M"))
+            .map(ace::Value::Time)
+            .unwrap_or_else(|_| ace::Value::String(value.to_string())),
+        _ => ace::Value::String(value.to_string()),
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -165,9 +229,10 @@ impl Env {
             ("day_of_week", self.day_of_week.as_ref()),
         ]
         .into_iter()
+        .filter(|(_, v)| !v.is_empty())
     }
 
     fn len(&self) -> usize {
-        self.iter().filter(|(_, v)| !v.is_empty()).count()
+        self.iter().count()
     }
 }

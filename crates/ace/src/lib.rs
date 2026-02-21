@@ -36,7 +36,7 @@ pub use evaluator::{EvaluationResult, PolicyEvaluator};
 pub use parser::PolicyParser;
 
 /// Represents the action a policy should take
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PolicyAction {
     Allow,
     Deny,
@@ -62,7 +62,7 @@ pub struct Policy {
 }
 
 /// Resource actions that can be performed
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceAction {
     Read,
     Write,
@@ -179,7 +179,7 @@ impl fmt::Display for Expression {
 }
 
 /// Comparison operators
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operator {
     Equal,
     NotEqual,
@@ -279,6 +279,36 @@ impl From<serde_json::Value> for Value {
     }
 }
 
+/// from &serde_json::Value
+/// Convert borrowed serde_json::Value to our Value enum.
+impl From<&serde_json::Value> for Value {
+    fn from(v: &serde_json::Value) -> Self {
+        match v {
+            serde_json::Value::String(s) => {
+                if let Some(date) = parse_iso_date(s) {
+                    Value::Date(date)
+                } else if let Some(time) = parse_time_of_day(s) {
+                    Value::Time(time)
+                } else {
+                    Value::String(s.clone())
+                }
+            }
+            serde_json::Value::Bool(b) => Value::Boolean(*b),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Value::Number(i)
+                } else if let Some(f) = n.as_f64() {
+                    Value::Float(f)
+                } else {
+                    Value::String(n.to_string())
+                }
+            }
+            serde_json::Value::Array(arr) => Value::Array(arr.iter().map(Value::from).collect()),
+            _ => Value::String(v.to_string()),
+        }
+    }
+}
+
 pub(crate) fn parse_iso_date(input: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(input, "%Y-%m-%d").ok()
 }
@@ -313,6 +343,7 @@ impl std::error::Error for ParseError {}
 /// Main policy engine that combines parsing and evaluation
 pub struct PolicyEngine {
     policies: Vec<Policy>,
+    policy_index: HashMap<String, HashMap<String, Vec<usize>>>,
     parser: PolicyParser,
     evaluator: PolicyEvaluator,
 }
@@ -322,6 +353,7 @@ impl PolicyEngine {
     pub fn new() -> Self {
         Self {
             policies: Vec::new(),
+            policy_index: HashMap::new(),
             parser: PolicyParser::new(),
             evaluator: PolicyEvaluator::new(),
         }
@@ -339,7 +371,7 @@ impl PolicyEngine {
 
             // Try to parse as policy, skip invalid lines
             if let Ok(policy) = self.parser.parse_line(line) {
-                self.policies.push(policy);
+                self.add_policy(policy);
             }
         }
         Ok(())
@@ -357,8 +389,11 @@ impl PolicyEngine {
         resource: &str,
         context: &HashMap<String, Value>,
     ) -> bool {
+        let Some(candidate_indices) = self.candidate_indices(subject, resource) else {
+            return false;
+        };
         self.evaluator
-            .evaluate(&self.policies, subject, resource, None, context)
+            .evaluate_indexed(&self.policies, candidate_indices, None, context)
     }
 
     /// Evaluate access for a subject and resource with specific action
@@ -369,10 +404,12 @@ impl PolicyEngine {
         resource_action: &ResourceAction,
         context: &HashMap<String, Value>,
     ) -> bool {
-        self.evaluator.evaluate(
+        let Some(candidate_indices) = self.candidate_indices(subject, resource) else {
+            return false;
+        };
+        self.evaluator.evaluate_indexed(
             &self.policies,
-            subject,
-            resource,
+            candidate_indices,
             Some(resource_action),
             context,
         )
@@ -385,8 +422,21 @@ impl PolicyEngine {
         resource: &str,
         context: &HashMap<String, Value>,
     ) -> EvaluationResult {
-        self.evaluator
-            .evaluate_with_details(&self.policies, subject, resource, None, context)
+        let Some(candidate_indices) = self.candidate_indices(subject, resource) else {
+            return EvaluationResult {
+                decision: false,
+                matched_policies: Vec::new(),
+                applied_policies: Vec::new(),
+                allow_count: 0,
+                deny_count: 0,
+            };
+        };
+        self.evaluator.evaluate_with_details_indexed(
+            &self.policies,
+            candidate_indices,
+            None,
+            context,
+        )
     }
 
     /// Evaluate with detailed results for specific action
@@ -397,10 +447,18 @@ impl PolicyEngine {
         resource_action: &ResourceAction,
         context: &HashMap<String, Value>,
     ) -> EvaluationResult {
-        self.evaluator.evaluate_with_details(
+        let Some(candidate_indices) = self.candidate_indices(subject, resource) else {
+            return EvaluationResult {
+                decision: false,
+                matched_policies: Vec::new(),
+                applied_policies: Vec::new(),
+                allow_count: 0,
+                deny_count: 0,
+            };
+        };
+        self.evaluator.evaluate_with_details_indexed(
             &self.policies,
-            subject,
-            resource,
+            candidate_indices,
             Some(resource_action),
             context,
         )
@@ -414,17 +472,21 @@ impl PolicyEngine {
     /// Add a policy programmatically
     pub fn add_policy(&mut self, policy: Policy) {
         self.policies.push(policy);
+        let index = self.policies.len() - 1;
+        self.index_policy(index);
     }
 
     /// Clear all policies
     pub fn clear_policies(&mut self) {
         self.policies.clear();
+        self.policy_index.clear();
     }
 
     /// Get policies that match a subject and resource
     pub fn get_matching_policies(&self, subject: &str, resource: &str) -> Vec<&Policy> {
-        self.evaluator
-            .get_matching_policies(&self.policies, subject, resource, None)
+        self.candidate_indices(subject, resource)
+            .map(|indices| indices.iter().map(|&index| &self.policies[index]).collect())
+            .unwrap_or_default()
     }
 
     /// Get policies that match a subject, resource, and action
@@ -434,12 +496,24 @@ impl PolicyEngine {
         resource: &str,
         resource_action: &ResourceAction,
     ) -> Vec<&Policy> {
-        self.evaluator.get_matching_policies(
-            &self.policies,
-            subject,
-            resource,
-            Some(resource_action),
-        )
+        self.candidate_indices(subject, resource)
+            .map(|indices| {
+                indices
+                    .iter()
+                    .filter_map(|&index| {
+                        let policy = &self.policies[index];
+                        if self
+                            .evaluator
+                            .policy_action_matches(policy, Some(resource_action))
+                        {
+                            Some(policy)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Load policies from multiple sources
@@ -453,6 +527,23 @@ impl PolicyEngine {
     /// Export policies as formatted strings
     pub fn export_policies(&self) -> Vec<String> {
         self.policies.iter().map(|p| format!("{}", p)).collect()
+    }
+
+    fn index_policy(&mut self, policy_index: usize) {
+        let policy = &self.policies[policy_index];
+        self.policy_index
+            .entry(policy.subject.clone())
+            .or_default()
+            .entry(policy.resource.clone())
+            .or_default()
+            .push(policy_index);
+    }
+
+    fn candidate_indices(&self, subject: &str, resource: &str) -> Option<&[usize]> {
+        self.policy_index
+            .get(subject)
+            .and_then(|resources| resources.get(resource))
+            .map(Vec::as_slice)
     }
 }
 
