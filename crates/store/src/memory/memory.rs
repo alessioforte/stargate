@@ -7,12 +7,13 @@ use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry as DashEntry;
 use portable_atomic::AtomicI64;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-pub type Data = Vec<u8>;
+pub type Data = Arc<[u8]>;
 
 #[derive(Debug, Clone)]
 pub enum StoreValue {
@@ -91,27 +92,51 @@ impl MemoryStore {
         })
     }
 
+    #[inline]
+    fn expiration_from_ttl(&self, ttl: Option<u64>) -> Option<DateTime<Utc>> {
+        ttl.map(|seconds| self.get_cached_now() + chrono::Duration::seconds(seconds as i64))
+    }
+
+    #[inline]
+    fn wrong_type_error(&self) -> StoreError {
+        StoreError::TypeMismatch(
+            "WRONGTYPE Operation against a key holding the wrong kind of value".to_string(),
+        )
+    }
+
+    #[inline]
+    fn is_expired_at(&self, exp: &Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+        exp.is_some_and(|date| now > date)
+    }
+
+    #[inline]
+    fn store_value_is_expired_at(&self, value: &StoreValue, now: DateTime<Utc>) -> bool {
+        match value {
+            StoreValue::Simple(_, exp) => self.is_expired_at(exp, now),
+            StoreValue::Hash(_, exp) => self.is_expired_at(exp, now),
+            StoreValue::AtomicI64(_, exp) => self.is_expired_at(exp, now),
+        }
+    }
+
+    #[inline]
+    fn remove_key_if_expired_at(&self, key: &str, now: DateTime<Utc>) -> bool {
+        self.data
+            .remove_if(key, |_, value| self.store_value_is_expired_at(value, now))
+            .is_some()
+    }
+
     pub fn is_expired(&self, exp: &Option<DateTime<Utc>>) -> bool {
-        exp.map_or(false, |date| self.get_cached_now() > date)
+        self.is_expired_at(exp, self.get_cached_now())
     }
 
     /// Atomically check if entry is expired and remove it if so
     fn check_and_remove_if_expired(&self, key: &str) -> bool {
-        if let Some(entry) = self.data.get(key) {
-            let is_expired = match entry.value() {
-                StoreValue::Simple(_, exp) => self.is_expired(exp),
-                StoreValue::Hash(_, exp) => self.is_expired(exp),
-                StoreValue::AtomicI64(_, exp) => self.is_expired(exp),
-            };
-
-            if is_expired {
-                drop(entry); // Release read lock before removing
-                self.data.remove(key);
-                self.stats
-                    .expired_entries_cleaned
-                    .fetch_add(1, Ordering::Relaxed);
-                return true;
-            }
+        let now = self.get_cached_now();
+        if self.remove_key_if_expired_at(key, now) {
+            self.stats
+                .expired_entries_cleaned
+                .fetch_add(1, Ordering::Relaxed);
+            return true;
         }
         false
     }
@@ -122,12 +147,14 @@ impl MemoryStore {
             match entry.value() {
                 StoreValue::Simple(value, exp) => {
                     // Atomic check and access
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry); // Release read lock
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::Relaxed);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                         self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                         return Ok(None);
                     }
@@ -138,11 +165,11 @@ impl MemoryStore {
                 }
                 StoreValue::Hash(_, _) => {
                     self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                    Ok(None) // Cannot get hash as simple value
+                    Err(self.wrong_type_error())
                 }
                 StoreValue::AtomicI64(_, _) => {
                     self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
-                    Ok(None) // Cannot get AtomicI64 as simple value
+                    Err(self.wrong_type_error())
                 }
             }
         } else {
@@ -160,7 +187,7 @@ impl MemoryStore {
             }
             StoreValue::Hash(hash_map, _) => {
                 let base_size =
-                    std::mem::size_of::<DashMap<String, (String, Option<DateTime<Utc>>)>>()
+                    std::mem::size_of::<DashMap<String, (Data, Option<DateTime<Utc>>)>>()
                         + std::mem::size_of::<Option<DateTime<Utc>>>();
                 let entries_size: usize = hash_map
                     .iter()
@@ -247,8 +274,8 @@ impl MemoryStore {
     }
 
     pub fn get_cache_hit_ratio(&self) -> f64 {
-        let hits = self.stats.cache_hits.load(Ordering::Acquire);
-        let misses = self.stats.cache_misses.load(Ordering::Acquire);
+        let hits = self.stats.cache_hits.load(Ordering::Relaxed);
+        let misses = self.stats.cache_misses.load(Ordering::Relaxed);
         let total = hits + misses;
         if total == 0 {
             0.0
@@ -299,9 +326,9 @@ impl Store for MemoryStore {
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
-        let data = self.serialize(value)?;
+        let data: Data = self.serialize(value)?.into();
 
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let exp = self.expiration_from_ttl(ttl);
         self.data
             .insert(key.to_string(), StoreValue::Simple(data, exp));
         Ok(())
@@ -354,36 +381,42 @@ impl Store for MemoryStore {
 
         self.stats.hash_sets.fetch_add(1, Ordering::Relaxed);
 
-        let serialized_value = self.serialize(value)?;
-        let field_exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let serialized_value: Data = self.serialize(value)?.into();
+        let field_exp = self.expiration_from_ttl(ttl);
 
         // Check if the key already exists before inserting, to detect type mismatches
         // and handle expired hashes correctly.
         if let Some(existing) = self.data.get(key) {
             match existing.value() {
                 StoreValue::Hash(_, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         // Expired hash: drop the read guard, remove the key, and fall through
                         // to create a fresh hash below (same as if key didn't exist).
                         drop(existing);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::Relaxed);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                     } else {
                         // Key exists and is a live hash — insert the field directly.
                         if let StoreValue::Hash(hash_map, _) = existing.value() {
-                            let is_new = !hash_map.contains_key(field);
-                            hash_map.insert(field.to_string(), (serialized_value, field_exp));
-                            return Ok(is_new);
+                            match hash_map.entry(field.to_string()) {
+                                DashEntry::Occupied(mut occupied) => {
+                                    occupied.insert((serialized_value, field_exp));
+                                    return Ok(false);
+                                }
+                                DashEntry::Vacant(vacant) => {
+                                    vacant.insert((serialized_value, field_exp));
+                                    return Ok(true);
+                                }
+                            }
                         }
                     }
                 }
                 StoreValue::Simple(_, _) | StoreValue::AtomicI64(_, _) => {
-                    return Err(StoreError::TypeMismatch(
-                        "WRONGTYPE Operation against a key holding the wrong kind of value"
-                            .to_string(),
-                    ));
+                    return Err(self.wrong_type_error());
                 }
             }
         }
@@ -410,50 +443,58 @@ impl Store for MemoryStore {
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
-            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+            self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
             return Ok(None);
         }
 
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::Relaxed);
-                        self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
+                        self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                         return Ok(None);
                     }
 
                     if let Some(field_entry) = hash_map.get(field) {
                         let (value, field_exp) = field_entry.value();
-                        if self.is_expired(field_exp) {
+                        if self.is_expired_at(field_exp, now) {
                             drop(field_entry);
-                            hash_map.remove(field);
-                            self.stats
-                                .expired_entries_cleaned
-                                .fetch_add(1, Ordering::SeqCst);
-                            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                            if hash_map
+                                .remove_if(field, |_, (_, candidate_exp)| {
+                                    self.is_expired_at(candidate_exp, now)
+                                })
+                                .is_some()
+                            {
+                                self.stats
+                                    .expired_entries_cleaned
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
+                            self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                             return Ok(None);
                         }
 
-                        self.stats.cache_hits.fetch_add(1, Ordering::Acquire);
+                        self.stats.cache_hits.fetch_add(1, Ordering::Relaxed);
                         let deserialized = self.deserialize(value)?;
                         Ok(Some(deserialized))
                     } else {
-                        self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                        self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                         Ok(None)
                     }
                 }
                 _ => {
-                    self.stats.cache_misses.fetch_add(1, Ordering::Release);
-                    Ok(None) // Key exists but is not a hash
+                    self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
+                    Err(self.wrong_type_error())
                 }
             }
         } else {
-            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+            self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
             Ok(None)
         }
     }
@@ -473,17 +514,19 @@ impl Store for MemoryStore {
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                         return Ok(false);
                     }
                     Ok(hash_map.remove(field).is_some())
                 }
-                _ => Ok(false),
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(false)
@@ -505,12 +548,14 @@ impl Store for MemoryStore {
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::Relaxed);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                         return Ok(HashMap::new());
                     }
 
@@ -520,7 +565,6 @@ impl Store for MemoryStore {
                     } else {
                         HashMap::new()
                     };
-                    let now = self.get_cached_now();
 
                     // Collect expired fields to remove them atomically
                     let mut expired_fields = Vec::new();
@@ -537,15 +581,21 @@ impl Store for MemoryStore {
 
                     // Remove expired fields
                     for field in expired_fields {
-                        hash_map.remove(&field);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::Relaxed);
+                        if hash_map
+                            .remove_if(&field, |_, (_, candidate_exp)| {
+                                self.is_expired_at(candidate_exp, now)
+                            })
+                            .is_some()
+                        {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                     }
 
                     Ok(result)
                 }
-                _ => Ok(HashMap::new()), // Cannot get all fields from simple value
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(HashMap::new())
@@ -562,7 +612,9 @@ impl Store for MemoryStore {
             ));
         }
 
-        self.stats.hash_exists_checks.fetch_add(1, Ordering::SeqCst);
+        self.stats
+            .hash_exists_checks
+            .fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
@@ -572,23 +624,31 @@ impl Store for MemoryStore {
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                         return Ok(false);
                     }
 
                     if let Some(field_entry) = hash_map.get(field) {
                         let (_, field_exp) = field_entry.value();
-                        if self.is_expired(field_exp) {
+                        if self.is_expired_at(field_exp, now) {
                             drop(field_entry);
-                            hash_map.remove(field);
-                            self.stats
-                                .expired_entries_cleaned
-                                .fetch_add(1, Ordering::SeqCst);
+                            if hash_map
+                                .remove_if(field, |_, (_, candidate_exp)| {
+                                    self.is_expired_at(candidate_exp, now)
+                                })
+                                .is_some()
+                            {
+                                self.stats
+                                    .expired_entries_cleaned
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
                             Ok(false)
                         } else {
                             Ok(true)
@@ -597,7 +657,7 @@ impl Store for MemoryStore {
                         Ok(false)
                     }
                 }
-                _ => Ok(false), // Key exists but is not a hash
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(false)
@@ -609,7 +669,7 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.hash_keys_calls.fetch_add(1, Ordering::SeqCst);
+        self.stats.hash_keys_calls.fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
@@ -619,16 +679,16 @@ impl Store for MemoryStore {
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                         return Ok(Vec::new());
                     }
-
-                    let now = Utc::now();
                     let mut keys = Vec::new();
                     let mut expired_fields = Vec::new();
 
@@ -643,15 +703,21 @@ impl Store for MemoryStore {
 
                     // Remove expired fields
                     for field in expired_fields {
-                        hash_map.remove(&field);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if hash_map
+                            .remove_if(&field, |_, (_, candidate_exp)| {
+                                self.is_expired_at(candidate_exp, now)
+                            })
+                            .is_some()
+                        {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                     }
 
                     Ok(keys)
                 }
-                _ => Ok(Vec::new()), // Cannot get keys from simple value
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(Vec::new())
@@ -663,7 +729,7 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.hash_vals_calls.fetch_add(1, Ordering::SeqCst);
+        self.stats.hash_vals_calls.fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
@@ -673,16 +739,16 @@ impl Store for MemoryStore {
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                         return Ok(Vec::new());
                     }
-
-                    let now = Utc::now();
                     let mut values = Vec::new();
                     let mut expired_fields = Vec::new();
 
@@ -698,15 +764,21 @@ impl Store for MemoryStore {
 
                     // Remove expired fields
                     for field in expired_fields {
-                        hash_map.remove(&field);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if hash_map
+                            .remove_if(&field, |_, (_, candidate_exp)| {
+                                self.is_expired_at(candidate_exp, now)
+                            })
+                            .is_some()
+                        {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                     }
 
                     Ok(values)
                 }
-                _ => Ok(Vec::new()), // Cannot get values from simple value or AtomicI64
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(Vec::new())
@@ -718,7 +790,7 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.hash_len_calls.fetch_add(1, Ordering::SeqCst);
+        self.stats.hash_len_calls.fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
@@ -728,17 +800,18 @@ impl Store for MemoryStore {
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::Hash(hash_map, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                         return Ok(0);
                     }
 
                     // Clean expired fields and count valid ones
-                    let now = Utc::now();
                     let mut valid_count = 0;
                     let mut expired_fields = Vec::new();
 
@@ -753,15 +826,21 @@ impl Store for MemoryStore {
 
                     // Remove expired fields
                     for field in expired_fields {
-                        hash_map.remove(&field);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
+                        if hash_map
+                            .remove_if(&field, |_, (_, candidate_exp)| {
+                                self.is_expired_at(candidate_exp, now)
+                            })
+                            .is_some()
+                        {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
                     }
 
                     Ok(valid_count)
                 }
-                _ => Ok(0), // Cannot get length from simple value or AtomicI64
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(0)
@@ -769,7 +848,7 @@ impl Store for MemoryStore {
     }
 
     /// Compare and swap operation for atomic updates
-    async fn compare_and_swap<T: SerializeValue + DeserializeValue>(
+    async fn compare_and_swap<T: SerializeValue + DeserializeValue + PartialEq>(
         &self,
         key: &str,
         expected: &T,
@@ -781,23 +860,34 @@ impl Store for MemoryStore {
         }
 
         let expected_str = self.serialize(expected)?;
-        let new_str = self.serialize(new_value)?;
+        let new_str: Data = self.serialize(new_value)?.into();
 
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let exp = self.expiration_from_ttl(ttl);
 
         if let Some(mut entry) = self.data.get_mut(key) {
             match entry.value_mut() {
                 StoreValue::Simple(current, current_exp) => {
-                    if !self.is_expired(current_exp) && current == &expected_str {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(current_exp, now) {
+                        drop(entry);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
+                        return Ok(false);
+                    }
+
+                    if current.as_ref() == expected_str.as_slice() {
                         *current = new_str;
                         *current_exp = exp;
-                        self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                        self.stats.sets.fetch_add(1, Ordering::Relaxed);
                         Ok(true)
                     } else {
                         Ok(false)
                     }
                 }
-                _ => Ok(false),
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(false)
@@ -812,37 +902,39 @@ impl AtomicStore for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        self.stats.gets.fetch_add(1, Ordering::SeqCst);
+        self.stats.gets.fetch_add(1, Ordering::Relaxed);
 
         // Check if expired and remove atomically
         if self.check_and_remove_if_expired(key) {
-            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+            self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
             return Ok(None);
         }
 
         if let Some(entry) = self.data.get(key) {
             match entry.value() {
                 StoreValue::AtomicI64(atomic, exp) => {
-                    if self.is_expired(exp) {
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(exp, now) {
                         drop(entry);
-                        self.data.remove(key);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
-                        self.stats.cache_misses.fetch_add(1, Ordering::Release);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
+                        self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
                         return Ok(None);
                     }
 
-                    self.stats.cache_hits.fetch_add(1, Ordering::Acquire);
-                    Ok(Some(atomic.load(Ordering::SeqCst)))
+                    self.stats.cache_hits.fetch_add(1, Ordering::Relaxed);
+                    Ok(Some(atomic.load(Ordering::Relaxed)))
                 }
                 _ => {
-                    self.stats.cache_misses.fetch_add(1, Ordering::Release);
-                    Ok(None) // Key exists but is not an AtomicI64
+                    self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
+                    Err(self.wrong_type_error())
                 }
             }
         } else {
-            self.stats.cache_misses.fetch_add(1, Ordering::Release);
+            self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
             Ok(None)
         }
     }
@@ -857,10 +949,10 @@ impl AtomicStore for MemoryStore {
             }
         }
 
-        self.stats.sets.fetch_add(1, Ordering::SeqCst);
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
         let atomic = Arc::new(AtomicI64::new(value));
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let exp = self.expiration_from_ttl(ttl);
         self.data
             .insert(key.to_string(), StoreValue::AtomicI64(atomic, exp));
         Ok(())
@@ -876,7 +968,7 @@ impl AtomicStore for MemoryStore {
             }
         }
 
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let exp = self.expiration_from_ttl(ttl);
 
         let mut entry = self
             .data
@@ -891,22 +983,20 @@ impl AtomicStore for MemoryStore {
                     *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
                     self.stats
                         .expired_entries_cleaned
-                        .fetch_add(1, Ordering::SeqCst);
-                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.stats.sets.fetch_add(1, Ordering::Relaxed);
                     return Ok(Some(by));
                 }
 
-                let new_value = atomic.fetch_add(by, Ordering::SeqCst) + by;
+                let new_value = atomic.fetch_add(by, Ordering::Relaxed) + by;
                 // Update expiration if TTL is provided
                 if ttl.is_some() {
                     *current_exp = exp;
                 }
-                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                self.stats.sets.fetch_add(1, Ordering::Relaxed);
                 Ok(Some(new_value))
             }
-            _ => Err(StoreError::TypeMismatch(
-                "Key exists but is not an AtomicI64".to_string(),
-            )),
+            _ => Err(self.wrong_type_error()),
         }
     }
 
@@ -920,7 +1010,7 @@ impl AtomicStore for MemoryStore {
             }
         }
 
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let exp = self.expiration_from_ttl(ttl);
 
         let mut entry = self
             .data
@@ -935,22 +1025,20 @@ impl AtomicStore for MemoryStore {
                     *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
                     self.stats
                         .expired_entries_cleaned
-                        .fetch_add(1, Ordering::SeqCst);
-                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.stats.sets.fetch_add(1, Ordering::Relaxed);
                     return Ok(Some(-by));
                 }
 
-                let new_value = atomic.fetch_sub(by, Ordering::SeqCst) - by;
+                let new_value = atomic.fetch_sub(by, Ordering::Relaxed) - by;
                 // Update expiration if TTL is provided
                 if ttl.is_some() {
                     *current_exp = exp;
                 }
-                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                self.stats.sets.fetch_add(1, Ordering::Relaxed);
                 Ok(Some(new_value))
             }
-            _ => Err(StoreError::TypeMismatch(
-                "Key exists but is not an AtomicI64".to_string(),
-            )),
+            _ => Err(self.wrong_type_error()),
         }
     }
 
@@ -970,37 +1058,37 @@ impl AtomicStore for MemoryStore {
             }
         }
 
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let exp = self.expiration_from_ttl(ttl);
 
         if let Some(mut entry) = self.data.get_mut(key) {
             match entry.value_mut() {
                 StoreValue::AtomicI64(atomic, current_exp) => {
-                    if self.is_expired(current_exp) {
-                        // If expired, reset to new value
-                        let new_atomic = Arc::new(AtomicI64::new(new));
-                        *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
-                        self.stats
-                            .expired_entries_cleaned
-                            .fetch_add(1, Ordering::SeqCst);
-                        return Ok(true);
+                    let now = self.get_cached_now();
+                    if self.is_expired_at(current_exp, now) {
+                        // Match Redis semantics: expired key behaves as missing key.
+                        drop(entry);
+                        if self.remove_key_if_expired_at(key, now) {
+                            self.stats
+                                .expired_entries_cleaned
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
+                        return Ok(false);
                     }
 
-                    let current_value = atomic.load(Ordering::SeqCst);
+                    let current_value = atomic.load(Ordering::Relaxed);
                     if current_value == old {
-                        atomic.store(new, Ordering::SeqCst);
+                        atomic.store(new, Ordering::Relaxed);
                         // Update expiration if TTL is provided
                         if ttl.is_some() {
                             *current_exp = exp;
                         }
-                        self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                        self.stats.sets.fetch_add(1, Ordering::Relaxed);
                         Ok(true)
                     } else {
                         Ok(false)
                     }
                 }
-                _ => Err(StoreError::TypeMismatch(
-                    "Key exists but is not an AtomicI64".to_string(),
-                )),
+                _ => Err(self.wrong_type_error()),
             }
         } else {
             Ok(false)
@@ -1029,40 +1117,41 @@ impl MemoryStore {
             }
         }
 
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
-        let default_data = self.serialize(&default)?;
-        let mut entry = self
-            .data
-            .entry(key.to_string())
-            .or_insert_with(|| StoreValue::Simple(default_data.clone(), None));
-
-        match entry.value_mut() {
-            StoreValue::Simple(current, current_exp) => {
-                if self.is_expired(current_exp) {
-                    let (res, new_value) = measure_fn(default.clone());
-                    let new_data = self.serialize(&new_value)?;
-                    *current = new_data;
-                    *current_exp = exp;
-                    self.stats
-                        .expired_entries_cleaned
-                        .fetch_add(1, Ordering::SeqCst);
-                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
-                    return Ok((res, new_value));
-                }
-
-                let current_value: T = self.deserialize(current)?;
-                let (res, new_value) = measure_fn(current_value);
-                let new_data = self.serialize(&new_value)?;
-                *current = new_data;
-                if ttl.is_some() {
-                    *current_exp = exp;
-                }
-                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+        let exp = self.expiration_from_ttl(ttl);
+        match self.data.entry(key.to_string()) {
+            DashEntry::Vacant(vacant) => {
+                let (res, new_value) = measure_fn(default);
+                let new_data: Data = self.serialize(&new_value)?.into();
+                vacant.insert(StoreValue::Simple(new_data, exp));
+                self.stats.sets.fetch_add(1, Ordering::Relaxed);
                 Ok((res, new_value))
             }
-            _ => Err(StoreError::TypeMismatch(
-                "Key exists but is not a simple value".to_string(),
-            )),
+            DashEntry::Occupied(mut occupied) => match occupied.get_mut() {
+                StoreValue::Simple(current, current_exp) => {
+                    if self.is_expired(current_exp) {
+                        let (res, new_value) = measure_fn(default.clone());
+                        let new_data: Data = self.serialize(&new_value)?.into();
+                        *current = new_data;
+                        *current_exp = exp;
+                        self.stats
+                            .expired_entries_cleaned
+                            .fetch_add(1, Ordering::Relaxed);
+                        self.stats.sets.fetch_add(1, Ordering::Relaxed);
+                        return Ok((res, new_value));
+                    }
+
+                    let current_value: T = self.deserialize(current)?;
+                    let (res, new_value) = measure_fn(current_value);
+                    let new_data: Data = self.serialize(&new_value)?.into();
+                    *current = new_data;
+                    if ttl.is_some() {
+                        *current_exp = exp;
+                    }
+                    self.stats.sets.fetch_add(1, Ordering::Relaxed);
+                    Ok((res, new_value))
+                }
+                _ => Err(self.wrong_type_error()),
+            },
         }
     }
 }
@@ -1086,41 +1175,44 @@ impl MemoryStore {
             }
         }
 
-        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
-
-        let mut entry = self
-            .data
-            .entry(key.to_string())
-            .or_insert_with(|| StoreValue::AtomicI64(Arc::new(AtomicI64::new(0)), None));
-
-        match entry.value_mut() {
-            StoreValue::AtomicI64(atomic, current_exp) => {
-                if self.is_expired(current_exp) {
-                    // If expired, reset to measure_fn(0)
-                    let (res, new_value) = measure_fn(0);
-                    let new_atomic = Arc::new(AtomicI64::new(new_value));
-                    *entry = StoreValue::AtomicI64(new_atomic.clone(), exp);
-                    self.stats
-                        .expired_entries_cleaned
-                        .fetch_add(1, Ordering::SeqCst);
-                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
-                    return Ok((res, new_value));
-                }
-
-                // FIXME: Problem**: Between `load` and `store`, another thread can modify the value → lost updates, incorrect rate limiting under concurrency.
-                let current_value = atomic.load(Ordering::SeqCst);
-                let (res, new_value) = measure_fn(current_value);
-                atomic.store(new_value, Ordering::SeqCst);
-                // Update expiration if TTL is provided
-                if ttl.is_some() {
-                    *current_exp = exp;
-                }
-                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+        let exp = self.expiration_from_ttl(ttl);
+        match self.data.entry(key.to_string()) {
+            DashEntry::Vacant(vacant) => {
+                let (res, new_value) = measure_fn(0);
+                vacant.insert(StoreValue::AtomicI64(
+                    Arc::new(AtomicI64::new(new_value)),
+                    exp,
+                ));
+                self.stats.sets.fetch_add(1, Ordering::Relaxed);
                 Ok((res, new_value))
             }
-            _ => Err(StoreError::TypeMismatch(
-                "Key exists but is not an AtomicI64".to_string(),
-            )),
+            DashEntry::Occupied(mut occupied) => match occupied.get_mut() {
+                StoreValue::AtomicI64(atomic, current_exp) => {
+                    if self.is_expired(current_exp) {
+                        // If expired, reset to measure_fn(0)
+                        let (res, new_value) = measure_fn(0);
+                        atomic.store(new_value, Ordering::Relaxed);
+                        *current_exp = exp;
+                        self.stats
+                            .expired_entries_cleaned
+                            .fetch_add(1, Ordering::Relaxed);
+                        self.stats.sets.fetch_add(1, Ordering::Relaxed);
+                        return Ok((res, new_value));
+                    }
+
+                    // FIXME: Problem**: Between `load` and `store`, another thread can modify the value → lost updates, incorrect rate limiting under concurrency.
+                    let current_value = atomic.load(Ordering::Relaxed);
+                    let (res, new_value) = measure_fn(current_value);
+                    atomic.store(new_value, Ordering::Relaxed);
+                    // Update expiration if TTL is provided
+                    if ttl.is_some() {
+                        *current_exp = exp;
+                    }
+                    self.stats.sets.fetch_add(1, Ordering::Relaxed);
+                    Ok((res, new_value))
+                }
+                _ => Err(self.wrong_type_error()),
+            },
         }
     }
 }
@@ -1156,6 +1248,7 @@ impl MemoryStore {
         operations: &[(&str, &T, Option<u64>)],
     ) -> StoreResult<Vec<bool>> {
         let mut results = Vec::with_capacity(operations.len());
+        let now = self.get_cached_now();
 
         for &(key, value, ttl) in operations {
             if key.trim().is_empty() {
@@ -1173,9 +1266,9 @@ impl MemoryStore {
             self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
             match self.serialize(value) {
-                Ok(data) => {
-                    let exp =
-                        ttl.map(|t| self.get_cached_now() + chrono::Duration::seconds(t as i64));
+                Ok(serialized) => {
+                    let data: Data = serialized.into();
+                    let exp = ttl.map(|seconds| now + chrono::Duration::seconds(seconds as i64));
                     self.data
                         .insert(key.to_string(), StoreValue::Simple(data, exp));
                     results.push(true);
@@ -1235,8 +1328,13 @@ impl MemoryStore {
         let mut checked = 0;
         let now = self.get_cached_now();
 
+        // Avoid full memory scans in the hot cleanup path: use a cheap approximation.
+        let estimated_usage = self.data.len().saturating_mul(128);
+        let is_under_pressure =
+            self.config.max_memory_usage > 0 && estimated_usage > self.config.max_memory_usage;
+
         // Apply memory pressure adjustment to batch size
-        let adjusted_batch_size = if self.is_memory_pressure() {
+        let adjusted_batch_size = if is_under_pressure {
             effective_batch_size * 2 // Clean more aggressively under memory pressure
         } else {
             effective_batch_size
@@ -1249,7 +1347,7 @@ impl MemoryStore {
             checked += 1;
 
             let should_keep = match value {
-                StoreValue::Simple(_, exp) => !self.is_expired(exp),
+                StoreValue::Simple(_, exp) => !self.is_expired_at(exp, now),
                 StoreValue::Hash(hash_map, exp) => {
                     // Clean expired hash fields
                     let mut fields_removed = 0;
@@ -1263,9 +1361,9 @@ impl MemoryStore {
                     removed += fields_removed;
 
                     // Keep hash if not expired and has fields
-                    !self.is_expired(exp) && !hash_map.is_empty()
+                    !self.is_expired_at(exp, now) && !hash_map.is_empty()
                 }
-                StoreValue::AtomicI64(_, exp) => !self.is_expired(exp),
+                StoreValue::AtomicI64(_, exp) => !self.is_expired_at(exp, now),
             };
 
             if !should_keep {
@@ -1297,6 +1395,8 @@ impl MemoryStore {
             + stats.hash_keys_calls
             + stats.hash_vals_calls
             + stats.hash_len_calls;
+        let total_keys = self.get_total_keys();
+        let memory_usage_bytes = self.get_memory_usage_bytes();
 
         MemoryStorePerformanceMetrics {
             cache_hit_ratio: self.get_cache_hit_ratio(),
@@ -1307,10 +1407,10 @@ impl MemoryStore {
             } else {
                 0.0
             },
-            memory_usage_bytes: self.get_memory_usage_bytes(),
-            total_keys: self.get_total_keys(),
-            average_key_size: if self.get_total_keys() > 0 {
-                self.get_memory_usage_bytes() / self.get_total_keys()
+            memory_usage_bytes,
+            total_keys,
+            average_key_size: if total_keys > 0 {
+                memory_usage_bytes / total_keys
             } else {
                 0
             },
@@ -1332,14 +1432,14 @@ impl MemoryStore {
             match entry.value() {
                 StoreValue::Simple(_, exp) => {
                     simple_keys += 1;
-                    if self.is_expired(exp) {
+                    if self.is_expired_at(exp, now) {
                         expired_keys += 1;
                     }
                 }
                 StoreValue::Hash(hash_map, exp) => {
                     hash_keys += 1;
                     total_hash_fields += hash_map.len();
-                    if self.is_expired(exp) {
+                    if self.is_expired_at(exp, now) {
                         expired_keys += 1;
                     } else {
                         // Count expired fields within the hash
@@ -1353,7 +1453,7 @@ impl MemoryStore {
                 }
                 StoreValue::AtomicI64(_, exp) => {
                     atomic_keys += 1;
-                    if self.is_expired(exp) {
+                    if self.is_expired_at(exp, now) {
                         expired_keys += 1;
                     }
                 }
@@ -1450,12 +1550,8 @@ impl MemoryStore {
 
                 let start_time = std::time::Instant::now();
                 let data_size_before = data.len();
-                let now = if config.enable_time_caching {
-                    // Use a single time for the entire cleanup cycle
-                    Utc::now()
-                } else {
-                    Utc::now()
-                };
+                // Use a single time reference for the whole cleanup cycle.
+                let now = Utc::now();
 
                 let mut removed: u64 = 0;
                 let mut processed: usize = 0;

@@ -20,6 +20,7 @@ tokio = { version = "1.49.0", features = ["fs", "macros", "rt-multi-thread", "ti
 tracing = "0.1.44"
 
 [dev-dependencies]
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.11"
 
 [features]
@@ -27,3 +28,8 @@ default = []
 memory = ["dep:dashmap"]
 redis = ["dep:redis"]
 compression = ["dep:lz4_flex"]
+
+[[bench]]
+name = "memory_store_bench"
+harness = false
+required-features = ["memory"]

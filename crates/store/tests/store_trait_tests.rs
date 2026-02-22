@@ -131,25 +131,71 @@ mod store_trait_tests {
     }
 
     #[tokio::test]
-    async fn test_cannot_get_hash_as_simple_value() {
+    async fn test_get_hash_as_simple_returns_type_mismatch() {
         let store = MemoryStore::new();
 
         store.hset("hash", "field", &"value", None).await.unwrap();
 
-        // Try to get hash as simple value - should return None
-        let result: Option<String> = store.get("hash").await.unwrap();
-        assert!(result.is_none());
+        let result: StoreResult<Option<String>> = store.get("hash").await;
+        assert!(matches!(result, Err(StoreError::TypeMismatch(_))));
     }
 
     #[tokio::test]
-    async fn test_cannot_get_atomic_as_simple_value() {
+    async fn test_get_atomic_as_simple_returns_type_mismatch() {
         let store = MemoryStore::new();
 
         store.set_i64("counter", 100, None).await.unwrap();
 
-        // Try to get atomic as simple value - should return None
-        let result: Option<String> = store.get("counter").await.unwrap();
-        assert!(result.is_none());
+        let result: StoreResult<Option<String>> = store.get("counter").await;
+        assert!(matches!(result, Err(StoreError::TypeMismatch(_))));
+    }
+
+    #[tokio::test]
+    async fn test_hash_operations_on_simple_key_return_type_mismatch() {
+        let store = MemoryStore::new();
+        store.set("simple", &"value", None).await.unwrap();
+
+        let hget_result: StoreResult<Option<String>> = store.hget("simple", "field").await;
+        assert!(matches!(hget_result, Err(StoreError::TypeMismatch(_))));
+
+        let hdel_result = store.hdel("simple", "field").await;
+        assert!(matches!(hdel_result, Err(StoreError::TypeMismatch(_))));
+
+        let hgetall_result: StoreResult<std::collections::HashMap<String, String>> =
+            store.hgetall("simple").await;
+        assert!(matches!(hgetall_result, Err(StoreError::TypeMismatch(_))));
+
+        let hexists_result = store.hexists("simple", "field").await;
+        assert!(matches!(hexists_result, Err(StoreError::TypeMismatch(_))));
+
+        let hkeys_result = store.hkeys("simple").await;
+        assert!(matches!(hkeys_result, Err(StoreError::TypeMismatch(_))));
+
+        let hvals_result: StoreResult<Vec<String>> = store.hvals("simple").await;
+        assert!(matches!(hvals_result, Err(StoreError::TypeMismatch(_))));
+
+        let hlen_result = store.hlen("simple").await;
+        assert!(matches!(hlen_result, Err(StoreError::TypeMismatch(_))));
+    }
+
+    #[tokio::test]
+    async fn test_get_i64_on_non_atomic_key_returns_type_mismatch() {
+        let store = MemoryStore::new();
+        store.set("value", &"abc", None).await.unwrap();
+
+        let result = store.get_i64("value").await;
+        assert!(matches!(result, Err(StoreError::TypeMismatch(_))));
+    }
+
+    #[tokio::test]
+    async fn test_compare_and_swap_on_non_simple_key_returns_type_mismatch() {
+        let store = MemoryStore::new();
+        store.hset("hash", "field", &"value", None).await.unwrap();
+
+        let result = store
+            .compare_and_swap("hash", &"old".to_string(), &"new".to_string(), None)
+            .await;
+        assert!(matches!(result, Err(StoreError::TypeMismatch(_))));
     }
 
     // ============================================================================

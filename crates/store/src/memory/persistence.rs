@@ -76,13 +76,13 @@ impl MemoryStore {
         for (key, value) in data.data {
             let store_value = match value {
                 SerializableStoreValue::Simple(val, exp) => {
-                    let data = rmp_serde::to_vec(&val).unwrap_or_default();
+                    let data = rmp_serde::to_vec(&val).unwrap_or_default().into();
                     StoreValue::Simple(data, exp)
                 }
                 SerializableStoreValue::Hash(hash_data, exp) => {
                     let dash_map = DashMap::new();
                     for (field, (val, field_exp)) in hash_data {
-                        let data = rmp_serde::to_vec(&val).unwrap_or_default();
+                        let data = rmp_serde::to_vec(&val).unwrap_or_default().into();
                         dash_map.insert(field, (data, field_exp));
                     }
                     StoreValue::Hash(dash_map, exp)
@@ -222,6 +222,68 @@ impl MemoryStore {
             })?;
 
         Ok(Self::from_serializable(serializable_data))
+    }
+
+    /// Loads store data from the simple JSON export format.
+    ///
+    /// The simple format does not contain type metadata for integers,
+    /// so numeric values are restored as simple values (not AtomicI64).
+    pub async fn load_from_simple_json<P: AsRef<Path>>(path: P) -> StoreResult<Self> {
+        let json_string = fs::read_to_string(path)
+            .await
+            .map_err(|e| StoreError::InvalidInput(format!("Failed to read from file: {}", e)))?;
+
+        let export_data: HashMap<String, serde_json::Value> = serde_json::from_str(&json_string)
+            .map_err(|e| {
+                StoreError::DeserializationFailed(format!(
+                    "Failed to deserialize simple store data: {}",
+                    e
+                ))
+            })?;
+
+        let store = MemoryStore::new();
+
+        for (key, value) in export_data {
+            match value {
+                serde_json::Value::Object(object_fields) => {
+                    let hash_map = DashMap::new();
+                    for (field, field_value) in object_fields {
+                        let data = rmp_serde::to_vec(&field_value).map_err(|e| {
+                            StoreError::SerializationFailed(format!(
+                                "Failed to serialize hash field '{}' for key '{}': {}",
+                                field, key, e
+                            ))
+                        })?;
+                        hash_map.insert(field, (data.into(), None));
+                    }
+                    store.data.insert(key, StoreValue::Hash(hash_map, None));
+                }
+                other => {
+                    let data = rmp_serde::to_vec(&other).map_err(|e| {
+                        StoreError::SerializationFailed(format!(
+                            "Failed to serialize value for key '{}': {}",
+                            key, e
+                        ))
+                    })?;
+                    store
+                        .data
+                        .insert(key, StoreValue::Simple(data.into(), None));
+                }
+            }
+        }
+
+        Ok(store)
+    }
+
+    /// Load store data preferring full JSON format and falling back to the
+    /// simple JSON backup format for backward compatibility.
+    pub async fn load_from_json_with_fallback<P: AsRef<Path>>(path: P) -> StoreResult<Self> {
+        let path = path.as_ref();
+        match Self::load_from_json(path).await {
+            Ok(store) => Ok(store),
+            Err(StoreError::DeserializationFailed(_)) => Self::load_from_simple_json(path).await,
+            Err(err) => Err(err),
+        }
     }
 
     /// Saves only the keys and values to a JSON file (without expiration times and stats)
@@ -419,6 +481,31 @@ mod tests {
         // JSON objects and arrays should be parsed as strings since they're stored as JSON strings
         assert!(parsed["json_obj"].is_string());
         assert!(parsed["json_array"].is_string());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_load_from_json_with_fallback_from_simple_export() -> StoreResult<()> {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!(
+            "test_simple_restore_{}.json",
+            chrono::Utc::now().timestamp()
+        ));
+
+        let store = MemoryStore::new();
+        store.set("key1", &"value1", None).await?;
+        store.hset("hash1", "field1", &123_i32, None).await?;
+
+        // Legacy backup format in the app currently uses the simple JSON export.
+        store.export_to_simple_json(&file_path).await?;
+
+        let restored_store = MemoryStore::load_from_json_with_fallback(&file_path).await?;
+        let value: Option<String> = restored_store.get("key1").await?;
+        assert_eq!(value, Some("value1".to_string()));
+
+        let hash_value: Option<i32> = restored_store.hget("hash1", "field1").await?;
+        assert_eq!(hash_value, Some(123));
 
         Ok(())
     }

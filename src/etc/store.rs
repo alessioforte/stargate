@@ -1,7 +1,14 @@
 #[cfg(feature = "memory")]
 mod memory {
     use once_cell::sync::Lazy;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use store::MemoryStore;
+
+    const MEMORY_BACKUP_PATH: &str = ".stargate/backup/memory.json";
+    const MEMORY_BACKUP_INTERVAL_SECS: u64 = 5;
+
+    static RESTORE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
+    static BACKUP_TASK_STARTED: AtomicBool = AtomicBool::new(false);
 
     pub static STORE: Lazy<MemoryStore> = Lazy::new(|| {
         let store = MemoryStore::new();
@@ -11,6 +18,7 @@ mod memory {
 
     pub async fn init() -> &'static MemoryStore {
         Lazy::force(&STORE);
+        restore_memory_backup().await;
         tracing::info!("Memory store initialized");
         run_memory_backup();
         &STORE
@@ -20,14 +28,52 @@ mod memory {
         &STORE
     }
 
+    async fn restore_memory_backup() {
+        if RESTORE_ATTEMPTED.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        match MemoryStore::load_from_json_with_fallback(MEMORY_BACKUP_PATH).await {
+            Ok(restored_store) => {
+                STORE.data.clear();
+                for entry in restored_store.data.iter() {
+                    STORE
+                        .data
+                        .insert(entry.key().clone(), entry.value().clone());
+                }
+                STORE.reset_stats();
+                tracing::info!(
+                    path = MEMORY_BACKUP_PATH,
+                    keys = STORE.get_total_keys(),
+                    "Memory store restored from backup"
+                );
+            }
+            Err(error) => {
+                tracing::info!(
+                    path = MEMORY_BACKUP_PATH,
+                    %error,
+                    "No memory backup restored at startup"
+                );
+            }
+        }
+    }
+
     fn run_memory_backup() {
-        let interval = std::time::Duration::from_secs(5);
+        if BACKUP_TASK_STARTED.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        let interval = std::time::Duration::from_secs(MEMORY_BACKUP_INTERVAL_SECS);
         tokio::spawn(async move {
             loop {
                 let store = use_store();
-                let _ = store
-                    .export_to_simple_json(".stargate/backup/memory.json")
-                    .await;
+                if let Err(error) = store.save_to_json(MEMORY_BACKUP_PATH).await {
+                    tracing::warn!(
+                        path = MEMORY_BACKUP_PATH,
+                        %error,
+                        "Failed to persist memory backup"
+                    );
+                }
                 tokio::time::sleep(interval).await;
             }
         });

@@ -351,6 +351,21 @@ mod memory_tests {
     }
 
     #[tokio::test]
+    async fn test_atomic_compare_and_swap_expired_key_returns_false() {
+        let store = MemoryStore::new();
+
+        store.set_i64("counter", 10, Some(1)).await.unwrap();
+        sleep(Duration::from_secs(2)).await;
+
+        let success = store
+            .compare_and_swap_i64("counter", 10, 20, None)
+            .await
+            .unwrap();
+        assert!(!success);
+        assert!(store.get_i64("counter").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn test_compare_and_swap() {
         let store = MemoryStore::new();
 
