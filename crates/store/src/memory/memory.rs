@@ -1009,6 +1009,65 @@ impl AtomicStore for MemoryStore {
 }
 
 impl MemoryStore {
+    pub async fn measure_and_set<T, F>(
+        &self,
+        key: &str,
+        default: T,
+        measure_fn: F,
+        ttl: Option<u64>,
+    ) -> StoreResult<(bool, T)>
+    where
+        T: SerializeValue + DeserializeValue + Clone,
+        F: Fn(T) -> (bool, T) + Send + Sync,
+    {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if let Some(ttl_val) = ttl {
+            if ttl_val == 0 {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+        }
+
+        let exp = ttl.map(|t| Utc::now() + chrono::Duration::seconds(t as i64));
+        let default_data = self.serialize(&default)?;
+        let mut entry = self
+            .data
+            .entry(key.to_string())
+            .or_insert_with(|| StoreValue::Simple(default_data.clone(), None));
+
+        match entry.value_mut() {
+            StoreValue::Simple(current, current_exp) => {
+                if self.is_expired(current_exp) {
+                    let (res, new_value) = measure_fn(default.clone());
+                    let new_data = self.serialize(&new_value)?;
+                    *current = new_data;
+                    *current_exp = exp;
+                    self.stats
+                        .expired_entries_cleaned
+                        .fetch_add(1, Ordering::SeqCst);
+                    self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                    return Ok((res, new_value));
+                }
+
+                let current_value: T = self.deserialize(current)?;
+                let (res, new_value) = measure_fn(current_value);
+                let new_data = self.serialize(&new_value)?;
+                *current = new_data;
+                if ttl.is_some() {
+                    *current_exp = exp;
+                }
+                self.stats.sets.fetch_add(1, Ordering::SeqCst);
+                Ok((res, new_value))
+            }
+            _ => Err(StoreError::TypeMismatch(
+                "Key exists but is not a simple value".to_string(),
+            )),
+        }
+    }
+}
+
+impl MemoryStore {
     pub async fn measure_and_set_i64<F>(
         &self,
         key: &str,

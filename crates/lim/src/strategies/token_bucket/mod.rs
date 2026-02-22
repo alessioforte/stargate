@@ -42,7 +42,15 @@ use crate::state::State;
 use crate::strategies::RateLimit;
 use async_trait::async_trait;
 use core::time::Duration;
+#[cfg(feature = "memory")]
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[cfg(any(feature = "memory", feature = "redis"))]
+#[inline]
+fn ceil_div_u64(value: u64, divisor: u64) -> u64 {
+    value / divisor + u64::from(value % divisor != 0)
+}
 
 // ========================== IN-MEMORY IMPLEMENTATION =========================
 
@@ -62,6 +70,70 @@ pub struct TokenBucket {
 
     /// TTL for stored state in seconds
     ttl: u64,
+}
+
+#[cfg(feature = "memory")]
+const TOKEN_SCALE: u64 = 1_000;
+
+#[cfg(feature = "memory")]
+const NO_REFILL_RETRY_AFTER_MS: u64 = u32::MAX as u64;
+
+#[cfg(feature = "memory")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct TokenBucketState {
+    tokens_scaled: u64,
+    last_update_micros: u64,
+}
+
+#[cfg(feature = "memory")]
+#[inline]
+fn scale_tokens(tokens: u64) -> u64 {
+    tokens.saturating_mul(TOKEN_SCALE)
+}
+
+#[cfg(feature = "memory")]
+fn transition_state(
+    state: TokenBucketState,
+    now_micros: u64,
+    capacity: u64,
+    refill_rate: u64,
+    cost: u64,
+) -> (bool, TokenBucketState) {
+    let capacity_scaled = scale_tokens(capacity);
+    let cost_scaled = scale_tokens(cost);
+
+    let elapsed_micros = now_micros.saturating_sub(state.last_update_micros);
+    // Keep the same arithmetic as Redis:
+    // tokens_to_add_scaled = elapsed_micros * refill_rate / 1000
+    let tokens_to_add_scaled = if refill_rate > 0 {
+        ((elapsed_micros as u128 * refill_rate as u128) / TOKEN_SCALE as u128).min(u64::MAX as u128)
+            as u64
+    } else {
+        0
+    };
+
+    let available_scaled = state
+        .tokens_scaled
+        .saturating_add(tokens_to_add_scaled)
+        .min(capacity_scaled);
+
+    if available_scaled >= cost_scaled {
+        (
+            true,
+            TokenBucketState {
+                tokens_scaled: available_scaled - cost_scaled,
+                last_update_micros: now_micros,
+            },
+        )
+    } else {
+        (
+            false,
+            TokenBucketState {
+                tokens_scaled: available_scaled,
+                last_update_micros: now_micros,
+            },
+        )
+    }
 }
 
 #[cfg(feature = "memory")]
@@ -89,87 +161,59 @@ impl TokenBucket {
 #[async_trait]
 impl RateLimit for TokenBucket {
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
-        use store::AtomicStore;
-
         let now_micros = self.clock.now_micros();
         let capacity = self.capacity;
         let refill_rate = self.refill_rate;
         let ttl = self.ttl;
 
-        // We store: (tokens * 1_000_000) << 44 | last_update_micros
-        // This packs both values into a single i64
-        // tokens are stored as fixed-point with 6 decimal places (microtokens)
-        // last_update is microseconds since epoch (fits in ~44 bits until year 2527)
-        let tokens_key = format!("{}:tokens", key);
-        let time_key = format!("{}:time", key);
-
-        // Get current state
-        let stored_tokens = self.store.get_i64(&tokens_key).await.ok().flatten();
-        let stored_time = self.store.get_i64(&time_key).await.ok().flatten();
-
-        let (current_tokens, last_update) = match (stored_tokens, stored_time) {
-            (Some(t), Some(time)) => (t as u64, time as u64),
-            _ => (capacity, now_micros), // Initialize with full bucket
+        let default_state = TokenBucketState {
+            tokens_scaled: scale_tokens(capacity),
+            last_update_micros: now_micros,
         };
 
-        // Calculate tokens to add based on elapsed time
-        let elapsed_micros = now_micros.saturating_sub(last_update);
-        let elapsed_secs_frac = elapsed_micros as f64 / 1_000_000.0;
-        let tokens_to_add = (elapsed_secs_frac * refill_rate as f64) as u64;
+        let (allowed, state) = self
+            .store
+            .measure_and_set(
+                key,
+                default_state,
+                |stored| transition_state(stored, now_micros, capacity, refill_rate, cost),
+                Some(ttl),
+            )
+            .await
+            .map_err(|e| {
+                crate::error::RateLimitError::MemoryError(format!(
+                    "Failed to access in-memory store: {}",
+                    e,
+                ))
+            })?;
 
-        // Calculate new token count (capped at capacity)
-        let available_tokens = current_tokens.saturating_add(tokens_to_add).min(capacity);
+        let remaining = state.tokens_scaled / TOKEN_SCALE;
 
-        // Check if we have enough tokens
-        if available_tokens >= cost {
-            let new_tokens = available_tokens - cost;
-
-            // Update state
-            let _ = self
-                .store
-                .set_i64(&tokens_key, new_tokens as i64, Some(ttl))
-                .await;
-            let _ = self
-                .store
-                .set_i64(&time_key, now_micros as i64, Some(ttl))
-                .await;
-
-            // Calculate time until bucket is full again
-            let tokens_needed = capacity - new_tokens;
+        if allowed {
+            let tokens_needed = capacity.saturating_sub(remaining);
             let reset_secs = if refill_rate > 0 && tokens_needed > 0 {
-                (tokens_needed as f64 / refill_rate as f64).ceil() as u64
+                ceil_div_u64(tokens_needed, refill_rate)
             } else {
                 0
             };
 
             Ok(RateLimitDecision::allowed(
                 capacity,
-                new_tokens,
+                remaining,
                 Some(Duration::from_secs(reset_secs)),
             ))
         } else {
-            // Not enough tokens - calculate retry after
-            let tokens_needed = cost - available_tokens;
-            let retry_secs = if refill_rate > 0 {
-                (tokens_needed as f64 / refill_rate as f64).ceil() as u64
+            let tokens_needed_scaled = scale_tokens(cost).saturating_sub(state.tokens_scaled);
+            let retry_after_ms = if refill_rate > 0 {
+                ceil_div_u64(tokens_needed_scaled, refill_rate)
             } else {
-                u64::MAX // Never if no refill
+                NO_REFILL_RETRY_AFTER_MS
             };
-
-            // Update the time even on denial to keep state fresh
-            let _ = self
-                .store
-                .set_i64(&tokens_key, available_tokens as i64, Some(ttl))
-                .await;
-            let _ = self
-                .store
-                .set_i64(&time_key, now_micros as i64, Some(ttl))
-                .await;
 
             Ok(RateLimitDecision::denied(
                 capacity,
-                available_tokens,
-                Some(Duration::from_secs(retry_secs)),
+                remaining,
+                Some(Duration::from_millis(retry_after_ms)),
                 None,
             ))
         }
@@ -240,7 +284,7 @@ impl RateLimit for TokenBucket {
             // Calculate time until full
             let tokens_needed = capacity.saturating_sub(remaining);
             let reset_secs = if refill_rate > 0 && tokens_needed > 0 {
-                (tokens_needed as f64 / refill_rate as f64).ceil() as u64
+                ceil_div_u64(tokens_needed, refill_rate)
             } else {
                 0
             };
@@ -305,5 +349,50 @@ mod tests {
         let tokens_to_add = (elapsed_secs_frac * refill_rate as f64) as u64;
 
         assert_eq!(tokens_to_add, 5);
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn test_memory_transition_keeps_fractional_refill_progress() {
+        let state = TokenBucketState {
+            tokens_scaled: 0,
+            last_update_micros: 0,
+        };
+
+        // 50ms at 10 tokens/s -> 0.5 token (denied, but progress must be preserved)
+        let (allowed_50ms, state_50ms) = transition_state(state, 50_000, 10, 10, 1);
+        assert!(!allowed_50ms);
+        assert_eq!(state_50ms.tokens_scaled, 500);
+
+        // Another 50ms accumulates to a full token, so the request is now allowed.
+        let (allowed_100ms, state_100ms) = transition_state(state_50ms, 100_000, 10, 10, 1);
+        assert!(allowed_100ms);
+        assert_eq!(state_100ms.tokens_scaled, 0);
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn test_memory_transition_supports_large_capacity_without_truncation() {
+        let capacity = 2_000_000u64;
+        let state = TokenBucketState {
+            tokens_scaled: scale_tokens(capacity),
+            last_update_micros: 1_000_000,
+        };
+
+        let (allowed, next) = transition_state(state, 1_000_000, capacity, 1, 1);
+        assert!(allowed);
+        assert_eq!(next.tokens_scaled, scale_tokens(capacity - 1));
+    }
+
+    #[cfg(feature = "memory")]
+    #[test]
+    fn test_memory_retry_after_ms_matches_redis_formula() {
+        let refill_rate = 10u64;
+        let available_scaled = 250u64;
+        let cost_scaled = scale_tokens(1);
+        let retry_after_ms =
+            ceil_div_u64(cost_scaled.saturating_sub(available_scaled), refill_rate);
+
+        assert_eq!(retry_after_ms, 75);
     }
 }

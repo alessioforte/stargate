@@ -91,7 +91,7 @@ maxminddb = { version = "0.27.3", features = ["simdutf8"] }
 moka = { version = "0.12.13", features = ["sync"] }
 
 [features]
-default = ["sqlite", "redis"]
+default = ["sqlite", "memory"]
 postgres = ["db/postgres"]
 sqlite = ["db/sqlite"]
 memory = ["store/memory", "gate/memory"]

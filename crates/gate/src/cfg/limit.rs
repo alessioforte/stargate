@@ -100,7 +100,7 @@ impl Strategy {
                     max_burst: NonZeroU32::new(*max_burst).unwrap(),
                     replenish_1_per,
                 };
-                Box::new(lim::gcra::Gcra::new(state, quota))
+                Box::new(lim::gcra::Gcra::new(state, clock, quota))
             }
             Strategy::TokenBucket {
                 capacity,

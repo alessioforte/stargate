@@ -18,7 +18,11 @@ pub static GEO_DB: Lazy<Option<GeoDb>> = Lazy::new(|| {
             Some(reader)
         }
         Err(e) => {
-            tracing::warn!("GeoIP database not available at {}: {}. GeoIP lookup disabled.", path, e);
+            tracing::warn!(
+                "GeoIP database not available at {}: {}. GeoIP lookup disabled.",
+                path,
+                e
+            );
             None
         }
     }

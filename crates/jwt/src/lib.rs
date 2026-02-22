@@ -2,10 +2,10 @@ mod claims;
 
 use chrono::Duration;
 pub use claims::Claims;
-pub use jsonwebtoken::errors::Error as JwtError;
 pub use jsonwebtoken::Algorithm;
+pub use jsonwebtoken::errors::Error as JwtError;
 
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use std::fs;
 
 /// JWT Configuration struct to hold preloaded keys and algorithm

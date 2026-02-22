@@ -37,6 +37,7 @@
 
 mod quota;
 
+use crate::clock::CachedClock;
 use crate::decision::RateLimitDecision;
 use crate::error::Result;
 use crate::state::State;
@@ -56,10 +57,7 @@ pub struct Gcra {
     store: Arc<State>,
 
     /// clock used to measure time
-    clock: quanta::Clock,
-
-    /// start time of the token bucket
-    start: quanta::Instant,
+    clock: Arc<CachedClock>,
 
     /// tau is the time it takes to replenish one token in microseconds
     tau: u64,
@@ -73,16 +71,13 @@ pub struct Gcra {
 
 #[cfg(feature = "memory")]
 impl Gcra {
-    pub fn new(store: Arc<State>, quota: Quota) -> Self {
+    pub fn new(store: Arc<State>, clock: Arc<CachedClock>, quota: Quota) -> Self {
         let tau = cmp::max(quota.replenish_1_per, Duration::from_micros(1)).as_micros() as u64;
         let burst = tau * (quota.max_burst.get() - 1) as u64;
-        let clock = quanta::Clock::new();
-        let start = clock.now();
         let ttl = ((tau * quota.max_burst.get() as u64) / 1_000_000).max(60);
         Gcra {
             store,
             clock,
-            start,
             tau,
             burst,
             ttl,
@@ -94,8 +89,7 @@ impl Gcra {
 #[async_trait]
 impl RateLimit for Gcra {
     async fn check(&self, key: &str, _cost: u64) -> Result<RateLimitDecision> {
-        let now = self.clock.now();
-        let t0 = now.duration_since(self.start).as_micros() as u64;
+        let t0 = self.clock.now_micros();
 
         let tau = self.tau;
         let burst = self.burst;
@@ -182,7 +176,7 @@ pub struct Gcra {
 
 #[cfg(feature = "redis")]
 impl Gcra {
-    pub fn new(store: Arc<State>, quota: Quota) -> Self {
+    pub fn new(store: Arc<State>, _clock: Arc<CachedClock>, quota: Quota) -> Self {
         // tau is the time it takes to replenish one token
         let tau = cmp::max(quota.replenish_1_per, Duration::from_micros(1)).as_micros() as u64;
         // burst is the maximum number of tokens that can be consumed in one burst
