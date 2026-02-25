@@ -144,9 +144,10 @@ impl RateLimit for Gcra {
         if allow {
             Ok(RateLimitDecision::allowed(limit, remaining, None))
         } else {
-            // Retry after (FIXED: double saturating_sub)
-            let wait_duration_micros = tat.saturating_sub(burst).saturating_sub(t0);
-            let retry_after = Duration::from_micros(wait_duration_micros);
+            // Retry after: ceil to milliseconds for consistent units across all strategies
+            let wait_micros = tat.saturating_sub(burst).saturating_sub(t0);
+            let wait_millis = wait_micros / 1_000 + u64::from(wait_micros % 1_000 != 0);
+            let retry_after = Duration::from_millis(wait_millis);
             Ok(RateLimitDecision::denied(
                 limit,
                 remaining,
@@ -158,6 +159,10 @@ impl RateLimit for Gcra {
 }
 
 // =========================== REDIS IMPLEMENTATION ===========================
+
+#[cfg(feature = "redis")]
+static GCRA_LUA_SCRIPT: std::sync::LazyLock<store::RedisScript> =
+    std::sync::LazyLock::new(|| store::RedisScript::new(include_str!("gcra.lua")));
 
 #[cfg(feature = "redis")]
 pub struct Gcra {
@@ -198,7 +203,7 @@ impl RateLimit for Gcra {
     async fn check(&self, key: &str, _cost: u64) -> Result<RateLimitDecision> {
         let mut con = self.store.get_connection();
 
-        let script = store::RedisScript::new(include_str!("gcra.lua"));
+        let script = &*GCRA_LUA_SCRIPT;
 
         let tau = self.tau;
         let burst = self.burst;
@@ -229,12 +234,12 @@ impl RateLimit for Gcra {
         if allow == 1 {
             Ok(RateLimitDecision::allowed(limit, remaining, None))
         } else {
-            let wait_duration = Duration::from_micros(retry_after);
-            let retry_after = wait_duration;
+            // Ceil microseconds to milliseconds for consistent units across all strategies
+            let wait_millis = retry_after / 1_000 + u64::from(retry_after % 1_000 != 0);
             Ok(RateLimitDecision::denied(
                 limit,
                 remaining,
-                Some(retry_after),
+                Some(Duration::from_millis(wait_millis)),
                 None,
             ))
         }

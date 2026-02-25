@@ -30,7 +30,6 @@ impl Limiter {
         self.limits.contains_key(name)
     }
 
-    // TODO: Add optional cost
     pub async fn check(
         &self,
         limiter_name: &str,

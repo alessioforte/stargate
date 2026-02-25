@@ -1200,10 +1200,19 @@ impl MemoryStore {
                         return Ok((res, new_value));
                     }
 
-                    // FIXME: Problem**: Between `load` and `store`, another thread can modify the value → lost updates, incorrect rate limiting under concurrency.
-                    let current_value = atomic.load(Ordering::Relaxed);
-                    let (res, new_value) = measure_fn(current_value);
-                    atomic.store(new_value, Ordering::Relaxed);
+                    let mut current_value = atomic.load(Ordering::Relaxed);
+                    let (res, new_value) = loop {
+                        let (res, new_value) = measure_fn(current_value);
+                        match atomic.compare_exchange_weak(
+                            current_value,
+                            new_value,
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        ) {
+                            Ok(_) => break (res, new_value),
+                            Err(actual) => current_value = actual,
+                        }
+                    };
                     // Update expiration if TTL is provided
                     if ttl.is_some() {
                         *current_exp = exp;

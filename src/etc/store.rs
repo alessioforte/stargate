@@ -82,7 +82,7 @@ mod memory {
 
 #[cfg(feature = "redis")]
 mod redis {
-    use store::{RedisPoolConfig, RedisStore};
+    use store::{Compression, CompressionConfig, RedisPoolConfig, RedisStore};
     use tokio::sync::OnceCell;
 
     static STORE: OnceCell<RedisStore> = OnceCell::const_new();
@@ -99,9 +99,15 @@ mod redis {
                     .unwrap_or(4);
 
                 let config = RedisPoolConfig::new(pool_size);
+                #[cfg(feature = "memory-compression")]
+                let com = Compression::Lz4;
+                #[cfg(not(feature = "memory-compression"))]
+                let com = Compression::None;
+                let com_config = CompressionConfig::new(com);
                 let store = RedisStore::with_config(&url, config)
                     .await
-                    .expect("Failed to create Redis store");
+                    .expect("Failed to create Redis store")
+                    .with_compression(com_config);
                 tracing::info!(
                     "Redis store initialized with pool of {} connection(s)",
                     store.pool_size()

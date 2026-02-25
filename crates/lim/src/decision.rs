@@ -22,7 +22,8 @@ pub struct RateLimitDecision {
     /// Number of requests remaining in the current window
     pub remaining: u64,
 
-    /// Duration to wait before retrying (if denied)
+    /// Duration to wait before retrying (if denied).
+    /// All strategies normalize this to millisecond resolution.
     pub retry_after: Option<Duration>,
 
     /// Duration until the rate limit resets
@@ -72,9 +73,13 @@ impl RateLimitDecision {
         self.remaining == 0
     }
 
-    /// Returns the retry after duration in seconds, if available
+    /// Returns the retry after duration in whole seconds (ceiling), if available.
+    /// Use this for HTTP `Retry-After` header values.
     pub fn retry_after_secs(&self) -> Option<u64> {
-        self.retry_after.map(|d| d.as_secs())
+        self.retry_after.map(|d| {
+            let secs = d.as_secs();
+            if d.subsec_millis() > 0 { secs + 1 } else { secs }
+        })
     }
 
     /// Returns the retry after duration in milliseconds, if available

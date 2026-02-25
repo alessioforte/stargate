@@ -14,6 +14,9 @@ pub use redis::Script as RedisScript;
 // Compression
 // =============================================================================
 
+const COMPRESSED_LZ4_PREFIX: u8 = 0x01;
+const UNCOMPRESSED_PREFIX: u8 = 0x00;
+
 /// Compression algorithm used for serialized values before storing in Redis.
 ///
 /// When enabled, values are compressed after serialization and decompressed
@@ -83,9 +86,16 @@ impl CompressionConfig {
             #[cfg(feature = "compression")]
             Compression::Lz4 => {
                 if data.len() < self.min_size {
-                    return Ok(data);
+                    let mut out = Vec::with_capacity(1 + data.len());
+                    out.push(UNCOMPRESSED_PREFIX);
+                    out.extend_from_slice(&data);
+                    return Ok(out);
                 }
-                Ok(lz4_flex::compress_prepend_size(&data))
+                let compressed = lz4_flex::compress_prepend_size(&data);
+                let mut out = Vec::with_capacity(1 + compressed.len());
+                out.push(COMPRESSED_LZ4_PREFIX);
+                out.extend_from_slice(&compressed);
+                Ok(out)
             }
         }
     }
@@ -96,14 +106,23 @@ impl CompressionConfig {
             Compression::None => Ok(data.to_vec()),
             #[cfg(feature = "compression")]
             Compression::Lz4 => {
-                if data.len() < self.min_size {
-                    // Data was below the threshold at write time, so it was
-                    // stored uncompressed. Return as-is.
-                    return Ok(data.to_vec());
+                if data.is_empty() {
+                    return Ok(Vec::new());
                 }
-                lz4_flex::decompress_size_prepended(data).map_err(|e| {
-                    StoreError::DeserializationFailed(format!("LZ4 decompression failed: {}", e))
-                })
+                match data[0] {
+                    UNCOMPRESSED_PREFIX => Ok(data[1..].to_vec()),
+                    COMPRESSED_LZ4_PREFIX => lz4_flex::decompress_size_prepended(&data[1..])
+                        .map_err(|e| {
+                            StoreError::DeserializationFailed(format!(
+                                "LZ4 decompression failed: {}",
+                                e
+                            ))
+                        }),
+                    _ => {
+                        // Legacy data written without prefix — treat as uncompressed
+                        Ok(data.to_vec())
+                    }
+                }
             }
         }
     }

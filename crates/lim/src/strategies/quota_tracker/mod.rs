@@ -81,6 +81,10 @@ impl RateLimit for QuotaTracker {
 // =========================== REDIS IMPLEMENTATION ===========================
 
 #[cfg(feature = "redis")]
+static QUOTA_TRACKER_LUA_SCRIPT: std::sync::LazyLock<store::RedisScript> =
+    std::sync::LazyLock::new(|| store::RedisScript::new(include_str!("quota_tracker.lua")));
+
+#[cfg(feature = "redis")]
 pub struct QuotaTracker {
     /// Redis store
     store: Arc<State>,
@@ -114,7 +118,7 @@ impl RateLimit for QuotaTracker {
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
         let mut con = self.store.get_connection();
 
-        let script = store::RedisScript::new(include_str!("quota_tracker.lua"));
+        let script = &*QUOTA_TRACKER_LUA_SCRIPT;
 
         let limit = self.limit;
         let window = self.window;

@@ -223,6 +223,10 @@ impl RateLimit for TokenBucket {
 // =========================== REDIS IMPLEMENTATION ===========================
 
 #[cfg(feature = "redis")]
+static TOKEN_BUCKET_LUA_SCRIPT: std::sync::LazyLock<store::RedisScript> =
+    std::sync::LazyLock::new(|| store::RedisScript::new(include_str!("token_bucket.lua")));
+
+#[cfg(feature = "redis")]
 pub struct TokenBucket {
     /// Redis store
     store: Arc<State>,
@@ -262,7 +266,7 @@ impl RateLimit for TokenBucket {
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
         let mut con = self.store.get_connection();
 
-        let script = store::RedisScript::new(include_str!("token_bucket.lua"));
+        let script = &*TOKEN_BUCKET_LUA_SCRIPT;
 
         let capacity = self.capacity;
         let refill_rate = self.refill_rate;
