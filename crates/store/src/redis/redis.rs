@@ -14,7 +14,9 @@ pub use redis::Script as RedisScript;
 // Compression
 // =============================================================================
 
+#[cfg(feature = "compression")]
 const COMPRESSED_LZ4_PREFIX: u8 = 0x01;
+#[cfg(feature = "compression")]
 const UNCOMPRESSED_PREFIX: u8 = 0x00;
 
 /// Compression algorithm used for serialized values before storing in Redis.

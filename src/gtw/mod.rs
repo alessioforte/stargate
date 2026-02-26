@@ -239,9 +239,9 @@ pub async fn handler(
 
     // 6. Load balancing + proxy (the actual work) ----------------------------
     let ctx = lb::RequestContext {
-        client_ip,
-        path: path.to_string(),
-        method: method.as_str().to_string(),
+        client_ip: &client_ip,
+        path: &path,
+        method: &method.as_str(),
         key: None,
     };
 

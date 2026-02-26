@@ -14,12 +14,13 @@ impl RoundRobin {
 }
 
 impl Strategy for RoundRobin {
-    fn select<'a>(&self, alive: &Vec<&'a Upstream>, _ctx: &RequestContext) -> Option<&'a Upstream> {
-        if alive.is_empty() {
+    fn select<'a>(&self, upstreams: &'a [Upstream], _ctx: &RequestContext) -> Option<&'a Upstream> {
+        let available_count = upstreams.iter().filter(|u| u.is_available()).count();
+        if available_count == 0 {
             return None;
         }
-        let index = self.current.fetch_add(1, Ordering::SeqCst) % alive.len();
-        Some(&alive[index])
+        let target = self.current.fetch_add(1, Ordering::Relaxed) % available_count;
+        upstreams.iter().filter(|u| u.is_available()).nth(target)
     }
 
     fn name(&self) -> &'static str {

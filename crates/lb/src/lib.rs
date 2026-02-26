@@ -1,7 +1,9 @@
+pub mod circuit_breaker;
 pub mod health_check;
 pub mod lb;
 pub mod strategies;
 
+pub use circuit_breaker::CircuitBreaker;
 pub use health_check::HealthCheck;
 pub use lb::{BaseLoadBalancer, LoadBalancer, RequestContext, Upstream};
 pub use strategies::ip_hash::IpHash;

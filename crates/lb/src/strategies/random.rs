@@ -10,13 +10,14 @@ impl Random {
 }
 
 impl Strategy for Random {
-    fn select<'a>(&self, alive: &Vec<&'a Upstream>, _ctx: &RequestContext) -> Option<&'a Upstream> {
-        if alive.is_empty() {
+    fn select<'a>(&self, upstreams: &'a [Upstream], _ctx: &RequestContext) -> Option<&'a Upstream> {
+        let available_count = upstreams.iter().filter(|u| u.is_available()).count();
+        if available_count == 0 {
             return None;
         }
         let mut rng = rand::rng();
-        let index = rng.random_range(0..alive.len());
-        Some(&alive[index])
+        let target = rng.random_range(0..available_count);
+        upstreams.iter().filter(|u| u.is_available()).nth(target)
     }
 
     fn name(&self) -> &'static str {

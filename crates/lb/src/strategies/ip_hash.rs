@@ -1,5 +1,5 @@
 use crate::lb::{RequestContext, Strategy, Upstream};
-use std::collections::hash_map::DefaultHasher;
+use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
 pub struct IpHash;
@@ -11,16 +11,16 @@ impl IpHash {
 }
 
 impl Strategy for IpHash {
-    fn select<'a>(&self, alive: &Vec<&'a Upstream>, ctx: &RequestContext) -> Option<&'a Upstream> {
-        if alive.is_empty() {
+    fn select<'a>(&self, upstreams: &'a [Upstream], ctx: &RequestContext) -> Option<&'a Upstream> {
+        let available_count = upstreams.iter().filter(|u| u.is_available()).count();
+        if available_count == 0 {
             return None;
         }
-        let ip = ctx.client_ip.clone();
-        let mut hasher = DefaultHasher::new();
-        ip.hash(&mut hasher);
+        let mut hasher = AHasher::default();
+        ctx.client_ip.hash(&mut hasher);
         let hash = hasher.finish();
-        let index = (hash as usize) % alive.len();
-        Some(&alive[index])
+        let target = (hash as usize) % available_count;
+        upstreams.iter().filter(|u| u.is_available()).nth(target)
     }
 
     fn name(&self) -> &'static str {

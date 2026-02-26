@@ -1,25 +1,36 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, AtomicUsize},
-};
+use crate::circuit_breaker::CircuitBreaker;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use reqwest::Client;
 
 pub struct Upstream {
     pub base_url: String,
-    pub alive: Arc<AtomicBool>,
-    pub health_check_path: Option<String>, // e.g., "/health"
-    pub fail_count: Arc<AtomicUsize>,      // for circuit breaker
+    pub health_check_path: Option<String>,
+    pub circuit_breaker: Arc<CircuitBreaker>,
 }
 
 impl Upstream {
     pub fn new(base_url: String, health_check_path: Option<String>) -> Self {
+        // Defaults: open after 3 consecutive failures, 30s cooldown
+        Self::with_circuit_breaker(base_url, health_check_path, 3, 30)
+    }
+
+    pub fn with_circuit_breaker(
+        base_url: String,
+        health_check_path: Option<String>,
+        fail_threshold: usize,
+        cooldown_secs: u64,
+    ) -> Self {
         Self {
             base_url,
             health_check_path,
-            alive: Arc::new(AtomicBool::new(true)),
-            fail_count: Arc::new(AtomicUsize::new(0)),
+            circuit_breaker: Arc::new(CircuitBreaker::new(fail_threshold, cooldown_secs)),
         }
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.circuit_breaker.is_available()
     }
 
     pub fn health_check_url(&self) -> Option<String> {
@@ -29,12 +40,12 @@ impl Upstream {
     }
 }
 
-pub struct RequestContext {
-    pub client_ip: String,
-    pub path: String,
-    pub method: String,
+pub struct RequestContext<'a> {
+    pub client_ip: &'a str,
+    pub path: &'a str,
+    pub method: &'a str,
     // pub headers: Option<http::HeaderMap>,
-    pub key: Option<String>, // for hashing/stickiness
+    pub key: Option<&'a str>,
 }
 
 #[async_trait::async_trait]
@@ -48,10 +59,9 @@ pub trait LoadBalancer {
 }
 
 pub trait Strategy: Send + Sync {
-    // fn select<'a>(&self, alive: &'a [&Upstream], context: &RequestContext) -> Option<&'a Upstream>;
     fn select<'a>(
         &self,
-        alive: &Vec<&'a Upstream>,
+        upstreams: &'a [Upstream],
         context: &RequestContext,
     ) -> Option<&'a Upstream>;
     fn name(&self) -> &'static str;
@@ -60,34 +70,43 @@ pub trait Strategy: Send + Sync {
 pub struct BaseLoadBalancer<S: Strategy> {
     strategy: S,
     upstreams: Vec<Upstream>,
+    index: HashMap<String, usize>,
     client: Arc<Client>,
 }
 
 impl<S: Strategy + 'static> BaseLoadBalancer<S> {
     pub fn new(strategy: S, upstreams: Vec<Upstream>) -> Arc<Self> {
+        let index = upstreams
+            .iter()
+            .enumerate()
+            .map(|(i, u)| (u.base_url.clone(), i))
+            .collect();
+
+        let client = match Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(2))
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to build HTTP client for health checks: {}", e);
+                Client::new() // fallback to default client
+            }
+        };
+
         Arc::new(Self {
             strategy,
             upstreams,
-            client: Arc::new(Client::new()),
+            index,
+            client: Arc::new(client),
         })
-    }
-
-    fn alive_upstreams(&self) -> Vec<&Upstream> {
-        self.upstreams
-            .iter()
-            .filter(|upstream| upstream.alive.load(std::sync::atomic::Ordering::Relaxed))
-            .collect()
     }
 }
 
 #[async_trait::async_trait]
 impl<S: Strategy + 'static> LoadBalancer for BaseLoadBalancer<S> {
     fn select(&self, context: &RequestContext) -> Option<&Upstream> {
-        let alive = self.alive_upstreams();
-        if alive.is_empty() {
-            return None;
-        }
-        self.strategy.select(&alive, context)
+        self.strategy.select(&self.upstreams, context)
     }
 
     fn name(&self) -> &'static str {
@@ -95,38 +114,45 @@ impl<S: Strategy + 'static> LoadBalancer for BaseLoadBalancer<S> {
     }
 
     fn mark_alive(&self, base_url: &str) {
-        if let Some(upstream) = self.upstreams.iter().find(|u| u.base_url == base_url) {
-            upstream
-                .alive
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            upstream
-                .fail_count
-                .store(0, std::sync::atomic::Ordering::Relaxed);
+        if let Some(&idx) = self.index.get(base_url) {
+            self.upstreams[idx].circuit_breaker.record_success();
         }
     }
 
     fn mark_dead(&self, base_url: &str) {
-        if let Some(upstream) = self.upstreams.iter().find(|u| u.base_url == base_url) {
-            upstream
-                .alive
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            upstream
-                .fail_count
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Some(&idx) = self.index.get(base_url) {
+            self.upstreams[idx].circuit_breaker.record_failure();
         }
     }
 
     async fn health_check(&self) {
+        let mut set = tokio::task::JoinSet::new();
         for upstream in &self.upstreams {
             if let Some(url) = upstream.health_check_url() {
-                match self.client.get(&url).send().await {
-                    Ok(_) => self.mark_alive(&upstream.base_url),
-                    Err(e) => {
-                        self.mark_dead(&upstream.base_url);
-                        tracing::warn!("Health check failed for {}: {}", upstream.base_url, e);
+                let client = Arc::clone(&self.client);
+                let cb = Arc::clone(&upstream.circuit_breaker);
+                let base_url = upstream.base_url.clone();
+                set.spawn(async move {
+                    match client.get(&url).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            cb.record_success();
+                        }
+                        Ok(resp) => {
+                            cb.record_failure();
+                            tracing::warn!(
+                                "Health check failed for {}: status {}",
+                                base_url,
+                                resp.status()
+                            );
+                        }
+                        Err(e) => {
+                            cb.record_failure();
+                            tracing::warn!("Health check failed for {}: {}", base_url, e);
+                        }
                     }
-                }
+                });
             }
         }
+        while set.join_next().await.is_some() {}
     }
 }
