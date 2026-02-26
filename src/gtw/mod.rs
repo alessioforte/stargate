@@ -154,7 +154,9 @@ pub async fn handler(
         sub_key = sub.id.to_string();
     }
 
-    let key = format!("lim:{}", sub_key);
+    let mut key = String::with_capacity(4 + sub_key.len());
+    key.push_str("lim:");
+    key.push_str(&sub_key);
 
     let decision = match limiter.check(&limit_name, &key, None).await {
         Ok(decision) => decision,
@@ -194,7 +196,9 @@ pub async fn handler(
 
     // Quota tracking (only if subject has a quota configured) ----------------
     if let Some(quota_name) = quota_name {
-        let quota_key = format!("quota:{}", sub_key);
+        let mut quota_key = String::with_capacity(6 + sub_key.len());
+        quota_key.push_str("quota:");
+        quota_key.push_str(&sub_key);
         let decision = match limiter.check(&quota_name, &quota_key, Some(cost)).await {
             Ok(decision) => decision,
             Err(e) => {

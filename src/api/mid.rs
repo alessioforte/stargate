@@ -23,9 +23,9 @@ pub async fn middleware<B: MessageBody + 'static>(
     // for the stargate api is always "default" the limit to check
     let limit_name = "default";
 
-    let key = client_ip.clone();
-
-    let key = format!("lim:{}", key);
+    let mut key = String::with_capacity(4 + client_ip.len());
+    key.push_str("lim:");
+    key.push_str(&client_ip);
     let decision = match limiter.check(limit_name, &key, None).await {
         Ok(decision) => decision,
         Err(e) => {

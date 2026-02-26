@@ -13,13 +13,18 @@ impl CachedClock {
             micros: AtomicU64::new(Self::system_now_micros()),
         });
 
-        let clock_clone = Arc::clone(&clock);
+        let clock_weak = Arc::downgrade(&clock);
         std::thread::spawn(move || {
-            let sleep_duration = std::time::Duration::from_millis(10);
+            let interval = std::time::Duration::from_millis(10);
+            let mut next_tick = std::time::Instant::now() + interval;
             loop {
-                std::thread::sleep(sleep_duration);
-                let now_micros = Self::system_now_micros();
-                clock_clone.micros.store(now_micros, Ordering::Relaxed);
+                let Some(clock) = clock_weak.upgrade() else { break };
+                let now = std::time::Instant::now();
+                if next_tick > now {
+                    std::thread::sleep(next_tick - now);
+                }
+                clock.micros.store(Self::system_now_micros(), Ordering::Relaxed);
+                next_tick += interval;
             }
         });
 
