@@ -37,7 +37,7 @@ pub async fn handler(
 
     if user.is_none() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid username".to_string(),
+            "Invalid credentials".to_string(),
         )));
     }
 
@@ -56,14 +56,14 @@ pub async fn handler(
         Some(c) => c.value,
         None => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid password".to_string(),
+                "Invalid credentials".to_string(),
             )));
         }
     };
 
     if Hash::verify(&credentials.password, &password).is_err() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid password".to_string(),
+            "Invalid credentials".to_string(),
         )));
     }
 
