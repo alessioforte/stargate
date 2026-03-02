@@ -1,5 +1,5 @@
 use crate::lb::{RequestContext, Strategy, Upstream};
-use rand::Rng;
+use rand::RngExt;
 
 pub struct Random;
 

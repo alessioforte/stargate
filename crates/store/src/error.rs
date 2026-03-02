@@ -72,40 +72,33 @@ impl From<redis::RedisError> for StoreError {
             redis::ErrorKind::AuthenticationFailed => {
                 StoreError::ConnectionFailed(format!("Redis authentication failed: {}", error))
             }
-            redis::ErrorKind::TypeError => StoreError::InvalidInput(format!(
-                "Invalid data type for Redis operation: {}",
+            redis::ErrorKind::UnexpectedReturnType => StoreError::TypeMismatch(format!(
+                "Unexpected return type from Redis: {}",
                 error
             )),
-            redis::ErrorKind::ExecAbortError => {
-                StoreError::RedisFailed(format!("Redis transaction aborted: {}", error))
+            redis::ErrorKind::ClusterConnectionNotFound => {
+                StoreError::BackendUnavailable(format!("Redis cluster connection not found: {}", error))
             }
-            redis::ErrorKind::BusyLoadingError => {
-                StoreError::BackendUnavailable(format!("Redis is loading data: {}", error))
+            redis::ErrorKind::Server(kind) => match kind {
+                redis::ServerErrorKind::BusyLoading => {
+                    StoreError::BackendUnavailable(format!("Redis is loading data: {}", error))
+                }
+                redis::ServerErrorKind::ClusterDown => {
+                    StoreError::BackendUnavailable(format!("Redis cluster is down: {}", error))
+                }
+                redis::ServerErrorKind::TryAgain => {
+                    StoreError::Timeout(format!("Redis operation should be retried: {}", error))
+                }
+                _ => StoreError::RedisFailed(format!("Redis server error: {}", error)),
+            },
+            redis::ErrorKind::Parse => {
+                StoreError::DeserializationFailed(format!("Redis parse error: {}", error))
             }
-
-            redis::ErrorKind::NoScriptError => {
-                StoreError::RedisFailed(format!("Redis script error: {}", error))
-            }
-            redis::ErrorKind::ReadOnly => {
-                StoreError::RedisFailed(format!("Redis is in read-only mode: {}", error))
-            }
-            redis::ErrorKind::ClusterDown => {
-                StoreError::BackendUnavailable(format!("Redis cluster is down: {}", error))
-            }
-            redis::ErrorKind::CrossSlot => {
-                StoreError::RedisFailed(format!("Redis cross-slot operation: {}", error))
-            }
-            redis::ErrorKind::TryAgain => {
-                StoreError::Timeout(format!("Redis operation should be retried: {}", error))
-            }
-            redis::ErrorKind::Ask => {
-                StoreError::RedisFailed(format!("Redis cluster redirection: {}", error))
-            }
-            redis::ErrorKind::IoError => StoreError::IoError(format!("Redis I/O error: {}", error)),
-            redis::ErrorKind::ExtensionError => {
+            redis::ErrorKind::Io => StoreError::IoError(format!("Redis I/O error: {}", error)),
+            redis::ErrorKind::Extension => {
                 StoreError::RedisFailed(format!("Redis extension error: {}", error))
             }
-            redis::ErrorKind::ClientError => {
+            redis::ErrorKind::Client => {
                 StoreError::RedisFailed(format!("Redis client error: {}", error))
             }
             _ => StoreError::RedisFailed(format!("Redis error: {}", error)),
@@ -149,7 +142,7 @@ mod tests {
     #[cfg(feature = "redis")]
     #[test]
     fn test_redis_error_conversion() {
-        let redis_error = redis::RedisError::from((redis::ErrorKind::IoError, "connection lost"));
+        let redis_error = redis::RedisError::from((redis::ErrorKind::Io, "connection lost"));
         let store_error = StoreError::from(redis_error);
 
         match store_error {

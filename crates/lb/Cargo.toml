@@ -9,9 +9,9 @@ license.workspace = true
 [dependencies]
 ahash = "0.8"
 async-trait = "0.1.89"
-chrono = "0.4.43"
+chrono = "0.4.44"
 dashmap = "6.1.0"
-rand = "0.9.1"
-reqwest = "0.12.23"
+rand = "0.10.0"
+reqwest = "0.13.2"
 tokio = "1.49.0"
 tracing = "0.1.44"

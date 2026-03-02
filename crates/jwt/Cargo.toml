@@ -7,7 +7,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono = "0.4.43"
-jsonwebtoken = "9.3.1"
+chrono = "0.4.44"
+jsonwebtoken = "10.3.0"
+pkcs8 = "0.10.2"
+rand_core = "0.6"
+rsa = "0.9.10"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_with = "3.12.0"

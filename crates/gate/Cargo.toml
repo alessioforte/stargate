@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 ace = { path = "../ace" }
 arc-swap = "1.8.1"
-chrono = "0.4.43"
+chrono = "0.4.44"
 lb = { path = "../lb" }
 lim = { path = "../lim" }
 matchit = "0.9.1"
