@@ -29,7 +29,7 @@
 //! assert_eq!(trie.search("http", "/api/v2").unwrap().name, "api");
 //! ```
 
-use crate::protocol::Protocol;
+use crate::protocol::{Protocol, PROTOCOL_COUNT};
 use lb::LoadBalancer;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -124,23 +124,23 @@ struct TriePathNode {
 /// trie.search("http", "/api/v2");            // -> api_service
 /// trie.search("http", "/other");             // -> None
 /// ```
-#[derive(Default)]
 pub struct TriePath {
-    /// Root nodes indexed by protocol (http, https, ws, wss)
-    root: HashMap<String, TriePathNode>,
+    /// Root nodes indexed by protocol discriminant (0=Http, 1=Https, 2=Ws, 3=Wss).
+    /// Direct array indexing eliminates HashMap hashing on the hot path.
+    root: [Option<TriePathNode>; PROTOCOL_COUNT],
+}
+
+impl Default for TriePath {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TriePath {
     /// Creates a new empty trie.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let trie = TriePath::new();
-    /// ```
     pub fn new() -> Self {
         TriePath {
-            root: HashMap::new(),
+            root: [const { None }; PROTOCOL_COUNT],
         }
     }
 
@@ -149,36 +149,19 @@ impl TriePath {
     /// If a service already exists at the exact same protocol and path,
     /// it will be silently replaced with the new service.
     ///
-    /// # Arguments
-    ///
-    /// * `protocol` - Protocol string: "http", "https", "ws", or "wss"
-    /// * `path` - URL path like "/api/v1/users" (leading slash optional)
-    /// * `service` - Service configuration to register
-    ///
-    /// # Behavior
-    ///
     /// - Invalid protocols are logged and ignored (no panic)
     /// - Path is split by '/' after trimming leading slashes
     /// - Each segment becomes a node in the trie
-    /// - Empty segments (from "//") create empty string nodes
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let mut trie = TriePath::new();
-    /// trie.insert("http", "/api/users", users_service);
-    /// trie.insert("https", "/api/users", secure_users_service);
-    /// ```
     pub fn insert(&mut self, protocol: &str, path: &str, service: Service) {
-        let p = Protocol::from_str(protocol);
-        if p.is_none() {
-            warn!("Unsupported protocol: {}", protocol);
-            return;
-        }
-        let protocol_node = self
-            .root
-            .entry(p.unwrap().as_str().to_string())
-            .or_default();
+        let p = match protocol.parse::<Protocol>() {
+            Ok(p) => p,
+            Err(_) => {
+                warn!("Unsupported protocol: {}", protocol);
+                return;
+            }
+        };
+
+        let protocol_node = self.root[p.index()].get_or_insert_with(TriePathNode::default);
 
         let mut node = protocol_node;
         for segment in path.trim_start_matches('/').split('/') {
@@ -190,59 +173,27 @@ impl TriePath {
 
     /// Searches for a service matching the given protocol and path.
     ///
-    /// Returns the service with the **longest matching prefix**. This means
-    /// if you search for "/api/v1/users/123" and services are registered at
-    /// "/api", "/api/v1", and "/api/v1/users", it will return the service
-    /// at "/api/v1/users" (the most specific match).
-    ///
-    /// # Arguments
-    ///
-    /// * `protocol` - Protocol to search: "http", "https", "ws", or "wss"
-    /// * `path` - URL path to search for
-    ///
-    /// # Returns
-    ///
-    /// * `Some(&Service)` - The service with the longest matching prefix
-    /// * `None` - No matching service found for this protocol/path combination
-    ///
-    /// # Matching Behavior
-    ///
-    /// The search walks the trie node-by-node, keeping track of the last
-    /// service encountered. When it can't match any more segments, it returns
-    /// the last service found. This implements prefix matching.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Given these registrations:
-    /// trie.insert("http", "/api", api_service);
-    /// trie.insert("http", "/api/v1", v1_service);
-    ///
-    /// // These searches return:
-    /// trie.search("http", "/api");        // -> Some(api_service)
-    /// trie.search("http", "/api/v1");     // -> Some(v1_service)
-    /// trie.search("http", "/api/v1/foo"); // -> Some(v1_service) (prefix match)
-    /// trie.search("http", "/api/v2");     // -> Some(api_service) (prefix match)
-    /// trie.search("http", "/other");      // -> None
-    /// trie.search("https", "/api");       // -> None (different protocol)
-    /// ```
+    /// Returns the service with the **longest matching prefix**. The search
+    /// walks the trie node-by-node, keeping track of the last service
+    /// encountered. When it can't match any more segments, it returns the
+    /// last service found.
+    #[inline]
     pub fn search(&self, protocol: &str, path: &str) -> Option<&Service> {
-        if let Some(mut node) = self.root.get(protocol) {
-            let mut last: Option<&Service> = None;
+        let p = protocol.parse::<Protocol>().ok()?;
+        let mut node = self.root[p.index()].as_ref()?;
+        let mut last: Option<&Service> = None;
 
-            for segment in path.trim_start_matches('/').split('/') {
-                if let Some(next_node) = node.children.get(segment) {
-                    node = next_node;
-                    if node.is_end {
-                        last = node.service.as_ref();
-                    }
-                } else {
-                    break;
+        for segment in path.trim_start_matches('/').split('/') {
+            if let Some(next_node) = node.children.get(segment) {
+                node = next_node;
+                if node.is_end {
+                    last = node.service.as_ref();
                 }
+            } else {
+                break;
             }
-            return last;
         }
-        None
+        last
     }
 }
 

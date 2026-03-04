@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Endpoint {
@@ -9,11 +10,13 @@ pub struct Endpoint {
 
 impl Endpoint {
     pub fn format(&self) -> String {
-        let port = match self.port {
-            Some(port) => format!(":{}", port),
-            None => "".to_string(),
-        };
-        let path = self.path.clone().unwrap_or_default();
-        format!("{}{}{}", self.host, port, path)
+        let mut result = self.host.clone();
+        if let Some(port) = self.port {
+            write!(result, ":{}", port).unwrap();
+        }
+        if let Some(ref path) = self.path {
+            result.push_str(path);
+        }
+        result
     }
 }

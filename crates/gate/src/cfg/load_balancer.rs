@@ -29,17 +29,16 @@ impl LoadBalancer {
     pub fn builder(
         &self,
         protocol: &str,
-        endpoints: &Vec<Endpoint>,
+        endpoints: &[Endpoint],
     ) -> Arc<dyn lb::LoadBalancer + Send + Sync> {
         let upstreams = endpoints
             .iter()
             .map(|endpoint| {
                 let base_url = format!("{}://{}", protocol, endpoint.format());
-                let mut health_check_path = None;
-                if self.liveness_probe.is_some() {
-                    let health_check = self.liveness_probe.as_ref().unwrap();
-                    health_check_path = Some(health_check.path.clone());
-                }
+                let health_check_path = self
+                    .liveness_probe
+                    .as_ref()
+                    .map(|probe| probe.path.clone());
 
                 lb::Upstream::new(base_url, health_check_path)
             })

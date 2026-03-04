@@ -18,13 +18,23 @@ use std::{
 use tokio::runtime::Runtime;
 use tracing::{error, info};
 
+fn get_config_dir() -> String {
+    env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string())
+}
+
 fn get_config_path() -> String {
-    let path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
-    let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
-    if !Path::new(&path).exists() {
-        std::fs::create_dir(&path).expect("Unable to create config directory");
+    let dir = get_config_dir();
+    if !Path::new(&dir).exists() {
+        std::fs::create_dir(&dir).expect("Unable to create config directory");
     }
-    format!("{}/{}", path, filename)
+    let filename = "config.yaml";
+    format!("{}/{}", dir, filename)
+}
+
+pub fn get_policies_path() -> String {
+    let dir = get_config_dir();
+    let filename = "policies";
+    format!("{}/{}", dir, filename)
 }
 
 fn get_config() -> Config {
@@ -36,27 +46,29 @@ pub fn init() -> Data<Gate> {
     let store = use_store();
     let config = get_config();
     let config_file_path = get_config_path();
+    let policies_path = get_policies_path();
 
-    let gate = Gate::new(Arc::new(store.clone())).build(&config);
-    watch_file(&config_file_path, &gate);
+    let gate = Gate::new(Arc::new(store.clone())).build(&config, &policies_path);
+    watch_config_file(&config_file_path, &gate);
+    watch_policies_file(&policies_path, &gate);
     Data::new(gate)
 }
 
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 
-pub fn watch_file(file_path: &str, gate: &Gate) {
+fn watch_config_file(file_path: &str, gate: &Gate) {
     let file_path = file_path.to_string();
     let mut gate = gate.clone();
     thread::spawn(move || {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
-            info!("Watching Gate configuration file");
+            info!("Watching gate configuration file");
             let (tx, rx) = std::sync::mpsc::channel();
 
             let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
             debouncer
                 .watcher()
-                .watch(Path::new(&file_path), RecursiveMode::Recursive)
+                .watch(Path::new(&file_path), RecursiveMode::NonRecursive)
                 .unwrap();
 
             for rs in rx {
@@ -65,9 +77,39 @@ pub fn watch_file(file_path: &str, gate: &Gate) {
                         for _e in events.iter() {
                             CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                             info!("Configuration file changed, reloading...");
-                            // TODO: maybe here clean memory store
                             let config = Config::from_file(&file_path);
                             gate.update_config(&config).await;
+                        }
+                    }
+                    Err(e) => error!("Error: {:?}", e),
+                }
+            }
+        });
+    });
+}
+
+fn watch_policies_file(file_path: &str, gate: &Gate) {
+    let file_path = file_path.to_string();
+    let mut gate = gate.clone();
+    thread::spawn(move || {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            info!("Watching policies file");
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
+            debouncer
+                .watcher()
+                .watch(Path::new(&file_path), RecursiveMode::NonRecursive)
+                .unwrap();
+
+            for rs in rx {
+                match rs {
+                    Ok(events) => {
+                        for _e in events.iter() {
+                            CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
+                            info!("Policies file changed, reloading...");
+                            gate.update_policy_engine(&file_path).await;
                         }
                     }
                     Err(e) => error!("Error: {:?}", e),

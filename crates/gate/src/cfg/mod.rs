@@ -1,4 +1,3 @@
-pub mod access_control;
 pub mod endpoint;
 pub mod limit;
 pub mod load_balancer;
@@ -12,7 +11,6 @@ use tracing::info;
 pub struct Config {
     pub services: Vec<service::Service>,
     pub limits: Option<Vec<limit::Limit>>,
-    pub access_control: Option<access_control::AccessControl>,
     pub mtls: Option<mtls::MtlsConfig>,
 }
 

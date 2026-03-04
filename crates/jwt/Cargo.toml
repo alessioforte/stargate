@@ -8,7 +8,7 @@ license.workspace = true
 
 [dependencies]
 chrono = "0.4.44"
-jsonwebtoken = "10.3.0"
+jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 pkcs8 = "0.10.2"
 rand_core = "0.6"
 rsa = "0.9.10"

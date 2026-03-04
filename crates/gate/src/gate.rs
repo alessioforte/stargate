@@ -1,5 +1,4 @@
-use crate::cfg::access_control::AccessControl;
-use crate::cfg::{Config, limit::Limit, load_balancer::LoadBalancer, service::Service as Svc};
+use crate::cfg::{Config, limit::Limit, service::Service as Svc};
 use crate::trie::{RouteNode, Service, TriePath};
 use ace::PolicyEngine;
 use arc_swap::ArcSwap;
@@ -37,54 +36,27 @@ impl Gate {
         }
     }
 
-    pub fn build(self, config: &Config) -> Self {
+    pub fn build(self, config: &Config, policies_path: &str) -> Self {
         self.build_service(&config.services)
-            .build_policy_engine(&config.access_control)
+            .build_policy_engine(policies_path)
             .build_limiter(&config.limits)
     }
 
-    fn build_service(mut self, svc: &Vec<Svc>) -> Self {
-        let trie = self.create_trie(&svc);
-        let services = Arc::new(ArcSwap::new(Arc::new(trie)));
-        self.services = services;
+    fn build_service(mut self, svc: &[Svc]) -> Self {
+        let trie = self.create_trie(svc);
+        self.services = Arc::new(ArcSwap::new(Arc::new(trie)));
         self
     }
 
-    fn build_policy_engine(mut self, ac: &Option<AccessControl>) -> Self {
-        let mut pe = PolicyEngine::new();
-        if let Some(ac) = ac.clone() {
-            if ac.policies_path.is_some() {
-                let file_path = ac.policies_path.unwrap();
-                let content = match std::fs::read_to_string(file_path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        error!("Unable to read policy file: {}", e);
-                        String::new()
-                    }
-                };
-                match pe.parse_file(&content) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!("Unable to parse policy file: {}", e);
-                    }
-                }
-            }
-        }
-        let policy_engine = Arc::new(ArcSwap::new(Arc::new(pe)));
-        self.policy_engine = policy_engine;
+    fn build_policy_engine(mut self, policies_path: &str) -> Self {
+        let pe = Self::load_policy_engine(policies_path);
+        self.policy_engine = Arc::new(ArcSwap::new(Arc::new(pe)));
         self
     }
 
     fn build_limiter(mut self, limits: &Option<Vec<Limit>>) -> Self {
-        if let Some(limits) = limits.clone() {
-            let mut limiter = lim::Limiter::new();
-            for item in limits {
-                let name = item.name.clone();
-                let state = Arc::clone(&self.store);
-                let clock = Arc::clone(&self.clock);
-                let limit = item.build(state, clock);
-                limiter.add_limit(name, limit);
-            }
+        if let Some(limits) = limits {
+            let limiter = Self::create_limiter(limits, &self.store, &self.clock);
             self.limiter = Arc::new(ArcSwap::new(Arc::new(limiter)));
         }
         self
@@ -92,77 +64,79 @@ impl Gate {
 
     pub async fn update_config(&mut self, config: &Config) {
         self.update_services(&config.services).await;
-        self.update_policy_engine(&config.access_control).await;
         self.update_limiter(&config.limits).await;
         info!("Gate configuration updated");
     }
 
-    pub async fn update_services(&mut self, services: &Vec<Svc>) {
-        // Stop the old liveness probe
+    pub async fn update_services(&mut self, services: &[Svc]) {
         {
-            // TODO: poisoning? Race Condition Potential
             let mut probe = self.liveness_probe.lock().unwrap();
             probe.stop();
         }
 
-        let trie = self.create_trie(&services);
+        let trie = self.create_trie(services);
         self.services.store(Arc::new(trie));
 
         info!("Gate services updated");
     }
 
-    pub async fn update_policy_engine(&mut self, ac: &Option<AccessControl>) {
-        let mut pe = PolicyEngine::new();
-        if let Some(ac) = ac.clone() {
-            if ac.policies_path.is_some() {
-                let file_path = ac.policies_path.unwrap();
-                let content =
-                    std::fs::read_to_string(file_path).expect("Unable to read policy file");
-                pe.parse_file(&content)
-                    .expect("Unable to parse policy file");
-            }
-        }
+    pub async fn update_policy_engine(&mut self, policies_path: &str) {
+        let pe = Self::load_policy_engine(policies_path);
         self.policy_engine.store(Arc::new(pe));
-
         info!("Gate policy engine updated");
     }
 
     pub async fn update_limiter(&mut self, limits: &Option<Vec<Limit>>) {
-        // FIXME: Maybe the current states should be deleted from the store
-        if let Some(limits) = limits.clone() {
-            let mut limiter = lim::Limiter::new();
-            for item in limits {
-                let name = item.name.clone();
-                let state = Arc::clone(&self.store);
-                let clock = Arc::clone(&self.clock);
-                let limit = item.build(state, clock);
-                limiter.add_limit(name, limit);
-            }
+        if let Some(limits) = limits {
+            let limiter = Self::create_limiter(limits, &self.store, &self.clock);
             self.limiter.store(Arc::new(limiter));
         }
-
         info!("Gate limiter updated");
     }
 
-    fn create_trie(&mut self, services: &Vec<Svc>) -> TriePath {
+    fn load_policy_engine(policies_path: &str) -> PolicyEngine {
+        let mut pe = PolicyEngine::new();
+        let content = match std::fs::read_to_string(policies_path) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("Unable to read policy file '{}': {}", policies_path, e);
+                return pe;
+            }
+        };
+        if let Err(e) = pe.parse_file(&content) {
+            error!("Unable to parse policy file '{}': {}", policies_path, e);
+        }
+        pe
+    }
+
+    fn create_limiter(
+        limits: &[Limit],
+        store: &Arc<lim::State>,
+        clock: &Arc<lim::CachedClock>,
+    ) -> lim::Limiter {
+        let mut limiter = lim::Limiter::new();
+        for item in limits {
+            let name = item.name.clone();
+            let limit = item.clone().build(Arc::clone(store), Arc::clone(clock));
+            limiter.add_limit(name, limit);
+        }
+        limiter
+    }
+
+    fn create_trie(&mut self, services: &[Svc]) -> TriePath {
         let mut trie = TriePath::new();
         let mut liveness_probe = lb::HealthCheck::new();
 
         for service in services {
             let protocol = service.protocol.as_str();
 
-            let lb_strategy = match service.load_balancer.clone() {
-                Some(lb) => lb,
-                None => LoadBalancer::default(),
-            };
+            let lb_strategy = service.load_balancer.as_ref().cloned().unwrap_or_default();
 
             let lb = lb_strategy.builder(protocol, &service.endpoints);
-            if lb_strategy.liveness_probe.is_some() {
-                let health_check = lb_strategy.liveness_probe.unwrap();
-                let i = health_check.interval.unwrap_or("5s".to_string());
-                let interval = tools::parse_duration(&i).unwrap_or(chrono::Duration::seconds(5));
-                let lb = Arc::clone(&lb);
-                liveness_probe.register(interval, lb);
+            if let Some(ref health_check) = lb_strategy.liveness_probe {
+                let i = health_check.interval.as_deref().unwrap_or("5s");
+                let interval = tools::parse_duration(i).unwrap_or(chrono::Duration::seconds(5));
+                liveness_probe.register(interval, Arc::clone(&lb));
             }
 
             let mut routes = None;
@@ -175,16 +149,10 @@ impl Gate {
                         resource: r.resource.clone(),
                         cost: r.cost,
                     };
-                    let router = map.get(&r.method);
-                    if router.is_none() {
-                        let mut router = matchit::Router::new();
-                        router.insert(&r.path, route).unwrap();
-                        map.insert(r.method.clone(), router);
-                    } else {
-                        map.entry(r.method.clone()).and_modify(|router| {
-                            router.insert(&r.path, route).unwrap();
-                        });
-                    }
+                    map.entry(r.method.clone())
+                        .or_insert_with(matchit::Router::new)
+                        .insert(&r.path, route)
+                        .unwrap();
                 }
                 routes = Some(map);
             }
