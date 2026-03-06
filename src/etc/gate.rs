@@ -1,12 +1,13 @@
 use crate::etc::store::use_store;
 use actix_web::web::Data;
 use gate::{Gate, cfg::Config};
-use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::DefaultHasher},
     env,
+    hash::{Hash, Hasher},
     path::Path,
     sync::{
         Arc,
@@ -34,7 +35,11 @@ fn get_config_path() -> String {
 pub fn get_policies_path() -> String {
     let dir = get_config_dir();
     let filename = "policies";
-    format!("{}/{}", dir, filename)
+    let path = format!("{}/{}", dir, filename);
+    if !Path::new(&path).exists() {
+        std::fs::write(&path, "").expect("Unable to create policies file");
+    }
+    path
 }
 
 fn get_config() -> Config {
@@ -56,6 +61,23 @@ pub fn init() -> Data<Gate> {
 
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 
+/// Computes a hash of the file content to detect actual changes.
+fn file_content_hash(path: &str) -> Option<u64> {
+    let content = std::fs::read(path).ok()?;
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+/// Returns true only for data-modification events (write/save),
+/// filtering out access, open, metadata, and rename events.
+fn is_write_event(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Modify(ModifyKind::Data(_)) | EventKind::Create(_)
+    )
+}
+
 fn watch_config_file(file_path: &str, gate: &Gate) {
     let file_path = file_path.to_string();
     let mut gate = gate.clone();
@@ -65,23 +87,31 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
             info!("Watching gate configuration file");
             let (tx, rx) = std::sync::mpsc::channel();
 
-            let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
-            debouncer
-                .watcher()
+            let mut last_hash = file_content_hash(&file_path);
+
+            let mut watcher = notify::recommended_watcher(tx).unwrap();
+            watcher
                 .watch(Path::new(&file_path), RecursiveMode::NonRecursive)
                 .unwrap();
 
             for rs in rx {
                 match rs {
-                    Ok(events) => {
-                        for _e in events.iter() {
-                            CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-                            info!("Configuration file changed, reloading...");
-                            let config = Config::from_file(&file_path);
-                            gate.update_config(&config).await;
+                    Ok(event) => {
+                        if !is_write_event(&event.kind) {
+                            continue;
                         }
+                        let current_hash = file_content_hash(&file_path);
+                        if current_hash == last_hash {
+                            continue;
+                        }
+                        last_hash = current_hash;
+
+                        CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
+                        info!("Configuration file changed, reloading...");
+                        let config = Config::from_file(&file_path);
+                        gate.update_config(&config).await;
                     }
-                    Err(e) => error!("Error: {:?}", e),
+                    Err(e) => error!("Watch error: {:?}", e),
                 }
             }
         });
@@ -97,22 +127,30 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
             info!("Watching policies file");
             let (tx, rx) = std::sync::mpsc::channel();
 
-            let mut debouncer = new_debouncer(Duration::from_secs(0), tx).unwrap();
-            debouncer
-                .watcher()
+            let mut last_hash = file_content_hash(&file_path);
+
+            let mut watcher = notify::recommended_watcher(tx).unwrap();
+            watcher
                 .watch(Path::new(&file_path), RecursiveMode::NonRecursive)
                 .unwrap();
 
             for rs in rx {
                 match rs {
-                    Ok(events) => {
-                        for _e in events.iter() {
-                            CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-                            info!("Policies file changed, reloading...");
-                            gate.update_policy_engine(&file_path).await;
+                    Ok(event) => {
+                        if !is_write_event(&event.kind) {
+                            continue;
                         }
+                        let current_hash = file_content_hash(&file_path);
+                        if current_hash == last_hash {
+                            continue;
+                        }
+                        last_hash = current_hash;
+
+                        CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
+                        info!("Policies file changed, reloading...");
+                        gate.update_policy_engine(&file_path).await;
                     }
-                    Err(e) => error!("Error: {:?}", e),
+                    Err(e) => error!("Watch error: {:?}", e),
                 }
             }
         });

@@ -76,7 +76,6 @@ tools = { path = "crates/tools" }
 utoipa = { version = "5.3.1", features = ["actix_extras", "yaml"] }
 once_cell = "1.21.3"
 serde_yaml_bw = "2.5.2"
-notify-debouncer-mini = "0.7.0"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "time"] }
 rustls = "0.23.36"
 rustls-pemfile = "2.2.0"
@@ -89,9 +88,10 @@ tracing-actix-web = "0.7.21"
 lru = "0.16.3"
 maxminddb = { version = "0.27.3", features = ["simdutf8"] }
 moka = { version = "0.12.13", features = ["sync"] }
+notify = "8.2.0"
 
 [features]
-default = ["sqlite", "redis"]
+default = ["sqlite", "memory"]
 postgres = ["db/postgres"]
 sqlite = ["db/sqlite"]
 memory = ["store/memory", "gate/memory"]

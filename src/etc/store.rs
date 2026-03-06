@@ -4,7 +4,7 @@ mod memory {
     use std::sync::atomic::{AtomicBool, Ordering};
     use store::MemoryStore;
 
-    const MEMORY_BACKUP_PATH: &str = ".stargate/backup/memory.json";
+    const MEMORY_BACKUP_PATH: &str = ".stargate/memory.json";
     const MEMORY_BACKUP_INTERVAL_SECS: u64 = 5;
 
     static RESTORE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
