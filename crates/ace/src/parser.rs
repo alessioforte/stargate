@@ -1,6 +1,6 @@
 use crate::{
     Condition, Expression, Operator, ParseError, Policy, PolicyAction, ResourceAction, Value,
-    parse_iso_date, parse_time_of_day,
+    parse_iso_date, parse_iso_datetime, parse_time_of_day, parse_time_with_offset,
 };
 
 pub struct PolicyParser;
@@ -221,6 +221,12 @@ impl PolicyParser {
         // String value (quoted)
         if value_str.starts_with('"') && value_str.ends_with('"') {
             let content = &value_str[1..value_str.len() - 1];
+            if let Some(dt) = parse_iso_datetime(content) {
+                return Ok(Value::DateTime(dt));
+            }
+            if let Some(dt) = parse_time_with_offset(content) {
+                return Ok(Value::DateTime(dt));
+            }
             if let Some(date) = parse_iso_date(content) {
                 return Ok(Value::Date(date));
             }
@@ -233,6 +239,12 @@ impl PolicyParser {
         // Single quoted strings
         if value_str.starts_with('\'') && value_str.ends_with('\'') {
             let content = &value_str[1..value_str.len() - 1];
+            if let Some(dt) = parse_iso_datetime(content) {
+                return Ok(Value::DateTime(dt));
+            }
+            if let Some(dt) = parse_time_with_offset(content) {
+                return Ok(Value::DateTime(dt));
+            }
             if let Some(date) = parse_iso_date(content) {
                 return Ok(Value::Date(date));
             }
@@ -248,6 +260,14 @@ impl PolicyParser {
         }
         if value_str == "false" {
             return Ok(Value::Boolean(false));
+        }
+
+        // DateTime values (ISO-8601 with timezone)
+        if let Some(dt) = parse_iso_datetime(value_str) {
+            return Ok(Value::DateTime(dt));
+        }
+        if let Some(dt) = parse_time_with_offset(value_str) {
+            return Ok(Value::DateTime(dt));
         }
 
         // Date and time values (ISO-8601 date, HH:MM[:SS] time)

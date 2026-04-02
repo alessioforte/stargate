@@ -1,6 +1,6 @@
 use crate::{
     Condition, Expression, Operator, Policy, PolicyAction, ResourceAction, Value, parse_iso_date,
-    parse_time_of_day,
+    parse_iso_datetime, parse_time_of_day, parse_time_with_offset,
 };
 use std::collections::HashMap;
 
@@ -157,6 +157,18 @@ impl PolicyEvaluator {
             (Value::Date(l), Value::String(r)) => parse_iso_date(r) == Some(*l),
             (Value::String(l), Value::Time(r)) => parse_time_of_day(l) == Some(*r),
             (Value::Time(l), Value::String(r)) => parse_time_of_day(r) == Some(*l),
+            (Value::String(l), Value::DateTime(r)) => {
+                parse_iso_datetime(l)
+                    .or_else(|| parse_time_with_offset(l))
+                    .as_ref()
+                    == Some(r)
+            }
+            (Value::DateTime(l), Value::String(r)) => {
+                parse_iso_datetime(r)
+                    .or_else(|| parse_time_with_offset(r))
+                    .as_ref()
+                    == Some(l)
+            }
             _ => false,
         }
     }
@@ -206,6 +218,13 @@ impl PolicyEvaluator {
             (Value::Time(l), Value::Time(r)) => Some(l.cmp(r)),
             (Value::Time(l), Value::String(r)) => parse_time_of_day(r).map(|time| l.cmp(&time)),
             (Value::String(l), Value::Time(r)) => parse_time_of_day(l).map(|time| time.cmp(r)),
+            (Value::DateTime(l), Value::DateTime(r)) => Some(l.cmp(r)),
+            (Value::DateTime(l), Value::String(r)) => parse_iso_datetime(r)
+                .or_else(|| parse_time_with_offset(r))
+                .map(|dt| l.cmp(&dt)),
+            (Value::String(l), Value::DateTime(r)) => parse_iso_datetime(l)
+                .or_else(|| parse_time_with_offset(l))
+                .map(|dt| dt.cmp(r)),
             _ => left.partial_cmp(right),
         }
     }

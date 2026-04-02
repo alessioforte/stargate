@@ -25,7 +25,7 @@
 //! ALLOW api_key FOR "feature3" WHEN api_key.valid == true AND api_key.scope == "read";
 //! ```
 
-use chrono::{NaiveDate, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -213,6 +213,7 @@ pub enum Value {
     Float(f64),
     Date(NaiveDate),
     Time(NaiveTime),
+    DateTime(DateTime<FixedOffset>),
     Array(Vec<Value>),
 }
 
@@ -225,6 +226,7 @@ impl PartialOrd for Value {
             (Value::Float(a), Value::Number(b)) => a.partial_cmp(&(*b as f64)),
             (Value::Date(a), Value::Date(b)) => a.partial_cmp(b),
             (Value::Time(a), Value::Time(b)) => a.partial_cmp(b),
+            (Value::DateTime(a), Value::DateTime(b)) => a.partial_cmp(b),
             (Value::String(a), Value::String(b)) => a.partial_cmp(b),
             (Value::Boolean(a), Value::Boolean(b)) => a.partial_cmp(b),
             _ => None,
@@ -241,6 +243,7 @@ impl fmt::Display for Value {
             Value::Float(f_val) => write!(f, "{}", f_val),
             Value::Date(date) => write!(f, "{}", date),
             Value::Time(time) => write!(f, "{}", time.format("%H:%M:%S")),
+            Value::DateTime(dt) => write!(f, "{}", dt.to_rfc3339()),
             Value::Array(arr) => {
                 write!(f, "[")?;
                 for (i, v) in arr.iter().enumerate() {
@@ -285,7 +288,11 @@ impl From<&serde_json::Value> for Value {
     fn from(v: &serde_json::Value) -> Self {
         match v {
             serde_json::Value::String(s) => {
-                if let Some(date) = parse_iso_date(s) {
+                if let Some(dt) = parse_iso_datetime(s) {
+                    Value::DateTime(dt)
+                } else if let Some(dt) = parse_time_with_offset(s) {
+                    Value::DateTime(dt)
+                } else if let Some(date) = parse_iso_date(s) {
                     Value::Date(date)
                 } else if let Some(time) = parse_time_of_day(s) {
                     Value::Time(time)
@@ -318,6 +325,26 @@ pub(crate) fn parse_time_of_day(input: &str) -> Option<NaiveTime> {
         .ok()
         .or_else(|| NaiveTime::parse_from_str(input, "%H:%M").ok())
 }
+
+pub(crate) fn parse_iso_datetime(input: &str) -> Option<DateTime<FixedOffset>> {
+    DateTime::parse_from_rfc3339(input)
+        .ok()
+        .or_else(|| DateTime::parse_from_str(input, "%Y-%m-%dT%H:%M%:z").ok())
+        .or_else(|| {
+            if input.ends_with('Z') {
+                let s = format!("{}+00:00", &input[..input.len() - 1]);
+                DateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M%:z").ok()
+            } else {
+                None
+            }
+        })
+}
+
+pub(crate) fn parse_time_with_offset(input: &str) -> Option<DateTime<FixedOffset>> {
+    let full = format!("2000-01-01T{}", input);
+    parse_iso_datetime(&full)
+}
+
 /// Errors that can occur during policy parsing
 #[derive(Debug, Clone)]
 pub enum ParseError {
@@ -602,18 +629,28 @@ impl ContextBuilder {
     }
 
     pub fn date(mut self, date: &str) -> Self {
-        let value = parse_iso_date(date)
-            .map(Value::Date)
+        let value = parse_iso_datetime(date)
+            .map(Value::DateTime)
+            .or_else(|| parse_iso_date(date).map(Value::Date))
             .unwrap_or_else(|| Value::String(date.to_string()));
         self.context.insert("time.date".to_string(), value);
         self
     }
 
     pub fn time(mut self, time: &str) -> Self {
-        let value = parse_time_of_day(time)
-            .map(Value::Time)
+        let value = parse_time_with_offset(time)
+            .map(Value::DateTime)
+            .or_else(|| parse_time_of_day(time).map(Value::Time))
             .unwrap_or_else(|| Value::String(time.to_string()));
         self.context.insert("time.time".to_string(), value);
+        self
+    }
+
+    pub fn datetime(mut self, datetime: &str) -> Self {
+        let value = parse_iso_datetime(datetime)
+            .map(Value::DateTime)
+            .unwrap_or_else(|| Value::String(datetime.to_string()));
+        self.context.insert("time.datetime".to_string(), value);
         self
     }
 
@@ -844,6 +881,163 @@ mod tests {
             Value::Array(vec![Value::String("unverified".to_string())]),
         )]);
         assert!(!engine.evaluate("user", "verified_feature", &ctx));
+    }
+
+    #[test]
+    fn test_time_with_timezone_policy() {
+        let mut engine = PolicyEngine::new();
+
+        let content = r#"
+        DENY user FOR "feature0" WHEN env.time < "09:00+02:00" OR env.time > "17:00+02:00";
+        "#;
+
+        engine.parse_file(content).unwrap();
+
+        // 10:00+02:00 is within working hours -> not denied (but no ALLOW, so false)
+        let ctx = context_with(vec![(
+            "env.time",
+            Value::DateTime(parse_time_with_offset("10:00+02:00").unwrap()),
+        )]);
+        assert!(!engine.evaluate("user", "feature0", &ctx));
+
+        // 08:00+02:00 is before 09:00+02:00 -> denied
+        let ctx = context_with(vec![(
+            "env.time",
+            Value::DateTime(parse_time_with_offset("08:00+02:00").unwrap()),
+        )]);
+        assert!(!engine.evaluate("user", "feature0", &ctx));
+    }
+
+    #[test]
+    fn test_time_with_timezone_allow_and_deny() {
+        let mut engine = PolicyEngine::new();
+
+        let content = r#"
+        ALLOW user FOR "feature0";
+        DENY user FOR "feature0" WHEN env.time < "09:00+02:00" OR env.time > "17:00+02:00";
+        "#;
+
+        engine.parse_file(content).unwrap();
+
+        // 10:00+02:00 is within working hours -> allowed
+        let ctx = context_with(vec![(
+            "env.time",
+            Value::DateTime(parse_time_with_offset("10:00+02:00").unwrap()),
+        )]);
+        assert!(engine.evaluate("user", "feature0", &ctx));
+
+        // 08:00+02:00 is before 09:00+02:00 -> denied
+        let ctx = context_with(vec![(
+            "env.time",
+            Value::DateTime(parse_time_with_offset("08:00+02:00").unwrap()),
+        )]);
+        assert!(!engine.evaluate("user", "feature0", &ctx));
+
+        // 18:00+02:00 is after 17:00+02:00 -> denied
+        let ctx = context_with(vec![(
+            "env.time",
+            Value::DateTime(parse_time_with_offset("18:00+02:00").unwrap()),
+        )]);
+        assert!(!engine.evaluate("user", "feature0", &ctx));
+    }
+
+    #[test]
+    fn test_datetime_with_timezone_comparison() {
+        let mut engine = PolicyEngine::new();
+
+        let content = r#"
+        ALLOW user FOR "feature1" WHEN time.datetime >= "2026-01-01T00:00:00+00:00";
+        "#;
+
+        engine.parse_file(content).unwrap();
+
+        // After the date -> allowed
+        let ctx = context_with(vec![(
+            "time.datetime",
+            Value::DateTime(parse_iso_datetime("2026-06-15T12:00:00+00:00").unwrap()),
+        )]);
+        assert!(engine.evaluate("user", "feature1", &ctx));
+
+        // Before the date -> denied
+        let ctx = context_with(vec![(
+            "time.datetime",
+            Value::DateTime(parse_iso_datetime("2025-12-31T23:59:59+00:00").unwrap()),
+        )]);
+        assert!(!engine.evaluate("user", "feature1", &ctx));
+    }
+
+    #[test]
+    fn test_timezone_cross_offset_comparison() {
+        let mut engine = PolicyEngine::new();
+
+        // Policy uses UTC
+        let content = r#"
+        ALLOW user FOR "feature1" WHEN env.time > "07:00+00:00";
+        "#;
+
+        engine.parse_file(content).unwrap();
+
+        // 09:00+02:00 == 07:00 UTC -> not greater, should be denied
+        let ctx = context_with(vec![(
+            "env.time",
+            Value::DateTime(parse_time_with_offset("09:00+02:00").unwrap()),
+        )]);
+        assert!(!engine.evaluate("user", "feature1", &ctx));
+
+        // 10:00+02:00 == 08:00 UTC -> greater than 07:00 UTC, allowed
+        let ctx = context_with(vec![(
+            "env.time",
+            Value::DateTime(parse_time_with_offset("10:00+02:00").unwrap()),
+        )]);
+        assert!(engine.evaluate("user", "feature1", &ctx));
+    }
+
+    #[test]
+    fn test_time_with_utc_z_suffix() {
+        let dt = parse_time_with_offset("09:00:00Z").unwrap();
+        assert_eq!(dt, parse_time_with_offset("09:00:00+00:00").unwrap());
+
+        let dt = parse_time_with_offset("17:00Z").unwrap();
+        assert_eq!(dt, parse_time_with_offset("17:00+00:00").unwrap());
+    }
+
+    #[test]
+    fn test_parse_iso_datetime_formats() {
+        // RFC 3339 with seconds
+        assert!(parse_iso_datetime("2026-01-01T09:00:00Z").is_some());
+        assert!(parse_iso_datetime("2026-01-01T09:00:00+02:00").is_some());
+
+        // Without seconds
+        assert!(parse_iso_datetime("2026-01-01T09:00+02:00").is_some());
+        assert!(parse_iso_datetime("2026-01-01T09:00Z").is_some());
+
+        // Not datetime
+        assert!(parse_iso_datetime("2026-01-01").is_none());
+        assert!(parse_iso_datetime("09:00").is_none());
+        assert!(parse_iso_datetime("hello").is_none());
+    }
+
+    #[test]
+    fn test_context_builder_datetime() {
+        let ctx = ContextBuilder::new()
+            .datetime("2026-01-01T09:00:00+02:00")
+            .build();
+
+        assert!(matches!(ctx.get("time.datetime"), Some(Value::DateTime(_))));
+    }
+
+    #[test]
+    fn test_context_builder_time_with_offset() {
+        let ctx = ContextBuilder::new().time("09:00+02:00").build();
+
+        assert!(matches!(ctx.get("time.time"), Some(Value::DateTime(_))));
+    }
+
+    #[test]
+    fn test_context_builder_time_without_offset() {
+        let ctx = ContextBuilder::new().time("09:00").build();
+
+        assert!(matches!(ctx.get("time.time"), Some(Value::Time(_))));
     }
 
     #[test]
