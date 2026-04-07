@@ -60,11 +60,22 @@ impl Service {
 
 // Generic init function that works with any database URL
 pub async fn init(conn: &str) -> Result<Service> {
+    let max_connections: u32 = std::env::var("DB_POOL_MAX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
+
     #[cfg(feature = "sqlite")]
-    let pool = sqlx::SqlitePool::connect(conn).await?;
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(max_connections)
+        .connect(conn)
+        .await?;
 
     #[cfg(feature = "postgres")]
-    let pool = PgPool::connect(conn).await?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(max_connections)
+        .connect(conn)
+        .await?;
 
     let service = Service::new(pool);
 

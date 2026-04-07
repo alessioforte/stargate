@@ -16,7 +16,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::runtime::Runtime;
+use tokio::runtime::Handle;
 use tracing::{error, info};
 
 fn get_config_dir() -> String {
@@ -81,9 +81,9 @@ fn is_write_event(kind: &EventKind) -> bool {
 fn watch_config_file(file_path: &str, gate: &Gate) {
     let file_path = file_path.to_string();
     let mut gate = gate.clone();
+    let handle = Handle::current();
     thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
+        handle.block_on(async {
             info!("Watching gate configuration file");
             let (tx, rx) = std::sync::mpsc::channel();
 
@@ -121,9 +121,9 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
 fn watch_policies_file(file_path: &str, gate: &Gate) {
     let file_path = file_path.to_string();
     let mut gate = gate.clone();
+    let handle = Handle::current();
     thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
+        handle.block_on(async {
             info!("Watching policies file");
             let (tx, rx) = std::sync::mpsc::channel();
 

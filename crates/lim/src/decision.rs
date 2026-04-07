@@ -78,7 +78,11 @@ impl RateLimitDecision {
     pub fn retry_after_secs(&self) -> Option<u64> {
         self.retry_after.map(|d| {
             let secs = d.as_secs();
-            if d.subsec_millis() > 0 { secs + 1 } else { secs }
+            if d.subsec_millis() > 0 {
+                secs + 1
+            } else {
+                secs
+            }
         })
     }
 

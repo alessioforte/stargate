@@ -138,25 +138,21 @@ pub async fn get_users(query: web::Query<ListUsersQuery>) -> Result<HttpResponse
 
     let (users, total) = match &query.q {
         Some(search_query) if !search_query.trim().is_empty() => {
-            println!(
-                "Searching users with query: {} {} {}",
-                search_query, limit, offset
-            );
             let users = crate::db::search_users(search_query, limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             let total = crate::db::count_search_users(search_query)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             (users, total)
         }
         _ => {
             let users = crate::db::get_all_users(limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             let total = crate::db::count_users()
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             (users, total)
         }
     };
@@ -201,9 +197,7 @@ pub async fn get_user(params: web::Path<String>) -> Result<HttpResponse, ErrorRe
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -248,9 +242,7 @@ pub async fn create_user(
     let hashed_password = match pw::Hash::encode(&payload.password) {
         Ok(hash) => hash,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -276,9 +268,7 @@ pub async fn create_user(
     {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -327,9 +317,7 @@ pub async fn update_user(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -354,9 +342,7 @@ pub async fn update_user(
     let user = match crate::db::update_user(updated_user, ctx).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -405,9 +391,7 @@ pub async fn patch_user(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -434,9 +418,7 @@ pub async fn patch_user(
     let user = match crate::db::update_user(existing_user, ctx).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -485,9 +467,7 @@ pub async fn update_user_attrs(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -497,9 +477,7 @@ pub async fn update_user_attrs(
     let user = match crate::db::update_user(existing_user, ctx).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -548,9 +526,7 @@ pub async fn patch_user_attrs(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -569,9 +545,7 @@ pub async fn patch_user_attrs(
     let user = match crate::db::update_user(existing_user, ctx).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -600,7 +574,6 @@ pub async fn delete_user(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    // FIXME: Prevent deletion of user admin
     let ctx = req
         .extensions_mut()
         .remove::<AuditContext>()
@@ -609,19 +582,30 @@ pub async fn delete_user(
     let id = params.into_inner();
 
     // Check if user exists
-    if let Ok(None) = crate::db::get_user_by_id(&id).await {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "User with id '{}' not found",
-            id
-        ))));
+    let user = match crate::db::get_user_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+                "User with id '{}' not found",
+                id
+            ))));
+        }
+        Err(e) => {
+            return Err(ErrorResponse::internal(e));
+        }
+    };
+
+    // Prevent deletion of super admin
+    if user.nickname == crate::etc::consts::STARGATE_ADMIN {
+        return Err(ErrorResponse::from(HttpError::Forbidden(
+            "cannot delete super admin user".to_string(),
+        )));
     }
 
     match crate::db::delete_user(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 
@@ -663,7 +647,7 @@ pub async fn get_user_organizations(
 
     let organizations = crate::db::get_user_organizations(&id)
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        .map_err(|e| ErrorResponse::internal(e))?;
 
     Ok(HttpResponse::Ok().json(organizations))
 }
@@ -704,11 +688,11 @@ pub async fn get_organization_users(
 
     let users = crate::db::get_organization_users_paginated(&org_id, limit, offset)
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        .map_err(|e| ErrorResponse::internal(e))?;
 
     let total = crate::db::count_organization_users(&org_id)
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        .map_err(|e| ErrorResponse::internal(e))?;
 
     let response = PaginatedResponse {
         data: users,
@@ -769,9 +753,7 @@ pub async fn add_user_to_organization(
     match crate::db::add_user_to_organization(&user_id, &org_id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 
@@ -832,9 +814,7 @@ pub async fn remove_user_from_organization(
     match crate::db::remove_user_from_organization(&user_id, &org_id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 

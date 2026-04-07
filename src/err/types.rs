@@ -138,9 +138,11 @@ impl Code {
         self.err_code().error_type.to_string()
     }
 
-    /// return the doc url ascociated with the error
+    /// return the doc url associated with the error
     pub fn url(&self) -> String {
-        format!("https://<DOCS_ENDPOINT>/errors#{}", self.name())
+        let base =
+            std::env::var("DOCS_URL").unwrap_or_else(|_| "https://docs.stargate.dev".to_string());
+        format!("{}/errors#{}", base, self.name())
     }
 }
 

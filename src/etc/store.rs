@@ -2,16 +2,26 @@
 mod memory {
     use once_cell::sync::Lazy;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use store::MemoryStore;
+    use store::{MemoryStore, memory::MemoryStoreConfig};
 
-    const MEMORY_BACKUP_PATH: &str = ".stargate/memory.json";
+    pub const MEMORY_BACKUP_PATH: &str = ".stargate/memory.json";
     const MEMORY_BACKUP_INTERVAL_SECS: u64 = 5;
+    const DEFAULT_MAX_MEMORY_MB: usize = 100;
 
     static RESTORE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
     static BACKUP_TASK_STARTED: AtomicBool = AtomicBool::new(false);
 
     pub static STORE: Lazy<MemoryStore> = Lazy::new(|| {
-        let store = MemoryStore::new();
+        let max_memory_mb: usize = std::env::var("STORE_MAX_MEMORY_MB")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_MEMORY_MB);
+
+        let config = MemoryStoreConfig {
+            max_memory_usage: max_memory_mb * 1024 * 1024,
+            ..MemoryStoreConfig::default()
+        };
+        let store = MemoryStore::with_config(config);
         store.run_cleaner(60);
         store
     });
@@ -128,8 +138,22 @@ mod redis {
 pub use memory::init;
 #[cfg(feature = "memory")]
 pub use memory::use_store;
+#[cfg(feature = "memory")]
+pub async fn save() {
+    let store = memory::use_store();
+    if let Err(error) = store.save_to_json(memory::MEMORY_BACKUP_PATH).await {
+        tracing::warn!("Failed to save memory store on shutdown: {}", error);
+    } else {
+        tracing::info!("Memory store saved on shutdown");
+    }
+}
 
 #[cfg(feature = "redis")]
 pub use redis::init;
 #[cfg(feature = "redis")]
 pub use redis::use_store;
+#[cfg(feature = "redis")]
+pub async fn save() {
+    // Redis is persistent; nothing to do on shutdown
+    tracing::info!("Redis store: no shutdown save needed");
+}

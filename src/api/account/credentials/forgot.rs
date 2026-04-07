@@ -33,9 +33,7 @@ pub async fn handler(
     let user = match crate::db::get_user_by_username(&body.email).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -59,12 +57,7 @@ pub async fn handler(
 
     let sid = act::create_change_password_request(&user.email)
         .await
-        .map_err(|e| {
-            ErrorResponse::from(HttpError::InternalServerError(format!(
-                "Failed to create change password request: {}",
-                e
-            )))
-        })?;
+        .map_err(|e| ErrorResponse::internal(e))?;
 
     let claim = jwt::Claims::default()
         .sub_id(user.id.clone())
@@ -75,9 +68,7 @@ pub async fn handler(
     let token = match jwt.generate_token(&claim) {
         Ok(token) => token,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -101,8 +92,6 @@ pub async fn handler(
             );
             Ok(HttpResponse::Ok().json(web::Json(message)))
         }
-        Err(e) => Err(ErrorResponse::from(HttpError::InternalServerError(
-            e.to_string(),
-        ))),
+        Err(e) => Err(ErrorResponse::internal(e)),
     }
 }

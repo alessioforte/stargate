@@ -18,12 +18,16 @@ impl CachedClock {
             let interval = std::time::Duration::from_millis(10);
             let mut next_tick = std::time::Instant::now() + interval;
             loop {
-                let Some(clock) = clock_weak.upgrade() else { break };
+                let Some(clock) = clock_weak.upgrade() else {
+                    break;
+                };
                 let now = std::time::Instant::now();
                 if next_tick > now {
                     std::thread::sleep(next_tick - now);
                 }
-                clock.micros.store(Self::system_now_micros(), Ordering::Relaxed);
+                clock
+                    .micros
+                    .store(Self::system_now_micros(), Ordering::Relaxed);
                 next_tick += interval;
             }
         });

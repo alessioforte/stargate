@@ -205,6 +205,11 @@ impl ErrorResponse {
         }
     }
 
+    pub fn internal(error: impl fmt::Display) -> Self {
+        tracing::error!("internal_server_error: {}", error);
+        Self::from_msg("internal error".to_string(), Code::InternalServerError)
+    }
+
     pub fn insert_header(&mut self, key: &str, value: &str) -> &mut Self {
         self.headers.push((key.to_string(), value.to_string()));
         self
@@ -230,7 +235,10 @@ where
 
 impl actix_web::error::ResponseError for ErrorResponse {
     fn error_response(&self) -> actix_web::HttpResponse {
-        let json = serde_json::to_vec(self).unwrap();
+        let json = serde_json::to_vec(self).unwrap_or_else(|_| {
+            br#"{"message":"internal error","code":"internal_server_error","type":"internal"}"#
+                .to_vec()
+        });
         let mut builder = actix_web::HttpResponseBuilder::new(self.status_code());
         builder.content_type("application/json");
 

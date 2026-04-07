@@ -38,9 +38,7 @@ pub async fn handler(
     let request = match act::get_email_verification_request(&sid).await {
         Ok(request) => request,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -63,9 +61,7 @@ pub async fn handler(
             new_sid
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -79,9 +75,7 @@ pub async fn handler(
     let token = match jwt.generate_token(&claim) {
         Ok(token) => token,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 

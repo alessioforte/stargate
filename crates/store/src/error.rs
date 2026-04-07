@@ -72,13 +72,13 @@ impl From<redis::RedisError> for StoreError {
             redis::ErrorKind::AuthenticationFailed => {
                 StoreError::ConnectionFailed(format!("Redis authentication failed: {}", error))
             }
-            redis::ErrorKind::UnexpectedReturnType => StoreError::TypeMismatch(format!(
-                "Unexpected return type from Redis: {}",
+            redis::ErrorKind::UnexpectedReturnType => {
+                StoreError::TypeMismatch(format!("Unexpected return type from Redis: {}", error))
+            }
+            redis::ErrorKind::ClusterConnectionNotFound => StoreError::BackendUnavailable(format!(
+                "Redis cluster connection not found: {}",
                 error
             )),
-            redis::ErrorKind::ClusterConnectionNotFound => {
-                StoreError::BackendUnavailable(format!("Redis cluster connection not found: {}", error))
-            }
             redis::ErrorKind::Server(kind) => match kind {
                 redis::ServerErrorKind::BusyLoading => {
                     StoreError::BackendUnavailable(format!("Redis is loading data: {}", error))

@@ -47,9 +47,8 @@ pub async fn handler(
 
     let email = claims.email.clone();
     if email.is_none() {
-        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
-            // TODO: different error?
-            "Request not found".to_string(),
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "Token missing email claim".to_string(),
         )));
     }
 
@@ -59,9 +58,7 @@ pub async fn handler(
     let sid = match act::get_change_password_request(&email).await {
         Ok(pra) => pra,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -74,9 +71,7 @@ pub async fn handler(
     let user = match crate::db::get_user_by_username(&email).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 

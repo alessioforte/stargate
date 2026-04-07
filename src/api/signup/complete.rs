@@ -51,9 +51,7 @@ pub async fn handler(
     let signup = match act::get_signup_request(&sid).await {
         Ok(signup) => signup,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -75,9 +73,7 @@ pub async fn handler(
     let user = match crate::db::get_user_by_username(&signup).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -91,9 +87,7 @@ pub async fn handler(
     let user = match crate::db::get_user_by_username(&body.nickname).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -142,8 +136,6 @@ pub async fn handler(
 
             Ok(HttpResponse::Ok().json(web::Json(message)))
         }
-        Err(e) => Err(ErrorResponse::from(HttpError::InternalServerError(
-            e.to_string(),
-        ))),
+        Err(e) => Err(ErrorResponse::internal(e)),
     }
 }

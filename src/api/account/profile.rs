@@ -56,9 +56,7 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     let user = match crate::db::get_user_by_username(&claims.sub).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 

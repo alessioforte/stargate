@@ -56,8 +56,7 @@ impl JwtConfig {
                 (
                     EncodingKey::from_rsa_pem(priv_pem.as_bytes())
                         .expect("Invalid RSA private key"),
-                    DecodingKey::from_rsa_pem(pub_pem.as_bytes())
-                        .expect("Invalid RSA public key"),
+                    DecodingKey::from_rsa_pem(pub_pem.as_bytes()).expect("Invalid RSA public key"),
                 )
             }
             KeySource::Ec {
@@ -69,8 +68,7 @@ impl JwtConfig {
                 let pub_pem =
                     fs::read_to_string(&public_key_path).expect("Failed to read EC public key");
                 (
-                    EncodingKey::from_ec_pem(priv_pem.as_bytes())
-                        .expect("Invalid EC private key"),
+                    EncodingKey::from_ec_pem(priv_pem.as_bytes()).expect("Invalid EC private key"),
                     DecodingKey::from_ec_pem(pub_pem.as_bytes()).expect("Invalid EC public key"),
                 )
             }

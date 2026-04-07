@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct AdminKey {
     pub id: String,
+    #[serde(skip_serializing)]
     pub key_hash: String,
     pub label: Option<String>,
     pub permissions: sqlx::types::Json<Vec<String>>,

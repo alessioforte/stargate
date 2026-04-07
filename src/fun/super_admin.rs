@@ -26,15 +26,26 @@ pub async fn create_super_admin() {
         .phone_number(None)
         .picture(None);
 
+    let hash = match pw::Hash::encode(&password) {
+        Ok(h) => h,
+        Err(e) => {
+            error!("Failed to hash super admin password: {}", e);
+            return;
+        }
+    };
+
     match crate::db::create_user(
         user,
         CredentialType::Password,
-        &pw::Hash::encode(&password).unwrap(),
+        &hash,
         AuditContext::system(),
     )
     .await
     {
-        Ok(_) => info!("Super admin password: {}", password),
+        Ok(_) => {
+            info!("Super admin created successfully.");
+            eprintln!("Super admin password: {}", password);
+        }
         Err(e) => error!("Failed to create super admin: {}", e),
     };
 }

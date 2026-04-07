@@ -57,6 +57,27 @@ pub fn init() -> tracing_appender::non_blocking::WorkerGuard {
     _guard
 }
 
+const SENSITIVE_PARAMS: &[&str] = &["token", "code", "secret", "key", "password", "state"];
+
+fn sanitize_query(query: &str) -> String {
+    if query.is_empty() {
+        return String::new();
+    }
+    query
+        .split('&')
+        .map(|pair| {
+            if let Some((key, _)) = pair.split_once('=') {
+                let lower = key.to_lowercase();
+                if SENSITIVE_PARAMS.iter().any(|s| lower.contains(s)) {
+                    return format!("{}=[REDACTED]", key);
+                }
+            }
+            pair.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
 pub struct StargateRootSpanBuilder;
 
 impl RootSpanBuilder for StargateRootSpanBuilder {
@@ -64,12 +85,11 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
         let request_id = Ulid::new().to_string();
 
         let req = sr.request();
-        let gate = req.app_data::<actix_web::web::Data<gate::Gate>>().unwrap();
+        let gate = req
+            .app_data::<actix_web::web::Data<gate::Gate>>()
+            .expect("Gate app_data must be configured in HttpServer");
         let ts = gate.clock.now_millis() as i64;
-        // FIXME: Evaluate a more performant way to get the current time, this is used in the audit context and in the logs, we should avoid calling chrono::Utc::now() multiple times per request
-        // let now = chrono::Utc::now();
         let now: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap_or_else(|| Utc::now());
-        println!("Current time: {}", now);
         let date = now.format("%Y-%m-%d").to_string();
         let time = now.format("%H:%M").to_string();
         let day_of_week = now.format("%A").to_string();
@@ -79,7 +99,7 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
             .unwrap_or_else(|| "unknown".to_string());
         let method = req.method().as_str();
         let path = req.path();
-        let query = req.query_string();
+        let query = sanitize_query(req.query_string());
         let peer_ip = req
             .connection_info()
             .peer_addr()

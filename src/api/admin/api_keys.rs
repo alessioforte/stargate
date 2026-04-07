@@ -103,13 +103,13 @@ pub async fn get_api_keys(
     let (api_keys, total) = if let Some(user_id) = &query.user_id {
         let keys = crate::db::get_api_keys_by_user_id(user_id)
             .await
-            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            .map_err(|e| ErrorResponse::internal(e))?;
         let total = keys.len() as i64;
         (keys, total)
     } else if let Some(service_account_id) = &query.service_account_id {
         let keys = crate::db::get_api_keys_by_service_account_id(service_account_id)
             .await
-            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            .map_err(|e| ErrorResponse::internal(e))?;
         let total = keys.len() as i64;
         (keys, total)
     } else if let Some(owner_type) = &query.owner_type {
@@ -117,25 +117,19 @@ pub async fn get_api_keys(
             "user" => {
                 let keys = crate::db::get_all_user_api_keys(limit, offset)
                     .await
-                    .map_err(|e| {
-                        ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
-                    })?;
-                let total = crate::db::count_user_api_keys().await.map_err(|e| {
-                    ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
-                })?;
+                    .map_err(|e| ErrorResponse::internal(e))?;
+                let total = crate::db::count_user_api_keys()
+                    .await
+                    .map_err(|e| ErrorResponse::internal(e))?;
                 (keys, total)
             }
             "service_account" => {
                 let keys = crate::db::get_all_service_account_api_keys(limit, offset)
                     .await
-                    .map_err(|e| {
-                        ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
-                    })?;
+                    .map_err(|e| ErrorResponse::internal(e))?;
                 let total = crate::db::count_service_account_api_keys()
                     .await
-                    .map_err(|e| {
-                        ErrorResponse::from(HttpError::InternalServerError(e.to_string()))
-                    })?;
+                    .map_err(|e| ErrorResponse::internal(e))?;
                 (keys, total)
             }
             _ => {
@@ -147,10 +141,10 @@ pub async fn get_api_keys(
     } else {
         let keys = crate::db::get_all_api_keys(limit, offset)
             .await
-            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            .map_err(|e| ErrorResponse::internal(e))?;
         let total = crate::db::count_api_keys()
             .await
-            .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+            .map_err(|e| ErrorResponse::internal(e))?;
         (keys, total)
     };
 
@@ -194,9 +188,7 @@ pub async fn get_api_key(params: web::Path<String>) -> Result<HttpResponse, Erro
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -251,9 +243,7 @@ pub async fn create_api_key(
         {
             Ok(api_key) => api_key,
             Err(e) => {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    e.to_string(),
-                )));
+                return Err(ErrorResponse::internal(e));
             }
         }
     } else if let Some(service_account_id) = service_account_id {
@@ -268,9 +258,7 @@ pub async fn create_api_key(
         {
             Ok(api_key) => api_key,
             Err(e) => {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    e.to_string(),
-                )));
+                return Err(ErrorResponse::internal(e));
             }
         }
     } else {
@@ -330,9 +318,7 @@ pub async fn delete_api_key(
     match crate::db::delete_api_key(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 
@@ -380,9 +366,7 @@ pub async fn revoke_api_key(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -395,9 +379,7 @@ pub async fn revoke_api_key(
     match crate::db::revoke_api_key(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 
@@ -448,9 +430,7 @@ pub async fn update_api_key_attrs(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -460,9 +440,7 @@ pub async fn update_api_key_attrs(
     let api_key = match crate::db::update_api_key(existing_key, ctx).await {
         Ok(key) => key,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -511,9 +489,7 @@ pub async fn patch_api_key_attrs(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -532,9 +508,7 @@ pub async fn patch_api_key_attrs(
     let api_key = match crate::db::update_api_key(existing_key, ctx).await {
         Ok(key) => key,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 

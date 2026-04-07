@@ -66,9 +66,7 @@ pub async fn handler(
     let user = match crate::db::get_user_by_username(&claims.sub).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -94,9 +92,7 @@ pub async fn handler(
     let (access_token, refresh_token) = match crate::fun::generate_tokens(claims) {
         Ok(tokens) => tokens,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -112,9 +108,7 @@ pub async fn handler(
     match store.set(&sid, &subject, Some(sttl)).await {
         Ok(_) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 

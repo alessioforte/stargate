@@ -35,10 +35,8 @@ impl LoadBalancer {
             .iter()
             .map(|endpoint| {
                 let base_url = format!("{}://{}", protocol, endpoint.format());
-                let health_check_path = self
-                    .liveness_probe
-                    .as_ref()
-                    .map(|probe| probe.path.clone());
+                let health_check_path =
+                    self.liveness_probe.as_ref().map(|probe| probe.path.clone());
 
                 lb::Upstream::new(base_url, health_check_path)
             })

@@ -29,7 +29,7 @@
 //! assert_eq!(trie.search("http", "/api/v2").unwrap().name, "api");
 //! ```
 
-use crate::protocol::{Protocol, PROTOCOL_COUNT};
+use crate::protocol::{PROTOCOL_COUNT, Protocol};
 use lb::LoadBalancer;
 use std::collections::HashMap;
 use std::sync::Arc;

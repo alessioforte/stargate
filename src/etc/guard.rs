@@ -25,7 +25,6 @@ fn cached_hash_api_key(api_key: &str) -> String {
     })
 }
 
-// TODO: maybe should return a Result instead of an Option
 /// Verify API key and return subject if valid from the session store
 pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
     let api_key = match req.get_api_key() {

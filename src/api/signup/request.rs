@@ -26,9 +26,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
     let user = match crate::db::get_user_by_username(&body.email).await {
         Ok(user) => user,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -40,12 +38,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
 
     let sr = act::check_email_verification_request(&body.email)
         .await
-        .map_err(|e| {
-            ErrorResponse::from(HttpError::InternalServerError(format!(
-                "Failed to check signup request: {}",
-                e
-            )))
-        })?;
+        .map_err(|e| ErrorResponse::internal(e))?;
     if sr.is_some() {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "Signup request already exists".to_string(),
@@ -54,12 +47,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
 
     let sid = act::create_email_verification_request(&body.email)
         .await
-        .map_err(|e| {
-            ErrorResponse::from(HttpError::InternalServerError(format!(
-                "Failed to create signup request: {}",
-                e
-            )))
-        })?;
+        .map_err(|e| ErrorResponse::internal(e))?;
 
     let claim = jwt::Claims::default()
         .subject("signup_request".to_string())
@@ -70,9 +58,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
     let token = match jwt.generate_token(&claim) {
         Ok(token) => token,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -93,9 +79,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
             Ok(HttpResponse::Ok().json(web::Json(message)))
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 }

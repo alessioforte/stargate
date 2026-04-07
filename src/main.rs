@@ -10,7 +10,8 @@ mod gtw;
 use crate::etc::{cfg, cors, gate, geoip, jwt, log, logo, store, tls};
 use actix_web::{
     App, HttpServer,
-    middleware::{self, TrailingSlash},
+    http::header,
+    middleware::{self, DefaultHeaders, TrailingSlash},
 };
 use dotenvy::dotenv;
 use std::env;
@@ -52,6 +53,15 @@ async fn main() -> std::io::Result<()> {
             .app_data(gcfg.clone())
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
             .wrap(middleware::Compress::default())
+            .wrap(
+                DefaultHeaders::new()
+                    .add((header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
+                    .add((header::X_FRAME_OPTIONS, "DENY"))
+                    .add((
+                        header::STRICT_TRANSPORT_SECURITY,
+                        "max-age=63072000; includeSubDomains",
+                    )),
+            )
             .wrap(TracingLogger::<log::StargateRootSpanBuilder>::new())
             .wrap(cors::middleware::configure())
             .configure(cfg::configure)
@@ -59,10 +69,17 @@ async fn main() -> std::io::Result<()> {
             .configure(gtw::configure)
     });
 
-    if tls_enabled == "true" {
+    let result = if tls_enabled == "true" {
         let tls = tls::builder();
-        return server.bind_openssl(addrs, tls)?.run().await;
-    }
+        server.bind_openssl(addrs, tls)?.run().await
+    } else {
+        server.bind(addrs)?.run().await
+    };
 
-    server.bind(addrs)?.run().await
+    info!("Server stopped, running shutdown hooks...");
+    store::save().await;
+    aud::shutdown().await;
+    info!("Shutdown complete");
+
+    result
 }

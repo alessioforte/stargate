@@ -83,19 +83,19 @@ pub async fn get_service_accounts(
         Some(search_query) if !search_query.trim().is_empty() => {
             let accounts = crate::db::search_service_accounts(search_query, limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             let total = crate::db::count_search_service_accounts(search_query)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             (accounts, total)
         }
         _ => {
             let accounts = crate::db::get_all_service_accounts(limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             let total = crate::db::count_service_accounts()
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             (accounts, total)
         }
     };
@@ -140,9 +140,7 @@ pub async fn get_service_account(params: web::Path<String>) -> Result<HttpRespon
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -190,9 +188,7 @@ pub async fn create_service_account(
     {
         Ok(account) => account,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -255,9 +251,7 @@ pub async fn update_service_account(
     {
         Ok(account) => account,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -303,9 +297,7 @@ pub async fn delete_service_account(
     match crate::db::delete_service_account(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 

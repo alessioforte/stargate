@@ -13,7 +13,6 @@ const MAX_LIMIT: i64 = 100;
 #[serde(rename_all = "camelCase")]
 struct AdminKey {
     id: String,
-    key_hash: String,
     label: Option<String>,
     permissions: Vec<String>,
     revoked: bool,
@@ -87,14 +86,13 @@ pub async fn get_admin_keys(
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    // TODO: Remove keyHash from the response
     let admin_keys = crate::db::get_all_admin_keys(limit, offset)
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        .map_err(|e| ErrorResponse::internal(e))?;
 
     let total = crate::db::count_admin_keys()
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+        .map_err(|e| ErrorResponse::internal(e))?;
 
     let response = PaginatedResponse {
         data: admin_keys,
@@ -136,9 +134,7 @@ pub async fn get_admin_key(params: web::Path<String>) -> Result<HttpResponse, Er
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -189,9 +185,7 @@ pub async fn create_admin_key(
     {
         Ok(key) => key,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -253,9 +247,7 @@ pub async fn update_admin_key_permissions(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -270,9 +262,7 @@ pub async fn update_admin_key_permissions(
     let admin_key = match crate::db::update_admin_key(existing_key, ctx).await {
         Ok(key) => key,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -317,9 +307,7 @@ pub async fn revoke_admin_key(
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -332,9 +320,7 @@ pub async fn revoke_admin_key(
     match crate::db::revoke_admin_key(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 
@@ -382,9 +368,7 @@ pub async fn delete_admin_key(
     match crate::db::delete_admin_key(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 

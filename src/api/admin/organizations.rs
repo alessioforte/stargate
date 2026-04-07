@@ -84,19 +84,19 @@ pub async fn get_organizations(
         Some(search_query) if !search_query.trim().is_empty() => {
             let organizations = crate::db::search_organizations(search_query, limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             let total = crate::db::count_search_organizations(search_query)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             (organizations, total)
         }
         _ => {
             let organizations = crate::db::get_all_organizations(limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             let total = crate::db::count_organizations()
                 .await
-                .map_err(|e| ErrorResponse::from(HttpError::InternalServerError(e.to_string())))?;
+                .map_err(|e| ErrorResponse::internal(e))?;
             (organizations, total)
         }
     };
@@ -141,9 +141,7 @@ pub async fn get_organization(params: web::Path<String>) -> Result<HttpResponse,
             ))));
         }
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -191,9 +189,7 @@ pub async fn create_organization(
     {
         Ok(org) => org,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -257,9 +253,7 @@ pub async fn update_organization(
     {
         Ok(org) => org,
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
@@ -305,9 +299,7 @@ pub async fn delete_organization(
     match crate::db::delete_organization(&id, ctx).await {
         Ok(()) => {}
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     }
 

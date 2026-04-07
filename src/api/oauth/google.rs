@@ -1,3 +1,4 @@
+use crate::act::oauth_state;
 use crate::err::{ErrorResponse, HttpError};
 
 use crate::fun::format_name;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct QueryCode {
     pub code: String,
-    // pub state: String,
+    pub state: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -43,6 +44,7 @@ pub async fn login(
         .remove::<AuditContext>()
         .unwrap_or_else(AuditContext::anonymous);
     let code = &query.code;
+    let state = &query.state;
 
     if code.is_empty() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -50,40 +52,37 @@ pub async fn login(
         )));
     }
 
-    let token_response = get_google_oauth_token(code).await;
-    if token_response.is_err() {
-        let message = format!(
-            "Error getting token: {:?}",
-            token_response.err().unwrap().to_string()
-        );
-        return Err(ErrorResponse::from(HttpError::BadGateway(
-            message.to_string(),
+    let valid_state = oauth_state::validate_oauth_state(state)
+        .await
+        .unwrap_or(false);
+    if !valid_state {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "invalid or expired oauth state".to_string(),
         )));
     }
 
-    let token = token_response.unwrap();
-    let google_user = get_google_user(&token.access_token, &token.id_token).await;
+    let token = get_google_oauth_token(code).await.map_err(|e| {
+        tracing::error!("Google OAuth token error: {}", e);
+        ErrorResponse::from(HttpError::BadGateway(
+            "failed to retrieve access token from Google".to_string(),
+        ))
+    })?;
 
-    if google_user.is_err() {
-        let message = format!(
-            "Error getting user: {:?}",
-            google_user.err().unwrap().to_string()
-        );
-        return Err(ErrorResponse::from(HttpError::BadGateway(
-            message.to_string(),
-        )));
-    }
+    let google_user = get_google_user(&token.access_token, &token.id_token)
+        .await
+        .map_err(|e| {
+            tracing::error!("Google user info error: {}", e);
+            ErrorResponse::from(HttpError::BadGateway(
+                "failed to retrieve user info from Google".to_string(),
+            ))
+        })?;
 
-    let google_user = google_user.unwrap();
-
-    let mut user = match crate::db::get_user_by_username(&google_user.email).await {
-        Ok(user) => user,
-        Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
-        }
-    };
+    let mut user = crate::db::get_user_by_username(&google_user.email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error during Google OAuth: {}", e);
+            ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+        })?;
 
     if user.is_none() {
         let new_user = Profile::new(google_user.email.clone(), google_user.email.clone())
@@ -91,30 +90,30 @@ pub async fn login(
             .picture(Some(google_user.picture.clone()));
 
         let value = format!("google:{}", google_user.id);
-        user = match crate::db::create_user(new_user, CredentialType::Oauth, &value, ctx.clone())
-            .await
-        {
-            Ok(user) => Some(user),
-            Err(e) => {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    e.to_string(),
-                )));
-            }
-        };
+        user = Some(
+            crate::db::create_user(new_user, CredentialType::Oauth, &value, ctx.clone())
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to create Google OAuth user: {}", e);
+                    ErrorResponse::from(HttpError::InternalServerError(
+                        "internal error".to_string(),
+                    ))
+                })?,
+        );
     }
 
-    let user = user.unwrap();
+    let user = user.ok_or_else(|| {
+        ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+    })?;
 
     if user.picture.is_none() {
         user.clone().picture(Some(google_user.picture.clone()));
-        match crate::db::update_user(user.clone(), ctx).await {
-            Ok(updated_user) => updated_user,
-            Err(e) => {
-                return Err(ErrorResponse::from(HttpError::InternalServerError(
-                    e.to_string(),
-                )));
-            }
-        };
+        crate::db::update_user(user.clone(), ctx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to update Google OAuth user picture: {}", e);
+                ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+            })?;
     }
 
     let given_name = user.given_name.clone().unwrap_or_default();
@@ -127,7 +126,10 @@ pub async fn login(
         .email(user.email)
         .email_verified(google_user.verified_email);
 
-    let (access_token, refresh_token) = crate::fun::generate_tokens(claims).unwrap();
+    let (access_token, refresh_token) = crate::fun::generate_tokens(claims).map_err(|e| {
+        tracing::error!("Token generation error: {}", e);
+        ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+    })?;
 
     Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
         access_token,

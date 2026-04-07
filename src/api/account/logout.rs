@@ -43,9 +43,7 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
     match store.delete(&sid).await {
         Ok(_) => (),
         Err(e) => {
-            return Err(ErrorResponse::from(HttpError::InternalServerError(
-                e.to_string(),
-            )));
+            return Err(ErrorResponse::internal(e));
         }
     };
 
