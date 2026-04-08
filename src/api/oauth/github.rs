@@ -108,12 +108,10 @@ pub async fn login(
 
     if user.picture.is_none() {
         let updated = user.clone().picture(Some(github_user.avatar_url.clone()));
-        crate::db::update_user(updated, ctx)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
-                ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
-            })?;
+        crate::db::update_user(updated, ctx).await.map_err(|e| {
+            tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
+            ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+        })?;
     }
 
     let given_name = user.given_name.clone().unwrap_or_default();

@@ -7,21 +7,34 @@ use utoipa::ToSchema;
 struct Health {
     name: &'static str,
     version: &'static str,
+    status: &'static str,
 }
 
 #[utoipa::path(
     path = "/health",
     tags = ["Health"],
     responses(
-        (status = 200, description = "OK", body = Health)
+        (status = 200, description = "OK", body = Health),
+        (status = 503, description = "Service Unavailable", body = Health)
     )
 )]
 #[get("/health")]
 pub async fn get() -> Result<HttpResponse, ErrorResponse> {
     let version = env!("CARGO_PKG_VERSION");
 
-    Ok(HttpResponse::Ok().json(Health {
-        name: "Stargate is up and running ✨",
-        version,
-    }))
+    let db_ok = crate::db::ping().await.is_ok();
+
+    if db_ok {
+        Ok(HttpResponse::Ok().json(Health {
+            name: "stargate",
+            version,
+            status: "healthy",
+        }))
+    } else {
+        Ok(HttpResponse::ServiceUnavailable().json(Health {
+            name: "stargate",
+            version,
+            status: "unhealthy",
+        }))
+    }
 }

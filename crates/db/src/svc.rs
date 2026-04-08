@@ -8,8 +8,6 @@ use crate::ent::{
 use crate::tx::Transaction;
 use anyhow::Result;
 use serde_json::Value as JsonValue;
-#[cfg(feature = "postgres")]
-use sqlx::PgPool;
 use std::fs;
 
 #[derive(Clone)]
@@ -58,6 +56,12 @@ impl Service {
         if let Err(e) = sqlx::raw_sql(&ddl).execute(&self.pool).await {
             eprintln!("Failed to execute schema from '{}': {}", file, e);
         }
+    }
+
+    /// Lightweight connectivity check — executes `SELECT 1`.
+    pub async fn ping(&self) -> Result<()> {
+        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        Ok(())
     }
 }
 

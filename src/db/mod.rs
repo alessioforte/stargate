@@ -6,11 +6,11 @@ pub use svc::*;
 mod postgres {
     use db::svc;
     use once_cell::sync::OnceCell;
-    use tracing::{error, info};
+    use tracing::info;
 
     static DB: OnceCell<svc::Service> = OnceCell::new();
 
-    pub async fn init() {
+    pub async fn init() -> anyhow::Result<()> {
         let password = std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "root".to_string());
         let user = std::env::var("POSTGRES_USER").unwrap_or_else(|_| "root".to_string());
         let host = std::env::var("POSTGRES_ENDPOINT").unwrap_or_else(|_| "localhost".to_string());
@@ -20,21 +20,25 @@ mod postgres {
         svc::ensure_database(&user, &password, &host, &database).await;
 
         let db_url = format!("postgres://{}:{}@{}/{}", user, password, host, database);
-        let service = svc::init(&db_url).await;
-        match service {
-            Ok(svc) => {
-                info!("PostgreSQL service initialized successfully");
-                if DB.set(svc).is_err() {
-                    error!("Failed to set the PostgreSQL service instance");
-                }
-            }
-            Err(e) => error!("Error initializing PostgreSQL service > {}", e),
-        }
+        let service = svc::init(&db_url).await?;
+
+        info!("PostgreSQL service initialized successfully");
+        DB.set(service)
+            .map_err(|_| anyhow::anyhow!("Failed to set the PostgreSQL service instance"))?;
+        Ok(())
     }
 
     pub fn service() -> svc::Service {
-        let service = DB.get().expect("Service not initialized");
-        service.clone()
+        DB.get()
+            .expect("DB service not initialized — init() must be called first")
+            .clone()
+    }
+
+    pub async fn ping() -> anyhow::Result<()> {
+        DB.get()
+            .ok_or_else(|| anyhow::anyhow!("DB not initialized"))?
+            .ping()
+            .await
     }
 }
 
@@ -42,45 +46,50 @@ mod postgres {
 mod sqlite {
     use db::svc;
     use once_cell::sync::OnceCell;
-    use tracing::{error, info};
+    use tracing::info;
 
     static DB: OnceCell<svc::Service> = OnceCell::new();
 
-    pub async fn init() {
-        if std::path::Path::new(".stargate/sqlite.db").exists() {
-            info!("SQLite database file found, initializing service...");
-        } else {
+    pub async fn init() -> anyhow::Result<()> {
+        if !std::path::Path::new(".stargate/sqlite.db").exists() {
             info!("SQLite database file not found, creating directory and file...");
-            std::fs::create_dir_all(".stargate").expect("Failed to create directory");
-            std::fs::File::create(".stargate/sqlite.db")
-                .expect("Failed to create SQLite database file");
+            std::fs::create_dir_all(".stargate")?;
+            std::fs::File::create(".stargate/sqlite.db")?;
             info!("SQLite database file created successfully");
         }
 
-        let service = svc::init("sqlite://.stargate/sqlite.db").await;
-        match service {
-            Ok(svc) => {
-                info!("Service initialized successfully");
-                if DB.set(svc).is_err() {
-                    error!("Failed to set the service instance");
-                }
-            }
-            Err(e) => error!("Error initializing service: {}", e),
-        }
+        let service = svc::init("sqlite://.stargate/sqlite.db").await?;
+
+        info!("SQLite service initialized successfully");
+        DB.set(service)
+            .map_err(|_| anyhow::anyhow!("Failed to set the SQLite service instance"))?;
+        Ok(())
     }
 
     pub fn service() -> svc::Service {
-        let service = DB.get().expect("Service not initialized");
-        service.clone()
+        DB.get()
+            .expect("DB service not initialized — init() must be called first")
+            .clone()
+    }
+
+    pub async fn ping() -> anyhow::Result<()> {
+        DB.get()
+            .ok_or_else(|| anyhow::anyhow!("DB not initialized"))?
+            .ping()
+            .await
     }
 }
 
 #[cfg(feature = "postgres")]
 pub use postgres::init;
 #[cfg(feature = "postgres")]
+pub use postgres::ping;
+#[cfg(feature = "postgres")]
 pub use postgres::service;
 
 #[cfg(feature = "sqlite")]
 pub use sqlite::init;
+#[cfg(feature = "sqlite")]
+pub use sqlite::ping;
 #[cfg(feature = "sqlite")]
 pub use sqlite::service;

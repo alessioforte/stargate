@@ -9,9 +9,6 @@ RUN apt-get update && apt-get upgrade -y && \
     apt-get clean && \
     cargo install cargo-chef --locked
 
-RUN mkdir -p .stargate/certificate/localhost
-RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout .stargate/certificate/localhost/key.pem -out .stargate/certificate/localhost/cert.pem -subj "/C=FR/ST=IDF/L=Paris/O=Global Security/OU=IT Department/CN=localhost"
-
 FROM chef AS planner
 ARG APP_NAME
 WORKDIR /app
@@ -36,7 +33,6 @@ RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y ca-certificates && \
     apt-get clean
 COPY --from=build /bin/server /bin/
-COPY --from=chef /app/.stargate /.stargate
 EXPOSE 5050
 
 ENV RUST_LOG=info

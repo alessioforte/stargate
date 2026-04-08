@@ -1,6 +1,7 @@
 pub mod admin_keys;
 pub mod api_keys;
 pub mod configurations;
+pub mod health;
 pub mod organizations;
 pub mod service_accounts;
 pub mod users;
@@ -64,6 +65,7 @@ pub fn routes() -> actix_web::Scope<
 > {
     web::scope("/admin")
         .wrap(GrantsMiddleware::with_extractor(extract))
+        .service(health::get)
         .service(users::routes())
         .service(configurations::routes())
         .service(api_keys::routes())

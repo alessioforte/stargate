@@ -13,7 +13,13 @@ impl TrustedEntry {
     fn contains(&self, ip: &IpAddr) -> bool {
         match (self, ip) {
             (TrustedEntry::Single(trusted), candidate) => trusted == candidate,
-            (TrustedEntry::CidrV4 { network, prefix_len }, IpAddr::V4(v4)) => {
+            (
+                TrustedEntry::CidrV4 {
+                    network,
+                    prefix_len,
+                },
+                IpAddr::V4(v4),
+            ) => {
                 let candidate = u32::from(*v4);
                 let mask = if *prefix_len == 0 {
                     0
@@ -22,7 +28,13 @@ impl TrustedEntry {
                 };
                 (candidate & mask) == (*network & mask)
             }
-            (TrustedEntry::CidrV6 { network, prefix_len }, IpAddr::V6(v6)) => {
+            (
+                TrustedEntry::CidrV6 {
+                    network,
+                    prefix_len,
+                },
+                IpAddr::V6(v6),
+            ) => {
                 let candidate = u128::from(*v6);
                 let mask = if *prefix_len == 0 {
                     0

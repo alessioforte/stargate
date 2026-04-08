@@ -42,7 +42,10 @@ async fn main() -> std::io::Result<()> {
     jwt::init();
     geoip::init();
     store::init().await;
-    db::init().await;
+    if let Err(e) = db::init().await {
+        tracing::error!("Database initialization failed: {}", e);
+        std::process::exit(1);
+    }
 
     let gcfg = gate::init();
 
@@ -70,7 +73,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     let result = if tls_enabled == "true" {
-        let tls = tls::builder();
+        let tls = tls::builder()?;
         server.bind_openssl(addrs, tls)?.run().await
     } else {
         server.bind(addrs)?.run().await
