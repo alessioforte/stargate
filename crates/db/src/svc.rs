@@ -44,18 +44,59 @@ impl Service {
         }
     }
 
-    // TODO: handle with migrations
     pub async fn init_schema(&self, file: &str) {
-        let ddl = fs::read_to_string(file).expect("Failed to read schema file");
-        for stmt in ddl.split(';') {
-            if !stmt.trim().is_empty() {
-                sqlx::query(stmt)
-                    .execute(&self.pool)
-                    .await
-                    .expect("Failed to execute schema statement");
+        let ddl = match fs::read_to_string(file) {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("Failed to read schema file '{}': {}", file, e);
+                return;
             }
+        };
+
+        // Execute the entire DDL as a single batch. This correctly handles
+        // PL/pgSQL DO $$ ... END $$; blocks that contain semicolons.
+        if let Err(e) = sqlx::raw_sql(&ddl).execute(&self.pool).await {
+            eprintln!("Failed to execute schema from '{}': {}", file, e);
         }
     }
+}
+
+/// Connect to the `postgres` maintenance database and create the target
+/// database if it does not already exist.
+#[cfg(feature = "postgres")]
+pub async fn ensure_database(user: &str, password: &str, host: &str, database: &str) {
+    let maintenance_url = format!("postgres://{}:{}@{}/postgres", user, password, host);
+    let pool = match sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&maintenance_url)
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Cannot connect to PostgreSQL server: {}", e);
+            return;
+        }
+    };
+
+    // Check if the database exists (parameterized query to avoid injection)
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(database)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(false);
+
+    if !exists {
+        // CREATE DATABASE cannot use bind parameters, but `database` comes
+        // from an env var set by the operator, not from user input.
+        let stmt = format!("CREATE DATABASE \"{}\"", database);
+        match sqlx::query(&stmt).execute(&pool).await {
+            Ok(_) => eprintln!("Created database '{}'", database),
+            Err(e) => eprintln!("Failed to create database '{}': {}", database, e),
+        }
+    }
+
+    pool.close().await;
 }
 
 // Generic init function that works with any database URL

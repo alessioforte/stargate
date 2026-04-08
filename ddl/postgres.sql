@@ -1,6 +1,28 @@
-CREATE TYPE credential_type AS ENUM ('password', 'oauth');
-CREATE TYPE action_type AS ENUM ('create', 'update', 'delete', 'read', 'login', 'logout');
-CREATE TYPE actor_type AS ENUM ('admin', 'user', 'api_key', 'system', 'anonymous');
+-- Enum types (idempotent: only created if they don't already exist)
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'credential_type') THEN
+        CREATE TYPE credential_type AS ENUM ('password', 'oauth');
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action_type') THEN
+        CREATE TYPE action_type AS ENUM ('create', 'update', 'delete', 'read', 'login', 'logout');
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'actor_type') THEN
+        CREATE TYPE actor_type AS ENUM ('admin', 'admin_key', 'user', 'api_key', 'system', 'anonymous');
+    END IF;
+END $$;
+
+-- Add missing enum values to existing types (safe on repeated runs)
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'admin_key' AND enumtypid = 'actor_type'::regtype) THEN
+        ALTER TYPE actor_type ADD VALUE IF NOT EXISTS 'admin_key';
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "organizations" (
     "id" TEXT PRIMARY KEY,

@@ -16,6 +16,9 @@ mod postgres {
         let host = std::env::var("POSTGRES_ENDPOINT").unwrap_or_else(|_| "localhost".to_string());
         let database =
             std::env::var("POSTGRES_DATABASE").unwrap_or_else(|_| "stargate".to_string());
+
+        svc::ensure_database(&user, &password, &host, &database).await;
+
         let db_url = format!("postgres://{}:{}@{}/{}", user, password, host, database);
         let service = svc::init(&db_url).await;
         match service {
