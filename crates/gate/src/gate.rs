@@ -55,10 +55,9 @@ impl Gate {
     }
 
     fn build_limiter(mut self, limits: &Option<Vec<Limit>>) -> Self {
-        if let Some(limits) = limits {
-            let limiter = Self::create_limiter(limits, &self.store, &self.clock);
-            self.limiter = Arc::new(ArcSwap::new(Arc::new(limiter)));
-        }
+        let limits = limits.as_deref().unwrap_or(&[]);
+        let limiter = Self::create_limiter(limits, &self.store, &self.clock);
+        self.limiter = Arc::new(ArcSwap::new(Arc::new(limiter)));
         self
     }
 
@@ -87,10 +86,9 @@ impl Gate {
     }
 
     pub async fn update_limiter(&mut self, limits: &Option<Vec<Limit>>) {
-        if let Some(limits) = limits {
-            let limiter = Self::create_limiter(limits, &self.store, &self.clock);
-            self.limiter.store(Arc::new(limiter));
-        }
+        let limits = limits.as_deref().unwrap_or(&[]);
+        let limiter = Self::create_limiter(limits, &self.store, &self.clock);
+        self.limiter.store(Arc::new(limiter));
         info!("Gate limiter updated");
     }
 
