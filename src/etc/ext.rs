@@ -2,6 +2,26 @@ use actix_web::{HttpRequest, http::header::Header, web::Query};
 use actix_web_httpauth::headers::authorization::{Authorization, Bearer};
 use std::net::{IpAddr, SocketAddr};
 
+/// Parse an IP address from a raw string that may contain a comma-separated
+/// list, square brackets, or a socket address (ip:port).
+fn parse_ip_str(raw: &str) -> Option<IpAddr> {
+    let first = raw.split(',').next()?.trim();
+    let unbracketed = first
+        .strip_prefix('[')
+        .and_then(|v| v.strip_suffix(']'))
+        .unwrap_or(first);
+
+    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+        return Some(ip);
+    }
+
+    if let Ok(sock) = first.parse::<SocketAddr>() {
+        return Some(sock.ip());
+    }
+
+    None
+}
+
 const KEYS: &[&str] = &["token", "access_token", "jwt"];
 
 pub trait RequestExt {
@@ -75,24 +95,26 @@ impl RequestExt for HttpRequest {
 
     fn get_client_ip_addr(&self) -> Option<IpAddr> {
         let conn = self.connection_info();
-        let raw = conn.realip_remote_addr()?;
 
-        // Usually contains a single client IP; if a list is present, use the first hop.
-        let first = raw.split(',').next()?.trim();
-        let unbracketed = first
-            .strip_prefix('[')
-            .and_then(|v| v.strip_suffix(']'))
-            .unwrap_or(first);
+        // Resolve the TCP peer address first — this is the direct connection IP
+        // and cannot be spoofed by headers.
+        let peer_ip = parse_ip_str(conn.peer_addr()?);
 
-        if let Ok(ip) = unbracketed.parse::<IpAddr>() {
-            return Some(ip);
+        // Only trust forwarded headers (X-Forwarded-For, X-Real-IP, etc.)
+        // when the direct peer is a configured trusted proxy.
+        // When TRUSTED_PROXIES is unset, realip is never used — safe default.
+        if let Some(ref peer) = peer_ip {
+            if super::proxy::is_trusted_proxy(peer) {
+                if let Some(forwarded) = conn.realip_remote_addr() {
+                    if let Some(ip) = parse_ip_str(forwarded) {
+                        return Some(ip);
+                    }
+                }
+            }
         }
 
-        if let Ok(sock) = first.parse::<SocketAddr>() {
-            return Some(sock.ip());
-        }
-
-        None
+        // Fall back to the direct peer address
+        peer_ip
     }
 
     fn get_user_agent(&self) -> Option<String> {

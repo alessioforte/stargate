@@ -43,7 +43,9 @@ impl Limiter {
             let cost = cost.unwrap_or(1);
             limiter.check(key, cost).await
         } else {
-            Err(RateLimitError::InvalidConfig(limiter_name.to_string()))
+            // No limit configured for this name — allow the request through.
+            // This prevents 500 errors on clean boot when limits config is null.
+            Ok(RateLimitDecision::allowed(0, 0, None))
         }
     }
 }
