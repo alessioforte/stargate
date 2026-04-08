@@ -1,11 +1,14 @@
 use crate::act::oauth_state;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc;
+use crate::etc::jwt::jwt_config;
 use crate::fun::format_name;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, get, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, cookie::Cookie, get, web};
 use db::ent::{AuditContext, CredentialType, Profile};
 use jwt::Claims;
 use oauth::github::{get_github_oauth_token, get_github_user};
 use serde::{Deserialize, Serialize};
+use store::Store;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -104,8 +107,8 @@ pub async fn login(
     })?;
 
     if user.picture.is_none() {
-        user.clone().picture(Some(github_user.avatar_url.clone()));
-        crate::db::update_user(user.clone(), ctx)
+        let updated = user.clone().picture(Some(github_user.avatar_url.clone()));
+        crate::db::update_user(updated, ctx)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
@@ -116,22 +119,47 @@ pub async fn login(
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
     let name = format_name(&given_name, &family_name);
+
+    let sid = ulid::Ulid::new().to_string();
     let claims = Claims::default()
-        .subject("github-oauth2".to_string())
-        .sub_id(user.id.clone())
-        .name(name.clone())
+        .subject(user.email.to_owned())
+        .sub_id(user.id.to_owned())
+        .name(name)
         .email(user.email.to_owned())
-        .email_verified(true);
+        .email_verified(true)
+        .sid(sid.clone());
 
     let (access_token, refresh_token) = crate::fun::generate_tokens(claims).map_err(|e| {
         tracing::error!("Token generation error: {}", e);
         ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
     })?;
 
-    Ok(HttpResponse::Ok().json(web::Json(AuthResponse {
-        access_token,
-        refresh_token,
-    })))
+    // Store session
+    let store = etc::store::use_store();
+    let subject = etc::sub::Subject::from(user.clone());
+    let refresh_exp = jwt_config().refresh_exp;
+    let access_exp = jwt_config().access_exp;
+    let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
+    let cttl: i64 = access_exp.as_seconds_f64() as i64;
+
+    store.set(&sid, &subject, Some(sttl)).await.map_err(|e| {
+        tracing::error!("Failed to store OAuth session: {}", e);
+        ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+    })?;
+
+    let cookie = Cookie::build("jwt", access_token.clone())
+        .path("/")
+        .http_only(true)
+        .same_site(actix_web::cookie::SameSite::Strict)
+        .max_age(actix_web::cookie::time::Duration::seconds(cttl))
+        .finish();
+
+    Ok(HttpResponse::Ok()
+        .cookie(cookie)
+        .json(web::Json(AuthResponse {
+            access_token,
+            refresh_token,
+        })))
 }
 
 pub fn routes() -> actix_web::Scope {
