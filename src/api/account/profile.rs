@@ -1,10 +1,12 @@
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
+use crate::etc::sub::Subject;
 use actix_web::{HttpRequest, HttpResponse, get, web};
 use etc::jwt::jwt_config;
 use serde::Serialize;
 use serde_json::Value;
+use store::Store;
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +54,16 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
             )));
         }
     };
+
+    // Validate session store — reject revoked/logged-out tokens
+    let sid = claims.sid.clone().unwrap_or_default();
+    let store = etc::store::use_store();
+    let session = store.get::<Subject>(&sid).await.unwrap_or(None);
+    if session.is_none() {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid Token".to_string(),
+        )));
+    }
 
     let user = match crate::db::get_user_by_username(&claims.sub).await {
         Ok(user) => user,

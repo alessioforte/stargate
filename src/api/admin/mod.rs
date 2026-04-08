@@ -5,7 +5,7 @@ pub mod organizations;
 pub mod service_accounts;
 pub mod users;
 
-use crate::etc::{ext::RequestExt, jwt::jwt_config};
+use crate::etc::{self, ext::RequestExt, jwt::jwt_config, sub::Subject};
 use crate::fun::check_super_admin_by_claims;
 use actix_web::HttpMessage;
 use actix_web::{
@@ -15,6 +15,7 @@ use actix_web::{
 use actix_web_grants::GrantsMiddleware;
 use db::ent::AuditContext;
 use std::collections::HashSet;
+use store::Store;
 
 const SUPER_ADMIN: &str = "super_admin";
 
@@ -26,7 +27,11 @@ async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
     if let Some(token) = req.request().get_token() {
         let jwt = jwt_config();
         if let Some(claims) = jwt.validate_token(&token).ok() {
-            if check_super_admin_by_claims(&claims) {
+            // Validate session store — reject revoked/logged-out tokens
+            let sid = claims.sid.clone().unwrap_or_default();
+            let store = etc::store::use_store();
+            let session = store.get::<Subject>(&sid).await.unwrap_or(None);
+            if session.is_some() && check_super_admin_by_claims(&claims) {
                 ctx = ctx.with_actor(db::ent::ActorType::Admin, claims.sub_id);
                 req.extensions_mut().insert(ctx);
                 return Ok(HashSet::from([SUPER_ADMIN.to_string()]));

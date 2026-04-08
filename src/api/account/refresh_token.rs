@@ -33,6 +33,16 @@ pub async fn handler(
         }
     };
 
+    // Only refresh tokens (typ == "refresh") are accepted here
+    match claims.typ.as_deref() {
+        Some("refresh") => {}
+        _ => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Invalid Token".to_string(),
+            )));
+        }
+    }
+
     let sid = match claims.sid {
         Some(sid) => sid,
         None => {
@@ -115,7 +125,7 @@ pub async fn handler(
     let cookie = Cookie::build("jwt", access_token.clone())
         .path("/")
         .http_only(true)
-        .same_site(actix_web::cookie::SameSite::Lax)
+        .same_site(actix_web::cookie::SameSite::Strict)
         .max_age(actix_web::cookie::time::Duration::seconds(cttl))
         .finish();
 
