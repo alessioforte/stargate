@@ -150,6 +150,7 @@ pub async fn login(
     let cookie = Cookie::build("jwt", access_token.clone())
         .path("/")
         .http_only(true)
+        .secure(crate::etc::tls::enabled().unwrap_or(false))
         .same_site(actix_web::cookie::SameSite::Strict)
         .max_age(actix_web::cookie::time::Duration::seconds(cttl))
         .finish();
