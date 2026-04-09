@@ -7,7 +7,7 @@ spec:
   capacity:
     storage: 1Gi
   accessModes:
-    - ReadWriteMany
+    {{- toYaml .Values.persistentVolume.accessModes | nindent 4 }}
   persistentVolumeReclaimPolicy: Retain
   hostPath:
     path: /Users/alessioforte/.pv-kubernetes

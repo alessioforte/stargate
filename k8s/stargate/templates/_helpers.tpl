@@ -60,3 +60,32 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Validate deployment profile combinations.
+*/}}
+{{- define "stargate.validateProfile" -}}
+{{- $mode := default "edge" .Values.deployment.mode -}}
+{{- if not (has $mode (list "edge" "cluster")) -}}
+{{- fail (printf "unsupported deployment.mode %q: expected \"edge\" or \"cluster\"" $mode) -}}
+{{- end -}}
+
+{{- if eq $mode "edge" -}}
+{{- if .Values.autoscaling.enabled -}}
+{{- fail "deployment.mode=edge requires autoscaling.enabled=false because local sqlite + memory state is single-node only" -}}
+{{- end -}}
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "deployment.mode=edge requires replicaCount=1 because local sqlite + memory state is single-node only" -}}
+{{- end -}}
+{{- end -}}
+
+{{- if eq $mode "cluster" -}}
+{{- $configData := default (dict) .Values.configmap.data -}}
+{{- if not (hasKey $configData "REDIS_URL") -}}
+{{- fail "deployment.mode=cluster requires configmap.data.REDIS_URL for shared state" -}}
+{{- end -}}
+{{- if not (hasKey $configData "POSTGRES_ENDPOINT") -}}
+{{- fail "deployment.mode=cluster requires configmap.data.POSTGRES_ENDPOINT for shared database connectivity" -}}
+{{- end -}}
+{{- end -}}
+{{- end }}

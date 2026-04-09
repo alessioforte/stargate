@@ -91,7 +91,9 @@ moka = { version = "0.12.13", features = ["sync"] }
 notify = "8.2.0"
 
 [features]
-default = ["sqlite", "memory"]
+default = ["edge"]
+edge = ["sqlite", "memory"]
+cluster = ["postgres", "redis"]
 postgres = ["db/postgres"]
 sqlite = ["db/sqlite"]
 memory = ["store/memory", "gate/memory"]

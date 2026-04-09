@@ -7,7 +7,7 @@ mod etc;
 mod fun;
 mod gtw;
 
-use crate::etc::{cfg, cors, gate, geoip, headers, jwt, log, logo, store, tls};
+use crate::etc::{cfg, cors, gate, geoip, headers, jwt, log, logo, profile, store, tls};
 use actix_web::{
     App, HttpServer,
     middleware::{self, TrailingSlash},
@@ -33,9 +33,16 @@ async fn main() -> std::io::Result<()> {
     let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let addrs = format!("0.0.0.0:{}", port);
     let tls_enabled = tls::enabled()?;
+    let runtime_profile = profile::validate_runtime_profile()?;
 
     info!("Version: {}", version);
     info!("Starting server on port {}", port);
+    info!(
+        "Runtime profile: {} (db={}, state={})",
+        runtime_profile,
+        profile::COMPILED_DB_BACKEND,
+        profile::COMPILED_STATE_BACKEND
+    );
 
     jwt::init();
     geoip::init();

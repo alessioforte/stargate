@@ -1,8 +1,15 @@
 # Default values for stargate.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
+# This chart defaults to the "edge" profile:
+# - single replica
+# - local sqlite + in-process memory state is acceptable
+# - intended for Raspberry Pi, edge, and other single-node deployments
+#
+# Switch to "cluster" only when you are using an image/runtime configured for
+# shared backends and you provide shared state services such as Redis/Postgres.
+deployment:
+  mode: edge
 
-replicaCount: 3
+replicaCount: 1
 
 image:
   repository: stargate
@@ -84,11 +91,13 @@ affinity: {}
 
 persistentVolume:
   enabled: true
+  accessModes:
+    - ReadWriteOnce
 
 persistentVolumeClaim:
   enabled: true
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
@@ -106,6 +115,12 @@ configmap:
   enabled: true
   name: stargate-config
   data:
+    # Cluster profile expects shared backends to be provided here.
+    # REDIS_URL: redis://redis.default.svc.cluster.local:6379
+    # POSTGRES_ENDPOINT: postgres.default.svc.cluster.local
+    # POSTGRES_DATABASE: stargate
+    # POSTGRES_USER: stargate
+    # POSTGRES_PASSWORD: change-me
     # SURREALDB_ENDPOINT: http://surrealdb-tikv.default.svc.cluster.local:8000
 
 livenessProbe:

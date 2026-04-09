@@ -11,6 +11,7 @@ pub mod jwt;
 pub mod log;
 pub mod logo;
 pub mod msg;
+pub mod profile;
 pub mod proxy;
 pub mod store;
 pub mod sub;

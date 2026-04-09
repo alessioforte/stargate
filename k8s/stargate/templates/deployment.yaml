@@ -1,3 +1,4 @@
+{{- include "stargate.validateProfile" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,6 +43,8 @@ spec:
               containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
+            - name: STARGATE_RUNTIME_PROFILE
+              value: {{ .Values.deployment.mode | quote }}
             {{- range $key, $value := .Values.configmap.data }}
             - name: {{ $key }}
               valueFrom:
