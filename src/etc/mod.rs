@@ -6,6 +6,7 @@ pub mod ext;
 pub mod gate;
 pub mod geoip;
 pub mod guard;
+pub mod headers;
 pub mod jwt;
 pub mod log;
 pub mod logo;

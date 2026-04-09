@@ -7,11 +7,10 @@ mod etc;
 mod fun;
 mod gtw;
 
-use crate::etc::{cfg, cors, gate, geoip, jwt, log, logo, store, tls};
+use crate::etc::{cfg, cors, gate, geoip, headers, jwt, log, logo, store, tls};
 use actix_web::{
     App, HttpServer,
-    http::header,
-    middleware::{self, DefaultHeaders, TrailingSlash},
+    middleware::{self, TrailingSlash},
 };
 use dotenvy::dotenv;
 use tracing::info;
@@ -55,17 +54,9 @@ async fn main() -> std::io::Result<()> {
             .app_data(gcfg.clone())
             .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
             .wrap(middleware::Compress::default())
-            .wrap(
-                DefaultHeaders::new()
-                    .add((header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
-                    .add((header::X_FRAME_OPTIONS, "DENY"))
-                    .add((
-                        header::STRICT_TRANSPORT_SECURITY,
-                        "max-age=63072000; includeSubDomains",
-                    )),
-            )
+            .wrap(headers::configure())
             .wrap(TracingLogger::<log::StargateRootSpanBuilder>::new())
-            .wrap(cors::middleware::configure())
+            .wrap(cors::configure())
             .configure(cfg::configure)
             .configure(api::configure)
             .configure(gtw::configure)
