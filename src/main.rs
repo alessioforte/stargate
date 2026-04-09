@@ -14,7 +14,6 @@ use actix_web::{
     middleware::{self, DefaultHeaders, TrailingSlash},
 };
 use dotenvy::dotenv;
-use std::env;
 use tracing::info;
 use tracing_actix_web::TracingLogger;
 
@@ -32,9 +31,9 @@ async fn main() -> std::io::Result<()> {
     aud::init();
 
     let version = env!("CARGO_PKG_VERSION");
-    let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
+    let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let addrs = format!("0.0.0.0:{}", port);
-    let tls_enabled = env::var("TLS_ENABLED").unwrap_or_else(|_| "true".to_string());
+    let tls_enabled = tls::enabled()?;
 
     info!("Version: {}", version);
     info!("Starting server on port {}", port);
@@ -72,7 +71,7 @@ async fn main() -> std::io::Result<()> {
             .configure(gtw::configure)
     });
 
-    let result = if tls_enabled == "true" {
+    let result = if tls_enabled {
         let tls = tls::builder()?;
         server.bind_openssl(addrs, tls)?.run().await
     } else {

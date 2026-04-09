@@ -1,5 +1,5 @@
 pub fn get_base_url() -> String {
-    let protocol = if std::env::var("TLS_ENABLED").unwrap_or("false".to_string()) == "true" {
+    let protocol = if crate::etc::tls::enabled().unwrap_or(false) {
         "https"
     } else {
         "http"
