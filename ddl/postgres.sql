@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS "users" (
     "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS "super_admins" (
+    "user_id" TEXT PRIMARY KEY REFERENCES "users" ("id") ON DELETE CASCADE,
+    "active" BOOLEAN NOT NULL DEFAULT TRUE
+);
+
 CREATE TABLE IF NOT EXISTS "credentials" (
     "id" TEXT PRIMARY KEY,
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
@@ -103,6 +108,7 @@ CREATE TABLE IF NOT EXISTS "service_account_api_keys" (
 -- Indexes on foreign keys
 CREATE INDEX IF NOT EXISTS "idx_service_accounts_org_id" ON "service_accounts" ("org_id");
 CREATE INDEX IF NOT EXISTS "idx_credentials_user_id" ON "credentials" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_super_admins_active" ON "super_admins" ("active");
 CREATE INDEX IF NOT EXISTS "idx_user_api_keys_user_id" ON "user_api_keys" ("user_id");
 CREATE INDEX IF NOT EXISTS "idx_sa_api_keys_service_account_id" ON "service_account_api_keys" ("service_account_id");
 CREATE INDEX IF NOT EXISTS "idx_user_organizations_org_id" ON "user_organizations" ("org_id");

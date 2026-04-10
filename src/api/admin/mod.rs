@@ -7,7 +7,6 @@ pub mod service_accounts;
 pub mod users;
 
 use crate::etc::{self, ext::RequestExt, jwt::jwt_config, sub::Subject};
-use crate::fun::check_super_admin_by_claims;
 use actix_web::HttpMessage;
 use actix_web::{
     Error, body::BoxBody, body::EitherBody, dev::ServiceFactory, dev::ServiceRequest,
@@ -32,10 +31,20 @@ async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
             let sid = claims.sid.clone().unwrap_or_default();
             let store = etc::store::use_store();
             let session = store.get::<Subject>(&sid).await.unwrap_or(None);
-            if session.is_some() && check_super_admin_by_claims(&claims) {
-                ctx = ctx.with_actor(db::ent::ActorType::Admin, claims.sub_id);
-                req.extensions_mut().insert(ctx);
-                return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
+            if session.is_some()
+                && let Some(user_id) = claims.sub_id.as_deref()
+            {
+                match crate::db::is_super_admin_user_id(user_id).await {
+                    Ok(true) => {
+                        ctx = ctx.with_actor(db::ent::ActorType::Admin, Some(user_id.to_string()));
+                        req.extensions_mut().insert(ctx);
+                        return Ok(HashSet::from([SUPER_ADMIN.to_string()]));
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        tracing::error!("Failed to resolve super admin grants: {}", err);
+                    }
+                }
             }
         }
     }

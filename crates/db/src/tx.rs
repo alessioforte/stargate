@@ -1,5 +1,6 @@
 use crate::ent::{
-    AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount, User,
+    AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount,
+    SuperAdmin, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -13,10 +14,18 @@ pub trait Transaction {
         credential_type: CredentialType,
         value: &str,
     ) -> Result<User>;
+    async fn create_super_admin_user(
+        &self,
+        user: Profile,
+        credential_type: CredentialType,
+        value: &str,
+    ) -> Result<User>;
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
     async fn get_user_by_id(&self, id: &str) -> Result<Option<User>>;
     async fn get_all_users(&self, limit: i64, offset: i64) -> Result<Vec<User>>;
     async fn count_users(&self) -> Result<i64>;
+    async fn get_super_admin_by_user_id(&self, user_id: &str) -> Result<Option<SuperAdmin>>;
+    async fn super_admin_exists(&self) -> Result<bool>;
     async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>>;
     async fn count_search_users(&self, query: &str) -> Result<i64>;
     async fn update_user(&self, user: User) -> Result<User>;

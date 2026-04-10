@@ -471,7 +471,6 @@ pub async fn update_user_attrs(
         }
     };
 
-    // Replace attrs entirely
     existing_user.attrs = payload.attrs.clone();
 
     let user = match crate::db::update_user(existing_user, ctx).await {
@@ -596,7 +595,12 @@ pub async fn delete_user(
     };
 
     // Prevent deletion of super admin
-    if user.nickname == crate::etc::consts::STARGATE_ADMIN {
+    let is_super_admin = match crate::db::is_super_admin_user_id(&user.id).await {
+        Ok(is_super_admin) => is_super_admin,
+        Err(e) => return Err(ErrorResponse::internal(e)),
+    };
+
+    if is_super_admin {
         return Err(ErrorResponse::from(HttpError::Forbidden(
             "cannot delete super admin user".to_string(),
         )));

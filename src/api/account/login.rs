@@ -104,8 +104,13 @@ pub async fn handler(
         .email_verified(true)
         .sid(sid.clone());
 
-    if user.nickname == crate::etc::consts::STARGATE_ADMIN {
-        claims = claims.role(crate::etc::consts::STARGATE_ADMIN.to_string());
+    let is_super_admin = match crate::fun::is_super_admin_user_id(&user.id).await {
+        Ok(is_super_admin) => is_super_admin,
+        Err(e) => return Err(ErrorResponse::internal(e)),
+    };
+
+    if is_super_admin {
+        claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
     }
 
     let (access_token, refresh_token) = match crate::fun::generate_tokens(claims) {

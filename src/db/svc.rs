@@ -6,13 +6,14 @@ use db::{
     Transaction,
     ent::{
         ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, Organization,
-        Profile, ServiceAccount, User,
+        Profile, ServiceAccount, SuperAdmin, User,
     },
     repo::ADMIN_KEY,
     repo::API_KEY,
     repo::CREDENTIAL,
     repo::ORGANIZATION,
     repo::SERVICE_ACCOUNT,
+    repo::SUPER_ADMIN,
     repo::USER,
 };
 
@@ -43,6 +44,40 @@ pub async fn create_user(
     }
 }
 
+pub async fn create_super_admin_user(
+    profile: Profile,
+    credential_type: CredentialType,
+    value: &str,
+    ctx: AuditContext,
+) -> Result<User> {
+    let svc = service();
+    match svc
+        .create_super_admin_user(profile, credential_type, value)
+        .await
+    {
+        Ok(user) => {
+            let user_metadata = serde_json::to_value(&user).unwrap_or_default();
+            let user_ctx = ctx
+                .clone()
+                .with_resource(USER.to_string())
+                .with_resource_id(user.id.clone())
+                .with_metadata(user_metadata);
+            audit::creation!(user_ctx);
+
+            let super_admin_ctx = ctx
+                .with_resource(SUPER_ADMIN.to_string())
+                .with_resource_id(user.id.clone());
+            audit::creation!(super_admin_ctx);
+
+            Ok(user)
+        }
+        Err(e) => {
+            tracing::error!("Error creating super admin user: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
 pub async fn get_user_by_username(username: &str) -> Result<Option<User>> {
     let svc = service();
     svc.get_user_by_username(username).await
@@ -61,6 +96,20 @@ pub async fn get_all_users(limit: i64, offset: i64) -> Result<Vec<User>> {
 pub async fn count_users() -> Result<i64> {
     let svc = service();
     svc.count_users().await
+}
+
+pub async fn get_super_admin_by_user_id(user_id: &str) -> Result<Option<SuperAdmin>> {
+    let svc = service();
+    svc.get_super_admin_by_user_id(user_id).await
+}
+
+pub async fn is_super_admin_user_id(user_id: &str) -> Result<bool> {
+    Ok(get_super_admin_by_user_id(user_id).await?.is_some())
+}
+
+pub async fn super_admin_exists() -> Result<bool> {
+    let svc = service();
+    svc.super_admin_exists().await
 }
 
 pub async fn search_users(query: &str, limit: i64, offset: i64) -> Result<Vec<User>> {

@@ -22,3 +22,71 @@ docker build --build-arg STARGATE_PROFILE=cluster -t stargate:cluster .
 ```
 
 At runtime, Stargate validates `STARGATE_RUNTIME_PROFILE` against the compiled backend set and fails fast if they do not match.
+
+## CLI
+
+Stargate includes a built-in CLI for administrative tasks. The server checks CLI arguments first, and when a command is provided it runs the CLI flow instead of starting the HTTP server.
+
+Current command tree:
+
+```text
+stargate admin bootstrap
+```
+
+## Bootstrap The First Super Admin
+
+Use the CLI to create the initial super-admin account explicitly. Stargate no longer auto-creates a privileged user during normal startup.
+
+Pass the password directly:
+
+```bash
+cargo run -- admin bootstrap \
+  --email admin@example.com \
+  --password 'replace-with-a-strong-password' \
+  --name 'Admin User' \
+  --nickname admin
+```
+
+Or read the password from stdin so it does not appear in shell history:
+
+```bash
+printf '%s' 'replace-with-a-strong-password' | cargo run -- admin bootstrap \
+  --email admin@example.com \
+  --password-stdin \
+  --name 'Admin User' \
+  --nickname admin
+```
+
+Or let Stargate generate a one-time bootstrap password and print it after successful creation:
+
+```bash
+cargo run -- admin bootstrap \
+  --email admin@example.com \
+  --generate-password \
+  --name 'Admin User' \
+  --nickname admin
+```
+
+If you are running a built binary instead of `cargo run`, use the same arguments:
+
+```bash
+./stargate admin bootstrap --email admin@example.com --password-stdin
+```
+
+## CLI Behavior
+
+- `admin bootstrap` fails if a super-admin already exists.
+- `admin bootstrap` fails if the target email already exists as a user.
+- `--password`, `--password-stdin`, and `--generate-password` are mutually exclusive.
+- One of `--password`, `--password-stdin`, or `--generate-password` is required.
+- `--generate-password` prints the generated password only after a successful bootstrap.
+- `--nickname` is optional and defaults to the email address.
+- `--name` is optional and sets the initial given name.
+
+## Runtime Requirements
+
+The CLI initializes the database before executing the command, so it uses the same compiled backend profile and runtime database configuration as the server.
+
+- In `edge` mode, ensure the process can create or access `.stargate/sqlite.db`.
+- In `cluster` mode, set the required Postgres environment variables before running the command.
+- If `STARGATE_RUNTIME_PROFILE` is set, it must match the compiled profile.

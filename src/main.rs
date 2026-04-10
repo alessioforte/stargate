@@ -1,6 +1,7 @@
 mod act;
 mod api;
 mod aud;
+mod cli;
 mod db;
 mod err;
 mod etc;
@@ -13,6 +14,7 @@ use actix_web::{
     middleware::{self, TrailingSlash},
 };
 use dotenvy::dotenv;
+
 use tracing::info;
 use tracing_actix_web::TracingLogger;
 
@@ -27,6 +29,12 @@ async fn main() -> std::io::Result<()> {
 
     dotenv().ok();
     let _guard = log::init();
+
+    let cli = cli::parse();
+    if let Some(command) = cli.command {
+        return cli::run_cli_command(command).await;
+    }
+
     aud::init();
 
     let version = env!("CARGO_PKG_VERSION");
@@ -53,8 +61,6 @@ async fn main() -> std::io::Result<()> {
     }
 
     let gcfg = gate::init();
-
-    fun::create_super_admin().await;
 
     let server = HttpServer::new(move || {
         App::new()

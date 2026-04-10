@@ -121,13 +121,21 @@ pub async fn login(
     let name = format_name(&given_name, &family_name);
 
     let sid = ulid::Ulid::new().to_string();
-    let claims = Claims::default()
+    let mut claims = Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
         .name(name)
         .email(user.email.to_owned())
         .email_verified(google_user.verified_email)
         .sid(sid.clone());
+
+    let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
+        .await
+        .map_err(ErrorResponse::internal)?;
+
+    if is_super_admin {
+        claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
+    }
 
     let (access_token, refresh_token) = crate::fun::generate_tokens(claims).map_err(|e| {
         tracing::error!("Token generation error: {}", e);

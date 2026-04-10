@@ -1,60 +1,49 @@
-use crate::etc::consts::STARGATE_ADMIN;
+use anyhow::{Result, bail};
 use db::ent::{AuditContext, CredentialType, Profile};
-use jwt::Claims;
-use tracing::{error, info};
+use tracing::info;
 
-pub async fn create_super_admin() {
-    let super_admin = match crate::db::get_user_by_username(STARGATE_ADMIN).await {
-        Ok(user) => user,
-        Err(e) => {
-            error!("Failed to get super admin: {}", e);
-            return;
-        }
-    };
+pub const SUPER_ADMIN_ROLE: &str = "super_admin";
 
-    if super_admin.is_some() {
-        info!("Super admin already exists.");
-        return;
+pub async fn super_admin_exists() -> Result<bool> {
+    crate::db::super_admin_exists().await
+}
+
+pub async fn is_super_admin_user_id(user_id: &str) -> Result<bool> {
+    crate::db::is_super_admin_user_id(user_id).await
+}
+
+pub async fn bootstrap_super_admin(
+    email: String,
+    password: String,
+    name: Option<String>,
+    nickname: Option<String>,
+) -> Result<()> {
+    if password.trim().is_empty() {
+        bail!("password must not be empty");
     }
 
-    let email =
-        std::env::var("SUPER_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost".to_string());
-    let name = std::env::var("SUPER_ADMIN_NAME").unwrap_or_else(|_| "Admin".to_string());
-    let password = pw::generator(40, true, true, true, false);
-    let user = Profile::new(email, STARGATE_ADMIN.to_string())
-        .given_name(Some(name))
-        .phone_number(None)
-        .picture(None);
+    if super_admin_exists().await? {
+        bail!("a super admin already exists");
+    }
 
-    let hash = match pw::Hash::encode(&password) {
-        Ok(h) => h,
-        Err(e) => {
-            error!("Failed to hash super admin password: {}", e);
-            return;
-        }
-    };
+    if crate::db::get_user_by_username(&email).await?.is_some() {
+        bail!("user with email '{email}' already exists");
+    }
 
-    match crate::db::create_user(
-        user,
+    let hash = pw::Hash::encode(&password)
+        .map_err(|e| anyhow::anyhow!("failed to hash bootstrap password: {e}"))?;
+    let nickname = nickname.unwrap_or_else(|| email.clone());
+
+    let profile = Profile::new(email.clone(), nickname).given_name(name);
+
+    crate::db::create_super_admin_user(
+        profile,
         CredentialType::Password,
         &hash,
         AuditContext::system(),
     )
-    .await
-    {
-        Ok(_) => {
-            info!("Super admin created successfully.");
-            eprintln!("Super admin password: {}", password);
-        }
-        Err(e) => error!("Failed to create super admin: {}", e),
-    };
-}
+    .await?;
 
-pub fn check_super_admin_by_claims(claims: &Claims) -> bool {
-    if let Some(role) = claims.role.as_ref() {
-        if role == STARGATE_ADMIN {
-            return true;
-        }
-    }
-    false
+    info!("Super admin bootstrapped for {}", email);
+    Ok(())
 }

@@ -1,9 +1,10 @@
 use super::repo::{
     AdminKeyRepository, ApiKeyRepository, AuditRepository, CredentialRepository,
-    OrganizationRepository, ServiceAccountRepository, UserRepository,
+    OrganizationRepository, ServiceAccountRepository, SuperAdminRepository, UserRepository,
 };
 use crate::ent::{
-    AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount, User,
+    AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount,
+    SuperAdmin, User,
 };
 use crate::tx::Transaction;
 use anyhow::Result;
@@ -23,6 +24,7 @@ pub struct Service {
     audit: AuditRepository,
     service_account: ServiceAccountRepository,
     organization: OrganizationRepository,
+    super_admin: SuperAdminRepository,
 }
 
 impl Service {
@@ -39,6 +41,7 @@ impl Service {
             audit: AuditRepository::new(),
             service_account: ServiceAccountRepository::new(),
             organization: OrganizationRepository::new(),
+            super_admin: SuperAdminRepository::new(),
         }
     }
 
@@ -161,6 +164,31 @@ impl Transaction for Service {
         Ok(record)
     }
 
+    async fn create_super_admin_user(
+        &self,
+        profile: Profile,
+        credential_type: CredentialType,
+        value: &str,
+    ) -> Result<User> {
+        let mut tx = self.pool.begin().await?;
+
+        let user = User::new(profile.email, profile.nickname)
+            .given_name(profile.given_name)
+            .family_name(profile.family_name)
+            .picture(profile.picture)
+            .phone_number(profile.phone_number)
+            .attrs(profile.attrs);
+
+        let user_id = user.id.clone();
+        let record = self.user.create(&mut tx, user).await?;
+        self.credential
+            .create(&mut tx, &user_id, credential_type, value)
+            .await?;
+        self.super_admin.create(&mut tx, &user_id).await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
         let mut tx = self.pool.begin().await?;
         let user = self.user.get_by_username(&mut tx, username).await?;
@@ -187,6 +215,20 @@ impl Transaction for Service {
         let count = self.user.count(&mut tx).await?;
         tx.commit().await?;
         Ok(count)
+    }
+
+    async fn get_super_admin_by_user_id(&self, user_id: &str) -> Result<Option<SuperAdmin>> {
+        let mut tx = self.pool.begin().await?;
+        let super_admin = self.super_admin.get_by_user_id(&mut tx, user_id).await?;
+        tx.commit().await?;
+        Ok(super_admin)
+    }
+
+    async fn super_admin_exists(&self) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let count = self.super_admin.count_active(&mut tx).await?;
+        tx.commit().await?;
+        Ok(count > 0)
     }
 
     async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>> {
