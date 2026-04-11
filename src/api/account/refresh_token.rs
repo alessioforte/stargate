@@ -74,13 +74,16 @@ pub async fn handler(
     };
 
     let user = match crate::db::get_user_by_username(&claims.sub).await {
-        Ok(user) => user,
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err(ErrorResponse::from(HttpError::Unauthorized(
+                "Invalid Token".to_string(),
+            )));
+        }
         Err(e) => {
             return Err(ErrorResponse::internal(e));
         }
     };
-
-    let user = user.unwrap();
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
