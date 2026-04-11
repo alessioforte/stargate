@@ -47,8 +47,8 @@ pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
 
     let jwt = jwt_config();
     let claims = match jwt.validate_token(&token) {
-        Ok(claims) => claims,
-        Err(_) => {
+        Ok(claims) if claims.typ.as_deref() == Some("bearer") => claims,
+        Ok(_) | Err(_) => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
                 "Invalid Token".to_string(),
             )));

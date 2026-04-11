@@ -87,6 +87,10 @@ pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
         }
     };
 
+    if claims.typ.as_deref() != Some("bearer") {
+        return None;
+    }
+
     // Get subject from session store
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
