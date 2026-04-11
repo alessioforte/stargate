@@ -299,6 +299,10 @@ impl MemoryStore {
 
 #[async_trait]
 impl Store for MemoryStore {
+    async fn ping(&self) -> StoreResult<()> {
+        Ok(())
+    }
+
     async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));

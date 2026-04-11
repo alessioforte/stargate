@@ -14,7 +14,7 @@ lb = { path = "../lb" }
 lim = { path = "../lim" }
 matchit = "0.9.1"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_yaml_bw = "2.5.2"
+serde_yaml_bw = "2.5.4"
 tools = { path = "../tools" }
 tracing = "0.1.44"
 utoipa = { version = "5.3.1", features = ["actix_extras", "yaml"] }

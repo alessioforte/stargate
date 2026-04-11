@@ -7,7 +7,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-awc = { version = "3.7.0", features = ["openssl"] }
+awc = { version = "3.8.2", features = ["openssl"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tracing = "0.1.44"

@@ -386,6 +386,15 @@ impl RedisStore {
 
 #[async_trait]
 impl Store for RedisStore {
+    async fn ping(&self) -> StoreResult<()> {
+        let mut con = self.pool.get();
+        redis::cmd("PING")
+            .query_async::<String>(&mut con)
+            .await
+            .map(|_| ())
+            .map_err(StoreError::from)
+    }
+
     async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
         self.validate_key(key)?;
 

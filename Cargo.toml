@@ -52,11 +52,11 @@ push = false
 [dependencies]
 ace = { path = "crates/ace" }
 actix-cors = "0.7.1"
-actix-web = { version = "4.12.1", features = ["openssl"] }
+actix-web = { version = "4.13.0", features = ["openssl"] }
 actix-web-grants = "4.1.2"
 actix-web-httpauth = "0.8.2"
 actix-ws-proxy = "0.1.2"
-awc = { version = "3.7.0", features = ["openssl", "rustls-0_23"] }
+awc = { version = "3.8.2", features = ["openssl", "rustls-0_23"] }
 db = { path = "crates/db" }
 chrono = "0.4.44"
 dotenvy = "0.15.7"
@@ -65,7 +65,7 @@ jwt = { path = "crates/jwt" }
 lb = { path = "crates/lb" }
 mime = "0.3.17"
 oauth = { path = "crates/oauth" }
-openssl = "0.10.72"
+openssl = "0.10.76"
 pw = { path = "crates/pw" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
@@ -74,25 +74,25 @@ store = { path = "crates/store" }
 thiserror = "2.0.12"
 tools = { path = "crates/tools" }
 utoipa = { version = "5.3.1", features = ["actix_extras", "yaml"] }
-once_cell = "1.21.3"
-serde_yaml_bw = "2.5.2"
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "time"] }
-rustls = "0.23.36"
+once_cell = "1.21.4"
+serde_yaml_bw = "2.5.4"
+tokio = { version = "1.51.1", features = ["macros", "rt-multi-thread", "time"] }
+rustls = "0.23.37"
 rustls-pemfile = "2.2.0"
-anyhow = "1.0.100"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json", "time"] }
+anyhow = "1.0.102"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json", "time"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.3"
 ulid = "1.2.1"
 tracing-actix-web = "0.7.21"
 lru = "0.16.3"
 maxminddb = { version = "0.27.3", features = ["simdutf8"] }
-moka = { version = "0.12.13", features = ["sync"] }
+moka = { version = "0.12.15", features = ["sync"] }
 notify = "8.2.0"
 clap = { version = "4.6.0", features = ["derive"] }
 
 [features]
-default = ["edge"]
+default = ["cluster"]
 edge = ["sqlite", "memory"]
 cluster = ["postgres", "redis"]
 postgres = ["db/postgres"]

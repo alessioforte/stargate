@@ -13,6 +13,9 @@ impl<T> DeserializeValue for T where T: DeserializeOwned + Send + Sync {}
 pub trait Store: Send + Sync {
     // Basic key-value operations
 
+    /// Check whether the underlying store backend is healthy and reachable.
+    async fn ping(&self) -> StoreResult<()>;
+
     /// Get a value from the store.
     async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>>;
 

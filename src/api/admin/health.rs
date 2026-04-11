@@ -2,6 +2,7 @@ use crate::err::ErrorResponse;
 use actix_web::{HttpResponse, get};
 use actix_web_grants::protect;
 use serde::Serialize;
+use store::Store;
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -65,10 +66,8 @@ pub async fn get() -> Result<HttpResponse, ErrorResponse> {
     // ── Redis (feature-gated) ─────────────────────────────────────────────────
     #[cfg(feature = "redis")]
     let redis = {
-        use redis::AsyncCommands;
         let store = crate::etc::store::use_store();
-        let mut conn = store.get_connection();
-        match redis::cmd("PING").query_async::<String>(&mut conn).await {
+        match store.ping().await {
             Ok(_) => ComponentStatus {
                 status: "healthy",
                 detail: None,
