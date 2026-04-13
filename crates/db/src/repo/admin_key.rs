@@ -13,8 +13,7 @@ impl AdminKeyRepository {
 
     pub async fn create(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         key_hash: &str,
         label: Option<String>,
         permissions: Vec<String>,
@@ -44,8 +43,7 @@ impl AdminKeyRepository {
 
     pub async fn get_by_hash(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         key_hash: &str,
     ) -> Result<Option<AdminKey>> {
         let row = sqlx::query_as::<_, AdminKey>(
@@ -66,8 +64,7 @@ impl AdminKeyRepository {
 
     pub async fn get_by_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         id: &str,
     ) -> Result<Option<AdminKey>> {
         let row = sqlx::query_as::<_, AdminKey>(
@@ -88,8 +85,7 @@ impl AdminKeyRepository {
 
     pub async fn get_all(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<AdminKey>> {
@@ -110,11 +106,7 @@ impl AdminKeyRepository {
         Ok(rows)
     }
 
-    pub async fn count(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<i64> {
+    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "
@@ -132,8 +124,7 @@ impl AdminKeyRepository {
 
     pub async fn update(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         admin_key: AdminKey,
     ) -> Result<AdminKey> {
         let row = sqlx::query_as::<_, AdminKey>(
@@ -157,12 +148,7 @@ impl AdminKeyRepository {
         Ok(row)
     }
 
-    pub async fn revoke_by_id(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
+    pub async fn revoke_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
             format!(
                 "
@@ -179,12 +165,7 @@ impl AdminKeyRepository {
         Ok(())
     }
 
-    pub async fn delete_by_id(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
+    pub async fn delete_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
             format!(
                 "

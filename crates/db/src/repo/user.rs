@@ -3,11 +3,6 @@ use anyhow::Result;
 
 pub const USER: &str = "users";
 
-#[cfg(feature = "sqlite")]
-const LIKE: &str = "LIKE";
-#[cfg(feature = "postgres")]
-const LIKE: &str = "ILIKE";
-
 #[derive(Clone)]
 pub struct UserRepository {}
 
@@ -16,12 +11,7 @@ impl UserRepository {
         Self {}
     }
 
-    pub async fn create(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        user: User,
-    ) -> Result<User> {
+    pub async fn create(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
             format!(
                 "
@@ -47,12 +37,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn search(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        query: &str,
-    ) -> Result<Vec<User>> {
+    pub async fn search(&self, tx: &mut crate::backend::Tx<'_>, query: &str) -> Result<Vec<User>> {
         let rows = sqlx::query_as::<_, User>(
             format!(
                 "
@@ -61,7 +46,7 @@ impl UserRepository {
             ORDER BY id DESC
         ",
                 users = USER,
-                like = LIKE
+                like = crate::backend::LIKE
             )
             .as_str(),
         )
@@ -74,8 +59,7 @@ impl UserRepository {
 
     pub async fn get_by_username(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         username: &str,
     ) -> Result<Option<User>> {
         let row = sqlx::query_as::<_, User>(
@@ -94,12 +78,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn update(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        user: User,
-    ) -> Result<User> {
+    pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
             format!(
                 "
@@ -128,8 +107,7 @@ impl UserRepository {
 
     pub async fn get_all(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<User>> {
@@ -148,11 +126,7 @@ impl UserRepository {
         Ok(rows)
     }
 
-    pub async fn count(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<i64> {
+    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
         let row: (i64,) =
             sqlx::query_as(format!("SELECT COUNT(*) FROM {users}", users = USER).as_str())
                 .fetch_one(&mut **tx)
@@ -163,8 +137,7 @@ impl UserRepository {
 
     pub async fn search_with_pagination(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         query: &str,
         limit: i64,
         offset: i64,
@@ -176,7 +149,7 @@ impl UserRepository {
                  WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
                  ORDER BY id LIMIT $2 OFFSET $3",
                 users = USER,
-                like = LIKE
+                like = crate::backend::LIKE
             )
             .as_str(),
         )
@@ -189,19 +162,14 @@ impl UserRepository {
         Ok(rows)
     }
 
-    pub async fn count_search(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        query: &str,
-    ) -> Result<i64> {
+    pub async fn count_search(&self, tx: &mut crate::backend::Tx<'_>, query: &str) -> Result<i64> {
         let pattern = format!("%{}%", query);
         let row: (i64,) = sqlx::query_as(
             format!(
                 "SELECT COUNT(*) FROM {users}
                  WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1",
                 users = USER,
-                like = LIKE
+                like = crate::backend::LIKE
             )
             .as_str(),
         )
@@ -214,8 +182,7 @@ impl UserRepository {
 
     pub async fn get_by_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         id: &str,
     ) -> Result<Option<User>> {
         let row = sqlx::query_as::<_, User>(
@@ -228,12 +195,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn delete(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
+    pub async fn delete(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(format!("DELETE FROM {users} WHERE id = $1", users = USER).as_str())
             .bind(id)
             .execute(&mut **tx)

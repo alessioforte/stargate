@@ -26,7 +26,11 @@ async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
         .unwrap_or_else(AuditContext::anonymous);
     if let Some(token) = req.request().get_token() {
         let jwt = jwt_config();
-        if let Some(claims) = jwt.validate_token(&token).ok().filter(|c| c.typ.as_deref() == Some("bearer")) {
+        if let Some(claims) = jwt
+            .validate_token(&token)
+            .ok()
+            .filter(|c| c.typ.as_deref() == Some("bearer"))
+        {
             // Validate session store — reject revoked/logged-out tokens
             let sid = claims.sid.clone().unwrap_or_default();
             let store = etc::store::use_store();

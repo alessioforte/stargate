@@ -13,8 +13,7 @@ impl SuperAdminRepository {
 
     pub async fn create(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
     ) -> Result<SuperAdmin> {
         let super_admin = SuperAdmin::new(user_id.to_string());
@@ -39,8 +38,7 @@ impl SuperAdminRepository {
 
     pub async fn get_by_user_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
     ) -> Result<Option<SuperAdmin>> {
         let row = sqlx::query_as::<_, SuperAdmin>(
@@ -60,11 +58,7 @@ impl SuperAdminRepository {
         Ok(row)
     }
 
-    pub async fn count_active(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<i64> {
+    pub async fn count_active(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "

@@ -11,12 +11,7 @@ impl AuditRepository {
         Self {}
     }
 
-    pub async fn insert(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        log: &Audit,
-    ) -> Result<Audit> {
+    pub async fn insert(&self, tx: &mut crate::backend::Tx<'_>, log: &Audit) -> Result<Audit> {
         let row = sqlx::query_as::<_, Audit>(
             format!(
                 "

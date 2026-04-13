@@ -15,8 +15,7 @@ impl ApiKeyRepository {
 
     pub async fn create(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         key_hash: &str,
         label: &str,
         attrs: Option<serde_json::Value>,
@@ -50,8 +49,7 @@ impl ApiKeyRepository {
 
     pub async fn link_to_user(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         api_key_id: &str,
         user_id: &str,
     ) -> Result<()> {
@@ -72,8 +70,7 @@ impl ApiKeyRepository {
 
     pub async fn link_to_service_account(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         api_key_id: &str,
         service_account_id: &str,
     ) -> Result<()> {
@@ -94,8 +91,7 @@ impl ApiKeyRepository {
 
     pub async fn get_by_user_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
     ) -> Result<Vec<ApiKey>> {
         let rows = sqlx::query_as::<_, ApiKey>(
@@ -120,8 +116,7 @@ impl ApiKeyRepository {
 
     pub async fn get_all_by_user_type(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ApiKey>> {
@@ -143,11 +138,7 @@ impl ApiKeyRepository {
         Ok(rows)
     }
 
-    pub async fn count_by_user_type(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<i64> {
+    pub async fn count_by_user_type(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "SELECT COUNT(*) FROM {api_keys} ak
@@ -165,8 +156,7 @@ impl ApiKeyRepository {
 
     pub async fn get_by_service_account_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         service_account_id: &str,
     ) -> Result<Vec<ApiKey>> {
         let rows = sqlx::query_as::<_, ApiKey>(
@@ -191,8 +181,7 @@ impl ApiKeyRepository {
 
     pub async fn get_all_by_service_account_type(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ApiKey>> {
@@ -216,8 +205,7 @@ impl ApiKeyRepository {
 
     pub async fn count_by_service_account_type(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
     ) -> Result<i64> {
         let row: (i64,) = sqlx::query_as(
             format!(
@@ -236,8 +224,7 @@ impl ApiKeyRepository {
 
     pub async fn get_by_hash(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         key_hash: &str,
     ) -> Result<Option<ApiKey>> {
         let row = sqlx::query_as::<_, ApiKey>(
@@ -256,12 +243,7 @@ impl ApiKeyRepository {
         Ok(row)
     }
 
-    pub async fn revoke_by_id(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
+    pub async fn revoke_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
             format!(
                 "
@@ -278,12 +260,7 @@ impl ApiKeyRepository {
         Ok(())
     }
 
-    pub async fn delete_by_id(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
+    pub async fn delete_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
             format!(
                 "
@@ -302,8 +279,7 @@ impl ApiKeyRepository {
 
     pub async fn get_by_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         id: &str,
     ) -> Result<Option<ApiKey>> {
         let row = sqlx::query_as::<_, ApiKey>(
@@ -324,8 +300,7 @@ impl ApiKeyRepository {
 
     pub async fn get_all(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ApiKey>> {
@@ -346,11 +321,7 @@ impl ApiKeyRepository {
         Ok(rows)
     }
 
-    pub async fn count(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<i64> {
+    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "
@@ -366,12 +337,7 @@ impl ApiKeyRepository {
         Ok(row.0)
     }
 
-    pub async fn update(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        api_key: ApiKey,
-    ) -> Result<ApiKey> {
+    pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, api_key: ApiKey) -> Result<ApiKey> {
         let row = sqlx::query_as::<_, ApiKey>(
             format!(
                 "

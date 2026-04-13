@@ -13,8 +13,7 @@ impl CredentialRepository {
 
     pub async fn create(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
         credential_type: CredentialType,
         value: &str,
@@ -44,8 +43,7 @@ impl CredentialRepository {
 
     pub async fn get_by_user_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
         credential_type: CredentialType,
     ) -> Result<Option<Credential>> {
@@ -68,8 +66,7 @@ impl CredentialRepository {
 
     pub async fn change_password(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
         new_password: &str,
     ) -> Result<Credential> {
@@ -96,8 +93,7 @@ impl CredentialRepository {
 
     pub async fn delete_by_user_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
     ) -> Result<()> {
         sqlx::query(

@@ -3,11 +3,6 @@ use anyhow::Result;
 
 pub const SERVICE_ACCOUNT: &str = "service_accounts";
 
-#[cfg(feature = "sqlite")]
-const LIKE: &str = "LIKE";
-#[cfg(feature = "postgres")]
-const LIKE: &str = "ILIKE";
-
 #[derive(Clone)]
 pub struct ServiceAccountRepository {}
 
@@ -18,8 +13,7 @@ impl ServiceAccountRepository {
 
     pub async fn create(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         name: &str,
         description: Option<&str>,
         org_id: Option<&str>,
@@ -53,8 +47,7 @@ impl ServiceAccountRepository {
 
     pub async fn get_by_id(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         id: &str,
     ) -> Result<Option<ServiceAccount>> {
         let row = sqlx::query_as::<_, ServiceAccount>(
@@ -69,8 +62,7 @@ impl ServiceAccountRepository {
 
     pub async fn get_all(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ServiceAccount>> {
@@ -89,11 +81,7 @@ impl ServiceAccountRepository {
         Ok(rows)
     }
 
-    pub async fn count(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<i64> {
+    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
         let row: (i64,) =
             sqlx::query_as(format!("SELECT COUNT(*) FROM {tbl}", tbl = SERVICE_ACCOUNT).as_str())
                 .fetch_one(&mut **tx)
@@ -104,8 +92,7 @@ impl ServiceAccountRepository {
 
     pub async fn search(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         query: &str,
         limit: i64,
         offset: i64,
@@ -119,7 +106,7 @@ impl ServiceAccountRepository {
             ORDER BY id DESC LIMIT $2 OFFSET $3
         ",
                 tbl = SERVICE_ACCOUNT,
-                like = LIKE
+                like = crate::backend::LIKE
             )
             .as_str(),
         )
@@ -132,12 +119,7 @@ impl ServiceAccountRepository {
         Ok(rows)
     }
 
-    pub async fn count_search(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        query: &str,
-    ) -> Result<i64> {
+    pub async fn count_search(&self, tx: &mut crate::backend::Tx<'_>, query: &str) -> Result<i64> {
         let pattern = format!("%{}%", query);
         let row: (i64,) = sqlx::query_as(
             format!(
@@ -146,7 +128,7 @@ impl ServiceAccountRepository {
             WHERE name {like} $1 OR description {like} $1
         ",
                 tbl = SERVICE_ACCOUNT,
-                like = LIKE
+                like = crate::backend::LIKE
             )
             .as_str(),
         )
@@ -159,8 +141,7 @@ impl ServiceAccountRepository {
 
     pub async fn update(
         &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tx: &mut crate::backend::Tx<'_>,
         id: &str,
         name: &str,
         description: Option<&str>,
@@ -186,12 +167,7 @@ impl ServiceAccountRepository {
         Ok(row)
     }
 
-    pub async fn delete(
-        &self,
-        #[cfg(feature = "sqlite")] tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        #[cfg(feature = "postgres")] tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        id: &str,
-    ) -> Result<()> {
+    pub async fn delete(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(format!("DELETE FROM {tbl} WHERE id = $1", tbl = SERVICE_ACCOUNT).as_str())
             .bind(id)
             .execute(&mut **tx)

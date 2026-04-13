@@ -2,6 +2,7 @@ use super::repo::{
     AdminKeyRepository, ApiKeyRepository, AuditRepository, CredentialRepository,
     OrganizationRepository, ServiceAccountRepository, SuperAdminRepository, UserRepository,
 };
+use crate::backend::Pool;
 use crate::ent::{
     AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount,
     SuperAdmin, User,
@@ -13,10 +14,7 @@ use std::fs;
 
 #[derive(Clone)]
 pub struct Service {
-    #[cfg(feature = "postgres")]
-    pool: sqlx::PgPool,
-    #[cfg(feature = "sqlite")]
-    pool: sqlx::SqlitePool,
+    pool: Pool,
     admin_key: AdminKeyRepository,
     user: UserRepository,
     credential: CredentialRepository,
@@ -28,10 +26,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(
-        #[cfg(feature = "sqlite")] pool: sqlx::SqlitePool,
-        #[cfg(feature = "postgres")] pool: sqlx::PgPool,
-    ) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self {
             pool,
             admin_key: AdminKeyRepository::new(),
