@@ -28,7 +28,7 @@ fn get_config_path() -> String {
     if !Path::new(&dir).exists() {
         std::fs::create_dir(&dir).expect("Unable to create config directory");
     }
-    let filename = "config.yaml";
+    let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
     format!("{}/{}", dir, filename)
 }
 
