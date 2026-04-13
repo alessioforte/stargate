@@ -8,4 +8,5 @@ license.workspace = true
 
 [dependencies]
 lettre = "0.11.16"
+thiserror = "2.0.17"
 tracing = "0.1.44"

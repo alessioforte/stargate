@@ -82,7 +82,7 @@ pub async fn handler(
         .name(Some(name))
         .token(token)
         .build()
-        .send();
+        .and_then(|smtp| smtp.send());
 
     match sender {
         Ok(_) => {

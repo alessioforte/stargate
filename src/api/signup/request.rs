@@ -67,7 +67,7 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
         .to(body.email.clone())
         .token(token)
         .build()
-        .send();
+        .and_then(|smtp| smtp.send());
 
     match sender {
         Ok(_) => {

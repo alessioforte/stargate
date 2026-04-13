@@ -3967,6 +3967,7 @@ name = "smtp"
 version = "0.1.0"
 dependencies = [
  "lettre",
+ "thiserror 2.0.18",
  "tracing",
 ]
 

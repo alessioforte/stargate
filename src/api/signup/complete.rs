@@ -125,7 +125,7 @@ pub async fn handler(
                 .to(user.email)
                 .name(Some(format_name(&given_name, &family_name)))
                 .build()
-                .send();
+                .and_then(|smtp| smtp.send());
 
             match sender {
                 Ok(_) => {}

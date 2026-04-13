@@ -107,7 +107,7 @@ pub async fn handler(
         .name(Some(format_name(&given_name, &family_name)))
         .token(token)
         .build()
-        .send();
+        .and_then(|smtp| smtp.send());
 
     match sender {
         Ok(_) => {}
