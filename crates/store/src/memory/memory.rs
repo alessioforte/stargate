@@ -284,6 +284,16 @@ impl MemoryStore {
         }
     }
 
+    /// Returns a monotonic approximation of persistence-relevant mutations.
+    /// This is intentionally conservative: some no-op writes may still advance it.
+    pub fn persistence_revision(&self) -> u64 {
+        self.stats.sets.load(Ordering::Relaxed)
+            + self.stats.deletes.load(Ordering::Relaxed)
+            + self.stats.hash_sets.load(Ordering::Relaxed)
+            + self.stats.hash_deletes.load(Ordering::Relaxed)
+            + self.stats.expired_entries_cleaned.load(Ordering::Relaxed)
+    }
+
     fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<Vec<u8>> {
         rmp_serde::to_vec(value).map_err(|e| {
             StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))

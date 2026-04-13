@@ -4,8 +4,10 @@ mod memory {
     use std::sync::atomic::{AtomicBool, Ordering};
     use store::{MemoryStore, memory::MemoryStoreConfig};
 
-    pub const MEMORY_BACKUP_PATH: &str = ".stargate/memory.json";
-    const MEMORY_BACKUP_INTERVAL_SECS: u64 = 5;
+    pub const MEMORY_BACKUP_PATH: &str = ".stargate/memory.bin";
+    const DEFAULT_MEMORY_BACKUP_INTERVAL_SECS: u64 = 30;
+    const DEFAULT_MEMORY_BACKUP_WRITE_THRESHOLD: u64 = 100;
+    const MEMORY_BACKUP_CHECK_INTERVAL_SECS: u64 = 1;
     const DEFAULT_MAX_MEMORY_MB: usize = 100;
 
     static RESTORE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
@@ -43,7 +45,7 @@ mod memory {
             return;
         }
 
-        match MemoryStore::load_from_json_with_fallback(MEMORY_BACKUP_PATH).await {
+        match MemoryStore::load_from_binary(MEMORY_BACKUP_PATH).await {
             Ok(restored_store) => {
                 STORE.data.clear();
                 for entry in restored_store.data.iter() {
@@ -73,18 +75,57 @@ mod memory {
             return;
         }
 
-        let interval = std::time::Duration::from_secs(MEMORY_BACKUP_INTERVAL_SECS);
+        let interval_secs = std::env::var("STORE_BACKUP_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v: &u64| *v > 0)
+            .unwrap_or(DEFAULT_MEMORY_BACKUP_INTERVAL_SECS);
+        let interval = std::time::Duration::from_secs(interval_secs);
+        let write_threshold = std::env::var("STORE_BACKUP_WRITE_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(|v: u64| if v == 0 { None } else { Some(v) })
+            .unwrap_or(Some(DEFAULT_MEMORY_BACKUP_WRITE_THRESHOLD));
+        let check_interval = std::time::Duration::from_secs(MEMORY_BACKUP_CHECK_INTERVAL_SECS);
         tokio::spawn(async move {
+            let mut last_persisted_revision = use_store().persistence_revision();
+            let mut last_persisted_at = tokio::time::Instant::now();
+            let mut ticker = tokio::time::interval(check_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            tracing::info!(
+                interval_secs,
+                write_threshold,
+                "Memory store backup task started"
+            );
             loop {
+                ticker.tick().await;
+
                 let store = use_store();
-                if let Err(error) = store.save_to_json(MEMORY_BACKUP_PATH).await {
+                let current_revision = store.persistence_revision();
+                if current_revision == last_persisted_revision {
+                    continue;
+                }
+
+                let writes_since_last_persist =
+                    current_revision.saturating_sub(last_persisted_revision);
+                let interval_elapsed = last_persisted_at.elapsed() >= interval;
+                let threshold_reached =
+                    write_threshold.is_some_and(|threshold| writes_since_last_persist >= threshold);
+
+                if !interval_elapsed && !threshold_reached {
+                    continue;
+                }
+
+                if let Err(error) = store.save_to_binary(MEMORY_BACKUP_PATH).await {
                     tracing::warn!(
                         path = MEMORY_BACKUP_PATH,
                         %error,
                         "Failed to persist memory backup"
                     );
+                } else {
+                    last_persisted_revision = current_revision;
+                    last_persisted_at = tokio::time::Instant::now();
                 }
-                tokio::time::sleep(interval).await;
             }
         });
     }
@@ -141,7 +182,7 @@ pub use memory::use_store;
 #[cfg(feature = "memory")]
 pub async fn save() {
     let store = memory::use_store();
-    if let Err(error) = store.save_to_json(memory::MEMORY_BACKUP_PATH).await {
+    if let Err(error) = store.save_to_binary(memory::MEMORY_BACKUP_PATH).await {
         tracing::warn!("Failed to save memory store on shutdown: {}", error);
     } else {
         tracing::info!("Memory store saved on shutdown");

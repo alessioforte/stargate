@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
 
-// Serializable data structures for JSON persistence
+// Serializable data structures for persistence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum SerializableStoreValue {
     Simple(serde_json::Value, Option<DateTime<Utc>>),
@@ -30,7 +30,7 @@ struct SerializableStoreData {
 
 impl MemoryStore {
     /// Helper function to deserialize stored MessagePack bytes into a serde_json::Value
-    /// for human-readable JSON persistence.
+    /// for persistence/export formats.
     fn parse_stored_value(value: &[u8]) -> serde_json::Value {
         rmp_serde::from_slice(value).unwrap_or(serde_json::Value::Null)
     }
@@ -121,16 +121,16 @@ impl MemoryStore {
         Ok(())
     }
 
-    /// Performs an atomic write by writing to a temporary file and then renaming it
-    async fn atomic_write<P: AsRef<Path>>(path: P, content: String) -> StoreResult<()> {
+    /// Performs an atomic write by writing to a temporary file and then renaming it.
+    async fn atomic_write<P: AsRef<Path>, B: AsRef<[u8]>>(path: P, content: B) -> StoreResult<()> {
         let path = path.as_ref();
         let temp_path = path.with_extension(format!(
             "{}.tmp",
-            path.extension().and_then(|s| s.to_str()).unwrap_or("json")
+            path.extension().and_then(|s| s.to_str()).unwrap_or("bin")
         ));
 
         // Write to temporary file first
-        fs::write(&temp_path, content).await.map_err(|e| {
+        fs::write(&temp_path, content.as_ref()).await.map_err(|e| {
             StoreError::InvalidInput(format!("Failed to write to temporary file: {}", e))
         })?;
 
@@ -184,13 +184,52 @@ impl MemoryStore {
         Ok(Some(backup_path.to_string_lossy().to_string()))
     }
 
-    /// Saves the store data to a JSON file
+    /// Saves the store data to a compact binary file using MessagePack.
+    pub async fn save_to_binary<P: AsRef<Path>>(&self, path: P) -> StoreResult<()> {
+        Self::ensure_file_path_exists(&path).await?;
+
+        let serializable_data = self.to_serializable();
+        let bytes = rmp_serde::to_vec(&serializable_data).map_err(|e| {
+            StoreError::SerializationFailed(format!("Failed to serialize store data: {}", e))
+        })?;
+
+        Self::atomic_write(path, bytes).await
+    }
+
+    /// Saves the store with automatic backup of the existing binary snapshot file.
+    pub async fn save_to_binary_with_backup<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> StoreResult<Option<String>> {
+        let backup_path = Self::backup_file(&path).await?;
+        self.save_to_binary(path).await?;
+        Ok(backup_path)
+    }
+
+    /// Loads store data from a binary MessagePack file.
+    pub async fn load_from_binary<P: AsRef<Path>>(path: P) -> StoreResult<Self> {
+        let bytes = fs::read(path)
+            .await
+            .map_err(|e| StoreError::InvalidInput(format!("Failed to read from file: {}", e)))?;
+
+        let serializable_data: SerializableStoreData =
+            rmp_serde::from_slice(&bytes).map_err(|e| {
+                StoreError::DeserializationFailed(format!(
+                    "Failed to deserialize store data: {}",
+                    e
+                ))
+            })?;
+
+        Ok(Self::from_serializable(serializable_data))
+    }
+
+    /// Saves the store data to a JSON file.
     pub async fn save_to_json<P: AsRef<Path>>(&self, path: P) -> StoreResult<()> {
         // Ensure the file path exists
         Self::ensure_file_path_exists(&path).await?;
 
         let serializable_data = self.to_serializable();
-        let json_string = serde_json::to_string_pretty(&serializable_data).map_err(|e| {
+        let json_string = serde_json::to_string(&serializable_data).map_err(|e| {
             StoreError::SerializationFailed(format!("Failed to serialize store data: {}", e))
         })?;
 
@@ -275,7 +314,7 @@ impl MemoryStore {
         Ok(store)
     }
 
-    /// Load store data preferring full JSON format and falling back to the
+    /// Loads store data preferring the full JSON format and falling back to the
     /// simple JSON backup format for backward compatibility.
     pub async fn load_from_json_with_fallback<P: AsRef<Path>>(path: P) -> StoreResult<Self> {
         let path = path.as_ref();
@@ -348,10 +387,8 @@ mod tests {
     #[tokio::test]
     async fn test_file_operations() -> StoreResult<()> {
         let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "test_store_{}.json",
-            chrono::Utc::now().timestamp()
-        ));
+        let binary_path =
+            temp_dir.join(format!("test_store_{}.bin", chrono::Utc::now().timestamp()));
 
         // Create a store with some data
         let store = MemoryStore::new();
@@ -359,17 +396,17 @@ mod tests {
         store.hset("hash1", "field1", &"hvalue1", None).await?;
 
         // Test file doesn't exist initially
-        assert!(MemoryStore::file_info(&file_path).await?.is_none());
+        assert!(MemoryStore::file_info(&binary_path).await?.is_none());
 
-        // Save to JSON (will create file and directories)
-        store.save_to_json(&file_path).await?;
+        // Save to binary (will create file and directories)
+        store.save_to_binary(&binary_path).await?;
 
         // Verify file exists and has content
-        let (size, _modified) = MemoryStore::file_info(&file_path).await?.unwrap();
+        let (size, _modified) = MemoryStore::file_info(&binary_path).await?.unwrap();
         assert!(size > 0);
 
-        // Load from JSON
-        let loaded_store = MemoryStore::load_from_json(&file_path).await?;
+        // Load from binary
+        let loaded_store = MemoryStore::load_from_binary(&binary_path).await?;
         let value: Option<String> = loaded_store.get("key1").await?;
         assert_eq!(value, Some("value1".to_string()));
 
@@ -390,13 +427,13 @@ mod tests {
             .join(format!("test_{}", chrono::Utc::now().timestamp()))
             .join("level1")
             .join("level2")
-            .join("store.json");
+            .join("store.bin");
 
         let store = MemoryStore::new();
         store.set("test", &"data", None).await?;
 
         // This should create all parent directories
-        store.save_to_json(&nested_path).await?;
+        store.save_to_binary(&nested_path).await?;
 
         // Verify file exists
         assert!(nested_path.exists());
@@ -407,19 +444,19 @@ mod tests {
     #[tokio::test]
     async fn test_backup_functionality() -> StoreResult<()> {
         let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!("store_{}.json", chrono::Utc::now().timestamp()));
+        let file_path = temp_dir.join(format!("store_{}.bin", chrono::Utc::now().timestamp()));
 
         let store = MemoryStore::new();
         store.set("original", &"data", None).await?;
 
         // Save initial file
-        store.save_to_json(&file_path).await?;
+        store.save_to_binary(&file_path).await?;
 
         // Modify store
         store.set("new", &"data", None).await?;
 
         // Save with backup
-        let backup_path = store.save_to_json_with_backup(&file_path).await?;
+        let backup_path = store.save_to_binary_with_backup(&file_path).await?;
 
         // Verify backup was created
         assert!(backup_path.is_some());
@@ -509,6 +546,7 @@ mod tests {
 
         Ok(())
     }
+
 }
 
 // Example usage documentation
@@ -531,8 +569,8 @@ mod examples {
             .await?;
 
         // Save with automatic directory creation
-        let path = "data/backups/store.json";
-        store.save_to_json(path).await?;
+        let path = "data/backups/store.bin";
+        store.save_to_binary(path).await?;
 
         // Check file info
         if let Some((size, modified)) = MemoryStore::file_info(path).await? {
@@ -540,7 +578,7 @@ mod examples {
         }
 
         // Create a backup before overwriting
-        if let Some(backup_path) = store.save_to_json_with_backup(path).await? {
+        if let Some(backup_path) = store.save_to_binary_with_backup(path).await? {
             println!("Backup created: {}", backup_path);
         }
 
@@ -550,7 +588,7 @@ mod examples {
             .await?;
 
         // Load from file
-        let restored_store = MemoryStore::load_from_json(path).await?;
+        let restored_store = MemoryStore::load_from_binary(path).await?;
         let user: Option<String> = restored_store.get("user:1").await?;
         println!("Restored user: {:?}", user);
 
