@@ -92,7 +92,7 @@ notify = "8.2.0"
 clap = { version = "4.6.0", features = ["derive"] }
 
 [features]
-default = ["cluster"]
+default = ["edge"]
 edge = ["sqlite", "memory"]
 cluster = ["postgres", "redis"]
 postgres = ["db/postgres"]

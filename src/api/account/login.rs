@@ -2,6 +2,7 @@ use super::{AuthResponse, UserCredentials};
 use crate::act::login_guard;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
+use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
 use crate::fun::format_name;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, cookie::Cookie, post, web};
@@ -18,7 +19,9 @@ use store::Store;
     description = "Authenticate a user using their username and password. On successful authentication, an access token and a refresh token are issued.",
     responses(
         (status = 200, description = "OK", body = AuthResponse),
+        (status = 429, description = "Too Many Requests", body = ErrorResponse),
         (status = 401, description = "Unauthorized - Invalid Credentials", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
@@ -27,11 +30,24 @@ pub async fn handler(
     req: HttpRequest,
     credentials: web::Json<UserCredentials>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let login_key = &credentials.username;
+    let login_identifier = credentials.username.trim();
+    let client_ip = req.get_client_ip();
 
-    let allowed = login_guard::check_login_allowed(login_key)
+    let user = match crate::db::get_user_by_username(login_identifier).await {
+        Ok(user) => user,
+        Err(e) => {
+            return Err(ErrorResponse::internal(e));
+        }
+    };
+
+    let throttle = match user.as_ref() {
+        Some(user) => login_guard::LoginThrottle::for_user(&client_ip, &user.id),
+        None => login_guard::LoginThrottle::for_identifier(&client_ip, login_identifier),
+    };
+
+    let allowed = login_guard::check_login_allowed(&throttle)
         .await
-        .unwrap_or(true);
+        .map_err(login_guard_unavailable)?;
     if !allowed {
         let mut err = ErrorResponse::from(HttpError::TooManyRequests(
             "too many failed login attempts, try again later".to_string(),
@@ -40,15 +56,10 @@ pub async fn handler(
         return Err(err);
     }
 
-    let user = match crate::db::get_user_by_username(&credentials.username).await {
-        Ok(user) => user,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
-
     if user.is_none() {
-        let _ = login_guard::record_failed_attempt(login_key).await;
+        login_guard::record_failed_attempt(&throttle)
+            .await
+            .map_err(login_guard_unavailable)?;
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Invalid credentials".to_string(),
         )));
@@ -66,7 +77,9 @@ pub async fn handler(
     let password = match user_credential {
         Some(c) => c.value,
         None => {
-            let _ = login_guard::record_failed_attempt(login_key).await;
+            login_guard::record_failed_attempt(&throttle)
+                .await
+                .map_err(login_guard_unavailable)?;
             return Err(ErrorResponse::from(HttpError::Unauthorized(
                 "Invalid credentials".to_string(),
             )));
@@ -74,13 +87,20 @@ pub async fn handler(
     };
 
     if Hash::verify(&credentials.password, &password).is_err() {
-        let _ = login_guard::record_failed_attempt(login_key).await;
+        login_guard::record_failed_attempt(&throttle)
+            .await
+            .map_err(login_guard_unavailable)?;
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Invalid credentials".to_string(),
         )));
     }
 
-    let _ = login_guard::clear_attempts(login_key).await;
+    if let Err(error) = login_guard::clear_subject_attempts(&throttle).await {
+        tracing::warn!(
+            "Failed to clear login attempts after successful login: {}",
+            error
+        );
+    }
 
     let mut ctx = req
         .extensions_mut()
@@ -149,4 +169,11 @@ pub async fn handler(
             refresh_token,
             token_type: "Bearer".to_string(),
         })))
+}
+
+fn login_guard_unavailable(error: store::StoreError) -> ErrorResponse {
+    tracing::error!("Login guard unavailable: {}", error);
+    ErrorResponse::from(HttpError::ServiceUnavailable(
+        "login temporarily unavailable".to_string(),
+    ))
 }

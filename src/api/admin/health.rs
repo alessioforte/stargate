@@ -2,6 +2,7 @@ use crate::err::ErrorResponse;
 use actix_web::{HttpResponse, get};
 use actix_web_grants::protect;
 use serde::Serialize;
+#[cfg(feature = "redis")]
 use store::Store;
 use utoipa::ToSchema;
 
