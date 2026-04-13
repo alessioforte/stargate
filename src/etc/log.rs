@@ -7,44 +7,77 @@ use tracing_actix_web::{DefaultRootSpanBuilder, RootSpanBuilder};
 use tracing_subscriber::{
     EnvFilter, Registry,
     fmt::{self, format::FmtSpan, time::UtcTime},
-    layer::SubscriberExt,
+    layer::{Layer, SubscriberExt},
     util::SubscriberInitExt,
 };
 use ulid::Ulid;
 
-pub fn init() -> tracing_appender::non_blocking::WorkerGuard {
+fn parse_bool_env(name: &str, default: bool) -> bool {
+    match std::env::var(name) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        },
+        Err(_) => default,
+    }
+}
+
+pub fn init() -> Vec<tracing_appender::non_blocking::WorkerGuard> {
     let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| ".stargate/logs".to_string());
-    let file_appender = tracing_appender::rolling::daily(log_dir.clone(), "stargate.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
     let env_filter = EnvFilter::from_default_env();
+    let mut file_enabled = parse_bool_env("LOG_FILE_ENABLED", true);
+    let mut console_enabled = parse_bool_env("LOG_CONSOLE_ENABLED", cfg!(debug_assertions));
+    let pretty_console = parse_bool_env("LOG_PRETTY_CONSOLE", cfg!(debug_assertions));
+    let mut guards = Vec::new();
 
-    // JSON file layer for structured logs
-    let file_layer = fmt::layer()
-        .json()
-        .with_writer(non_blocking)
-        .with_timer(UtcTime::rfc_3339())
-        .with_span_events(fmt::format::FmtSpan::CLOSE)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .with_target(true)
-        .with_level(true)
-        .with_ansi(false);
+    if !file_enabled && !console_enabled {
+        console_enabled = true;
+        file_enabled = false;
+    }
 
-    // Console layer for development
-    let console_layer = fmt::layer()
-        .with_timer(UtcTime::rfc_3339())
-        .with_span_events(FmtSpan::CLOSE)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .with_target(true)
-        .with_level(true)
-        .with_ansi(true)
-        .pretty();
+    let file_layer = if file_enabled {
+        let file_appender = tracing_appender::rolling::daily(log_dir.clone(), "stargate.log");
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        guards.push(guard);
+        Some(
+            fmt::layer()
+                .json()
+                .with_writer(non_blocking)
+                .with_timer(UtcTime::rfc_3339())
+                .with_span_events(fmt::format::FmtSpan::CLOSE)
+                .with_file(true)
+                .with_line_number(true)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_target(true)
+                .with_level(true)
+                .with_ansi(false)
+                .boxed(),
+        )
+    } else {
+        None
+    };
+
+    let console_layer = if console_enabled {
+        let base = fmt::layer()
+            .with_timer(UtcTime::rfc_3339())
+            .with_span_events(FmtSpan::CLOSE)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .with_target(true)
+            .with_level(true)
+            .with_ansi(true);
+        if pretty_console {
+            Some(base.pretty().boxed())
+        } else {
+            Some(base.compact().boxed())
+        }
+    } else {
+        None
+    };
 
     Registry::default()
         .with(env_filter)
@@ -52,9 +85,15 @@ pub fn init() -> tracing_appender::non_blocking::WorkerGuard {
         .with(console_layer)
         .init();
 
-    info!("Logging initialized. Logs will be written to {}", log_dir);
+    info!(
+        log_dir,
+        file_enabled,
+        console_enabled,
+        pretty_console = console_enabled && pretty_console,
+        "Logging initialized"
+    );
 
-    _guard
+    guards
 }
 
 const SENSITIVE_PARAMS: &[&str] = &["token", "code", "secret", "key", "password", "state"];
