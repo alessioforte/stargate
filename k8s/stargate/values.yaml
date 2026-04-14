@@ -32,6 +32,8 @@ serviceAccount:
 
 podAnnotations: {}
 
+terminationGracePeriodSeconds: 40
+
 podSecurityContext: {}
   # fsGroup: 2000
 
@@ -116,10 +118,12 @@ configmap:
   name: stargate-config
   data:
     # Cluster profile expects shared backends to be provided here.
+    # SERVER_SHUTDOWN_TIMEOUT_SECS: "25"
+    # AUDIT_MAX_PENDING: "1024"
     # REDIS_URL: redis://redis.default.svc.cluster.local:6379
     # POSTGRES_ENDPOINT: postgres.default.svc.cluster.local
     # POSTGRES_DATABASE: stargate
-    # POSTGRES_USER: stargate
+    # POSTGRES_USERNAME: stargate
     # POSTGRES_PASSWORD: change-me
     # SURREALDB_ENDPOINT: http://surrealdb-tikv.default.svc.cluster.local:8000
 

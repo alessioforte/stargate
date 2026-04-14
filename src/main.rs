@@ -42,6 +42,7 @@ async fn main() -> std::io::Result<()> {
     let addrs = format!("0.0.0.0:{}", port);
     let tls_enabled = tls::enabled()?;
     let runtime_profile = profile::validate_runtime_profile()?;
+    let shutdown_timeout_secs = act::server_shutdown_timeout_secs();
 
     info!("Version: {}", version);
     info!("Starting server on port {}", port);
@@ -51,6 +52,7 @@ async fn main() -> std::io::Result<()> {
         profile::COMPILED_DB_BACKEND,
         profile::COMPILED_STATE_BACKEND
     );
+    info!("Graceful shutdown timeout: {}s", shutdown_timeout_secs);
 
     jwt::init();
     geoip::init();
@@ -73,7 +75,9 @@ async fn main() -> std::io::Result<()> {
             .configure(cfg::configure)
             .configure(api::configure)
             .configure(gtw::configure)
-    });
+    })
+    .shutdown_timeout(shutdown_timeout_secs)
+    .shutdown_signal(act::shutdown_signal()?);
 
     let result = if tls_enabled {
         let tls = tls::builder()?;

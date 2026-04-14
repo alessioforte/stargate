@@ -546,7 +546,6 @@ mod tests {
 
         Ok(())
     }
-
 }
 
 // Example usage documentation

@@ -12,7 +12,7 @@ mod postgres {
 
     pub async fn init() -> anyhow::Result<()> {
         let password = std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "root".to_string());
-        let user = std::env::var("POSTGRES_USER").unwrap_or_else(|_| "root".to_string());
+        let user = std::env::var("POSTGRES_USERNAME").unwrap_or_else(|_| "root".to_string());
         let host = std::env::var("POSTGRES_ENDPOINT").unwrap_or_else(|_| "localhost".to_string());
         let database =
             std::env::var("POSTGRES_DATABASE").unwrap_or_else(|_| "stargate".to_string());
