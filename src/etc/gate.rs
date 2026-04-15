@@ -78,21 +78,55 @@ fn is_write_event(kind: &EventKind) -> bool {
     )
 }
 
+fn create_file_watcher(
+    file_path: &str,
+    label: &'static str,
+    tx: std::sync::mpsc::Sender<notify::Result<notify::Event>>,
+) -> Option<notify::RecommendedWatcher> {
+    let mut watcher = match notify::recommended_watcher(tx) {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            error!(
+                path = file_path,
+                watcher = label,
+                error = ?error,
+                "Failed to initialize file watcher; live reload disabled"
+            );
+            return None;
+        }
+    };
+
+    if let Err(error) = watcher.watch(Path::new(file_path), RecursiveMode::NonRecursive) {
+        error!(
+            path = file_path,
+            watcher = label,
+            error = ?error,
+            "Failed to register file watcher; live reload disabled"
+        );
+        return None;
+    }
+
+    info!(
+        path = file_path,
+        watcher = label,
+        "Watching file for changes"
+    );
+    Some(watcher)
+}
+
 fn watch_config_file(file_path: &str, gate: &Gate) {
     let file_path = file_path.to_string();
     let mut gate = gate.clone();
     let handle = Handle::current();
     thread::spawn(move || {
         handle.block_on(async {
-            info!("Watching gate configuration file");
             let (tx, rx) = std::sync::mpsc::channel();
 
             let mut last_hash = file_content_hash(&file_path);
 
-            let mut watcher = notify::recommended_watcher(tx).unwrap();
-            watcher
-                .watch(Path::new(&file_path), RecursiveMode::NonRecursive)
-                .unwrap();
+            let Some(_watcher) = create_file_watcher(&file_path, "gate_config", tx) else {
+                return;
+            };
 
             for rs in rx {
                 match rs {
@@ -124,15 +158,13 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
     let handle = Handle::current();
     thread::spawn(move || {
         handle.block_on(async {
-            info!("Watching policies file");
             let (tx, rx) = std::sync::mpsc::channel();
 
             let mut last_hash = file_content_hash(&file_path);
 
-            let mut watcher = notify::recommended_watcher(tx).unwrap();
-            watcher
-                .watch(Path::new(&file_path), RecursiveMode::NonRecursive)
-                .unwrap();
+            let Some(_watcher) = create_file_watcher(&file_path, "policies", tx) else {
+                return;
+            };
 
             for rs in rx {
                 match rs {
