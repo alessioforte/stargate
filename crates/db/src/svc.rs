@@ -725,10 +725,12 @@ impl Transaction for Service {
     // ── Audit ───────────────────────────────────────────────────────────────
 
     async fn insert_audit_log_bulk(&self, logs: Vec<crate::ent::Audit>) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        for log in logs {
-            self.audit.insert(&mut tx, &log).await?;
+        if logs.is_empty() {
+            return Ok(());
         }
+
+        let mut tx = self.pool.begin().await?;
+        self.audit.insert_bulk(&mut tx, &logs).await?;
         tx.commit().await?;
         Ok(())
     }

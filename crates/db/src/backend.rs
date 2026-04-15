@@ -10,3 +10,8 @@ pub type Tx<'a> = sqlx::Transaction<'a, Db>;
 pub const LIKE: &str = "ILIKE";
 #[cfg(feature = "sqlite")]
 pub const LIKE: &str = "LIKE";
+
+#[cfg(feature = "postgres")]
+pub const MAX_BIND_PARAMETERS: usize = 65_535;
+#[cfg(feature = "sqlite")]
+pub const MAX_BIND_PARAMETERS: usize = 999;
