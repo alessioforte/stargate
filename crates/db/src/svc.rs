@@ -185,62 +185,37 @@ impl Transaction for Service {
     }
 
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
-        let mut tx = self.pool.begin().await?;
-        let user = self.user.get_by_username(&mut tx, username).await?;
-        tx.commit().await?;
-        Ok(user)
+        self.user.get_by_username(&self.pool, username).await
     }
 
     async fn get_user_by_id(&self, id: &str) -> Result<Option<User>> {
-        let mut tx = self.pool.begin().await?;
-        let user = self.user.get_by_id(&mut tx, id).await?;
-        tx.commit().await?;
-        Ok(user)
+        self.user.get_by_id(&self.pool, id).await
     }
 
     async fn get_all_users(&self, limit: i64, offset: i64) -> Result<Vec<User>> {
-        let mut tx = self.pool.begin().await?;
-        let users = self.user.get_all(&mut tx, limit, offset).await?;
-        tx.commit().await?;
-        Ok(users)
+        self.user.get_all(&self.pool, limit, offset).await
     }
 
     async fn count_users(&self) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.user.count(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.user.count(&self.pool).await
     }
 
     async fn get_super_admin_by_user_id(&self, user_id: &str) -> Result<Option<SuperAdmin>> {
-        let mut tx = self.pool.begin().await?;
-        let super_admin = self.super_admin.get_by_user_id(&mut tx, user_id).await?;
-        tx.commit().await?;
-        Ok(super_admin)
+        self.super_admin.get_by_user_id(&self.pool, user_id).await
     }
 
     async fn super_admin_exists(&self) -> Result<bool> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.super_admin.count_active(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count > 0)
+        Ok(self.super_admin.count_active(&self.pool).await? > 0)
     }
 
     async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>> {
-        let mut tx = self.pool.begin().await?;
-        let users = self
-            .user
-            .search_with_pagination(&mut tx, query, limit, offset)
-            .await?;
-        tx.commit().await?;
-        Ok(users)
+        self.user
+            .search_with_pagination(&self.pool, query, limit, offset)
+            .await
     }
 
     async fn count_search_users(&self, query: &str) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.user.count_search(&mut tx, query).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.user.count_search(&self.pool, query).await
     }
 
     async fn update_user(&self, user: User) -> Result<User> {
@@ -272,13 +247,9 @@ impl Transaction for Service {
         user_id: &str,
         credential_type: CredentialType,
     ) -> Result<Option<Credential>> {
-        let mut tx = self.pool.begin().await?;
-        let credential = self
-            .credential
-            .get_by_user_id(&mut tx, user_id, credential_type)
-            .await?;
-        tx.commit().await?;
-        Ok(credential)
+        self.credential
+            .get_by_user_id(&self.pool, user_id, credential_type)
+            .await
     }
 
     // ── API Keys ────────────────────────────────────────────────────────────
@@ -328,61 +299,38 @@ impl Transaction for Service {
     }
 
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>> {
-        let mut tx = self.pool.begin().await?;
-        let api_key = self.api_key.get_by_hash(&mut tx, key_hash).await?;
-        tx.commit().await?;
-        Ok(api_key)
+        self.api_key.get_by_hash(&self.pool, key_hash).await
     }
 
     async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>> {
-        let mut tx = self.pool.begin().await?;
-        let api_key = self.api_key.get_by_id(&mut tx, id).await?;
-        tx.commit().await?;
-        Ok(api_key)
+        self.api_key.get_by_id(&self.pool, id).await
     }
 
     async fn get_all_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
-        let mut tx = self.pool.begin().await?;
-        let api_keys = self.api_key.get_all(&mut tx, limit, offset).await?;
-        tx.commit().await?;
-        Ok(api_keys)
+        self.api_key.get_all(&self.pool, limit, offset).await
     }
 
     async fn get_api_keys_by_user_id(&self, user_id: &str) -> Result<Vec<ApiKey>> {
-        let mut tx = self.pool.begin().await?;
-        let api_keys = self.api_key.get_by_user_id(&mut tx, user_id).await?;
-        tx.commit().await?;
-        Ok(api_keys)
+        self.api_key.get_by_user_id(&self.pool, user_id).await
     }
 
     async fn get_all_user_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
-        let mut tx = self.pool.begin().await?;
-        let api_keys = self
-            .api_key
-            .get_all_by_user_type(&mut tx, limit, offset)
-            .await?;
-        tx.commit().await?;
-        Ok(api_keys)
+        self.api_key
+            .get_all_by_user_type(&self.pool, limit, offset)
+            .await
     }
 
     async fn count_user_api_keys(&self) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.api_key.count_by_user_type(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.api_key.count_by_user_type(&self.pool).await
     }
 
     async fn get_api_keys_by_service_account_id(
         &self,
         service_account_id: &str,
     ) -> Result<Vec<ApiKey>> {
-        let mut tx = self.pool.begin().await?;
-        let api_keys = self
-            .api_key
-            .get_by_service_account_id(&mut tx, service_account_id)
-            .await?;
-        tx.commit().await?;
-        Ok(api_keys)
+        self.api_key
+            .get_by_service_account_id(&self.pool, service_account_id)
+            .await
     }
 
     async fn get_all_service_account_api_keys(
@@ -390,27 +338,17 @@ impl Transaction for Service {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ApiKey>> {
-        let mut tx = self.pool.begin().await?;
-        let api_keys = self
-            .api_key
-            .get_all_by_service_account_type(&mut tx, limit, offset)
-            .await?;
-        tx.commit().await?;
-        Ok(api_keys)
+        self.api_key
+            .get_all_by_service_account_type(&self.pool, limit, offset)
+            .await
     }
 
     async fn count_service_account_api_keys(&self) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.api_key.count_by_service_account_type(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.api_key.count_by_service_account_type(&self.pool).await
     }
 
     async fn count_api_keys(&self) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.api_key.count(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.api_key.count(&self.pool).await
     }
 
     async fn update_api_key(&self, api_key: ApiKey) -> Result<ApiKey> {
@@ -452,31 +390,19 @@ impl Transaction for Service {
     }
 
     async fn get_admin_key_by_hash(&self, key_hash: &str) -> Result<Option<AdminKey>> {
-        let mut tx = self.pool.begin().await?;
-        let admin_key = self.admin_key.get_by_hash(&mut tx, key_hash).await?;
-        tx.commit().await?;
-        Ok(admin_key)
+        self.admin_key.get_by_hash(&self.pool, key_hash).await
     }
 
     async fn get_admin_key_by_id(&self, id: &str) -> Result<Option<AdminKey>> {
-        let mut tx = self.pool.begin().await?;
-        let admin_key = self.admin_key.get_by_id(&mut tx, id).await?;
-        tx.commit().await?;
-        Ok(admin_key)
+        self.admin_key.get_by_id(&self.pool, id).await
     }
 
     async fn get_all_admin_keys(&self, limit: i64, offset: i64) -> Result<Vec<AdminKey>> {
-        let mut tx = self.pool.begin().await?;
-        let admin_keys = self.admin_key.get_all(&mut tx, limit, offset).await?;
-        tx.commit().await?;
-        Ok(admin_keys)
+        self.admin_key.get_all(&self.pool, limit, offset).await
     }
 
     async fn count_admin_keys(&self) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.admin_key.count(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.admin_key.count(&self.pool).await
     }
 
     async fn update_admin_key(&self, admin_key: AdminKey) -> Result<AdminKey> {
@@ -518,10 +444,7 @@ impl Transaction for Service {
     }
 
     async fn get_service_account_by_id(&self, id: &str) -> Result<Option<ServiceAccount>> {
-        let mut tx = self.pool.begin().await?;
-        let sa = self.service_account.get_by_id(&mut tx, id).await?;
-        tx.commit().await?;
-        Ok(sa)
+        self.service_account.get_by_id(&self.pool, id).await
     }
 
     async fn get_all_service_accounts(
@@ -529,17 +452,13 @@ impl Transaction for Service {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ServiceAccount>> {
-        let mut tx = self.pool.begin().await?;
-        let accounts = self.service_account.get_all(&mut tx, limit, offset).await?;
-        tx.commit().await?;
-        Ok(accounts)
+        self.service_account
+            .get_all(&self.pool, limit, offset)
+            .await
     }
 
     async fn count_service_accounts(&self) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.service_account.count(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.service_account.count(&self.pool).await
     }
 
     async fn search_service_accounts(
@@ -548,20 +467,13 @@ impl Transaction for Service {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ServiceAccount>> {
-        let mut tx = self.pool.begin().await?;
-        let accounts = self
-            .service_account
-            .search(&mut tx, query, limit, offset)
-            .await?;
-        tx.commit().await?;
-        Ok(accounts)
+        self.service_account
+            .search(&self.pool, query, limit, offset)
+            .await
     }
 
     async fn count_search_service_accounts(&self, query: &str) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.service_account.count_search(&mut tx, query).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.service_account.count_search(&self.pool, query).await
     }
 
     async fn update_service_account(
@@ -605,24 +517,15 @@ impl Transaction for Service {
     }
 
     async fn get_organization_by_id(&self, id: &str) -> Result<Option<Organization>> {
-        let mut tx = self.pool.begin().await?;
-        let org = self.organization.get_by_id(&mut tx, id).await?;
-        tx.commit().await?;
-        Ok(org)
+        self.organization.get_by_id(&self.pool, id).await
     }
 
     async fn get_all_organizations(&self, limit: i64, offset: i64) -> Result<Vec<Organization>> {
-        let mut tx = self.pool.begin().await?;
-        let orgs = self.organization.get_all(&mut tx, limit, offset).await?;
-        tx.commit().await?;
-        Ok(orgs)
+        self.organization.get_all(&self.pool, limit, offset).await
     }
 
     async fn count_organizations(&self) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.organization.count(&mut tx).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.organization.count(&self.pool).await
     }
 
     async fn search_organizations(
@@ -631,20 +534,13 @@ impl Transaction for Service {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Organization>> {
-        let mut tx = self.pool.begin().await?;
-        let orgs = self
-            .organization
-            .search(&mut tx, query, limit, offset)
-            .await?;
-        tx.commit().await?;
-        Ok(orgs)
+        self.organization
+            .search(&self.pool, query, limit, offset)
+            .await
     }
 
     async fn count_search_organizations(&self, query: &str) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.organization.count_search(&mut tx, query).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.organization.count_search(&self.pool, query).await
     }
 
     async fn update_organization(
@@ -687,10 +583,7 @@ impl Transaction for Service {
     }
 
     async fn get_organization_users(&self, org_id: &str) -> Result<Vec<User>> {
-        let mut tx = self.pool.begin().await?;
-        let users = self.organization.get_users(&mut tx, org_id).await?;
-        tx.commit().await?;
-        Ok(users)
+        self.organization.get_users(&self.pool, org_id).await
     }
 
     async fn get_organization_users_paginated(
@@ -699,27 +592,19 @@ impl Transaction for Service {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<User>> {
-        let mut tx = self.pool.begin().await?;
-        let users = self
-            .organization
-            .get_users_paginated(&mut tx, org_id, limit, offset)
-            .await?;
-        tx.commit().await?;
-        Ok(users)
+        self.organization
+            .get_users_paginated(&self.pool, org_id, limit, offset)
+            .await
     }
 
     async fn count_organization_users(&self, org_id: &str) -> Result<i64> {
-        let mut tx = self.pool.begin().await?;
-        let count = self.organization.count_users(&mut tx, org_id).await?;
-        tx.commit().await?;
-        Ok(count)
+        self.organization.count_users(&self.pool, org_id).await
     }
 
     async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<Organization>> {
-        let mut tx = self.pool.begin().await?;
-        let orgs = self.organization.get_orgs_by_user(&mut tx, user_id).await?;
-        tx.commit().await?;
-        Ok(orgs)
+        self.organization
+            .get_orgs_by_user(&self.pool, user_id)
+            .await
     }
 
     // ── Audit ───────────────────────────────────────────────────────────────

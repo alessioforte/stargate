@@ -42,27 +42,24 @@ impl OrganizationRepository {
         Ok(row)
     }
 
-    pub async fn get_by_id(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        id: &str,
-    ) -> Result<Option<Organization>> {
+    pub async fn get_by_id<'c, E>(&self, ex: E, id: &str) -> Result<Option<Organization>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, Organization>(
             format!("SELECT * FROM {tbl} WHERE id = $1", tbl = ORGANIZATION).as_str(),
         )
         .bind(id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)
     }
 
-    pub async fn get_all(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<Organization>> {
+    pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<Organization>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, Organization>(
             format!(
                 "SELECT * FROM {tbl} ORDER BY id DESC LIMIT $1 OFFSET $2",
@@ -72,28 +69,34 @@ impl OrganizationRepository {
         )
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
+    pub async fn count<'c, E>(&self, ex: E) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) =
             sqlx::query_as(format!("SELECT COUNT(*) FROM {tbl}", tbl = ORGANIZATION).as_str())
-                .fetch_one(&mut **tx)
+                .fetch_one(ex)
                 .await?;
 
         Ok(row.0)
     }
 
-    pub async fn search(
+    pub async fn search<'c, E>(
         &self,
-        tx: &mut crate::backend::Tx<'_>,
+        ex: E,
         query: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<Organization>> {
+    ) -> Result<Vec<Organization>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query_as::<_, Organization>(
             format!(
@@ -110,13 +113,16 @@ impl OrganizationRepository {
         .bind(&pattern)
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count_search(&self, tx: &mut crate::backend::Tx<'_>, query: &str) -> Result<i64> {
+    pub async fn count_search<'c, E>(&self, ex: E, query: &str) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let pattern = format!("%{}%", query);
         let row: (i64,) = sqlx::query_as(
             format!(
@@ -130,7 +136,7 @@ impl OrganizationRepository {
             .as_str(),
         )
         .bind(&pattern)
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)
@@ -215,11 +221,10 @@ impl OrganizationRepository {
         Ok(())
     }
 
-    pub async fn get_users(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        org_id: &str,
-    ) -> Result<Vec<User>> {
+    pub async fn get_users<'c, E>(&self, ex: E, org_id: &str) -> Result<Vec<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, User>(
             format!(
                 "
@@ -234,19 +239,22 @@ impl OrganizationRepository {
             .as_str(),
         )
         .bind(org_id)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn get_users_paginated(
+    pub async fn get_users_paginated<'c, E>(
         &self,
-        tx: &mut crate::backend::Tx<'_>,
+        ex: E,
         org_id: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<User>> {
+    ) -> Result<Vec<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, User>(
             format!(
                 "SELECT u.* FROM {users} u
@@ -261,13 +269,16 @@ impl OrganizationRepository {
         .bind(org_id)
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count_users(&self, tx: &mut crate::backend::Tx<'_>, org_id: &str) -> Result<i64> {
+    pub async fn count_users<'c, E>(&self, ex: E, org_id: &str) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "SELECT COUNT(*) FROM {users} u
@@ -279,17 +290,16 @@ impl OrganizationRepository {
             .as_str(),
         )
         .bind(org_id)
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)
     }
 
-    pub async fn get_orgs_by_user(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        user_id: &str,
-    ) -> Result<Vec<Organization>> {
+    pub async fn get_orgs_by_user<'c, E>(&self, ex: E, user_id: &str) -> Result<Vec<Organization>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, Organization>(
             format!(
                 "
@@ -304,7 +314,7 @@ impl OrganizationRepository {
             .as_str(),
         )
         .bind(user_id)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)

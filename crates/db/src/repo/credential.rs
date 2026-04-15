@@ -41,12 +41,15 @@ impl CredentialRepository {
         Ok(row)
     }
 
-    pub async fn get_by_user_id(
+    pub async fn get_by_user_id<'c, E>(
         &self,
-        tx: &mut crate::backend::Tx<'_>,
+        ex: E,
         user_id: &str,
         credential_type: CredentialType,
-    ) -> Result<Option<Credential>> {
+    ) -> Result<Option<Credential>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, Credential>(
             format!(
                 "
@@ -58,7 +61,7 @@ impl CredentialRepository {
         )
         .bind(user_id)
         .bind(credential_type)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)

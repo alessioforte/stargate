@@ -41,11 +41,10 @@ impl AdminKeyRepository {
         Ok(row)
     }
 
-    pub async fn get_by_hash(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        key_hash: &str,
-    ) -> Result<Option<AdminKey>> {
+    pub async fn get_by_hash<'c, E>(&self, ex: E, key_hash: &str) -> Result<Option<AdminKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
@@ -56,17 +55,16 @@ impl AdminKeyRepository {
             .as_str(),
         )
         .bind(key_hash)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)
     }
 
-    pub async fn get_by_id(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        id: &str,
-    ) -> Result<Option<AdminKey>> {
+    pub async fn get_by_id<'c, E>(&self, ex: E, id: &str) -> Result<Option<AdminKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
@@ -77,18 +75,16 @@ impl AdminKeyRepository {
             .as_str(),
         )
         .bind(id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)
     }
 
-    pub async fn get_all(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<AdminKey>> {
+    pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<AdminKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, AdminKey>(
             format!(
                 "
@@ -100,13 +96,16 @@ impl AdminKeyRepository {
         )
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
+    pub async fn count<'c, E>(&self, ex: E) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "
@@ -116,7 +115,7 @@ impl AdminKeyRepository {
             )
             .as_str(),
         )
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)

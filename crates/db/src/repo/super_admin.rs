@@ -36,11 +36,10 @@ impl SuperAdminRepository {
         Ok(row)
     }
 
-    pub async fn get_by_user_id(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        user_id: &str,
-    ) -> Result<Option<SuperAdmin>> {
+    pub async fn get_by_user_id<'c, E>(&self, ex: E, user_id: &str) -> Result<Option<SuperAdmin>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, SuperAdmin>(
             format!(
                 "
@@ -52,13 +51,16 @@ impl SuperAdminRepository {
             .as_str(),
         )
         .bind(user_id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)
     }
 
-    pub async fn count_active(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
+    pub async fn count_active<'c, E>(&self, ex: E) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "
@@ -68,7 +70,7 @@ impl SuperAdminRepository {
             )
             .as_str(),
         )
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)

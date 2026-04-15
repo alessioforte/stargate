@@ -37,7 +37,10 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn search(&self, tx: &mut crate::backend::Tx<'_>, query: &str) -> Result<Vec<User>> {
+    pub async fn search<'c, E>(&self, ex: E, query: &str) -> Result<Vec<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, User>(
             format!(
                 "
@@ -51,17 +54,16 @@ impl UserRepository {
             .as_str(),
         )
         .bind(format!("%{}%", query))
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn get_by_username(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        username: &str,
-    ) -> Result<Option<User>> {
+    pub async fn get_by_username<'c, E>(&self, ex: E, username: &str) -> Result<Option<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, User>(
             format!(
                 "
@@ -72,7 +74,7 @@ impl UserRepository {
             .as_str(),
         )
         .bind(username)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)
@@ -105,12 +107,10 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn get_all(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<User>> {
+    pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, User>(
             format!(
                 "SELECT * FROM {users} ORDER BY id LIMIT $1 OFFSET $2",
@@ -120,28 +120,34 @@ impl UserRepository {
         )
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
+    pub async fn count<'c, E>(&self, ex: E) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) =
             sqlx::query_as(format!("SELECT COUNT(*) FROM {users}", users = USER).as_str())
-                .fetch_one(&mut **tx)
+                .fetch_one(ex)
                 .await?;
 
         Ok(row.0)
     }
 
-    pub async fn search_with_pagination(
+    pub async fn search_with_pagination<'c, E>(
         &self,
-        tx: &mut crate::backend::Tx<'_>,
+        ex: E,
         query: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<User>> {
+    ) -> Result<Vec<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query_as::<_, User>(
             format!(
@@ -156,13 +162,16 @@ impl UserRepository {
         .bind(&pattern)
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count_search(&self, tx: &mut crate::backend::Tx<'_>, query: &str) -> Result<i64> {
+    pub async fn count_search<'c, E>(&self, ex: E, query: &str) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let pattern = format!("%{}%", query);
         let row: (i64,) = sqlx::query_as(
             format!(
@@ -174,22 +183,21 @@ impl UserRepository {
             .as_str(),
         )
         .bind(&pattern)
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)
     }
 
-    pub async fn get_by_id(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        id: &str,
-    ) -> Result<Option<User>> {
+    pub async fn get_by_id<'c, E>(&self, ex: E, id: &str) -> Result<Option<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, User>(
             format!("SELECT * FROM {users} WHERE id = $1", users = USER).as_str(),
         )
         .bind(id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)

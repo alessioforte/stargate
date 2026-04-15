@@ -89,11 +89,10 @@ impl ApiKeyRepository {
         Ok(())
     }
 
-    pub async fn get_by_user_id(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        user_id: &str,
-    ) -> Result<Vec<ApiKey>> {
+    pub async fn get_by_user_id<'c, E>(&self, ex: E, user_id: &str) -> Result<Vec<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, ApiKey>(
             format!(
                 "
@@ -108,18 +107,21 @@ impl ApiKeyRepository {
             .as_str(),
         )
         .bind(user_id)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn get_all_by_user_type(
+    pub async fn get_all_by_user_type<'c, E>(
         &self,
-        tx: &mut crate::backend::Tx<'_>,
+        ex: E,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<ApiKey>> {
+    ) -> Result<Vec<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, ApiKey>(
             format!(
                 "SELECT ak.* FROM {api_keys} ak
@@ -132,13 +134,16 @@ impl ApiKeyRepository {
         )
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count_by_user_type(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
+    pub async fn count_by_user_type<'c, E>(&self, ex: E) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "SELECT COUNT(*) FROM {api_keys} ak
@@ -148,17 +153,20 @@ impl ApiKeyRepository {
             )
             .as_str(),
         )
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)
     }
 
-    pub async fn get_by_service_account_id(
+    pub async fn get_by_service_account_id<'c, E>(
         &self,
-        tx: &mut crate::backend::Tx<'_>,
+        ex: E,
         service_account_id: &str,
-    ) -> Result<Vec<ApiKey>> {
+    ) -> Result<Vec<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, ApiKey>(
             format!(
                 "
@@ -173,18 +181,21 @@ impl ApiKeyRepository {
             .as_str(),
         )
         .bind(service_account_id)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn get_all_by_service_account_type(
+    pub async fn get_all_by_service_account_type<'c, E>(
         &self,
-        tx: &mut crate::backend::Tx<'_>,
+        ex: E,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<ApiKey>> {
+    ) -> Result<Vec<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, ApiKey>(
             format!(
                 "SELECT ak.* FROM {api_keys} ak
@@ -197,16 +208,16 @@ impl ApiKeyRepository {
         )
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count_by_service_account_type(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-    ) -> Result<i64> {
+    pub async fn count_by_service_account_type<'c, E>(&self, ex: E) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "SELECT COUNT(*) FROM {api_keys} ak
@@ -216,17 +227,16 @@ impl ApiKeyRepository {
             )
             .as_str(),
         )
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)
     }
 
-    pub async fn get_by_hash(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        key_hash: &str,
-    ) -> Result<Option<ApiKey>> {
+    pub async fn get_by_hash<'c, E>(&self, ex: E, key_hash: &str) -> Result<Option<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, ApiKey>(
             format!(
                 "
@@ -237,7 +247,7 @@ impl ApiKeyRepository {
             .as_str(),
         )
         .bind(key_hash)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)
@@ -277,11 +287,10 @@ impl ApiKeyRepository {
         Ok(())
     }
 
-    pub async fn get_by_id(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        id: &str,
-    ) -> Result<Option<ApiKey>> {
+    pub async fn get_by_id<'c, E>(&self, ex: E, id: &str) -> Result<Option<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row = sqlx::query_as::<_, ApiKey>(
             format!(
                 "
@@ -292,18 +301,16 @@ impl ApiKeyRepository {
             .as_str(),
         )
         .bind(id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(ex)
         .await?;
 
         Ok(row)
     }
 
-    pub async fn get_all(
-        &self,
-        tx: &mut crate::backend::Tx<'_>,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<ApiKey>> {
+    pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let rows = sqlx::query_as::<_, ApiKey>(
             format!(
                 "
@@ -315,13 +322,16 @@ impl ApiKeyRepository {
         )
         .bind(limit)
         .bind(offset)
-        .fetch_all(&mut **tx)
+        .fetch_all(ex)
         .await?;
 
         Ok(rows)
     }
 
-    pub async fn count(&self, tx: &mut crate::backend::Tx<'_>) -> Result<i64> {
+    pub async fn count<'c, E>(&self, ex: E) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
         let row: (i64,) = sqlx::query_as(
             format!(
                 "
@@ -331,7 +341,7 @@ impl ApiKeyRepository {
             )
             .as_str(),
         )
-        .fetch_one(&mut **tx)
+        .fetch_one(ex)
         .await?;
 
         Ok(row.0)

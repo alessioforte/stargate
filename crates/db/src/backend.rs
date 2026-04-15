@@ -6,6 +6,10 @@ pub type Db = sqlx::Sqlite;
 pub type Pool = sqlx::Pool<Db>;
 pub type Tx<'a> = sqlx::Transaction<'a, Db>;
 
+pub trait ReadExecutor<'c>: sqlx::Executor<'c, Database = Db> {}
+
+impl<'c, T> ReadExecutor<'c> for T where T: sqlx::Executor<'c, Database = Db> {}
+
 #[cfg(feature = "postgres")]
 pub const LIKE: &str = "ILIKE";
 #[cfg(feature = "sqlite")]
