@@ -19,7 +19,7 @@ use db::ent::AuditContext;
 use gate::Gate;
 use ulid::Ulid;
 
-pub async fn handler(
+async fn handler(
     gate: actix_web::web::Data<Gate>,
     req: HttpRequest,
     stream: Payload,
@@ -175,8 +175,7 @@ pub async fn handler(
         let retry_after = decision
             .retry_after
             .unwrap_or(std::time::Duration::from_secs(60));
-        let retry_after = chrono::Duration::from_std(retry_after).unwrap_or_default();
-        let retry_after = tools::duration_to_string(&retry_after);
+        let retry_after = retry_after_header_value(retry_after);
         let mut res =
             ErrorResponse::from(HttpError::TooManyRequests("Too Many Requests".to_string()));
         res.insert_header("retry-after", &retry_after)
@@ -215,8 +214,7 @@ pub async fn handler(
             let retry_after = decision
                 .retry_after
                 .unwrap_or(std::time::Duration::from_secs(60));
-            let retry_after = chrono::Duration::from_std(retry_after).unwrap();
-            let retry_after = tools::duration_to_string(&retry_after);
+            let retry_after = retry_after_header_value(retry_after);
             let mut res = ErrorResponse::from(HttpError::TooManyRequests(
                 "Quota limit exceeded".to_string(),
             ));
@@ -273,6 +271,21 @@ pub async fn handler(
     })?;
 
     http::handler(&req, stream, &headers, &uri, &client).await
+}
+
+fn retry_after_header_value(retry_after: std::time::Duration) -> String {
+    let retry_after = match chrono::Duration::from_std(retry_after) {
+        Ok(retry_after) => retry_after,
+        Err(error) => {
+            tracing::warn!(
+                error = ?error,
+                "Retry-After duration overflowed chrono::Duration; defaulting to zero"
+            );
+            chrono::Duration::default()
+        }
+    };
+
+    tools::duration_to_string(&retry_after)
 }
 
 pub fn configure(cfg: &mut ServiceConfig) {
