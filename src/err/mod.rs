@@ -202,8 +202,8 @@ impl ErrorResponse {
             code: code.http(),
             message,
             headers: Vec::new(),
-            error_code: code.name(),
-            error_type: code.type_(),
+            error_code: code.name().to_string(),
+            error_type: code.type_().to_string(),
             error_link: code.url(),
         }
     }
