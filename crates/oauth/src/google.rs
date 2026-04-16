@@ -23,7 +23,8 @@ pub struct GoogleUserResult {
 pub async fn get_google_oauth_token(
     authorization_code: &str,
 ) -> Result<OAuthResponse, Box<dyn Error>> {
-    let redirect_uri = "http://localhost:5050/oauth/google".to_string();
+    let redirect_uri = std::env::var("GOOGLE_OAUTH_REDIRECT_URI")
+        .unwrap_or_else(|_| "http://localhost:5050/oauth/google".to_string());
     let client_secret =
         std::env::var("GOOGLE_OAUTH_CLIENT_SECRET").unwrap_or_else(|_| "".to_string());
     let client_id = std::env::var("GOOGLE_OAUTH_CLIENT_ID").unwrap_or_else(|_| "".to_string());
