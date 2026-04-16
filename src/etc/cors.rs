@@ -9,9 +9,9 @@ pub fn configure() -> actix_cors::Cors {
         ])
         .max_age(3600);
 
-    if origins.is_empty() || origins == "*" {
+    if origins == "*" {
         cors = cors.allow_any_origin();
-    } else {
+    } else if !origins.is_empty() {
         for origin in origins.split(',') {
             let origin = origin.trim();
             if !origin.is_empty() {
@@ -19,6 +19,7 @@ pub fn configure() -> actix_cors::Cors {
             }
         }
     }
+    // empty CORS_ORIGINS = deny all cross-origin requests
 
     cors
 }
