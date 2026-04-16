@@ -99,7 +99,7 @@ async fn handler(
                 resource = route.value.resource.clone();
             }
             None => {
-                return Err(ErrorResponse::from(HttpError::NotFound(
+                return Err(ErrorResponse::from(HttpError::MethodNotAllowed(
                     "Method not allowed".to_string(),
                 )));
             }

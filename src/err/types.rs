@@ -80,6 +80,7 @@ pub enum Code {
 
     TooManyRequests,
     ServiceUnavailable,
+    MethodNotAllowed,
 }
 
 impl Code {
@@ -119,6 +120,9 @@ impl Code {
             TooManyRequests => ErrCode::invalid("too_many_requests", StatusCode::TOO_MANY_REQUESTS),
             ServiceUnavailable => {
                 ErrCode::internal("service_unavailable", StatusCode::SERVICE_UNAVAILABLE)
+            }
+            MethodNotAllowed => {
+                ErrCode::invalid("method_not_allowed", StatusCode::METHOD_NOT_ALLOWED)
             }
         }
     }

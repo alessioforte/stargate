@@ -43,6 +43,8 @@ pub enum HttpError {
     TooManyRequests(String),
     #[error("{0}")]
     ServiceUnavailable(String),
+    #[error("{0}")]
+    MethodNotAllowed(String),
 }
 
 impl ErrorCode for HttpError {
@@ -63,6 +65,7 @@ impl ErrorCode for HttpError {
             HttpError::BadGateway(_) => Code::BadGateway,
             HttpError::TooManyRequests(_) => Code::TooManyRequests,
             HttpError::ServiceUnavailable(_) => Code::ServiceUnavailable,
+            HttpError::MethodNotAllowed(_) => Code::MethodNotAllowed,
         }
     }
 }
