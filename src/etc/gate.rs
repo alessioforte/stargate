@@ -5,12 +5,11 @@ use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
+    collections::HashMap,
     env,
-    hash::{Hash, Hasher},
     path::Path,
     sync::{
-        Arc,
+        Arc, OnceLock, RwLock,
         atomic::{AtomicU64, Ordering},
     },
     thread,
@@ -42,7 +41,7 @@ pub fn get_policies_path() -> String {
     path
 }
 
-fn get_config() -> Config {
+fn load_config() -> Config {
     let config_file_path = get_config_path();
     gate::cfg::Config::from_file(&config_file_path)
 }
@@ -53,20 +52,52 @@ pub fn init() -> Data<Gate> {
     let config_file_path = get_config_path();
     let policies_path = get_policies_path();
 
-    let gate = Gate::new(Arc::new(store.clone())).build(&config, &policies_path);
+    let gate = Gate::new(Arc::new(store.clone())).build(config.as_ref(), &policies_path);
     watch_config_file(&config_file_path, &gate);
     watch_policies_file(&policies_path, &gate);
     Data::new(gate)
 }
 
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
+static CONFIG_CACHE: OnceLock<RwLock<CachedConfig>> = OnceLock::new();
 
-/// Computes a hash of the file content to detect actual changes.
-fn file_content_hash(path: &str) -> Option<u64> {
-    let content = std::fs::read(path).ok()?;
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    Some(hasher.finish())
+#[derive(Clone)]
+struct CachedConfig {
+    version: u64,
+    config: Arc<Config>,
+}
+
+fn config_cache() -> &'static RwLock<CachedConfig> {
+    CONFIG_CACHE.get_or_init(|| {
+        RwLock::new(CachedConfig {
+            version: 0,
+            config: Arc::new(load_config()),
+        })
+    })
+}
+
+fn get_config() -> Arc<Config> {
+    let cache = config_cache().read().expect("Config cache lock poisoned");
+    cache.config.clone()
+}
+
+fn get_config_snapshot() -> CachedConfig {
+    config_cache()
+        .read()
+        .expect("Config cache lock poisoned")
+        .clone()
+}
+
+fn update_cached_config(config: Config) -> u64 {
+    let mut cache = config_cache().write().expect("Config cache lock poisoned");
+    cache.version += 1;
+    cache.config = Arc::new(config);
+    cache.version
+}
+
+/// Returns the full file content so change detection stays deterministic.
+fn file_content(path: &str) -> Option<Vec<u8>> {
+    std::fs::read(path).ok()
 }
 
 /// Returns true only for data-modification events (write/save),
@@ -122,7 +153,7 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
         handle.block_on(async {
             let (tx, rx) = std::sync::mpsc::channel();
 
-            let mut last_hash = file_content_hash(&file_path);
+            let mut last_content = file_content(&file_path);
 
             let Some(_watcher) = create_file_watcher(&file_path, "gate_config", tx) else {
                 return;
@@ -134,15 +165,16 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         if !is_write_event(&event.kind) {
                             continue;
                         }
-                        let current_hash = file_content_hash(&file_path);
-                        if current_hash == last_hash {
+                        let current_content = file_content(&file_path);
+                        if current_content == last_content {
                             continue;
                         }
-                        last_hash = current_hash;
+                        last_content = current_content;
 
-                        CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-                        info!("Configuration file changed, reloading...");
                         let config = Config::from_file(&file_path);
+                        let config_version = update_cached_config(config.clone());
+                        CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
+                        info!(config_version, "Configuration file changed, reloading...");
                         gate.update_config(&config).await;
                     }
                     Err(e) => error!("Watch error: {:?}", e),
@@ -160,7 +192,7 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
         handle.block_on(async {
             let (tx, rx) = std::sync::mpsc::channel();
 
-            let mut last_hash = file_content_hash(&file_path);
+            let mut last_content = file_content(&file_path);
 
             let Some(_watcher) = create_file_watcher(&file_path, "policies", tx) else {
                 return;
@@ -172,11 +204,11 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
                         if !is_write_event(&event.kind) {
                             continue;
                         }
-                        let current_hash = file_content_hash(&file_path);
-                        if current_hash == last_hash {
+                        let current_content = file_content(&file_path);
+                        if current_content == last_content {
                             continue;
                         }
-                        last_hash = current_hash;
+                        last_content = current_content;
 
                         CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                         info!("Policies file changed, reloading...");
@@ -202,17 +234,16 @@ thread_local! {
     static CLIENT_POOL: std::cell::RefCell<Option<LocalClients>> = const { std::cell::RefCell::new(None) };
 }
 
-pub fn build_clients() -> HashMap<String, awc::Client> {
+fn build_clients(config: &Config) -> HashMap<String, awc::Client> {
     let mut new_clients = HashMap::new();
-    let cfg = get_config();
 
-    let tls_config = if let Some(mtls) = cfg.mtls {
+    let tls_config = if let Some(mtls) = &config.mtls {
         Some(build_mtls(mtls))
     } else {
         None
     };
 
-    for svc in &cfg.services {
+    for svc in &config.services {
         let timeout = svc.connect_timeout.unwrap_or(30);
         let mut client = awc::Client::builder()
             .timeout(Duration::from_secs(timeout))
@@ -234,17 +265,17 @@ pub fn build_clients() -> HashMap<String, awc::Client> {
 }
 
 fn update_clients_if_needed() {
-    let current_version = get_config_version();
+    let config_snapshot = get_config_snapshot();
     CLIENT_POOL.with(|pool| {
         let mut pool_ref = pool.borrow_mut();
         let needs_update = match &*pool_ref {
-            Some(local_clients) => local_clients.version != current_version,
+            Some(local_clients) => local_clients.version != config_snapshot.version,
             None => true,
         };
         if needs_update {
-            let new_clients = build_clients();
+            let new_clients = build_clients(config_snapshot.config.as_ref());
             *pool_ref = Some(LocalClients {
-                version: current_version,
+                version: config_snapshot.version,
                 clients: new_clients,
             });
         }
@@ -265,10 +296,10 @@ pub fn get_client(service_name: &str) -> Option<awc::Client> {
     client_opt
 }
 
-fn build_mtls(mtls: gate::cfg::mtls::MtlsConfig) -> ClientConfig {
+fn build_mtls(mtls: &gate::cfg::mtls::MtlsConfig) -> ClientConfig {
     // read ca cert file
     let mut ca_cert_file = std::io::BufReader::new(
-        std::fs::File::open(mtls.ca_cert_path).expect("Unable to open CA cert file"),
+        std::fs::File::open(&mtls.ca_cert_path).expect("Unable to open CA cert file"),
     );
 
     // load ca certs
@@ -287,7 +318,7 @@ fn build_mtls(mtls: gate::cfg::mtls::MtlsConfig) -> ClientConfig {
 
     // read client cert file
     let mut client_cert_file = std::io::BufReader::new(
-        std::fs::File::open(mtls.client_cert_path).expect("Unable to open client cert file"),
+        std::fs::File::open(&mtls.client_cert_path).expect("Unable to open client cert file"),
     );
     let client_certs = certs(&mut client_cert_file)
         .collect::<Result<Vec<_>, _>>()
@@ -295,7 +326,7 @@ fn build_mtls(mtls: gate::cfg::mtls::MtlsConfig) -> ClientConfig {
 
     // read client key file
     let mut client_key_file = std::io::BufReader::new(
-        std::fs::File::open(mtls.client_key_path).expect("Unable to open client key file"),
+        std::fs::File::open(&mtls.client_key_path).expect("Unable to open client key file"),
     );
     let mut client_keys = pkcs8_private_keys(&mut client_key_file)
         .collect::<Result<Vec<_>, _>>()
