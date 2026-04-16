@@ -25,9 +25,10 @@ pub async fn get_google_oauth_token(
 ) -> Result<OAuthResponse, Box<dyn Error>> {
     let redirect_uri = std::env::var("GOOGLE_OAUTH_REDIRECT_URI")
         .unwrap_or_else(|_| "http://localhost:5050/oauth/google".to_string());
-    let client_secret =
-        std::env::var("GOOGLE_OAUTH_CLIENT_SECRET").unwrap_or_else(|_| "".to_string());
-    let client_id = std::env::var("GOOGLE_OAUTH_CLIENT_ID").unwrap_or_else(|_| "".to_string());
+    let client_secret = std::env::var("GOOGLE_OAUTH_CLIENT_SECRET")
+        .map_err(|_| "Google OAuth not configured: missing GOOGLE_OAUTH_CLIENT_SECRET")?;
+    let client_id = std::env::var("GOOGLE_OAUTH_CLIENT_ID")
+        .map_err(|_| "Google OAuth not configured: missing GOOGLE_OAUTH_CLIENT_ID")?;
 
     let root_url = "https://www.googleapis.com/oauth2/v4/token";
     let client = Client::new();

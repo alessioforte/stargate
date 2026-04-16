@@ -22,8 +22,10 @@ pub struct GitHubUserResult {
 pub async fn get_github_oauth_token(
     authorization_code: &str,
 ) -> Result<GitHubOauthToken, Box<dyn Error>> {
-    let client_secret = env::var("GITHUB_OAUTH_CLIENT_SECRET").unwrap_or_else(|_| "".to_owned());
-    let client_id = env::var("GITHUB_OAUTH_CLIENT_ID").unwrap_or_else(|_| "".to_owned());
+    let client_secret = env::var("GITHUB_OAUTH_CLIENT_SECRET")
+        .map_err(|_| "GitHub OAuth not configured: missing GITHUB_OAUTH_CLIENT_SECRET")?;
+    let client_id = env::var("GITHUB_OAUTH_CLIENT_ID")
+        .map_err(|_| "GitHub OAuth not configured: missing GITHUB_OAUTH_CLIENT_ID")?;
 
     let root_url = "https://github.com/login/oauth/access_token";
 
