@@ -1,7 +1,6 @@
-use crate::etc::{ac::Env, ext::RequestExt, geoip};
+use crate::etc::{ext::RequestExt, reqctx::RequestContext};
 use actix_web::HttpMessage;
 use chrono::{DateTime, Utc};
-use db::ent::AuditContext;
 use tracing::info;
 use tracing_actix_web::{DefaultRootSpanBuilder, RootSpanBuilder};
 use tracing_subscriber::{
@@ -129,13 +128,7 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
             .expect("Gate app_data must be configured in HttpServer");
         let ts = gate.clock.now_millis() as i64;
         let now: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap_or_else(|| Utc::now());
-        let date = now.format("%Y-%m-%d").to_string();
-        let time = now.format("%H:%M").to_string();
-        let day_of_week = now.format("%A").to_string();
-
-        let user_agent = req
-            .get_user_agent()
-            .unwrap_or_else(|| "unknown".to_string());
+        let user_agent = req.get_user_agent();
         let method = req.method().as_str();
         let path = req.path();
         let query = sanitize_query(req.query_string());
@@ -144,57 +137,26 @@ impl RootSpanBuilder for StargateRootSpanBuilder {
             .peer_addr()
             .unwrap_or("unknown")
             .to_string();
-
         let ip_addr = req.get_client_ip_addr();
         let ip_address = ip_addr
             .map(|ip| ip.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-
-        // geoip lookup
-        let geo_info = ip_addr
-            .and_then(geoip::lookup)
-            .unwrap_or_else(geoip::GeoInfo::unknown);
-
-        // Initialize the audit context with the request context
-        // this is a bridge between the tracing context and the audit context
-        let ctx = AuditContext::anonymous().with_request_id(request_id.clone());
-        req.extensions_mut().insert(ctx);
-
-        let env = Env {
-            ip_address: ip_address.clone().into_boxed_str(),
-            user_agent: user_agent.clone().into_boxed_str(),
-            country_code: geo_info
-                .country_code
-                .clone()
-                .unwrap_or_else(|| "unknown".into()),
-            country_name: geo_info
-                .country_name
-                .clone()
-                .unwrap_or_else(|| "unknown".into()),
-            city_name: geo_info
-                .city_name
-                .clone()
-                .unwrap_or_else(|| "unknown".into()),
-            date: date.into_boxed_str(),
-            time: time.into_boxed_str(),
-            day_of_week: day_of_week.into_boxed_str(),
-        };
-        req.extensions_mut().insert(env);
+        req.extensions_mut().insert(RequestContext::new(
+            request_id.clone(),
+            now,
+            ip_addr,
+            user_agent.clone(),
+        ));
 
         tracing::info_span!("http_request",
             request_id = %request_id,
             http.method = %method,
             http.path = %path,
             http.query = %query,
-            http.user_agent = %user_agent,
+            http.user_agent = %user_agent.as_deref().unwrap_or("unknown"),
             http.peer_ip = %peer_ip,
             http.client_ip = %ip_address,
             http.status_code = tracing::field::Empty,
-            geoip.country_code = %geo_info.country_code.as_deref().unwrap_or("unknown"),
-            geoip.country_name = %geo_info.country_name.as_deref().unwrap_or("unknown"),
-            geoip.city_name = %geo_info.city_name.as_deref().unwrap_or("unknown"),
-            geoip.latitude = geo_info.latitude.unwrap_or(0.0),
-            geoip.longitude = geo_info.longitude.unwrap_or(0.0),
         )
     }
 

@@ -46,8 +46,6 @@ pub struct GeoInfo {
     pub country_code: Option<Box<str>>,
     pub country_name: Option<Box<str>>,
     pub city_name: Option<Box<str>>,
-    pub latitude: Option<f64>,
-    pub longitude: Option<f64>,
 }
 
 impl GeoInfo {
@@ -56,8 +54,6 @@ impl GeoInfo {
             country_code: None,
             country_name: None,
             city_name: None,
-            latitude: None,
-            longitude: None,
         })
     }
 }
@@ -75,8 +71,6 @@ pub fn lookup(ip_addr: IpAddr) -> Option<Arc<GeoInfo>> {
                     country_code: city.country.iso_code.map(Box::from),
                     country_name: city.country.names.english.map(Box::from),
                     city_name: city.city.names.english.map(Box::from),
-                    latitude: city.location.latitude,
-                    longitude: city.location.longitude,
                 })
             })
             .unwrap_or_else(GeoInfo::unknown)

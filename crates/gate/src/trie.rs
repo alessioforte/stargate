@@ -29,6 +29,7 @@
 //! assert_eq!(trie.search("http", "/api/v2").unwrap().name, "api");
 //! ```
 
+use crate::cfg::service::ContextConfig;
 use crate::protocol::{PROTOCOL_COUNT, Protocol};
 use lb::LoadBalancer;
 use std::collections::HashMap;
@@ -46,6 +47,8 @@ pub struct RouteNode {
     pub resource: Option<String>,
     /// Cost for the quota tracking
     pub cost: Option<u64>,
+    /// Optional request context profile for this route
+    pub context: Option<ContextConfig>,
 }
 
 /// A service registration containing routing and load balancing configuration.
@@ -65,6 +68,8 @@ pub struct Service {
     pub resource: Option<String>,
     /// Cost for the quota tracking
     pub cost: Option<u64>,
+    /// Optional request context profile for this service
+    pub context: Option<ContextConfig>,
     /// Fine-grained routing rules by HTTP method and path
     pub routes: Option<HashMap<String, matchit::Router<RouteNode>>>,
 }
@@ -213,6 +218,7 @@ mod tests {
             auth_required: Some(false),
             cost: None,
             resource: None,
+            context: None,
             routes: None,
         }
     }
@@ -560,6 +566,7 @@ mod tests {
             auth_required: Some(true),
             resource: Some("admin:read".to_string()),
             cost: Some(1),
+            context: None,
             routes: None,
         };
 

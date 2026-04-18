@@ -2,9 +2,10 @@ use super::SignupCompleteRequestBody;
 use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
+use crate::etc::reqctx::take_audit_context;
 use crate::fun::format_name;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, put, web};
-use db::ent::{AuditContext, CredentialType, Profile};
+use actix_web::{HttpRequest, HttpResponse, put, web};
+use db::ent::{CredentialType, Profile};
 use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
 use smtp::Smtp;
@@ -27,10 +28,7 @@ pub async fn handler(
     req: HttpRequest,
     body: web::Json<SignupCompleteRequestBody>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
     let body = body.into_inner();
 
     let jwt = crate::etc::jwt::jwt_config();

@@ -1,8 +1,8 @@
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, put, web};
+use crate::etc::reqctx::take_audit_context;
+use actix_web::{HttpRequest, HttpResponse, delete, get, post, put, web};
 use actix_web_grants::protect;
-use db::ent::AuditContext;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: i64 = 20;
@@ -168,10 +168,7 @@ pub async fn create_organization(
     req: HttpRequest,
     payload: web::Json<CreateOrganizationRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     if payload.name.trim().is_empty() {
         return Err(ErrorResponse::from(HttpError::BadRequest(
@@ -221,10 +218,7 @@ pub async fn update_organization(
     params: web::Path<String>,
     payload: web::Json<UpdateOrganizationRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -282,10 +276,7 @@ pub async fn delete_organization(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 

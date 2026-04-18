@@ -2,9 +2,9 @@ use super::ChangePasswordRequestBody;
 use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
+use crate::etc::reqctx::take_audit_context;
 use crate::fun::format_name;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, put, web};
-use db::ent::AuditContext;
+use actix_web::{HttpRequest, HttpResponse, put, web};
 use etc::msg::MessageResponse;
 use pw::Hash;
 use smtp::{Smtp, Template};
@@ -28,10 +28,7 @@ pub async fn handler(
     req: HttpRequest,
     body: web::Json<ChangePasswordRequestBody>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let body = body.into_inner();
     let token = body.token.clone();

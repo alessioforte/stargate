@@ -3,6 +3,20 @@ use super::load_balancer::LoadBalancer;
 use crate::protocol::Protocol;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvProfile {
+    None,
+    Basic,
+    Geo,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextConfig {
+    pub env: Option<EnvProfile>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Service {
     pub name: String,
@@ -15,6 +29,7 @@ pub struct Service {
     pub auth_required: Option<bool>,
     pub resource: Option<String>,
     pub cost: Option<u64>,
+    pub context: Option<ContextConfig>,
     pub routes: Option<Vec<Route>>,
 }
 
@@ -25,6 +40,7 @@ pub struct Route {
     pub auth_required: Option<bool>,
     pub resource: Option<String>,
     pub cost: Option<u64>,
+    pub context: Option<ContextConfig>,
 }
 
 fn default_protocol() -> Protocol {

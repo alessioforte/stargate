@@ -1,8 +1,8 @@
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, put, web};
+use crate::etc::reqctx::take_audit_context;
+use actix_web::{HttpRequest, HttpResponse, delete, get, post, put, web};
 use actix_web_grants::protect;
-use db::ent::AuditContext;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: i64 = 20;
@@ -161,10 +161,7 @@ pub async fn create_admin_key(
     req: HttpRequest,
     payload: web::Json<CreateAdminKeyRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     if payload.permissions.is_empty() {
         return Err(ErrorResponse::from(HttpError::BadRequest(
@@ -225,10 +222,7 @@ pub async fn update_admin_key_permissions(
     params: web::Path<String>,
     payload: web::Json<UpdateAdminKeyPermissionsRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -291,10 +285,7 @@ pub async fn revoke_admin_key(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -351,10 +342,7 @@ pub async fn delete_admin_key(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 

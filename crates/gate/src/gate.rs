@@ -146,6 +146,7 @@ impl Gate {
                         auth_required: r.auth_required.unwrap_or(false),
                         resource: r.resource.clone(),
                         cost: r.cost,
+                        context: r.context.clone(),
                     };
                     map.entry(r.method.clone())
                         .or_insert_with(matchit::Router::new)
@@ -162,6 +163,7 @@ impl Gate {
                 path: service.path.clone(),
                 lb: Some(lb),
                 cost: service.cost,
+                context: service.context.clone(),
                 routes,
             };
 

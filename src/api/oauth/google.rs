@@ -2,9 +2,10 @@ use crate::act::oauth_state;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
+use crate::etc::reqctx::take_audit_context;
 use crate::fun::format_name;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, cookie::Cookie, get, web};
-use db::ent::{AuditContext, CredentialType, Profile};
+use actix_web::{HttpRequest, HttpResponse, cookie::Cookie, get, web};
+use db::ent::{CredentialType, Profile};
 use jwt::Claims;
 use oauth::google::{get_google_oauth_token, get_google_user};
 use serde::{Deserialize, Serialize};
@@ -41,10 +42,7 @@ pub async fn login(
     req: HttpRequest,
     query: web::Query<QueryCode>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
     let code = &query.code;
     let state = &query.state;
 

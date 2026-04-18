@@ -4,9 +4,9 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
+use crate::etc::reqctx::take_audit_context;
 use crate::fun::format_name;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, cookie::Cookie, post, web};
-use db::ent::AuditContext;
 use db::ent::CredentialType;
 use pw::Hash;
 use store::Store;
@@ -102,10 +102,7 @@ pub async fn handler(
         );
     }
 
-    let mut ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let mut ctx = take_audit_context(&req);
     ctx = ctx.with_actor(db::ent::ActorType::User, Some(user.id.clone()));
     req.extensions_mut().insert(ctx);
 

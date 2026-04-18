@@ -1,8 +1,8 @@
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, patch, post, put, web};
+use crate::etc::reqctx::take_audit_context;
+use actix_web::{HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use actix_web_grants::protect;
-use db::ent::AuditContext;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -215,10 +215,7 @@ pub async fn create_api_key(
     req: HttpRequest,
     payload: web::Json<CreateApiKeyRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let user_id = payload.user_id.clone();
     let service_account_id = payload.service_account_id.clone();
@@ -300,10 +297,7 @@ pub async fn delete_api_key(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -349,10 +343,7 @@ pub async fn revoke_api_key(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -413,10 +404,7 @@ pub async fn update_api_key_attrs(
     params: web::Path<String>,
     payload: web::Json<ApiKeyAttrsRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -472,10 +460,7 @@ pub async fn patch_api_key_attrs(
     params: web::Path<String>,
     payload: web::Json<ApiKeyAttrsRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 

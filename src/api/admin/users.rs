@@ -1,8 +1,9 @@
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, patch, post, put, web};
+use crate::etc::reqctx::take_audit_context;
+use actix_web::{HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use actix_web_grants::protect;
-use db::ent::{AuditContext, CredentialType, Profile};
+use db::ent::{CredentialType, Profile};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -225,10 +226,7 @@ pub async fn create_user(
     req: HttpRequest,
     payload: web::Json<CreateUserRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     // Check if user already exists
     if let Ok(Some(_)) = crate::db::get_user_by_username(&payload.email).await {
@@ -300,10 +298,7 @@ pub async fn update_user(
     params: web::Path<String>,
     payload: web::Json<UpdateUserRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -374,10 +369,7 @@ pub async fn patch_user(
     params: web::Path<String>,
     payload: web::Json<PatchUserRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -450,10 +442,7 @@ pub async fn update_user_attrs(
     params: web::Path<String>,
     payload: web::Json<UserAttrsRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -508,10 +497,7 @@ pub async fn patch_user_attrs(
     params: web::Path<String>,
     payload: web::Json<UserAttrsRequest>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -573,10 +559,7 @@ pub async fn delete_user(
     req: HttpRequest,
     params: web::Path<String>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let id = params.into_inner();
 
@@ -731,10 +714,7 @@ pub async fn add_user_to_organization(
     req: HttpRequest,
     params: web::Path<(String, String)>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let (user_id, org_id) = params.into_inner();
 
@@ -792,10 +772,7 @@ pub async fn remove_user_from_organization(
     req: HttpRequest,
     params: web::Path<(String, String)>,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let ctx = take_audit_context(&req);
 
     let (user_id, org_id) = params.into_inner();
 

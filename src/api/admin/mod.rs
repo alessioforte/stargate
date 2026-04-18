@@ -6,6 +6,7 @@ pub mod organizations;
 pub mod service_accounts;
 pub mod users;
 
+use crate::etc::reqctx::take_audit_context;
 use crate::etc::{self, ext::RequestExt, jwt::jwt_config, sub::Subject};
 use actix_web::HttpMessage;
 use actix_web::{
@@ -13,17 +14,13 @@ use actix_web::{
     dev::ServiceResponse, web,
 };
 use actix_web_grants::GrantsMiddleware;
-use db::ent::AuditContext;
 use std::collections::HashSet;
 use store::Store;
 
 const SUPER_ADMIN: &str = "super_admin";
 
 async fn extract(req: &mut ServiceRequest) -> Result<HashSet<String>, Error> {
-    let mut ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
+    let mut ctx = take_audit_context(req);
     if let Some(token) = req.request().get_token() {
         let jwt = jwt_config();
         if let Some(claims) = jwt

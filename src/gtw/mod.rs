@@ -2,57 +2,34 @@ mod http;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{
-    ac::{Env, access_control},
-    ext::RequestExt,
-    gate::get_client,
-    guard,
-};
-use actix_web::HttpMessage;
+use crate::etc::{ac::access_control, ext::RequestExt, gate::get_client, guard, reqctx};
 use actix_web::{
     HttpRequest, HttpResponse,
     http::header::{HeaderMap, HeaderName, HeaderValue},
     web::Payload,
     web::ServiceConfig,
 };
-use db::ent::AuditContext;
 use gate::Gate;
-use ulid::Ulid;
+use gate::cfg::service::EnvProfile;
 
 async fn handler(
     gate: actix_web::web::Data<Gate>,
     req: HttpRequest,
     stream: Payload,
 ) -> Result<HttpResponse, ErrorResponse> {
-    let mut ctx = req
-        .extensions_mut()
-        .remove::<AuditContext>()
-        .unwrap_or_else(AuditContext::anonymous);
-
     let mut sub = match guard::verify_api_key(&req).await {
-        Some(s) => {
-            ctx = ctx.with_actor(db::ent::ActorType::AdminKey, Some(s.id.clone()));
-            Some(s)
-        }
+        Some(s) => Some(s),
         None => None,
     };
 
     if sub.is_none() {
         sub = match guard::verify_jwt(&req).await {
-            Some(s) => {
-                ctx = ctx.with_actor(db::ent::ActorType::User, Some(s.id.clone()));
-                Some(s)
-            }
+            Some(s) => Some(s),
             None => None,
         };
     }
 
-    let request_id = ctx
-        .request_id
-        .clone()
-        .unwrap_or_else(|| Ulid::new().to_string());
-    req.extensions_mut().insert(ctx);
-
+    let request_id = reqctx::request_id(&req);
     let query = req.query_string();
     let method = req.method().clone();
     let client_ip = req.get_client_ip();
@@ -82,6 +59,7 @@ async fn handler(
     let subpath = path.replacen(&service.path, "", 1);
     let mut auth_required = service.auth_required.unwrap_or(false);
     let mut resource = service.resource.clone();
+    let mut env_profile = service.context.as_ref().and_then(|context| context.env);
 
     // 2. Route matching (cheap, in-memory) -----------------------------------
     if let Some(routes) = &service.routes {
@@ -97,6 +75,12 @@ async fn handler(
                 cost = route.value.cost.unwrap_or(cost);
                 auth_required = route.value.auth_required;
                 resource = route.value.resource.clone();
+                env_profile = route
+                    .value
+                    .context
+                    .as_ref()
+                    .and_then(|context| context.env)
+                    .or(env_profile);
             }
             None => {
                 return Err(ErrorResponse::from(HttpError::MethodNotAllowed(
@@ -119,10 +103,7 @@ async fn handler(
     {
         let pe = gate.policy_engine.load();
         let s = sub.clone().unwrap();
-        let env = req
-            .extensions_mut()
-            .remove::<Env>()
-            .unwrap_or_else(Env::default);
+        let env = reqctx::build_env(&req, env_profile.unwrap_or(EnvProfile::Geo));
         let allowed = access_control(&pe, &s, &env, &r);
 
         if !allowed {
