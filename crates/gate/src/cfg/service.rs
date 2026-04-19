@@ -17,6 +17,12 @@ pub struct ContextConfig {
     pub env: Option<EnvProfile>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamingMode {
+    Sse,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Service {
     pub name: String,
@@ -41,6 +47,7 @@ pub struct Route {
     pub resource: Option<String>,
     pub cost: Option<u64>,
     pub context: Option<ContextConfig>,
+    pub streaming: Option<StreamingMode>,
 }
 
 fn default_protocol() -> Protocol {

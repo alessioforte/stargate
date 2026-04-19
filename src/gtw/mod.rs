@@ -2,7 +2,12 @@ mod http;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ac::access_control, ext::RequestExt, gate::get_client, guard, reqctx};
+use crate::etc::{
+    ac::access_control,
+    ext::RequestExt,
+    gate::{get_client, get_streaming_client},
+    guard, reqctx,
+};
 use actix_web::{
     HttpRequest, HttpResponse,
     http::header::{HeaderMap, HeaderName, HeaderValue},
@@ -10,7 +15,7 @@ use actix_web::{
     web::ServiceConfig,
 };
 use gate::Gate;
-use gate::cfg::service::EnvProfile;
+use gate::cfg::service::{EnvProfile, StreamingMode};
 
 async fn handler(
     gate: actix_web::web::Data<Gate>,
@@ -60,6 +65,7 @@ async fn handler(
     let mut auth_required = service.auth_required.unwrap_or(false);
     let mut resource = service.resource.clone();
     let mut env_profile = service.context.as_ref().and_then(|context| context.env);
+    let mut streaming: Option<StreamingMode> = None;
 
     // 2. Route matching (cheap, in-memory) -----------------------------------
     if let Some(routes) = &service.routes {
@@ -81,6 +87,7 @@ async fn handler(
                     .as_ref()
                     .and_then(|context| context.env)
                     .or(env_profile);
+                streaming = route.value.streaming;
             }
             None => {
                 return Err(ErrorResponse::from(HttpError::MethodNotAllowed(
@@ -245,7 +252,11 @@ async fn handler(
         return ws::handler(&req, stream, &uri).await;
     }
 
-    let client = get_client(&service.name).ok_or_else(|| {
+    let client = match streaming {
+        Some(StreamingMode::Sse) => get_streaming_client(&service.name),
+        None => get_client(&service.name),
+    }
+    .ok_or_else(|| {
         ErrorResponse::from(HttpError::InternalServerError(
             "HTTP client not found".to_string(),
         ))

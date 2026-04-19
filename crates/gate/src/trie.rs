@@ -29,7 +29,7 @@
 //! assert_eq!(trie.search("http", "/api/v2").unwrap().name, "api");
 //! ```
 
-use crate::cfg::service::ContextConfig;
+use crate::cfg::service::{ContextConfig, StreamingMode};
 use crate::protocol::{PROTOCOL_COUNT, Protocol};
 use lb::LoadBalancer;
 use std::collections::HashMap;
@@ -49,6 +49,8 @@ pub struct RouteNode {
     pub cost: Option<u64>,
     /// Optional request context profile for this route
     pub context: Option<ContextConfig>,
+    /// Streaming mode for long-lived responses (e.g., SSE)
+    pub streaming: Option<StreamingMode>,
 }
 
 /// A service registration containing routing and load balancing configuration.

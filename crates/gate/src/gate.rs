@@ -147,6 +147,7 @@ impl Gate {
                         resource: r.resource.clone(),
                         cost: r.cost,
                         context: r.context.clone(),
+                        streaming: r.streaming,
                     };
                     map.entry(r.method.clone())
                         .or_insert_with(matchit::Router::new)

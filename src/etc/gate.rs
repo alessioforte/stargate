@@ -228,14 +228,28 @@ pub fn get_config_version() -> u64 {
 struct LocalClients {
     version: u64,
     clients: HashMap<String, awc::Client>,
+    streaming_clients: HashMap<String, awc::Client>,
 }
 
 thread_local! {
     static CLIENT_POOL: std::cell::RefCell<Option<LocalClients>> = const { std::cell::RefCell::new(None) };
 }
 
-fn build_clients(config: &Config) -> HashMap<String, awc::Client> {
+struct BuiltClients {
+    clients: HashMap<String, awc::Client>,
+    streaming_clients: HashMap<String, awc::Client>,
+}
+
+fn service_has_streaming_route(svc: &gate::cfg::service::Service) -> bool {
+    svc.routes
+        .as_ref()
+        .map(|rs| rs.iter().any(|r| r.streaming.is_some()))
+        .unwrap_or(false)
+}
+
+fn build_clients(config: &Config) -> BuiltClients {
     let mut new_clients = HashMap::new();
+    let mut new_streaming_clients = HashMap::new();
 
     let tls_config = if let Some(mtls) = &config.mtls {
         Some(build_mtls(mtls))
@@ -245,23 +259,42 @@ fn build_clients(config: &Config) -> HashMap<String, awc::Client> {
 
     for svc in &config.services {
         let timeout = svc.connect_timeout.unwrap_or(30);
-        let mut client = awc::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .finish();
+        let use_tls = tls_config.is_some() && svc.protocol == gate::protocol::Protocol::Https;
 
-        if let Some(tls_cfg) = &tls_config
-            && svc.protocol == gate::protocol::Protocol::Https
+        let client = if use_tls
+            && let Some(tls_cfg) = &tls_config
         {
             let connector = awc::Connector::new().rustls_0_23(Arc::new(tls_cfg.clone()));
-            client = awc::Client::builder()
+            awc::Client::builder()
                 .timeout(Duration::from_secs(timeout))
                 .connector(connector)
-                .finish();
-        }
-
+                .finish()
+        } else {
+            awc::Client::builder()
+                .timeout(Duration::from_secs(timeout))
+                .finish()
+        };
         new_clients.insert(svc.name.clone(), client);
+
+        if service_has_streaming_route(svc) {
+            let streaming_client = if use_tls
+                && let Some(tls_cfg) = &tls_config
+            {
+                let connector = awc::Connector::new().rustls_0_23(Arc::new(tls_cfg.clone()));
+                awc::Client::builder()
+                    .disable_timeout()
+                    .connector(connector)
+                    .finish()
+            } else {
+                awc::Client::builder().disable_timeout().finish()
+            };
+            new_streaming_clients.insert(svc.name.clone(), streaming_client);
+        }
     }
-    new_clients
+    BuiltClients {
+        clients: new_clients,
+        streaming_clients: new_streaming_clients,
+    }
 }
 
 fn update_clients_if_needed() {
@@ -273,10 +306,11 @@ fn update_clients_if_needed() {
             None => true,
         };
         if needs_update {
-            let new_clients = build_clients(config_snapshot.config.as_ref());
+            let built = build_clients(config_snapshot.config.as_ref());
             *pool_ref = Some(LocalClients {
                 version: config_snapshot.version,
-                clients: new_clients,
+                clients: built.clients,
+                streaming_clients: built.streaming_clients,
             });
         }
     });
@@ -289,6 +323,20 @@ pub fn get_client(service_name: &str) -> Option<awc::Client> {
     CLIENT_POOL.with(|pool| {
         if let Some(local_clients) = &*pool.borrow() {
             if let Some(client) = local_clients.clients.get(service_name) {
+                client_opt = Some(client.clone());
+            }
+        }
+    });
+    client_opt
+}
+
+pub fn get_streaming_client(service_name: &str) -> Option<awc::Client> {
+    update_clients_if_needed();
+
+    let mut client_opt = None;
+    CLIENT_POOL.with(|pool| {
+        if let Some(local_clients) = &*pool.borrow() {
+            if let Some(client) = local_clients.streaming_clients.get(service_name) {
                 client_opt = Some(client.clone());
             }
         }
