@@ -1,5 +1,4 @@
-use actix_web;
-use actix_web::http::StatusCode;
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

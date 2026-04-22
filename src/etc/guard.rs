@@ -1,5 +1,4 @@
 use crate::etc::{self, ext::RequestExt, sub::Subject};
-use actix_web::HttpRequest;
 use lru::LruCache;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
@@ -26,13 +25,8 @@ fn cached_hash_api_key(api_key: &str) -> String {
 }
 
 /// Verify API key and return subject if valid from the session store
-pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
-    let api_key = match req.get_api_key() {
-        Some(k) => k,
-        None => {
-            return None;
-        }
-    };
+pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> {
+    let api_key = req.get_api_key()?;
     let hash_key = cached_hash_api_key(&api_key);
     let store = etc::store::use_store();
     let session = store.get::<Subject>(&hash_key).await.unwrap_or(None);
@@ -41,7 +35,6 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
         return Some(subject);
     }
 
-    // if is not found in the store try to find it in the database
     let result = match crate::db::get_api_key_by_hash(&hash_key).await {
         Ok(v) => v,
         Err(e) => {
@@ -71,13 +64,8 @@ pub async fn verify_api_key(req: &HttpRequest) -> Option<Subject> {
 }
 
 /// Verify JWT token and return subject if valid from the session store
-pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
-    let token = match req.get_token() {
-        Some(t) => t,
-        None => {
-            return None;
-        }
-    };
+pub async fn verify_jwt<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> {
+    let token = req.get_token()?;
 
     let jwt = etc::jwt::jwt_config();
     let claims = match jwt.validate_token(&token) {
@@ -91,7 +79,6 @@ pub async fn verify_jwt(req: &HttpRequest) -> Option<Subject> {
         return None;
     }
 
-    // Get subject from session store
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
     let session = match store.get::<Subject>(&sid).await {

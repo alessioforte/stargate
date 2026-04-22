@@ -2,40 +2,39 @@ mod http;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{
-    ac::access_control,
-    ext::RequestExt,
-    gate::{get_client, get_streaming_client},
-    guard, reqctx,
-};
-use actix_web::{
-    HttpRequest, HttpResponse,
-    http::header::{HeaderMap, HeaderName, HeaderValue},
-    web::Payload,
-    web::ServiceConfig,
-};
+use crate::etc::{ac::access_control, ext::RequestExt, guard};
 use gate::Gate;
 use gate::cfg::service::{EnvProfile, StreamingMode};
 
-async fn handler(
-    gate: actix_web::web::Data<Gate>,
-    req: HttpRequest,
-    stream: Payload,
-) -> Result<HttpResponse, ErrorResponse> {
-    let mut sub = match guard::verify_api_key(&req).await {
-        Some(s) => Some(s),
-        None => None,
-    };
+use crate::etc::{
+    gate::{get_client, get_streaming_client},
+    reqctx,
+};
 
+use ::http::{
+    Request,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
+use axum::{
+    body::Body,
+    response::{IntoResponse, Response},
+};
+use std::{convert::Infallible, sync::Arc};
+async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
+    let gate = req
+        .extensions()
+        .get::<Arc<Gate>>()
+        .cloned()
+        .expect("Gate extension must be configured");
+
+    let auth_req = auth_request(&req);
+    let mut sub = guard::verify_api_key(&auth_req).await;
     if sub.is_none() {
-        sub = match guard::verify_jwt(&req).await {
-            Some(s) => Some(s),
-            None => None,
-        };
+        sub = guard::verify_jwt(&auth_req).await;
     }
 
-    let request_id = reqctx::request_id(&req);
-    let query = req.query_string();
+    let request_id = reqctx::request_id_from(req.extensions());
+    let query = req.uri().query().unwrap_or("").to_string();
     let method = req.method().clone();
     let client_ip = req.get_client_ip();
     let has_auth = sub.is_some();
@@ -46,12 +45,11 @@ async fn handler(
         HeaderValue::from_str(&request_id).unwrap(),
     );
 
-    // 1. Service lookup (cheap, in-memory) -----------------------------------
-    let path = req.uri().path();
+    let path = req.uri().path().to_string();
     let protocol = req.get_protocol();
     let services = gate.services.load();
 
-    let service = match services.search(&protocol, path) {
+    let service = match services.search(&protocol, &path) {
         Some(service) => service,
         None => {
             return Err(ErrorResponse::from(HttpError::NotFound(
@@ -67,7 +65,6 @@ async fn handler(
     let mut env_profile = service.context.as_ref().and_then(|context| context.env);
     let mut streaming: Option<StreamingMode> = None;
 
-    // 2. Route matching (cheap, in-memory) -----------------------------------
     if let Some(routes) = &service.routes {
         match routes.get(method.as_str()) {
             Some(router) => {
@@ -97,31 +94,30 @@ async fn handler(
         }
     }
 
-    // 3. Auth check (cheap, already resolved by ctx::middleware) --------------
     if auth_required && !has_auth {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Unauthorized".to_string(),
         )));
     }
 
-    // 4. Access control (cheap, in-memory policy evaluation) -----------------
-    if let Some(r) = resource
-        && has_auth
-    {
-        let pe = gate.policy_engine.load();
-        let s = sub.clone().unwrap();
-        let env = reqctx::build_env(&req, env_profile.unwrap_or(EnvProfile::Geo));
-        let allowed = access_control(&pe, &s, &env, &r);
+    if has_auth {
+        if let Some(r) = resource {
+            let pe = gate.policy_engine.load();
+            let s = sub.clone().unwrap();
+            let env = reqctx::build_env_from(
+                req.extensions_mut(),
+                env_profile.unwrap_or(EnvProfile::Geo),
+            );
+            let allowed = access_control(&pe, &s, &env, &r);
 
-        if !allowed {
-            return Err(ErrorResponse::from(HttpError::Forbidden(
-                "Forbidden".to_string(),
-            )));
+            if !allowed {
+                return Err(ErrorResponse::from(HttpError::Forbidden(
+                    "Forbidden".to_string(),
+                )));
+            }
         }
     }
 
-    // 5. Rate limit + quota (expensive, store round-trips) -------------------
-    // Only reached by requests that passed all cheap checks above.
     let limiter = gate.limiter.load();
     let mut limit_name = "default".to_string();
     let mut quota_name: Option<String> = None;
@@ -148,8 +144,8 @@ async fn handler(
 
     let decision = match limiter.check(&limit_name, &key, None).await {
         Ok(decision) => decision,
-        Err(e) => {
-            tracing::error!("Rate limiter error: {}", e);
+        Err(error) => {
+            tracing::error!("Rate limiter error: {}", error);
             return Err(ErrorResponse::from(HttpError::InternalServerError(
                 "Rate limiter error".to_string(),
             )));
@@ -181,15 +177,14 @@ async fn handler(
         HeaderValue::from_str(&remaining).unwrap(),
     );
 
-    // Quota tracking (only if subject has a quota configured) ----------------
     if let Some(quota_name) = quota_name {
         let mut quota_key = String::with_capacity(6 + sub_key.len());
         quota_key.push_str("quota:");
         quota_key.push_str(&sub_key);
         let decision = match limiter.check(&quota_name, &quota_key, Some(cost)).await {
             Ok(decision) => decision,
-            Err(e) => {
-                tracing::error!("Quota limiter error: {}", e);
+            Err(error) => {
+                tracing::error!("Quota limiter error: {}", error);
                 return Err(ErrorResponse::from(HttpError::InternalServerError(
                     "Quota limiter error".to_string(),
                 )));
@@ -209,7 +204,6 @@ async fn handler(
             res.insert_header("retry-after", &retry_after)
                 .insert_header("x-quota-limit", &quota_limit)
                 .insert_header("x-quota-remaining", &quota_remaining);
-
             return Err(res);
         }
 
@@ -223,11 +217,10 @@ async fn handler(
         );
     }
 
-    // 6. Load balancing + proxy (the actual work) ----------------------------
     let ctx = lb::RequestContext {
         client_ip: &client_ip,
         path: &path,
-        method: &method.as_str(),
+        method: method.as_str(),
         key: None,
     };
 
@@ -245,11 +238,12 @@ async fn handler(
 
     let mut uri = format!("{}{}", upstream.base_url, subpath);
     if !query.is_empty() {
-        uri.push_str(&format!("?{}", query));
+        uri.push('?');
+        uri.push_str(&query);
     }
 
     if protocol == "ws" {
-        return ws::handler(&req, stream, &uri).await;
+        return ws::handler(req, &uri).await;
     }
 
     let client = match streaming {
@@ -262,7 +256,20 @@ async fn handler(
         ))
     })?;
 
-    http::handler(&req, stream, &headers, &uri, &client).await
+    http::handler(req, &headers, &uri, &client).await
+}
+
+pub async fn service(req: Request<Body>) -> Result<Response, Infallible> {
+    match handle_hyper(req).await {
+        Ok(response) => Ok(response),
+        Err(error) => Ok(error.into_response()),
+    }
+}
+
+fn auth_request(req: &Request<Body>) -> Request<()> {
+    let mut auth_req = Request::builder().uri(req.uri().clone()).body(()).unwrap();
+    *auth_req.headers_mut() = req.headers().clone();
+    auth_req
 }
 
 fn retry_after_header_value(retry_after: std::time::Duration) -> String {
@@ -278,8 +285,4 @@ fn retry_after_header_value(retry_after: std::time::Duration) -> String {
     };
 
     tools::duration_to_string(&retry_after)
-}
-
-pub fn configure(cfg: &mut ServiceConfig) {
-    cfg.default_service(actix_web::web::to(handler));
 }

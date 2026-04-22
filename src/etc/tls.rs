@@ -1,5 +1,8 @@
-use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslFiletype, SslMethod};
 use std::{env, io, path::Path};
+
+pub fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
 
 fn parse_bool_env(env_key: &str, value: &str) -> io::Result<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
@@ -41,19 +44,43 @@ fn required_path(env_key: &str) -> io::Result<String> {
     Ok(value)
 }
 
-pub fn builder() -> io::Result<SslAcceptorBuilder> {
-    let key_file_path = required_path("TLS_KEY")?;
-    let cert_file_path = required_path("TLS_CERT")?;
+pub fn rustls_server_config() -> io::Result<std::sync::Arc<rustls::ServerConfig>> {
+    use rustls::ServerConfig;
+    use rustls_pemfile::{certs, pkcs8_private_keys};
+    use std::{fs::File, io::BufReader, sync::Arc};
 
-    let mut builder =
-        SslAcceptor::mozilla_intermediate(SslMethod::tls()).map_err(io::Error::other)?;
-    builder
-        .set_private_key_file(key_file_path, SslFiletype::PEM)
+    let key_path = required_path("TLS_KEY")?;
+    let cert_path = required_path("TLS_CERT")?;
+
+    let cert_chain = {
+        let mut reader = BufReader::new(File::open(&cert_path)?);
+        certs(&mut reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io::Error::other)?
+    };
+
+    let private_key = {
+        let mut reader = BufReader::new(File::open(&key_path)?);
+        pkcs8_private_keys(&mut reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io::Error::other)?
+            .into_iter()
+            .next()
+            .map(rustls::pki_types::PrivateKeyDer::Pkcs8)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no PKCS8 private key found in TLS_KEY",
+                )
+            })?
+    };
+
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, private_key)
         .map_err(io::Error::other)?;
-    builder
-        .set_certificate_chain_file(cert_file_path)
-        .map_err(io::Error::other)?;
-    Ok(builder)
+
+    Ok(Arc::new(config))
 }
 
 #[cfg(test)]
