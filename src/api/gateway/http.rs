@@ -1,14 +1,10 @@
 use crate::err::{ErrorResponse, HttpError};
-
-#[cfg(feature = "hyper-stack")]
 use axum::{body::Body, response::Response};
-#[cfg(feature = "hyper-stack")]
 use http::header::{
     CONNECTION, HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING,
     UPGRADE,
 };
 
-#[cfg(feature = "hyper-stack")]
 pub async fn handler(
     mut req: http::Request<Body>,
     headers: &http::HeaderMap,
@@ -50,7 +46,6 @@ pub async fn handler(
     Ok(proxied)
 }
 
-#[cfg(feature = "hyper-stack")]
 fn strip_hop_by_hop_headers(headers: &mut http::HeaderMap) {
     let mut connection_headers = Vec::new();
     for value in headers.get_all(CONNECTION) {
@@ -83,7 +78,7 @@ fn strip_hop_by_hop_headers(headers: &mut http::HeaderMap) {
     headers.remove("trailers");
 }
 
-#[cfg(all(test, feature = "hyper-stack"))]
+#[cfg(test)]
 mod tests {
     use super::strip_hop_by_hop_headers;
     use axum::body::Body;

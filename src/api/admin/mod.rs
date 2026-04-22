@@ -114,7 +114,7 @@ macro_rules! require_grants {
     ($req:expr, $($grant:expr),+ $(,)?) => {{
         let grants = $req
             .extensions()
-            .get::<$crate::http::api::admin::Grants>()
+            .get::<$crate::api::admin::Grants>()
             .cloned()
             .unwrap_or_default();
         if !grants.has_any(&[$($grant),+]) {

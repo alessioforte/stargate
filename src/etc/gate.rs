@@ -15,9 +15,7 @@ use std::{
 use tokio::runtime::Handle;
 use tracing::{error, info};
 
-#[cfg(feature = "hyper-stack")]
 use hyper_rustls::HttpsConnectorBuilder;
-#[cfg(feature = "hyper-stack")]
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
@@ -229,12 +227,9 @@ pub fn get_config_version() -> u64 {
     CONFIG_VERSION.load(Ordering::SeqCst)
 }
 
-#[cfg(feature = "hyper-stack")]
 type HyperConnector = hyper_rustls::HttpsConnector<HttpConnector>;
-#[cfg(feature = "hyper-stack")]
 pub type HyperClient = Client<HyperConnector, axum::body::Body>;
 
-#[cfg(feature = "hyper-stack")]
 #[derive(Clone)]
 struct SharedHyperClients {
     version: u64,
@@ -242,15 +237,12 @@ struct SharedHyperClients {
     streaming_clients: HashMap<String, HyperClient>,
 }
 
-#[cfg(feature = "hyper-stack")]
 static HYPER_CLIENT_POOL: OnceLock<RwLock<Option<SharedHyperClients>>> = OnceLock::new();
 
-#[cfg(feature = "hyper-stack")]
 fn hyper_client_pool() -> &'static RwLock<Option<SharedHyperClients>> {
     HYPER_CLIENT_POOL.get_or_init(|| RwLock::new(None))
 }
 
-#[cfg(feature = "hyper-stack")]
 struct BuiltHyperClients {
     clients: HashMap<String, HyperClient>,
     streaming_clients: HashMap<String, HyperClient>,
@@ -263,7 +255,6 @@ fn service_has_streaming_route(svc: &gate::cfg::service::Service) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(feature = "hyper-stack")]
 fn build_hyper_client(timeout: Duration, tls_config: Option<&ClientConfig>) -> HyperClient {
     let mut connector = HttpConnector::new();
     connector.enforce_http(false);
@@ -287,7 +278,6 @@ fn build_hyper_client(timeout: Duration, tls_config: Option<&ClientConfig>) -> H
     Client::builder(TokioExecutor::new()).build(https)
 }
 
-#[cfg(feature = "hyper-stack")]
 fn build_hyper_clients(config: &Config) -> BuiltHyperClients {
     let mut clients = HashMap::new();
     let mut streaming_clients = HashMap::new();
@@ -313,7 +303,6 @@ fn build_hyper_clients(config: &Config) -> BuiltHyperClients {
     }
 }
 
-#[cfg(feature = "hyper-stack")]
 fn update_clients_if_needed() {
     let config_snapshot = get_config_snapshot();
     let mut pool = hyper_client_pool()
@@ -335,7 +324,6 @@ fn update_clients_if_needed() {
     }
 }
 
-#[cfg(feature = "hyper-stack")]
 pub fn get_client(service_name: &str) -> Option<HyperClient> {
     update_clients_if_needed();
     hyper_client_pool()
@@ -346,7 +334,6 @@ pub fn get_client(service_name: &str) -> Option<HyperClient> {
         .cloned()
 }
 
-#[cfg(feature = "hyper-stack")]
 pub fn get_streaming_client(service_name: &str) -> Option<HyperClient> {
     update_clients_if_needed();
     hyper_client_pool()

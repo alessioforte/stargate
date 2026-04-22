@@ -3,14 +3,10 @@ mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{ac::access_control, ext::RequestExt, guard};
-use gate::Gate;
-use gate::cfg::service::{EnvProfile, StreamingMode};
-
 use crate::etc::{
     gate::{get_client, get_streaming_client},
     reqctx,
 };
-
 use ::http::{
     Request,
     header::{HeaderMap, HeaderName, HeaderValue},
@@ -19,7 +15,10 @@ use axum::{
     body::Body,
     response::{IntoResponse, Response},
 };
+use gate::Gate;
+use gate::cfg::service::{EnvProfile, StreamingMode};
 use std::{convert::Infallible, sync::Arc};
+
 async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
     let gate = req
         .extensions()

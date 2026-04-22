@@ -8,6 +8,7 @@ pub mod headers;
 pub mod jwt;
 pub mod log;
 pub mod logo;
+pub mod mid;
 pub mod msg;
 pub mod profile;
 pub mod proxy;

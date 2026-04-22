@@ -1,23 +1,17 @@
 use crate::err::{ErrorResponse, HttpError};
-#[cfg(feature = "hyper-stack")]
 use axum::{body::Body, response::Response};
-#[cfg(feature = "hyper-stack")]
 use futures_util::{SinkExt, StreamExt};
-#[cfg(feature = "hyper-stack")]
 use http::header::{
     CONNECTION, CONTENT_LENGTH, HOST, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_EXTENSIONS,
     SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, TE, TRAILER,
     TRANSFER_ENCODING, UPGRADE,
 };
-#[cfg(feature = "hyper-stack")]
 use hyper_tungstenite::HyperWebsocket;
-#[cfg(feature = "hyper-stack")]
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{self, client::IntoClientRequest},
 };
 
-#[cfg(feature = "hyper-stack")]
 pub async fn handler(mut req: http::Request<Body>, uri: &str) -> Result<Response, ErrorResponse> {
     if !hyper_tungstenite::is_upgrade_request(&req) {
         return Err(ErrorResponse::from(HttpError::BadRequest(
@@ -57,7 +51,6 @@ pub async fn handler(mut req: http::Request<Body>, uri: &str) -> Result<Response
     Ok(response.map(Body::new))
 }
 
-#[cfg(feature = "hyper-stack")]
 fn build_upstream_request(
     uri: &str,
     incoming_headers: &http::HeaderMap,
@@ -74,7 +67,6 @@ fn build_upstream_request(
     Ok(request)
 }
 
-#[cfg(feature = "hyper-stack")]
 fn copy_forwarded_headers(target: &mut http::HeaderMap, source: &http::HeaderMap) {
     for (name, value) in source {
         if should_forward_request_header(name) {
@@ -83,7 +75,6 @@ fn copy_forwarded_headers(target: &mut http::HeaderMap, source: &http::HeaderMap
     }
 }
 
-#[cfg(feature = "hyper-stack")]
 fn should_forward_request_header(name: &http::HeaderName) -> bool {
     name != CONNECTION
         && name != CONTENT_LENGTH
@@ -98,7 +89,6 @@ fn should_forward_request_header(name: &http::HeaderName) -> bool {
         && name != UPGRADE
 }
 
-#[cfg(feature = "hyper-stack")]
 async fn proxy_websocket(
     websocket: HyperWebsocket,
     mut upstream: tokio_tungstenite::WebSocketStream<
@@ -153,7 +143,7 @@ async fn proxy_websocket(
     Ok(())
 }
 
-#[cfg(all(test, feature = "hyper-stack"))]
+#[cfg(test)]
 mod tests {
     use super::{build_upstream_request, copy_forwarded_headers, should_forward_request_header};
     use http::header::{
