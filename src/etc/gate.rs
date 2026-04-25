@@ -1,5 +1,8 @@
 use crate::etc::store::use_store;
-use gate::{Gate, cfg::Config};
+use gate::{
+    Gate,
+    cfg::{RuntimeConfig, v2alpha1::Service as V2Service},
+};
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use std::{
     collections::HashMap,
@@ -46,9 +49,9 @@ pub fn get_policies_path() -> String {
     path
 }
 
-fn load_config() -> Config {
+fn load_config() -> RuntimeConfig {
     let config_file_path = get_config_path();
-    gate::cfg::Config::from_file(&config_file_path)
+    RuntimeConfig::from_file(&config_file_path).expect("Unable to load gateway config")
 }
 
 pub fn init() -> std::sync::Arc<Gate> {
@@ -69,7 +72,7 @@ static CONFIG_CACHE: OnceLock<RwLock<CachedConfig>> = OnceLock::new();
 #[derive(Clone)]
 struct CachedConfig {
     version: u64,
-    config: Arc<Config>,
+    config: Arc<RuntimeConfig>,
 }
 
 fn config_cache() -> &'static RwLock<CachedConfig> {
@@ -81,7 +84,7 @@ fn config_cache() -> &'static RwLock<CachedConfig> {
     })
 }
 
-fn get_config() -> Arc<Config> {
+fn get_config() -> Arc<RuntimeConfig> {
     let cache = config_cache().read().expect("Config cache lock poisoned");
     cache.config.clone()
 }
@@ -93,11 +96,21 @@ fn get_config_snapshot() -> CachedConfig {
         .clone()
 }
 
-fn update_cached_config(config: Config) -> u64 {
+fn update_cached_config(config: RuntimeConfig) -> u64 {
     let mut cache = config_cache().write().expect("Config cache lock poisoned");
     cache.version += 1;
     cache.config = Arc::new(config);
     cache.version
+}
+
+#[cfg(test)]
+pub(crate) fn set_config_for_test(config: RuntimeConfig) {
+    let version = update_cached_config(config);
+    CONFIG_VERSION.store(version, Ordering::SeqCst);
+    let mut pool = hyper_client_pool()
+        .write()
+        .expect("Hyper client pool lock poisoned");
+    *pool = None;
 }
 
 fn file_content(path: &str) -> Option<Vec<u8>> {
@@ -173,7 +186,13 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         }
                         last_content = current_content;
 
-                        let config = Config::from_file(&file_path);
+                        let config = match RuntimeConfig::from_file(&file_path) {
+                            Ok(config) => config,
+                            Err(error) => {
+                                error!(%error, "Configuration file changed but did not validate; keeping previous config");
+                                continue;
+                            }
+                        };
                         let config_version = update_cached_config(config.clone());
                         CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                         info!(config_version, "Configuration file changed, reloading...");
@@ -234,7 +253,6 @@ pub type HyperClient = Client<HyperConnector, axum::body::Body>;
 struct SharedHyperClients {
     version: u64,
     clients: HashMap<String, HyperClient>,
-    streaming_clients: HashMap<String, HyperClient>,
 }
 
 static HYPER_CLIENT_POOL: OnceLock<RwLock<Option<SharedHyperClients>>> = OnceLock::new();
@@ -245,17 +263,11 @@ fn hyper_client_pool() -> &'static RwLock<Option<SharedHyperClients>> {
 
 struct BuiltHyperClients {
     clients: HashMap<String, HyperClient>,
-    streaming_clients: HashMap<String, HyperClient>,
-}
-
-fn service_has_streaming_route(svc: &gate::cfg::service::Service) -> bool {
-    svc.routes
-        .as_ref()
-        .map(|rs| rs.iter().any(|r| r.streaming.is_some()))
-        .unwrap_or(false)
 }
 
 fn build_hyper_client(timeout: Duration, tls_config: Option<&ClientConfig>) -> HyperClient {
+    crate::etc::tls::install_crypto_provider();
+
     let mut connector = HttpConnector::new();
     connector.enforce_http(false);
     connector.set_connect_timeout(Some(timeout));
@@ -278,29 +290,38 @@ fn build_hyper_client(timeout: Duration, tls_config: Option<&ClientConfig>) -> H
     Client::builder(TokioExecutor::new()).build(https)
 }
 
-fn build_hyper_clients(config: &Config) -> BuiltHyperClients {
+fn build_hyper_clients(config: &RuntimeConfig) -> BuiltHyperClients {
     let mut clients = HashMap::new();
-    let mut streaming_clients = HashMap::new();
 
-    let tls_config = config.mtls.as_ref().map(build_mtls);
+    let tls_config = config.mtls().map(build_mtls);
 
-    for svc in &config.services {
-        let timeout = Duration::from_secs(svc.connect_timeout.unwrap_or(30));
-        let use_tls = tls_config.is_some() && svc.protocol == gate::protocol::Protocol::Https;
+    for (name, service) in &config.raw.http.services {
+        let V2Service::LoadBalancer { upstream } = service else {
+            continue;
+        };
+        let Some(upstream) = config.raw.http.upstreams.get(upstream) else {
+            continue;
+        };
+
+        let timeout = upstream
+            .transport
+            .as_ref()
+            .and_then(|transport| transport.connect_timeout.as_deref())
+            .and_then(|duration| tools::parse_duration(duration).ok())
+            .and_then(|duration| duration.to_std().ok())
+            .unwrap_or_else(|| Duration::from_secs(30));
+        let use_tls = tls_config.is_some()
+            && upstream
+                .targets
+                .iter()
+                .any(|target| target.url.starts_with("https://"));
         let tls = use_tls.then(|| tls_config.as_ref()).flatten();
 
         let client = build_hyper_client(timeout, tls);
-        clients.insert(svc.name.clone(), client.clone());
-
-        if service_has_streaming_route(svc) {
-            streaming_clients.insert(svc.name.clone(), client);
-        }
+        clients.insert(name.clone(), client);
     }
 
-    BuiltHyperClients {
-        clients,
-        streaming_clients,
-    }
+    BuiltHyperClients { clients }
 }
 
 fn update_clients_if_needed() {
@@ -319,7 +340,6 @@ fn update_clients_if_needed() {
         *pool = Some(SharedHyperClients {
             version: config_snapshot.version,
             clients: built.clients,
-            streaming_clients: built.streaming_clients,
         });
     }
 }
@@ -331,16 +351,6 @@ pub fn get_client(service_name: &str) -> Option<HyperClient> {
         .expect("Hyper client pool lock poisoned")
         .as_ref()
         .and_then(|pool| pool.clients.get(service_name))
-        .cloned()
-}
-
-pub fn get_streaming_client(service_name: &str) -> Option<HyperClient> {
-    update_clients_if_needed();
-    hyper_client_pool()
-        .read()
-        .expect("Hyper client pool lock poisoned")
-        .as_ref()
-        .and_then(|pool| pool.streaming_clients.get(service_name))
         .cloned()
 }
 

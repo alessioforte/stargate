@@ -32,6 +32,8 @@ pub enum HttpError {
     #[error("{0}")]
     BadRequest(String),
     #[error("{0}")]
+    PayloadTooLarge(String),
+    #[error("{0}")]
     InternalServerError(String),
     #[error("{0}")]
     NotFound(String),
@@ -62,6 +64,7 @@ impl ErrorCode for HttpError {
             HttpError::NotFound(_) => Code::NotFound,
             HttpError::Conflict(_) => Code::Conflict,
             HttpError::BadRequest(_) => Code::BadRequest,
+            HttpError::PayloadTooLarge(_) => Code::PayloadTooLarge,
             HttpError::BadGateway(_) => Code::BadGateway,
             HttpError::TooManyRequests(_) => Code::TooManyRequests,
             HttpError::ServiceUnavailable(_) => Code::ServiceUnavailable,

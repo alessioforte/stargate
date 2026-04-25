@@ -10,6 +10,7 @@ pub async fn handler(
     headers: &http::HeaderMap,
     uri: &str,
     client: &crate::etc::gate::HyperClient,
+    preserve_host: bool,
 ) -> Result<Response, ErrorResponse> {
     let upstream_uri = uri.parse::<http::Uri>().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid upstream URI");
@@ -20,7 +21,9 @@ pub async fn handler(
 
     *req.uri_mut() = upstream_uri;
     strip_hop_by_hop_headers(req.headers_mut());
-    req.headers_mut().remove(HOST);
+    if !preserve_host {
+        req.headers_mut().remove(HOST);
+    }
 
     let response = client.request(req).await.map_err(|error| {
         tracing::error!("Error forwarding request to backend: {}", error);

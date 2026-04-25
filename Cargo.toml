@@ -97,6 +97,9 @@ moka = { version = "0.12.15", features = ["sync"] }
 notify = "8.2.0"
 clap = { version = "4.6.1", features = ["derive"] }
 
+[dev-dependencies]
+lim = { path = "crates/lim", features = ["memory"] }
+
 [features]
 default = ["edge"]
 edge = ["sqlite", "memory"]

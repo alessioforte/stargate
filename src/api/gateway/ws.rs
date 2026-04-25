@@ -12,14 +12,18 @@ use tokio_tungstenite::{
     tungstenite::{self, client::IntoClientRequest},
 };
 
-pub async fn handler(mut req: http::Request<Body>, uri: &str) -> Result<Response, ErrorResponse> {
+pub async fn handler(
+    mut req: http::Request<Body>,
+    uri: &str,
+    preserve_host: bool,
+) -> Result<Response, ErrorResponse> {
     if !hyper_tungstenite::is_upgrade_request(&req) {
         return Err(ErrorResponse::from(HttpError::BadRequest(
             "Invalid websocket upgrade request".to_string(),
         )));
     }
 
-    let upstream_request = build_upstream_request(uri, req.headers())?;
+    let upstream_request = build_upstream_request(uri, req.headers(), preserve_host)?;
     let (upstream_ws, upstream_response) =
         connect_async(upstream_request).await.map_err(|error| {
             tracing::error!(%uri, %error, "WebSocket upstream connect failed");
@@ -54,6 +58,7 @@ pub async fn handler(mut req: http::Request<Body>, uri: &str) -> Result<Response
 fn build_upstream_request(
     uri: &str,
     incoming_headers: &http::HeaderMap,
+    preserve_host: bool,
 ) -> Result<http::Request<()>, ErrorResponse> {
     let mut request = uri.into_client_request().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid WebSocket upstream URI");
@@ -62,23 +67,27 @@ fn build_upstream_request(
         ))
     })?;
 
-    copy_forwarded_headers(request.headers_mut(), incoming_headers);
+    copy_forwarded_headers(request.headers_mut(), incoming_headers, preserve_host);
 
     Ok(request)
 }
 
-fn copy_forwarded_headers(target: &mut http::HeaderMap, source: &http::HeaderMap) {
+fn copy_forwarded_headers(
+    target: &mut http::HeaderMap,
+    source: &http::HeaderMap,
+    preserve_host: bool,
+) {
     for (name, value) in source {
-        if should_forward_request_header(name) {
+        if should_forward_request_header(name, preserve_host) {
             target.append(name, value.clone());
         }
     }
 }
 
-fn should_forward_request_header(name: &http::HeaderName) -> bool {
+fn should_forward_request_header(name: &http::HeaderName, preserve_host: bool) -> bool {
     name != CONNECTION
         && name != CONTENT_LENGTH
-        && name != HOST
+        && (preserve_host || name != HOST)
         && name != SEC_WEBSOCKET_ACCEPT
         && name != SEC_WEBSOCKET_EXTENSIONS
         && name != SEC_WEBSOCKET_KEY
@@ -170,7 +179,7 @@ mod tests {
         source.insert("x-request-id", "req_123".parse().unwrap());
 
         let mut target = http::HeaderMap::new();
-        copy_forwarded_headers(&mut target, &source);
+        copy_forwarded_headers(&mut target, &source, false);
 
         assert!(target.get(CONNECTION).is_none());
         assert!(target.get(UPGRADE).is_none());
@@ -195,7 +204,7 @@ mod tests {
         headers.insert("x-trace-id", "trace_1".parse().unwrap());
 
         let request =
-            build_upstream_request("wss://upstream.example/socket?foo=1", &headers).unwrap();
+            build_upstream_request("wss://upstream.example/socket?foo=1", &headers, false).unwrap();
 
         assert_eq!(request.uri(), "wss://upstream.example/socket?foo=1");
         assert_eq!(
@@ -207,8 +216,22 @@ mod tests {
 
     #[test]
     fn sec_websocket_protocol_is_forwardable() {
-        assert!(should_forward_request_header(&SEC_WEBSOCKET_PROTOCOL));
-        assert!(!should_forward_request_header(&SEC_WEBSOCKET_KEY));
-        assert!(!should_forward_request_header(&CONNECTION));
+        assert!(should_forward_request_header(
+            &SEC_WEBSOCKET_PROTOCOL,
+            false
+        ));
+        assert!(!should_forward_request_header(&SEC_WEBSOCKET_KEY, false));
+        assert!(!should_forward_request_header(&CONNECTION, false));
+    }
+
+    #[test]
+    fn host_header_is_forwarded_when_preserved() {
+        let mut source = http::HeaderMap::new();
+        source.insert(HOST, "gateway.local".parse().unwrap());
+
+        let mut target = http::HeaderMap::new();
+        copy_forwarded_headers(&mut target, &source, true);
+
+        assert_eq!(target.get(HOST).unwrap(), "gateway.local");
     }
 }

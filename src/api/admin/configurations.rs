@@ -4,7 +4,7 @@ use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
-use gate::cfg::Config;
+use gate::cfg::{RuntimeConfig, v2alpha1::Config};
 use http::header::CONTENT_TYPE;
 use serde::Deserialize;
 use std::env;
@@ -22,7 +22,7 @@ const CONFIG_GRANT: &str = "configurations";
     path = "/admin/configurations",
     tags = ["Admin", "Configurations"],
     responses(
-        (status = 200, description = "OK", body = Config),
+        (status = 200, description = "OK"),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Config file not found", body = ErrorResponse),
@@ -51,13 +51,13 @@ pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse>
             .unwrap()
             .into_response()),
         _ => {
-            let config: Config = serde_yaml_bw::from_str(&content).map_err(|e| {
+            let config = RuntimeConfig::from_yaml_str(&content).map_err(|e| {
                 ErrorResponse::from(HttpError::InternalServerError(format!(
                     "Failed to parse config file: {}",
                     e
                 )))
             })?;
-            Ok(Json(config).into_response())
+            Ok(Json(config.raw).into_response())
         }
     }
 }
@@ -78,6 +78,12 @@ pub async fn update_configurations(req: Request) -> Result<Response, ErrorRespon
     require_grants!(req, SUPER_ADMIN, CONFIG_GRANT);
 
     let config: Config = extract_json(req).await?;
+    RuntimeConfig::from_raw(config.clone()).map_err(|e| {
+        ErrorResponse::from(HttpError::BadRequest(format!(
+            "Invalid gateway config: {}",
+            e
+        )))
+    })?;
 
     let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
     let config_filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());

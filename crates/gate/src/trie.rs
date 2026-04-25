@@ -39,7 +39,7 @@ use tracing::warn;
 /// Metadata for a specific route within a service.
 ///
 /// Used for fine-grained routing control at the HTTP method + path level.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct RouteNode {
     /// Whether authentication is required for this specific route
     pub auth_required: bool,
@@ -74,6 +74,10 @@ pub struct Service {
     pub context: Option<ContextConfig>,
     /// Fine-grained routing rules by HTTP method and path
     pub routes: Option<HashMap<String, matchit::Router<RouteNode>>>,
+    /// When true, missing route matches may fall back to the service-level config.
+    pub route_fallback_to_service: bool,
+    /// Allowed methods for service-level fallback. Empty means all methods.
+    pub route_fallback_methods: Vec<String>,
 }
 
 /// Internal node in the trie structure.
@@ -222,6 +226,8 @@ mod tests {
             resource: None,
             context: None,
             routes: None,
+            route_fallback_to_service: false,
+            route_fallback_methods: Vec::new(),
         }
     }
 
@@ -570,6 +576,8 @@ mod tests {
             cost: Some(1),
             context: None,
             routes: None,
+            route_fallback_to_service: false,
+            route_fallback_methods: Vec::new(),
         };
 
         trie.insert("http", "/protected", service);

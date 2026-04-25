@@ -31,10 +31,26 @@ pub trait RequestExt {
     fn get_client_ip(&self) -> String;
     fn get_client_ip_addr(&self) -> Option<IpAddr>;
     fn get_user_agent(&self) -> Option<String>;
+    fn get_host(&self) -> Option<String>;
+    fn get_query_values(&self, name: &str) -> Vec<String>;
+    fn get_cookie_value(&self, name: &str) -> Option<String>;
 }
 
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+fn normalize_host(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    if let Ok(authority) = raw.parse::<http::uri::Authority>() {
+        return Some(authority.host().to_ascii_lowercase());
+    }
+
+    Some(raw.to_ascii_lowercase())
 }
 
 fn token_from_authorization(headers: &HeaderMap) -> Option<String> {
@@ -85,7 +101,7 @@ fn token_from_query(query: Option<&str>) -> Option<String> {
     None
 }
 
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(s.len());
     let mut bytes = s.as_bytes().iter().copied();
     while let Some(b) = bytes.next() {
@@ -132,6 +148,44 @@ fn forwarded_ip(headers: &HeaderMap) -> Option<IpAddr> {
     if let Some(real) = header_str(headers, "x-real-ip") {
         if let Some(ip) = parse_ip_str(real) {
             return Some(ip);
+        }
+    }
+    None
+}
+
+fn query_values(query: Option<&str>, name: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let Some(query) = query else {
+        return values;
+    };
+
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+
+        let (raw_key, raw_value) = match pair.split_once('=') {
+            Some((key, value)) => (key, value),
+            None => (pair, ""),
+        };
+
+        if percent_decode(raw_key) == name {
+            values.push(percent_decode(raw_value));
+        }
+    }
+
+    values
+}
+
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    let raw = headers.get(COOKIE)?.to_str().ok()?;
+    for item in raw.split(';') {
+        let item = item.trim();
+        let Some((cookie_name, cookie_value)) = item.split_once('=') else {
+            continue;
+        };
+        if cookie_name.trim() == name {
+            return Some(cookie_value.trim().trim_matches('"').to_string());
         }
     }
     None
@@ -193,6 +247,24 @@ impl<B> RequestExt for Request<B> {
             Some(v.to_string())
         }
     }
+
+    fn get_host(&self) -> Option<String> {
+        if let Some(host) = header_str(self.headers(), "host").and_then(normalize_host) {
+            return Some(host);
+        }
+
+        self.uri()
+            .authority()
+            .map(|authority| authority.host().to_ascii_lowercase())
+    }
+
+    fn get_query_values(&self, name: &str) -> Vec<String> {
+        query_values(self.uri().query(), name)
+    }
+
+    fn get_cookie_value(&self, name: &str) -> Option<String> {
+        cookie_value(self.headers(), name)
+    }
 }
 
 #[cfg(test)]
@@ -246,6 +318,27 @@ mod tests {
     fn protocol_default_http() {
         let r = req_with(&[], None);
         assert_eq!(r.get_protocol(), "http");
+    }
+
+    #[test]
+    fn host_from_header_is_normalized() {
+        let r = req_with(&[("host", "API.EXAMPLE.COM:8443")], None);
+        assert_eq!(r.get_host().as_deref(), Some("api.example.com"));
+    }
+
+    #[test]
+    fn query_values_decode_repeated_keys() {
+        let r = req_with(&[], Some("preview=true&preview=blue%20sky&other=1"));
+        assert_eq!(
+            r.get_query_values("preview"),
+            vec!["true".to_string(), "blue sky".to_string()]
+        );
+    }
+
+    #[test]
+    fn cookie_lookup_reads_named_cookie() {
+        let r = req_with(&[("cookie", "other=1; canary=v2; more=2")], None);
+        assert_eq!(r.get_cookie_value("canary").as_deref(), Some("v2"));
     }
 
     #[test]
