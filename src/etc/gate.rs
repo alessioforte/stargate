@@ -104,6 +104,7 @@ fn update_cached_config(config: RuntimeConfig) -> u64 {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn set_config_for_test(config: RuntimeConfig) {
     let version = update_cached_config(config);
     CONFIG_VERSION.store(version, Ordering::SeqCst);
