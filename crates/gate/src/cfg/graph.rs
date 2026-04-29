@@ -1,9 +1,5 @@
 use crate::cfg::{
-    limit::Limit,
-    load_balancer::LoadBalancer,
-    mtls::MtlsConfig,
-    service::EnvProfile,
-    v2alpha1::{AuthStrategy, UpstreamProtocol},
+    Limit, LoadBalancer, MtlsConfig, {AuthStrategy, EnvProfile, UpstreamProtocol},
 };
 use indexmap::IndexMap;
 use regex::Regex;

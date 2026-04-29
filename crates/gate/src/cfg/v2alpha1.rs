@@ -1,10 +1,10 @@
-use super::{limit::Limit, load_balancer::LoadBalancer, mtls::MtlsConfig, service::EnvProfile};
-use crate::graph::{
+use super::graph::{
     CompileError, CompiledConfig, HeaderValueNode, HttpGraph, MatchExprNode, MiddlewareNode,
     MirrorServiceNode, NamedValuePredicate, PathPredicate, PolicyNode, ResponseBodyNode,
     RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode, UpstreamTargetNode,
     ValuePredicate, WeightedServiceNode,
 };
+use super::{Limit, LoadBalancer, MtlsConfig};
 use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,14 @@ impl Config {
             },
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, utoipa::ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvProfile {
+    None,
+    Basic,
+    Geo,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

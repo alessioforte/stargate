@@ -6,7 +6,7 @@ use ::http::{HeaderMap, Request};
 use axum::body::Body;
 use gate::{
     Gate,
-    cfg::{service::EnvProfile, v2alpha1::AuthStrategy},
+    cfg::{AuthStrategy, EnvProfile},
     graph::{HttpGraph, PolicyNode, RouterNode},
 };
 use std::sync::Arc;

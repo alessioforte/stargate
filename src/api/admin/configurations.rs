@@ -4,7 +4,7 @@ use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
-use gate::cfg::{RuntimeConfig, v2alpha1::Config};
+use gate::cfg::{Config, RuntimeConfig};
 use http::header::CONTENT_TYPE;
 use serde::Deserialize;
 use std::env;

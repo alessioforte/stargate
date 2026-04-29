@@ -1,7 +1,7 @@
 use crate::etc::{ac::Env, geoip};
 use chrono::{DateTime, Utc};
 use db::ent::AuditContext;
-use gate::cfg::service::EnvProfile;
+use gate::cfg::EnvProfile;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use ulid::Ulid;

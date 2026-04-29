@@ -1,11 +1,16 @@
-pub mod endpoint;
-pub mod limit;
-pub mod load_balancer;
-pub mod mtls;
-pub mod service;
-pub mod v2alpha1;
+mod endpoint;
+pub mod graph;
+mod limit;
+mod load_balancer;
+mod mtls;
+mod v2alpha1;
 
-use crate::graph::CompiledConfig;
+pub use limit::Limit;
+pub use load_balancer::LoadBalancer;
+pub use mtls::MtlsConfig;
+pub use v2alpha1::{AuthStrategy, Config, EnvProfile, Service, UpstreamProtocol};
+
+use graph::CompiledConfig;
 use serde_yaml_bw::Value;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -25,7 +30,7 @@ pub enum ConfigLoadError {
         source: std::io::Error,
     },
     Parse(serde_yaml_bw::Error),
-    Compile(crate::graph::CompileError),
+    Compile(graph::CompileError),
     MissingV2Schema,
 }
 

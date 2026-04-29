@@ -1,7 +1,7 @@
 use crate::etc::store::use_store;
 use gate::{
     Gate,
-    cfg::{RuntimeConfig, v2alpha1::Service as V2Service},
+    cfg::{RuntimeConfig, Service},
 };
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use std::{
@@ -297,7 +297,7 @@ fn build_hyper_clients(config: &RuntimeConfig) -> BuiltHyperClients {
     let tls_config = config.mtls().map(build_mtls);
 
     for (name, service) in &config.raw.http.services {
-        let V2Service::LoadBalancer { upstream } = service else {
+        let Service::LoadBalancer { upstream } = service else {
             continue;
         };
         let Some(upstream) = config.raw.http.upstreams.get(upstream) else {
@@ -355,7 +355,7 @@ pub fn get_client(service_name: &str) -> Option<HyperClient> {
         .cloned()
 }
 
-fn build_mtls(mtls: &gate::cfg::mtls::MtlsConfig) -> ClientConfig {
+fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
     let mut ca_cert_file = std::io::BufReader::new(
         std::fs::File::open(&mtls.ca_cert_path).expect("Unable to open CA cert file"),
     );
