@@ -193,7 +193,7 @@ mod tests {
             r#"
 schema: stargate/v2alpha1
 limits:
-  - name: default
+  default:
     strategy: gcra
     params:
       max_burst: 3

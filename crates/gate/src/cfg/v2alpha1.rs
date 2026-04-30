@@ -4,7 +4,7 @@ use super::graph::{
     RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode, UpstreamTargetNode,
     ValuePredicate, WeightedServiceNode,
 };
-use super::{Limit, LoadBalancer, MtlsConfig};
+use super::{Limit, LimitSpec, LoadBalancer, MtlsConfig};
 use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub struct Config {
     #[serde(default = "default_schema")]
     pub schema: String,
     #[serde(default)]
-    pub limits: Vec<Limit>,
+    pub limits: IndexMap<String, LimitSpec>,
     #[serde(default)]
     pub mtls: Option<MtlsConfig>,
     #[serde(default)]
@@ -29,7 +29,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             schema: default_schema(),
-            limits: Vec::new(),
+            limits: IndexMap::new(),
             mtls: None,
             http: HttpConfig::default(),
         }
@@ -60,7 +60,11 @@ impl Config {
             return Err(CompileError::new("schema", format!("expected {}", SCHEMA)));
         }
 
-        let limit_names = collect_limit_names(&self.limits)?;
+        let limits = compile_limits(&self.limits)?;
+        let limit_names = limits
+            .iter()
+            .map(|limit| limit.name.clone())
+            .collect::<HashSet<_>>();
         let upstreams = compile_upstreams(&self.http.upstreams)?;
         let middlewares = compile_middlewares(&self.http.middlewares)?;
         let policies = compile_policies(&self.http.policies, &limit_names)?;
@@ -76,7 +80,7 @@ impl Config {
 
         Ok(CompiledConfig {
             schema: self.schema.clone(),
-            limits: self.limits.clone(),
+            limits,
             mtls: self.mtls.clone(),
             http: HttpGraph {
                 upstreams,
@@ -328,18 +332,15 @@ fn default_schema() -> String {
     SCHEMA.to_string()
 }
 
-fn collect_limit_names(limits: &[Limit]) -> Result<HashSet<String>, CompileError> {
-    let mut names = HashSet::new();
-    for (idx, limit) in limits.iter().enumerate() {
-        let path = format!("limits[{}].name", idx);
-        if limit.name.trim().is_empty() {
-            return Err(CompileError::new(path, "limit name cannot be empty"));
+fn compile_limits(limits: &IndexMap<String, LimitSpec>) -> Result<Vec<Limit>, CompileError> {
+    let mut out = Vec::with_capacity(limits.len());
+    for (name, spec) in limits {
+        if name.trim().is_empty() {
+            return Err(CompileError::new("limits", "limit name cannot be empty"));
         }
-        if !names.insert(limit.name.clone()) {
-            return Err(CompileError::new(path, "duplicate limit name"));
-        }
+        out.push(Limit::new(name.clone(), spec.clone()));
     }
-    Ok(names)
+    Ok(out)
 }
 
 fn compile_upstreams(
@@ -1014,12 +1015,12 @@ mod tests {
             r#"
 schema: stargate/v2alpha1
 limits:
-  - name: default
+  default:
     strategy: gcra
     params:
       max_burst: 3
       replenish_1_per: 500ms
-  - name: daily
+  daily:
     strategy: quota_tracker
     params:
       limit: 1000
@@ -1131,7 +1132,7 @@ http:
             r#"
 schema: stargate/v2alpha1
 limits:
-  - name: default
+  default:
     strategy: gcra
     params:
       max_burst: 3

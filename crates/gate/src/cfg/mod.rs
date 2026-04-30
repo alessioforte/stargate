@@ -5,7 +5,7 @@ mod load_balancer;
 mod mtls;
 mod v2alpha1;
 
-pub use limit::Limit;
+pub use limit::{Limit, LimitSpec};
 pub use load_balancer::LoadBalancer;
 pub use mtls::MtlsConfig;
 pub use v2alpha1::{AuthStrategy, Config, EnvProfile, Service, UpstreamProtocol};
@@ -130,7 +130,7 @@ mod tests {
         let error = RuntimeConfig::from_yaml_str(
             r#"
 limits:
-  - name: default
+  default:
     strategy: gcra
     params:
       max_burst: 3

@@ -10,8 +10,9 @@ Legacy config without `schema: stargate/v2alpha1` is rejected at load time. Hot 
 
 ## Model
 
-The HTTP gateway config is split into named objects:
+The gateway config is split into named objects:
 
+- `limits`: named rate-limit and quota strategies referenced by policies.
 - `upstreams`: physical target pools.
 - `services`: traffic actions that point to upstreams or compose other services.
 - `middlewares`: request/response transforms.
@@ -26,7 +27,7 @@ Routers are sorted by descending `priority`. Ties keep declaration order. Use hi
 schema: stargate/v2alpha1
 
 limits:
-  - name: default
+  default:
     strategy: gcra
     params:
       max_burst: 100
@@ -323,7 +324,7 @@ Policy order in the runtime is fixed: auth, access control, rate limit, quota. T
 schema: stargate/v2alpha1
 
 limits:
-  - name: default
+  default:
     strategy: gcra
     params:
       max_burst: 1000
