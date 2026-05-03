@@ -14,6 +14,7 @@ use utoipa::OpenApi;
     paths(
         crate::api::health::get_health,
         crate::api::well_known::get_jwks,
+        crate::api::well_known::get_oauth_metadata,
         crate::api::docs::get_api_doc,
         crate::api::signup::request::post_signup,
         crate::api::signup::verification::get_signup,
@@ -79,6 +80,10 @@ pub fn router() -> axum::Router {
     axum::Router::new()
         .route("/health", get(health::get_health))
         .route("/.well-known/jwks.json", get(well_known::get_jwks))
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(well_known::get_oauth_metadata),
+        )
         .route("/docs", get(docs::get_api_doc))
         .merge(signup::router())
         .merge(oauth::router())
@@ -90,7 +95,10 @@ pub fn router() -> axum::Router {
 mod tests {
     use super::router;
     use axum::body::Body;
-    use http::{Request, StatusCode, header::CONTENT_TYPE};
+    use http::{
+        Request, StatusCode,
+        header::{CACHE_CONTROL, CONTENT_TYPE},
+    };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -130,6 +138,32 @@ mod tests {
             resp.headers().get(CONTENT_TYPE).unwrap(),
             "application/json"
         );
+        assert_eq!(
+            resp.headers().get(CACHE_CONTROL).unwrap(),
+            "public, max-age=300"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["keys"].is_array());
+    }
+
+    #[tokio::test]
+    async fn oauth_authorization_server_metadata_returns_200() {
+        let resp = send("/.well-known/oauth-authorization-server").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["issuer"].is_string());
+        assert!(json.get("authorization_endpoint").is_none());
+        assert!(json.get("token_endpoint").is_none());
+        assert!(json["jwks_uri"].is_string());
+        assert_eq!(json["response_types_supported"], serde_json::json!([]));
+        assert_eq!(json["grant_types_supported"], serde_json::json!([]));
+        assert!(json.get("token_endpoint_auth_methods_supported").is_none());
     }
 
     #[tokio::test]
@@ -144,6 +178,8 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["openapi"].is_string());
         assert!(json["paths"]["/health"].is_object());
+        assert!(json["paths"]["/.well-known/jwks.json"].is_object());
+        assert!(json["paths"]["/.well-known/oauth-authorization-server"].is_object());
         assert!(json["paths"]["/signup"].is_object());
         assert!(json["paths"]["/oauth/state"].is_object());
         assert!(json["paths"]["/oauth/github"].is_object());

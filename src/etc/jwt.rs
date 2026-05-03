@@ -33,14 +33,23 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
         }
         Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
             let jwks_path = ".stargate/jwks";
-            ensure_rsa_keys(jwks_path);
+            ensure_key_pair(jwks_path, || jwt::generate_rsa_keys(2048));
             KeySource::Rsa {
                 private_key_path: format!("{}/private.pem", jwks_path),
                 public_key_path: format!("{}/public.pem", jwks_path),
             }
         }
-        Algorithm::ES256 | Algorithm::ES384 => {
-            let jwks_path = ".stargate/jwks";
+        Algorithm::ES256 => {
+            let jwks_path = ".stargate/jwks/es256";
+            ensure_key_pair(jwks_path, jwt::generate_p256_keys);
+            KeySource::Ec {
+                private_key_path: format!("{}/private.pem", jwks_path),
+                public_key_path: format!("{}/public.pem", jwks_path),
+            }
+        }
+        Algorithm::ES384 => {
+            let jwks_path = ".stargate/jwks/es384";
+            ensure_key_pair(jwks_path, jwt::generate_p384_keys);
             KeySource::Ec {
                 private_key_path: format!("{}/private.pem", jwks_path),
                 public_key_path: format!("{}/public.pem", jwks_path),
@@ -57,19 +66,29 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
     let refresh_exp =
         parse_duration(&jwt_refresh_exp).expect("Invalid JWT refresh expiration duration");
 
-    JwtConfig::new(algorithm, key_source, access_exp, refresh_exp)
+    let key_id = env::var("JWT_KID")
+        .ok()
+        .filter(|kid| !kid.trim().is_empty())
+        .unwrap_or_else(|| "stargate-current".to_string());
+
+    JwtConfig::new_with_key_id(algorithm, key_source, access_exp, refresh_exp, Some(key_id))
 });
 
-fn ensure_rsa_keys(jwks_path: &str) {
-    if !Path::new(jwks_path).exists() {
-        std::fs::create_dir_all(jwks_path).expect("Unable to create JWKS directory");
-        let (private_key, public_key) =
-            jwt::generate_rsa_keys(2048).expect("Failed to generate RSA keys");
-        std::fs::write(format!("{}/private.pem", jwks_path), private_key)
-            .expect("Unable to write private key");
-        std::fs::write(format!("{}/public.pem", jwks_path), public_key)
-            .expect("Unable to write public key");
+fn ensure_key_pair<F>(jwks_path: &str, generate: F)
+where
+    F: FnOnce() -> Result<(String, String), Box<dyn std::error::Error>>,
+{
+    let private_key_path = format!("{}/private.pem", jwks_path);
+    let public_key_path = format!("{}/public.pem", jwks_path);
+
+    if Path::new(&private_key_path).exists() && Path::new(&public_key_path).exists() {
+        return;
     }
+
+    std::fs::create_dir_all(jwks_path).expect("Unable to create JWKS directory");
+    let (private_key, public_key) = generate().expect("Failed to generate JWT signing keys");
+    std::fs::write(private_key_path, private_key).expect("Unable to write private key");
+    std::fs::write(public_key_path, public_key).expect("Unable to write public key");
 }
 
 pub fn init() {
