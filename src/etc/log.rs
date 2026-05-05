@@ -1,8 +1,6 @@
 use crate::etc::{ext::RequestExt, reqctx::RequestContext};
-use actix_web::HttpMessage;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use tracing::info;
-use tracing_actix_web::{DefaultRootSpanBuilder, RootSpanBuilder};
 use tracing_subscriber::{
     EnvFilter, Registry,
     fmt::{self, format::FmtSpan, time::UtcTime},
@@ -116,64 +114,52 @@ fn sanitize_query(query: &str) -> String {
         .join("&")
 }
 
-pub struct StargateRootSpanBuilder;
+pub async fn trace_middleware(
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use tracing::Instrument;
 
-impl RootSpanBuilder for StargateRootSpanBuilder {
-    fn on_request_start(sr: &actix_web::dev::ServiceRequest) -> tracing::Span {
-        let request_id = Ulid::new().to_string();
+    let request_id = Ulid::new().to_string();
+    let now = Utc::now();
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let query = sanitize_query(req.uri().query().unwrap_or(""));
+    let user_agent = req.get_user_agent();
+    let peer_ip = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|ci| ci.0.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let client_ip_addr = req.get_client_ip_addr();
+    let ip_address = client_ip_addr
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
 
-        let req = sr.request();
-        let gate = req
-            .app_data::<actix_web::web::Data<gate::Gate>>()
-            .expect("Gate app_data must be configured in HttpServer");
-        let ts = gate.clock.now_millis() as i64;
-        let now: DateTime<Utc> = DateTime::from_timestamp_millis(ts).unwrap_or_else(|| Utc::now());
-        let user_agent = req.get_user_agent();
-        let method = req.method().as_str();
-        let path = req.path();
-        let query = sanitize_query(req.query_string());
-        let peer_ip = req
-            .connection_info()
-            .peer_addr()
-            .unwrap_or("unknown")
-            .to_string();
-        let ip_addr = req.get_client_ip_addr();
-        let ip_address = ip_addr
-            .map(|ip| ip.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-        req.extensions_mut().insert(RequestContext::new(
-            request_id.clone(),
-            now,
-            ip_addr,
-            user_agent.clone(),
-        ));
+    req.extensions_mut().insert(RequestContext::new(
+        request_id.clone(),
+        now,
+        client_ip_addr,
+        user_agent.clone(),
+    ));
 
-        tracing::info_span!("http_request",
-            request_id = %request_id,
-            http.method = %method,
-            http.path = %path,
-            http.query = %query,
-            http.user_agent = %user_agent.as_deref().unwrap_or("unknown"),
-            http.peer_ip = %peer_ip,
-            http.client_ip = %ip_address,
-            http.status_code = tracing::field::Empty,
-        )
-    }
+    let span = tracing::info_span!(
+        "http_request",
+        request_id = %request_id,
+        http.method = %method,
+        http.path = %path,
+        http.query = %query,
+        http.user_agent = %user_agent.as_deref().unwrap_or("unknown"),
+        http.peer_ip = %peer_ip,
+        http.client_ip = %ip_address,
+        http.status_code = tracing::field::Empty,
+    );
 
-    fn on_request_end<B: awc::body::MessageBody>(
-        span: tracing::Span,
-        outcome: &Result<actix_web::dev::ServiceResponse<B>, actix_web::Error>,
-    ) {
-        match outcome {
-            Ok(response) => {
-                let status_code = response.status().as_u16();
-                span.record("http.status_code", status_code);
-            }
-            Err(error) => {
-                tracing::error!(parent: &span, %error, "Request failed");
-            }
-        };
-
-        DefaultRootSpanBuilder::on_request_end(span, outcome);
-    }
+    let mut response = next.run(req).instrument(span.clone()).await;
+    span.record("http.status_code", response.status().as_u16());
+    response.headers_mut().insert(
+        http::header::HeaderName::from_static("x-request-id"),
+        request_id.parse().unwrap(),
+    );
+    response
 }

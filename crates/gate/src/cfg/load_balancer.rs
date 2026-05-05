@@ -31,14 +31,21 @@ impl LoadBalancer {
         protocol: &str,
         endpoints: &[Endpoint],
     ) -> Arc<dyn lb::LoadBalancer + Send + Sync> {
-        let upstreams = endpoints
+        let urls = endpoints
             .iter()
-            .map(|endpoint| {
-                let base_url = format!("{}://{}", protocol, endpoint.format());
+            .map(|endpoint| format!("{}://{}", protocol, endpoint.format()))
+            .collect::<Vec<_>>();
+        self.builder_from_urls(&urls)
+    }
+
+    pub fn builder_from_urls(&self, urls: &[String]) -> Arc<dyn lb::LoadBalancer + Send + Sync> {
+        let upstreams = urls
+            .iter()
+            .map(|base_url| {
                 let health_check_path =
                     self.liveness_probe.as_ref().map(|probe| probe.path.clone());
 
-                lb::Upstream::new(base_url, health_check_path)
+                lb::Upstream::new(base_url.clone(), health_check_path)
             })
             .collect::<Vec<_>>();
         match self.strategy {

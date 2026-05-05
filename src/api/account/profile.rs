@@ -1,9 +1,10 @@
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::ext::RequestExt;
+use crate::etc::jwt::jwt_config;
 use crate::etc::sub::Subject;
-use actix_web::{HttpRequest, HttpResponse, get, web};
-use etc::jwt::jwt_config;
+use axum::Json;
+use axum::extract::Request;
 use serde::Serialize;
 use serde_json::Value;
 use store::Store;
@@ -22,8 +23,8 @@ pub struct UserSchema {
 }
 
 #[utoipa::path(
-    context_path = "/account",
-    path = "/profile",
+    get,
+    path = "/account/profile",
     tags = ["Account"],
     summary = "Get User Profile",
     description = "Retrieve the profile information of the currently authenticated user using their access token.",
@@ -34,50 +35,46 @@ pub struct UserSchema {
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
-#[get("/profile")]
-pub async fn handler(req: HttpRequest) -> Result<HttpResponse, ErrorResponse> {
-    let token = match req.get_token() {
-        Some(t) => t,
-        None => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Token not found".to_string(),
-            )));
-        }
-    };
+pub async fn get_profile(req: Request) -> Result<Json<db::ent::User>, ErrorResponse> {
+    let token = req.get_token().ok_or_else(|| {
+        ErrorResponse::from(HttpError::Unauthorized("Token not found".to_string()))
+    })?;
 
-    let jwt = jwt_config();
-    let claims = match jwt.validate_token(&token) {
-        Ok(claims) if claims.typ.as_deref() == Some("bearer") => claims,
-        Ok(_) | Err(_) => {
+    let claims = match jwt_config().validate_token(&token) {
+        Ok(c) if c.typ.as_deref() == Some("bearer") => c,
+        _ => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
                 "Invalid Token".to_string(),
             )));
         }
     };
 
-    // Validate session store — reject revoked/logged-out tokens
+    if crate::act::token_revocation::is_revoked(&claims)
+        .await
+        .map_err(ErrorResponse::internal)?
+    {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid Token".to_string(),
+        )));
+    }
+
     let sid = claims.sid.clone().unwrap_or_default();
-    let store = etc::store::use_store();
-    let session = store.get::<Subject>(&sid).await.unwrap_or(None);
+    let session = etc::store::use_store()
+        .get::<Subject>(&sid)
+        .await
+        .unwrap_or(None);
     if session.is_none() {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Invalid Token".to_string(),
         )));
     }
 
-    let user = match crate::db::get_user_by_username(&claims.sub).await {
-        Ok(user) => user,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+    let user = crate::db::get_user_by_username(&claims.sub)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .ok_or_else(|| {
+            ErrorResponse::from(HttpError::DocumentNotFound("User not found".to_string()))
+        })?;
 
-    if user.is_none() {
-        return Err(ErrorResponse::from(HttpError::DocumentNotFound(
-            "User not found".to_string(),
-        )));
-    }
-
-    let user = user.unwrap();
-    Ok(HttpResponse::Ok().json(web::Json(user)))
+    Ok(Json(user))
 }

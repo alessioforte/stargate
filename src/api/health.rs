@@ -1,16 +1,19 @@
 use crate::err::ErrorResponse;
-use actix_web::{HttpResponse, get};
+use axum::Json;
+use axum::response::IntoResponse;
+use http::StatusCode;
 use serde::Serialize;
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, ToSchema)]
-struct Health {
+pub struct Health {
     name: &'static str,
     version: &'static str,
     status: &'static str,
 }
 
 #[utoipa::path(
+    get,
     path = "/health",
     tags = ["Health"],
     responses(
@@ -18,23 +21,30 @@ struct Health {
         (status = 503, description = "Service Unavailable", body = Health)
     )
 )]
-#[get("/health")]
-pub async fn get() -> Result<HttpResponse, ErrorResponse> {
+pub async fn get_health() -> Result<axum::response::Response, ErrorResponse> {
     let version = env!("CARGO_PKG_VERSION");
 
     let db_ok = crate::db::ping().await.is_ok();
 
     if db_ok {
-        Ok(HttpResponse::Ok().json(Health {
-            name: "stargate",
-            version,
-            status: "healthy",
-        }))
+        Ok((
+            StatusCode::OK,
+            Json(Health {
+                name: "stargate",
+                version,
+                status: "healthy",
+            }),
+        )
+            .into_response())
     } else {
-        Ok(HttpResponse::ServiceUnavailable().json(Health {
-            name: "stargate",
-            version,
-            status: "unhealthy",
-        }))
+        Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(Health {
+                name: "stargate",
+                version,
+                status: "unhealthy",
+            }),
+        )
+            .into_response())
     }
 }

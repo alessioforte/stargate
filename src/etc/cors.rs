@@ -1,25 +1,30 @@
-pub fn configure() -> actix_cors::Cors {
-    let origins = std::env::var("CORS_ORIGINS").unwrap_or_default();
+pub fn hyper_configure() -> tower_http::cors::CorsLayer {
+    use http::{Method, header};
+    use std::time::Duration;
+    use tower_http::cors::CorsLayer;
 
-    let mut cors = actix_cors::Cors::default()
-        .allowed_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-        .allowed_headers(vec![
-            actix_web::http::header::AUTHORIZATION,
-            actix_web::http::header::CONTENT_TYPE,
+    let origins_str = std::env::var("CORS_ORIGINS").unwrap_or_default();
+    let layer = CorsLayer::new()
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
         ])
-        .max_age(3600);
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .max_age(Duration::from_secs(3600));
 
-    if origins == "*" {
-        cors = cors.allow_any_origin();
-    } else if !origins.is_empty() {
-        for origin in origins.split(',') {
-            let origin = origin.trim();
-            if !origin.is_empty() {
-                cors = cors.allowed_origin(origin);
-            }
-        }
+    if origins_str == "*" {
+        layer.allow_origin(tower_http::cors::Any)
+    } else if !origins_str.is_empty() {
+        let origins: Vec<http::HeaderValue> = origins_str
+            .split(',')
+            .filter_map(|o| o.trim().parse().ok())
+            .collect();
+        layer.allow_origin(origins)
+    } else {
+        layer
     }
-    // empty CORS_ORIGINS = deny all cross-origin requests
-
-    cors
 }

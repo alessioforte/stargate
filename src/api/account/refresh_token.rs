@@ -1,66 +1,56 @@
-use super::AuthResponse;
-use super::RefreshTokenRequestBody;
+use super::{AuthResponse, RefreshTokenRequestBody, build_jwt_cookie};
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{self, jwt::jwt_config, sub::Subject};
-use actix_web::{HttpResponse, cookie::Cookie, put, web};
+use axum::Json;
+use axum::response::{IntoResponse, Response};
+use http::header::SET_COOKIE;
 use store::Store;
 
 #[utoipa::path(
-    context_path = "/account",
-    path = "/refresh-token",
+    put,
+    path = "/account/refresh-token",
     tags = ["Account"],
     summary = "Refresh Access Token",
     description = "Refresh the access token using a valid refresh token. This endpoint validates the provided refresh token and issues a new access token along with a new refresh token.",
+    request_body = RefreshTokenRequestBody,
     responses(
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized - Invalid Token", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
-#[put("/refresh-token")]
-pub async fn handler(
-    body: web::Json<RefreshTokenRequestBody>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let body = body.into_inner();
-    let refresh_token = body.refresh_token.clone();
-    let jwt = jwt_config();
-    let claims = match jwt.validate_token(&refresh_token) {
-        Ok(claims) => claims,
-        Err(_) => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid Token".to_string(),
-            )));
-        }
-    };
+pub async fn put_refresh_token(
+    Json(body): Json<RefreshTokenRequestBody>,
+) -> Result<Response, ErrorResponse> {
+    let claims = jwt_config()
+        .validate_token(&body.refresh_token)
+        .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
 
-    // Only refresh tokens (typ == "refresh") are accepted here
-    match claims.typ.as_deref() {
-        Some("refresh") => {}
-        _ => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid Token".to_string(),
-            )));
-        }
+    if claims.typ.as_deref() != Some("refresh") {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid Token".to_string(),
+        )));
     }
 
-    let sid = match claims.sid {
-        Some(sid) => sid,
-        None => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid Token".to_string(),
-            )));
-        }
-    };
+    if crate::act::token_revocation::is_revoked(&claims)
+        .await
+        .map_err(ErrorResponse::internal)?
+    {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid Token".to_string(),
+        )));
+    }
+
+    let sid = claims
+        .sid
+        .clone()
+        .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
 
     let store = etc::store::use_store();
-    let session = match store.get::<Subject>(&sid).await {
-        Ok(s) => s,
-        Err(_) => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid Token".to_string(),
-            )));
-        }
-    };
+    let session = store
+        .get::<Subject>(&sid)
+        .await
+        .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
 
     match session {
         Some(_) => {
@@ -73,76 +63,58 @@ pub async fn handler(
         }
     };
 
-    let user = match crate::db::get_user_by_username(&claims.sub).await {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid Token".to_string(),
-            )));
-        }
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+    let user = crate::db::get_user_by_username(&claims.sub)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
     let name = crate::fun::format_name(&given_name, &family_name);
 
-    let sid = ulid::Ulid::new().to_string();
-    let mut claims = jwt::Claims::default()
+    let new_sid = ulid::Ulid::new().to_string();
+    let mut new_claims = jwt::Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
-        .name(name.clone())
+        .name(name)
         .email(user.email.to_owned())
         .email_verified(true)
-        .sid(sid.clone());
+        .sid(new_sid.clone());
 
-    let is_super_admin = match crate::fun::is_super_admin_user_id(&user.id).await {
-        Ok(is_super_admin) => is_super_admin,
-        Err(e) => return Err(ErrorResponse::internal(e)),
-    };
-
+    let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
+        .await
+        .map_err(ErrorResponse::internal)?;
     if is_super_admin {
-        claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
+        new_claims = new_claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
     }
 
-    let (access_token, refresh_token) = match crate::fun::generate_tokens(claims) {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+    let (access_token, refresh_token) =
+        crate::fun::generate_tokens(new_claims).map_err(ErrorResponse::internal)?;
 
-    // Store the user ID in the session
-    let store = etc::store::use_store();
     let refresh_exp = jwt_config().refresh_exp;
     let access_exp = jwt_config().access_exp;
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
-    let subject = etc::sub::Subject::from(user.clone());
+    let subject = Subject::from(user.clone());
+    store
+        .set(&new_sid, &subject, Some(sttl))
+        .await
+        .map_err(ErrorResponse::internal)?;
 
-    match store.set(&sid, &subject, Some(sttl)).await {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    }
+    let cookie = build_jwt_cookie(&access_token, cttl);
+    let body = AuthResponse {
+        access_token,
+        refresh_token,
+        token_type: "Bearer".to_string(),
+    };
 
-    let cookie = Cookie::build("jwt", access_token.clone())
-        .path("/")
-        .http_only(true)
-        .secure(crate::etc::tls::enabled().unwrap_or(false))
-        .same_site(actix_web::cookie::SameSite::Strict)
-        .max_age(actix_web::cookie::time::Duration::seconds(cttl))
-        .finish();
-
-    Ok(HttpResponse::Ok()
-        .cookie(cookie)
-        .json(web::Json(AuthResponse {
-            access_token,
-            refresh_token,
-            token_type: "Bearer".to_string(),
-        })))
+    let mut resp = Json(body).into_response();
+    resp.headers_mut().insert(
+        SET_COOKIE,
+        cookie
+            .parse()
+            .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
+    );
+    Ok(resp)
 }

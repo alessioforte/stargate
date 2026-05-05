@@ -2,6 +2,13 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::env;
 
+pub fn issuer_from_env() -> String {
+    env::var("JWT_ISSUER").unwrap_or_else(|_| {
+        let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
+        format!("http://localhost:{port}")
+    })
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -26,7 +33,7 @@ pub struct Claims {
 impl Default for Claims {
     fn default() -> Self {
         let now = Utc::now();
-        let iss = env::var("JWT_ISSUER").unwrap_or_else(|_| "issuer".to_string());
+        let iss = issuer_from_env();
 
         Claims {
             iss,

@@ -1,6 +1,9 @@
 use crate::err::ErrorResponse;
-use actix_web::{HttpResponse, get};
-use actix_web_grants::protect;
+use crate::require_grants;
+use axum::Json;
+use axum::extract::Request;
+use axum::response::{IntoResponse, Response};
+use http::StatusCode;
 use serde::Serialize;
 #[cfg(feature = "redis")]
 use store::Store;
@@ -25,7 +28,7 @@ struct StoreStats {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct AdminHealth {
+pub struct AdminHealth {
     name: &'static str,
     version: &'static str,
     status: &'static str,
@@ -37,8 +40,8 @@ struct AdminHealth {
 }
 
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/health",
+    get,
+    path = "/admin/health",
     tags = ["Admin"],
     summary = "Service Health",
     description = "Returns detailed status of Stargate and its dependencies. Requires super_admin.",
@@ -47,12 +50,11 @@ struct AdminHealth {
         (status = 503, description = "One or more dependencies unhealthy", body = AdminHealth),
     )
 )]
-#[get("/health")]
-#[protect("super_admin")]
-pub async fn get() -> Result<HttpResponse, ErrorResponse> {
+pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, "super_admin");
+
     let version = env!("CARGO_PKG_VERSION");
 
-    // ── Database ──────────────────────────────────────────────────────────────
     let database = match crate::db::ping().await {
         Ok(_) => ComponentStatus {
             status: "healthy",
@@ -64,7 +66,6 @@ pub async fn get() -> Result<HttpResponse, ErrorResponse> {
         },
     };
 
-    // ── Redis (feature-gated) ─────────────────────────────────────────────────
     #[cfg(feature = "redis")]
     let redis = {
         let store = crate::etc::store::use_store();
@@ -80,7 +81,6 @@ pub async fn get() -> Result<HttpResponse, ErrorResponse> {
         }
     };
 
-    // ── Memory store stats (feature-gated) ────────────────────────────────────
     #[cfg(feature = "memory")]
     let store_stats = {
         let store = crate::etc::store::use_store();
@@ -92,7 +92,6 @@ pub async fn get() -> Result<HttpResponse, ErrorResponse> {
         }
     };
 
-    // ── Overall status ────────────────────────────────────────────────────────
     let all_healthy = database.status == "healthy" && {
         #[cfg(feature = "redis")]
         {
@@ -117,9 +116,11 @@ pub async fn get() -> Result<HttpResponse, ErrorResponse> {
         store: store_stats,
     };
 
-    if all_healthy {
-        Ok(HttpResponse::Ok().json(body))
+    let status = if all_healthy {
+        StatusCode::OK
     } else {
-        Ok(HttpResponse::ServiceUnavailable().json(body))
-    }
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    Ok((status, Json(body)).into_response())
 }

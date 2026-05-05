@@ -1,89 +1,97 @@
+use super::{SUPER_ADMIN, extract_json, extract_query};
 use crate::err::{ErrorResponse, HttpError};
-use actix_web::{HttpResponse, get, put, web};
-use actix_web_grants::protect;
-use gate::cfg::Config;
+use crate::require_grants;
+use axum::Json;
+use axum::extract::Request;
+use axum::response::{IntoResponse, Response};
+use gate::cfg::{Config, RuntimeConfig};
+use http::header::CONTENT_TYPE;
 use serde::Deserialize;
 use std::env;
 use std::fs;
 
-#[derive(Deserialize)]
-struct Params {
+#[derive(Deserialize, Debug, utoipa::IntoParams)]
+struct ConfigFormatQuery {
     format: Option<String>,
 }
 
+const CONFIG_GRANT: &str = "configurations";
+
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/configurations",
+    get,
+    path = "/admin/configurations",
     tags = ["Admin", "Configurations"],
     responses(
-        (status = 200, description = "OK", body = Config),
-        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 200, description = "OK"),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Config file not found", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-#[get("")]
-#[protect(any("super_admin", "configurations"))]
-pub async fn get_configurations(query: web::Query<Params>) -> Result<HttpResponse, ErrorResponse> {
-    let format = query.format.clone().unwrap_or("json".to_string());
+pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, CONFIG_GRANT);
+
+    let query: ConfigFormatQuery = extract_query(&req)?;
+    let format = query.format.unwrap_or_else(|| "json".to_string());
+
     let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
     let config_filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
     let path = format!("{}/{}", config_path, config_filename);
-    let content = fs::read_to_string(path);
-    let content = match content {
-        Ok(content) => content,
-        Err(_) => {
-            return Err(HttpError::NotFound("Config file not found".to_string()).into());
-        }
-    };
+
+    let content = fs::read_to_string(&path).map_err(|_| {
+        ErrorResponse::from(HttpError::NotFound("Config file not found".to_string()))
+    })?;
 
     match format.as_str() {
-        "yaml" => Ok(HttpResponse::Ok()
-            .content_type("application/yaml")
-            .body(content)),
+        "yaml" => Ok(http::Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, "application/yaml")
+            .body(axum::body::Body::from(content))
+            .unwrap()
+            .into_response()),
         _ => {
-            let config: Config = serde_yaml_bw::from_str(&content).map_err(|e| {
-                HttpError::InternalServerError(format!("Failed to parse config file: {}", e))
+            let config = RuntimeConfig::from_yaml_str(&content).map_err(|e| {
+                ErrorResponse::from(HttpError::InternalServerError(format!(
+                    "Failed to parse config file: {}",
+                    e
+                )))
             })?;
-            let json_data = serde_json::to_string(&config).unwrap();
-            Ok(HttpResponse::Ok()
-                .content_type("application/json")
-                .body(json_data))
+            Ok(Json(config.raw).into_response())
         }
     }
 }
 
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/configurations",
+    put,
+    path = "/admin/configurations",
     tags = ["Admin", "Configurations"],
     responses(
         (status = 200, description = "OK"),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
-        (status = 404, description = "Config file not found", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-#[put("")]
-#[protect(any("super_admin", "configurations"))]
-pub async fn update_configurations(
-    config: web::Json<Config>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let cfg = config.into_inner();
-    cfg.to_file(&format!(
-        "{}/{}",
-        env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string()),
-        env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string())
-    ));
-    Ok(HttpResponse::Ok().finish())
-}
+pub async fn update_configurations(req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, CONFIG_GRANT);
 
-pub fn routes() -> actix_web::Scope {
-    web::scope("/configurations")
-        .service(get_configurations)
-        .service(update_configurations)
+    let config: Config = extract_json(req).await?;
+    RuntimeConfig::from_raw(config.clone()).map_err(|e| {
+        ErrorResponse::from(HttpError::BadRequest(format!(
+            "Invalid gateway config: {}",
+            e
+        )))
+    })?;
+
+    let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
+    let config_filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
+    config.to_file(&format!("{}/{}", config_path, config_filename));
+
+    Ok(http::Response::builder()
+        .status(200)
+        .body(axum::body::Body::empty())
+        .unwrap()
+        .into_response())
 }

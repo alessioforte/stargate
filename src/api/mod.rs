@@ -1,23 +1,39 @@
-mod account;
-mod admin;
-mod docs;
-mod health;
-mod mid;
-mod oauth;
-mod signup;
+pub mod account;
+pub mod admin;
+pub mod docs;
+pub mod gateway;
+pub mod health;
+pub mod oauth;
+pub mod signup;
+pub mod well_known;
 
-use actix_web::{guard, middleware::from_fn, web::ServiceConfig};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::api::health::get,
-        crate::api::admin::configurations::get_configurations,
-        crate::api::admin::configurations::update_configurations,
+        crate::api::health::get_health,
+        crate::api::well_known::get_jwks,
+        crate::api::well_known::get_oauth_metadata,
+        crate::api::docs::get_api_doc,
+        crate::api::signup::request::post_signup,
+        crate::api::signup::verification::get_signup,
+        crate::api::signup::complete::put_signup,
+        crate::api::oauth::post_state,
+        crate::api::oauth::post_introspect,
+        crate::api::oauth::post_revoke,
+        crate::api::oauth::github::get_github,
+        crate::api::oauth::google::get_google,
+        crate::api::account::login::post_login,
+        crate::api::account::logout::delete_logout,
+        crate::api::account::profile::get_profile,
+        crate::api::account::refresh_token::put_refresh_token,
+        crate::api::account::credentials::forgot::post_credentials,
+        crate::api::account::credentials::reset::put_credentials,
+        crate::api::admin::health::get_admin_health,
         crate::api::admin::users::get_users,
-        crate::api::admin::users::create_user,
         crate::api::admin::users::get_user,
+        crate::api::admin::users::create_user,
         crate::api::admin::users::update_user,
         crate::api::admin::users::patch_user,
         crate::api::admin::users::update_user_attrs,
@@ -27,9 +43,14 @@ use utoipa::OpenApi;
         crate::api::admin::users::get_organization_users,
         crate::api::admin::users::add_user_to_organization,
         crate::api::admin::users::remove_user_from_organization,
+        crate::api::admin::organizations::get_organizations,
+        crate::api::admin::organizations::get_organization,
+        crate::api::admin::organizations::create_organization,
+        crate::api::admin::organizations::update_organization,
+        crate::api::admin::organizations::delete_organization,
         crate::api::admin::api_keys::get_api_keys,
-        crate::api::admin::api_keys::create_api_key,
         crate::api::admin::api_keys::get_api_key,
+        crate::api::admin::api_keys::create_api_key,
         crate::api::admin::api_keys::delete_api_key,
         crate::api::admin::api_keys::revoke_api_key,
         crate::api::admin::api_keys::update_api_key_attrs,
@@ -45,23 +66,8 @@ use utoipa::OpenApi;
         crate::api::admin::service_accounts::create_service_account,
         crate::api::admin::service_accounts::update_service_account,
         crate::api::admin::service_accounts::delete_service_account,
-        crate::api::admin::organizations::get_organizations,
-        crate::api::admin::organizations::get_organization,
-        crate::api::admin::organizations::create_organization,
-        crate::api::admin::organizations::update_organization,
-        crate::api::admin::organizations::delete_organization,
-        crate::api::account::profile::handler,
-        crate::api::account::login::handler,
-        crate::api::account::refresh_token::handler,
-        crate::api::account::logout::handler,
-        crate::api::account::credentials::forgot::handler,
-        crate::api::account::credentials::reset::handler,
-        crate::api::oauth::github::login,
-        crate::api::oauth::google::login,
-        crate::api::signup::request::handler,
-        crate::api::signup::verification::handler,
-        crate::api::signup::complete::handler,
-        crate::api::docs::get_api_doc,
+        crate::api::admin::configurations::get_configurations,
+        crate::api::admin::configurations::update_configurations,
     ),
     info(
         title = "Stargate APIs ✨",
@@ -70,31 +76,308 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
-const API_PREFIXES: &[&str] = &[
-    "/health", "/docs", "/account", "/oauth", "/signup", "/admin",
-];
+pub fn router() -> axum::Router {
+    use axum::routing::get;
 
-pub fn configure(cfg: &mut ServiceConfig) {
-    let base_path = std::env::var("API_BASE_PATH").unwrap_or_else(|_| "".to_string());
+    axum::Router::new()
+        .route("/health", get(health::get_health))
+        .route("/.well-known/jwks.json", get(well_known::get_jwks))
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(well_known::get_oauth_metadata),
+        )
+        .route("/docs", get(docs::get_api_doc))
+        .merge(signup::router())
+        .merge(oauth::router())
+        .merge(account::router())
+        .merge(admin::router())
+}
 
-    let mut scope = actix_web::web::scope(&base_path)
-        .wrap(from_fn(mid::middleware))
-        .service(health::get)
-        .service(docs::routes())
-        .service(account::routes())
-        .service(oauth::routes())
-        .service(signup::routes())
-        .service(admin::routes());
+#[cfg(test)]
+mod tests {
+    use super::router;
+    use axum::body::Body;
+    use http::{
+        Request, StatusCode,
+        header::{CACHE_CONTROL, CONTENT_TYPE},
+    };
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
 
-    // When the base path is empty, the scope matches all requests, which causes
-    // gateway requests to go through the API middleware. Add a guard so only
-    // requests targeting known API paths enter this scope.
-    if base_path.is_empty() {
-        scope = scope.guard(guard::fn_guard(|ctx| {
-            let path = ctx.head().uri.path();
-            API_PREFIXES.iter().any(|prefix| path.starts_with(prefix))
-        }));
+    async fn send(uri: &str) -> http::Response<Body> {
+        router()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
     }
 
-    cfg.service(scope);
+    async fn send_req(req: Request<Body>) -> http::Response<Body> {
+        router().oneshot(req).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn health_returns_json() {
+        let resp = send("/health").await;
+        // /health pings DB which is not initialized in tests; expect 503.
+        assert!(matches!(
+            resp.status(),
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert_eq!(
+            resp.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["name"], "stargate");
+    }
+
+    #[tokio::test]
+    async fn jwks_returns_200() {
+        let resp = send("/.well-known/jwks.json").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            resp.headers().get(CACHE_CONTROL).unwrap(),
+            "public, max-age=300"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["keys"].is_array());
+    }
+
+    #[tokio::test]
+    async fn oauth_authorization_server_metadata_returns_200() {
+        let resp = send("/.well-known/oauth-authorization-server").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["issuer"].is_string());
+        assert!(json.get("authorization_endpoint").is_none());
+        assert!(json.get("token_endpoint").is_none());
+        assert!(json["introspection_endpoint"].is_string());
+        assert!(json["revocation_endpoint"].is_string());
+        assert!(json["jwks_uri"].is_string());
+        assert_eq!(json["response_types_supported"], serde_json::json!([]));
+        assert_eq!(json["grant_types_supported"], serde_json::json!([]));
+        assert!(json.get("token_endpoint_auth_methods_supported").is_none());
+    }
+
+    #[tokio::test]
+    async fn docs_returns_openapi_json() {
+        let resp = send("/docs").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["openapi"].is_string());
+        assert!(json["paths"]["/health"].is_object());
+        assert!(json["paths"]["/.well-known/jwks.json"].is_object());
+        assert!(json["paths"]["/.well-known/oauth-authorization-server"].is_object());
+        assert!(json["paths"]["/signup"].is_object());
+        assert!(json["paths"]["/oauth/state"].is_object());
+        assert!(json["paths"]["/oauth/introspect"].is_object());
+        assert!(json["paths"]["/oauth/revoke"].is_object());
+        assert!(json["paths"]["/oauth/github"].is_object());
+        assert!(json["paths"]["/oauth/google"].is_object());
+        assert!(json["paths"]["/account/login"].is_object());
+        assert!(json["paths"]["/account/logout"].is_object());
+        assert!(json["paths"]["/account/profile"].is_object());
+        assert!(json["paths"]["/account/refresh-token"].is_object());
+        assert!(json["paths"]["/account/credentials"].is_object());
+        assert!(json["paths"]["/admin/health"].is_object());
+        assert!(json["paths"]["/admin/users"].is_object());
+        assert!(json["paths"]["/admin/users/{id}"].is_object());
+        assert!(json["paths"]["/admin/users/{id}/attrs"].is_object());
+        assert!(json["paths"]["/admin/users/{id}/organizations"].is_object());
+        assert!(json["paths"]["/admin/users/{id}/organizations/{org_id}"].is_object());
+        assert!(json["paths"]["/admin/users/organizations/{org_id}"].is_object());
+        assert!(json["paths"]["/admin/organizations"].is_object());
+        assert!(json["paths"]["/admin/organizations/{id}"].is_object());
+        assert!(json["paths"]["/admin/api-keys"].is_object());
+        assert!(json["paths"]["/admin/api-keys/{id}"].is_object());
+        assert!(json["paths"]["/admin/api-keys/{id}/revoke"].is_object());
+        assert!(json["paths"]["/admin/api-keys/{id}/attrs"].is_object());
+        assert!(json["paths"]["/admin/admin-keys"].is_object());
+        assert!(json["paths"]["/admin/admin-keys/{id}"].is_object());
+        assert!(json["paths"]["/admin/admin-keys/{id}/revoke"].is_object());
+        assert!(json["paths"]["/admin/admin-keys/{id}/permissions"].is_object());
+        assert!(json["paths"]["/admin/service-accounts"].is_object());
+        assert!(json["paths"]["/admin/service-accounts/{id}"].is_object());
+        assert!(json["paths"]["/admin/configurations"].is_object());
+    }
+
+    #[tokio::test]
+    async fn admin_health_missing_grant_forbidden() {
+        let resp = send("/admin/health").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_users_missing_grant_forbidden() {
+        let resp = send("/admin/users").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_user_by_id_missing_grant_forbidden() {
+        let resp = send("/admin/users/abc").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_organizations_missing_grant_forbidden() {
+        let resp = send("/admin/organizations").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_organization_by_id_missing_grant_forbidden() {
+        let resp = send("/admin/organizations/abc").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_api_keys_missing_grant_forbidden() {
+        let resp = send("/admin/api-keys").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_api_key_by_id_missing_grant_forbidden() {
+        let resp = send("/admin/api-keys/abc").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_admin_keys_missing_grant_forbidden() {
+        let resp = send("/admin/admin-keys").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_admin_key_by_id_missing_grant_forbidden() {
+        let resp = send("/admin/admin-keys/abc").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_service_accounts_missing_grant_forbidden() {
+        let resp = send("/admin/service-accounts").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_configurations_missing_grant_forbidden() {
+        let resp = send("/admin/configurations").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn signup_get_missing_token_rejected() {
+        let resp = send("/signup").await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn signup_post_missing_body_rejected() {
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri("/signup")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn oauth_github_missing_query_rejected() {
+        let resp = send("/oauth/github").await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn oauth_google_missing_query_rejected() {
+        let resp = send("/oauth/google").await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn oauth_introspect_missing_grant_forbidden() {
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri("/oauth/introspect")
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("token=abc"))
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn oauth_revoke_missing_grant_forbidden() {
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri("/oauth/revoke")
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("token=abc"))
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn account_logout_missing_token_unauthorized() {
+        let req = Request::builder()
+            .method(http::Method::DELETE)
+            .uri("/account/logout")
+            .body(Body::empty())
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn account_profile_missing_token_unauthorized() {
+        let resp = send("/account/profile").await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn account_refresh_token_missing_body_rejected() {
+        let req = Request::builder()
+            .method(http::Method::PUT)
+            .uri("/account/refresh-token")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn signup_put_missing_content_type_rejected() {
+        let req = Request::builder()
+            .method(http::Method::PUT)
+            .uri("/signup")
+            .body(Body::from("{}"))
+            .unwrap();
+        let resp = send_req(req).await;
+        // axum Json rejects missing/wrong content-type with 415
+        assert!(matches!(
+            resp.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE | StatusCode::BAD_REQUEST
+        ));
+    }
 }

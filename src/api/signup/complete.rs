@@ -2,9 +2,10 @@ use super::SignupCompleteRequestBody;
 use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context;
+use crate::etc::reqctx::take_audit_context_from;
 use crate::fun::format_name;
-use actix_web::{HttpRequest, HttpResponse, put, web};
+use axum::Json;
+use axum::extract::{FromRequest, Request};
 use db::ent::{CredentialType, Profile};
 use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
@@ -12,9 +13,10 @@ use smtp::Smtp;
 use tracing::error;
 
 #[utoipa::path(
-    context_path = "/signup",
-    path = "",
+    put,
+    path = "/signup",
     tags = ["Signup"],
+    request_body = SignupCompleteRequestBody,
     responses(
         (status = 200, description = "OK", body = MessageResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
@@ -23,87 +25,63 @@ use tracing::error;
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
-#[put("")]
-pub async fn handler(
-    req: HttpRequest,
-    body: web::Json<SignupCompleteRequestBody>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = take_audit_context(&req);
-    let body = body.into_inner();
+pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
+    let ctx = take_audit_context_from(req.extensions_mut());
 
-    let jwt = crate::etc::jwt::jwt_config();
-    let claim = match jwt.validate_token(&body.token) {
-        Ok(claim) => claim,
-        Err(e) => return Err(ErrorResponse::from(HttpError::BadRequest(e.to_string()))),
-    };
+    let Json(body) = Json::<SignupCompleteRequestBody>::from_request(req, &())
+        .await
+        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
 
-    let sid = match claim.sub_id {
-        Some(sid) => sid,
-        None => {
-            return Err(ErrorResponse::from(HttpError::BadRequest(
-                "Invalid token".to_string(),
-            )));
-        }
-    };
+    let jwt_cfg = crate::etc::jwt::jwt_config();
+    let claim = jwt_cfg
+        .validate_token(&body.token)
+        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
 
-    let signup = match act::get_signup_request(&sid).await {
-        Ok(signup) => signup,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+    let sid = claim
+        .sub_id
+        .clone()
+        .ok_or_else(|| ErrorResponse::from(HttpError::BadRequest("Invalid token".to_string())))?;
 
-    if signup.is_none() {
-        return Err(ErrorResponse::from(HttpError::NotFound(
-            "Signup request not found".to_string(),
-        )));
-    }
+    let signup = act::get_signup_request(&sid)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .ok_or_else(|| {
+            ErrorResponse::from(HttpError::NotFound("Signup request not found".to_string()))
+        })?;
 
-    let signup = signup.unwrap();
-
-    if claim.email.is_some() && signup != claim.email.unwrap() {
+    if let Some(ref claim_email) = claim.email
+        && &signup != claim_email
+    {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Email does not match".to_string(),
         )));
     }
 
-    // Check if a user already exists with this email
-    let user = match crate::db::get_user_by_username(&signup).await {
-        Ok(user) => user,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
-
-    if user.is_some() {
-        // If a user already exists with this email, we return a conflict error
+    if crate::db::get_user_by_username(&signup)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .is_some()
+    {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "User already exists".to_string(),
         )));
     }
 
-    let user = match crate::db::get_user_by_username(&body.nickname).await {
-        Ok(user) => user,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
-
-    if user.is_some() {
-        // If a user already exists with this nickname, we return a conflict error
+    if crate::db::get_user_by_username(&body.nickname)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .is_some()
+    {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "Nickname already exists".to_string(),
         )));
     }
 
-    let password_policies = PasswordPolicy::standard();
-    let validate_password = password_policies.validate(&body.password);
-    if validate_password.is_err() {
-        let message = validate_password.unwrap_err();
-        return Err(ErrorResponse::from(HttpError::BadRequest(message)));
-    }
+    PasswordPolicy::standard()
+        .validate(&body.password)
+        .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
 
-    let user = Profile::new(signup, body.nickname.clone())
+    let profile = Profile::new(signup, body.nickname.clone())
         .given_name(Some(body.given_name.clone()))
         .family_name(Some(body.family_name.clone()))
         .phone_number(body.phone_number.clone())
@@ -111,29 +89,26 @@ pub async fn handler(
 
     let password = Hash::encode(&body.password).unwrap();
 
-    match crate::db::create_user(user, CredentialType::Password, &password, ctx).await {
-        Ok(user) => {
-            let _ = act::delete_signup_request(&sid).await;
+    let user = crate::db::create_user(profile, CredentialType::Password, &password, ctx)
+        .await
+        .map_err(ErrorResponse::internal)?;
 
-            let given_name = user.given_name.clone().unwrap_or_default();
-            let family_name = user.family_name.clone().unwrap_or_default();
+    let _ = act::delete_signup_request(&sid).await;
 
-            let sender = Smtp::new()
-                .template(smtp::Template::SignupCompleted)
-                .to(user.email)
-                .name(Some(format_name(&given_name, &family_name)))
-                .build()
-                .and_then(|smtp| smtp.send());
-
-            match sender {
-                Ok(_) => {}
-                Err(e) => error!("Could not send email: {:?}", e),
-            }
-
-            let message = MessageResponse::new("User created successfully", "signup_completed");
-
-            Ok(HttpResponse::Ok().json(web::Json(message)))
-        }
-        Err(e) => Err(ErrorResponse::internal(e)),
+    let given_name = user.given_name.clone().unwrap_or_default();
+    let family_name = user.family_name.clone().unwrap_or_default();
+    if let Err(e) = Smtp::new()
+        .template(smtp::Template::SignupCompleted)
+        .to(user.email)
+        .name(Some(format_name(&given_name, &family_name)))
+        .build()
+        .and_then(|smtp| smtp.send())
+    {
+        error!("Could not send email: {:?}", e);
     }
+
+    Ok(Json(MessageResponse::new(
+        "User created successfully",
+        "signup_completed",
+    )))
 }

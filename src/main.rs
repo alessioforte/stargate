@@ -6,28 +6,32 @@ mod db;
 mod err;
 mod etc;
 mod fun;
-mod gtw;
 
-use crate::etc::{cfg, cors, gate, geoip, headers, jwt, log, logo, profile, store, tls};
-use actix_web::{
-    App, HttpServer,
-    middleware::{self, TrailingSlash},
-};
+use crate::etc::{cors, gate, geoip, headers, jwt, log, logo, profile, run, store, tls};
+
+use axum::Extension;
+use axum::middleware::from_fn;
 use dotenvy::dotenv;
-
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tower::service_fn;
+use tower_http::{compression::CompressionLayer, normalize_path::NormalizePathLayer};
 use tracing::info;
-use tracing_actix_web::TracingLogger;
 
 // =^.^=
 // 🦀
 // Stargate ✨
 // 🚀
-
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
+    run().await
+}
+
+pub async fn run() -> std::io::Result<()> {
     println!("{}", logo::LOGO);
 
     dotenv().ok();
+    tls::install_crypto_provider();
     let _guard = log::init();
 
     let cli = cli::parse();
@@ -39,7 +43,9 @@ async fn main() -> std::io::Result<()> {
 
     let version = env!("CARGO_PKG_VERSION");
     let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
-    let addrs = format!("0.0.0.0:{}", port);
+    let addr: SocketAddr = format!("0.0.0.0:{}", port)
+        .parse()
+        .expect("Invalid listen address");
     let tls_enabled = tls::enabled()?;
     let runtime_profile = profile::validate_runtime_profile()?;
     let shutdown_timeout_secs = act::server_shutdown_timeout_secs();
@@ -62,28 +68,26 @@ async fn main() -> std::io::Result<()> {
         std::process::exit(1);
     }
 
-    let gcfg = gate::init();
+    let gate = gate::init();
 
-    let server = HttpServer::new(move || {
-        App::new()
-            .app_data(gcfg.clone())
-            .wrap(middleware::NormalizePath::new(TrailingSlash::Trim))
-            .wrap(middleware::Compress::default())
-            .wrap(headers::configure())
-            .wrap(TracingLogger::<log::StargateRootSpanBuilder>::new())
-            .wrap(cors::configure())
-            .configure(cfg::configure)
-            .configure(api::configure)
-            .configure(gtw::configure)
-    })
-    .shutdown_timeout(shutdown_timeout_secs)
-    .shutdown_signal(act::shutdown_signal()?);
+    let app = api::router()
+        .layer(from_fn(etc::mid::rate_limit_middleware))
+        .fallback_service(service_fn(api::gateway::service))
+        .layer(Extension(Arc::clone(&gate)))
+        .layer(from_fn(headers::security_headers_middleware))
+        .layer(from_fn(log::trace_middleware))
+        .layer(cors::hyper_configure())
+        .layer(CompressionLayer::new())
+        .layer(NormalizePathLayer::trim_trailing_slash());
+
+    let shutdown = act::shutdown_signal()?;
+
+    info!("Server listening on {}", addr);
 
     let result = if tls_enabled {
-        let tls = tls::builder()?;
-        server.bind_openssl(addrs, tls)?.run().await
+        run::tls(app, addr, shutdown, shutdown_timeout_secs).await
     } else {
-        server.bind(addrs)?.run().await
+        run::plain(app, addr, shutdown).await
     };
 
     info!("Server stopped, running shutdown hooks...");

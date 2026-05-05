@@ -1,12 +1,12 @@
 use crate::etc::{ac::Env, geoip};
-use actix_web::HttpMessage;
 use chrono::{DateTime, Utc};
 use db::ent::AuditContext;
-use gate::cfg::service::EnvProfile;
+use gate::cfg::EnvProfile;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use ulid::Ulid;
 
+#[derive(Clone)]
 pub struct RequestContext {
     request_id: Box<str>,
     started_at: DateTime<Utc>,
@@ -85,33 +85,28 @@ impl RequestContext {
     }
 }
 
-pub fn request_id(message: &impl HttpMessage) -> String {
-    message
-        .extensions()
+pub fn request_id_from(extensions: &http::Extensions) -> String {
+    extensions
         .get::<RequestContext>()
         .map(|ctx| ctx.request_id().to_string())
         .unwrap_or_else(|| Ulid::new().to_string())
 }
 
-pub fn take_audit_context(message: &impl HttpMessage) -> AuditContext {
-    if let Some(ctx) = message.extensions_mut().remove::<AuditContext>() {
+pub fn take_audit_context_from(extensions: &mut http::Extensions) -> AuditContext {
+    if let Some(ctx) = extensions.remove::<AuditContext>() {
         return ctx;
     }
-
-    message
-        .extensions()
+    extensions
         .get::<RequestContext>()
         .map(RequestContext::audit_context)
         .unwrap_or_else(AuditContext::anonymous)
 }
 
-pub fn build_env(message: &impl HttpMessage, profile: EnvProfile) -> Env {
-    if let Some(env) = message.extensions_mut().remove::<Env>() {
+pub fn build_env_from(extensions: &mut http::Extensions, profile: EnvProfile) -> Env {
+    if let Some(env) = extensions.remove::<Env>() {
         return env;
     }
-
-    message
-        .extensions()
+    extensions
         .get::<RequestContext>()
         .map(|ctx| ctx.env(profile))
         .unwrap_or_default()

@@ -6,13 +6,44 @@ use std::sync::Arc;
 pub struct Limit {
     pub name: String,
     #[serde(flatten)]
-    params: Strategy,
+    spec: LimitSpec,
 }
 
 impl Default for Limit {
     fn default() -> Self {
         Limit {
             name: "default".to_string(),
+            spec: LimitSpec::default(),
+        }
+    }
+}
+
+impl Limit {
+    pub fn new(name: impl Into<String>, spec: LimitSpec) -> Self {
+        Self {
+            name: name.into(),
+            spec,
+        }
+    }
+
+    pub fn build(
+        self,
+        state: Arc<lim::State>,
+        clock: Arc<lim::CachedClock>,
+    ) -> Box<dyn lim::RateLimit> {
+        self.spec.factory(state, clock)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LimitSpec {
+    #[serde(flatten)]
+    params: Strategy,
+}
+
+impl Default for LimitSpec {
+    fn default() -> Self {
+        Self {
             params: Strategy::Gcra {
                 max_burst: 2,
                 replenish_1_per: "5s".to_string(),
@@ -21,9 +52,9 @@ impl Default for Limit {
     }
 }
 
-impl Limit {
-    pub fn build(
-        self,
+impl LimitSpec {
+    fn factory(
+        &self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
     ) -> Box<dyn lim::RateLimit> {

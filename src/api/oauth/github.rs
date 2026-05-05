@@ -1,11 +1,15 @@
+use super::build_jwt_cookie;
 use crate::act::oauth_state;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
-use crate::etc::reqctx::take_audit_context;
+use crate::etc::reqctx::take_audit_context_from;
 use crate::fun::format_name;
-use actix_web::{HttpRequest, HttpResponse, cookie::Cookie, get, web};
+use axum::Json;
+use axum::extract::{Query, Request};
+use axum::response::{IntoResponse, Response};
 use db::ent::{CredentialType, Profile};
+use http::header::SET_COOKIE;
 use jwt::Claims;
 use oauth::github::{get_github_oauth_token, get_github_user};
 use serde::{Deserialize, Serialize};
@@ -20,16 +24,20 @@ pub struct QueryCode {
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct AuthResponse {
-    access_token: String,
-    refresh_token: String,
+pub struct AuthResponse {
+    pub access_token: String,
+    pub refresh_token: String,
 }
 
 #[utoipa::path(
-    context_path = "/oauth",
-    path = "/github",
+    get,
+    path = "/oauth/github",
     tags = ["OAuth"],
     description = "Login with GitHub",
+    params(
+        ("code" = String, Query, description = "Authorization code"),
+        ("state" = String, Query, description = "OAuth state token"),
+    ),
     responses(
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -37,12 +45,12 @@ struct AuthResponse {
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
     )
 )]
-#[get("")]
-pub async fn login(
-    req: HttpRequest,
-    query: web::Query<QueryCode>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = take_audit_context(&req);
+pub async fn get_github(mut req: Request) -> Result<Response, ErrorResponse> {
+    let ctx = take_audit_context_from(req.extensions_mut());
+
+    let Query(query): Query<QueryCode> = Query::try_from_uri(req.uri())
+        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+
     let code = &query.code;
     let state = &query.state;
 
@@ -138,7 +146,6 @@ pub async fn login(
         ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
     })?;
 
-    // Store session
     let store = etc::store::use_store();
     let subject = etc::sub::Subject::from(user.clone());
     let refresh_exp = jwt_config().refresh_exp;
@@ -151,22 +158,18 @@ pub async fn login(
         ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
     })?;
 
-    let cookie = Cookie::build("jwt", access_token.clone())
-        .path("/")
-        .http_only(true)
-        .secure(crate::etc::tls::enabled().unwrap_or(false))
-        .same_site(actix_web::cookie::SameSite::Strict)
-        .max_age(actix_web::cookie::time::Duration::seconds(cttl))
-        .finish();
+    let cookie = build_jwt_cookie(&access_token, cttl);
+    let body = AuthResponse {
+        access_token,
+        refresh_token,
+    };
 
-    Ok(HttpResponse::Ok()
-        .cookie(cookie)
-        .json(web::Json(AuthResponse {
-            access_token,
-            refresh_token,
-        })))
-}
-
-pub fn routes() -> actix_web::Scope {
-    web::scope("/github").service(login)
+    let mut resp = Json(body).into_response();
+    resp.headers_mut().insert(
+        SET_COOKIE,
+        cookie
+            .parse()
+            .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
+    );
+    Ok(resp)
 }

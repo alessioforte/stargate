@@ -1,27 +1,18 @@
-use super::ApiDoc;
 use crate::err::ErrorResponse;
 use crate::fun::get_base_url;
-use actix_web::{HttpResponse, Scope, get};
+use axum::Json;
 use utoipa::{OpenApi, openapi::Server};
 
 #[utoipa::path(
-    context_path = "/docs",
-    path = "",
+    get,
+    path = "/docs",
     tags = ["Documentation"],
     responses(
         (status = 200, description = "OK")
     )
 )]
-#[get("")]
-pub async fn get_api_doc() -> Result<HttpResponse, ErrorResponse> {
-    let mut doc = ApiDoc::openapi();
-
-    let base_url = get_base_url();
-    doc.servers = Some(vec![Server::new(base_url)]);
-
-    Ok(HttpResponse::Ok().json(doc))
-}
-
-pub fn routes() -> Scope {
-    Scope::new("/docs").service(get_api_doc)
+pub async fn get_api_doc() -> Result<Json<utoipa::openapi::OpenApi>, ErrorResponse> {
+    let mut doc = super::ApiDoc::openapi();
+    doc.servers = Some(vec![Server::new(get_base_url())]);
+    Ok(Json(doc))
 }

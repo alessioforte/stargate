@@ -1,33 +1,34 @@
+use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context;
-use actix_web::{HttpRequest, HttpResponse, delete, get, post, put, web};
-use actix_web_grants::protect;
+use crate::etc::reqctx::take_audit_context_from;
+use crate::require_grants;
+use axum::Json;
+use axum::extract::Request;
+use axum::response::{IntoResponse, Response};
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
+const ORG_GRANT: &str = "organizations";
 
-/// Schema only representation of Organization for OpenAPI docs
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct Organization {
-    id: i64,
-    name: String,
-    description: Option<String>,
-    attrs: Option<serde_json::Value>,
+pub struct OrganizationSchema {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub attrs: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ListOrganizationsQuery {
-    /// Maximum number of organizations to return (default: 20, max: 100)
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Number of organizations to skip (default: 0)
     #[serde(default)]
     pub offset: Option<i64>,
-    /// Search query to filter organizations by name or description
     #[serde(default)]
     pub q: Option<String>,
 }
@@ -59,116 +60,104 @@ pub struct UpdateOrganizationRequest {
     pub attrs: Option<serde_json::Value>,
 }
 
-/// Get all organizations with pagination and optional search
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/organizations",
+    get,
+    path = "/admin/organizations",
     tags = ["Admin", "Organizations"],
     params(ListOrganizationsQuery),
     responses(
-        (status = 200, description = "List of organizations retrieved successfully", body = PaginatedResponse<Organization>),
+        (status = 200, description = "List of organizations retrieved successfully", body = PaginatedResponse<OrganizationSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-#[get("")]
-#[protect(any("super_admin", "organizations"))]
-pub async fn get_organizations(
-    query: web::Query<ListOrganizationsQuery>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1);
+pub async fn get_organizations(req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
+
+    let query: ListOrganizationsQuery = extract_query(&req)?;
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    let (organizations, total) = match &query.q {
-        Some(search_query) if !search_query.trim().is_empty() => {
-            let organizations = crate::db::search_organizations(search_query, limit, offset)
+    let (orgs, total) = match &query.q {
+        Some(q) if !q.trim().is_empty() => {
+            let orgs = crate::db::search_organizations(q, limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::internal(e))?;
-            let total = crate::db::count_search_organizations(search_query)
+                .map_err(ErrorResponse::internal)?;
+            let total = crate::db::count_search_organizations(q)
                 .await
-                .map_err(|e| ErrorResponse::internal(e))?;
-            (organizations, total)
+                .map_err(ErrorResponse::internal)?;
+            (orgs, total)
         }
         _ => {
-            let organizations = crate::db::get_all_organizations(limit, offset)
+            let orgs = crate::db::get_all_organizations(limit, offset)
                 .await
-                .map_err(|e| ErrorResponse::internal(e))?;
+                .map_err(ErrorResponse::internal)?;
             let total = crate::db::count_organizations()
                 .await
-                .map_err(|e| ErrorResponse::internal(e))?;
-            (organizations, total)
+                .map_err(ErrorResponse::internal)?;
+            (orgs, total)
         }
     };
 
-    let response = PaginatedResponse {
-        data: organizations,
+    Ok(Json(PaginatedResponse {
+        data: orgs,
         total,
         limit,
         offset,
-    };
-
-    Ok(HttpResponse::Ok().json(response))
+    })
+    .into_response())
 }
 
-/// Get an organization by ID
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/organizations/{id}",
+    get,
+    path = "/admin/organizations/{id}",
     tags = ["Admin", "Organizations"],
-    params(
-        ("id" = String, Path, description = "Organization ID")
-    ),
+    params(("id" = String, Path, description = "Organization ID")),
     responses(
-        (status = 200, description = "Organization retrieved successfully", body = Organization),
+        (status = 200, description = "Organization retrieved successfully", body = OrganizationSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Organization not found", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-#[get("/{id}")]
-#[protect(any("super_admin", "organizations"))]
-pub async fn get_organization(params: web::Path<String>) -> Result<HttpResponse, ErrorResponse> {
-    let id = params.into_inner();
+pub async fn get_organization(mut req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
 
-    let organization = match crate::db::get_organization_by_id(&id).await {
-        Ok(Some(org)) => org,
-        Ok(None) => {
-            return Err(ErrorResponse::from(HttpError::NotFound(format!(
+    let id: String = extract_path(&mut req).await?;
+
+    let org = crate::db::get_organization_by_id(&id)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .ok_or_else(|| {
+            ErrorResponse::from(HttpError::NotFound(format!(
                 "Organization with id '{}' not found",
                 id
-            ))));
-        }
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+            )))
+        })?;
 
-    Ok(HttpResponse::Ok().json(organization))
+    Ok(Json(org).into_response())
 }
 
-/// Create a new organization
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/organizations",
+    post,
+    path = "/admin/organizations",
     tags = ["Admin", "Organizations"],
     request_body = CreateOrganizationRequest,
     responses(
-        (status = 201, description = "Organization created successfully", body = Organization),
+        (status = 201, description = "Organization created successfully", body = OrganizationSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-#[post("")]
-#[protect(any("super_admin", "organizations"))]
-pub async fn create_organization(
-    req: HttpRequest,
-    payload: web::Json<CreateOrganizationRequest>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = take_audit_context(&req);
+pub async fn create_organization(mut req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
+
+    let ctx = take_audit_context_from(req.extensions_mut());
+    let payload: CreateOrganizationRequest = extract_json(req).await?;
 
     if payload.name.trim().is_empty() {
         return Err(ErrorResponse::from(HttpError::BadRequest(
@@ -176,34 +165,26 @@ pub async fn create_organization(
         )));
     }
 
-    let organization = match crate::db::create_organization(
+    let org = crate::db::create_organization(
         &payload.name,
         payload.description.as_deref(),
         payload.attrs.as_ref(),
         ctx,
     )
     .await
-    {
-        Ok(org) => org,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+    .map_err(ErrorResponse::internal)?;
 
-    Ok(HttpResponse::Created().json(organization))
+    Ok((StatusCode::CREATED, Json(org)).into_response())
 }
 
-/// Update an organization
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/organizations/{id}",
+    put,
+    path = "/admin/organizations/{id}",
     tags = ["Admin", "Organizations"],
-    params(
-        ("id" = String, Path, description = "Organization ID")
-    ),
+    params(("id" = String, Path, description = "Organization ID")),
     request_body = UpdateOrganizationRequest,
     responses(
-        (status = 200, description = "Organization updated successfully", body = Organization),
+        (status = 200, description = "Organization updated successfully", body = OrganizationSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -211,16 +192,12 @@ pub async fn create_organization(
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-#[put("/{id}")]
-#[protect(any("super_admin", "organizations"))]
-pub async fn update_organization(
-    req: HttpRequest,
-    params: web::Path<String>,
-    payload: web::Json<UpdateOrganizationRequest>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = take_audit_context(&req);
+pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
 
-    let id = params.into_inner();
+    let ctx = take_audit_context_from(req.extensions_mut());
+    let id: String = extract_path(&mut req).await?;
+    let payload: UpdateOrganizationRequest = extract_json(req).await?;
 
     if payload.name.trim().is_empty() {
         return Err(ErrorResponse::from(HttpError::BadRequest(
@@ -228,15 +205,18 @@ pub async fn update_organization(
         )));
     }
 
-    // Check if organization exists
-    if let Ok(None) = crate::db::get_organization_by_id(&id).await {
+    if crate::db::get_organization_by_id(&id)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .is_none()
+    {
         return Err(ErrorResponse::from(HttpError::NotFound(format!(
             "Organization with id '{}' not found",
             id
         ))));
     }
 
-    let organization = match crate::db::update_organization(
+    let org = crate::db::update_organization(
         &id,
         &payload.name,
         payload.description.as_deref(),
@@ -244,24 +224,16 @@ pub async fn update_organization(
         ctx,
     )
     .await
-    {
-        Ok(org) => org,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+    .map_err(ErrorResponse::internal)?;
 
-    Ok(HttpResponse::Ok().json(organization))
+    Ok(Json(org).into_response())
 }
 
-/// Delete an organization
 #[utoipa::path(
-    context_path = "/admin",
-    path = "/organizations/{id}",
+    delete,
+    path = "/admin/organizations/{id}",
     tags = ["Admin", "Organizations"],
-    params(
-        ("id" = String, Path, description = "Organization ID")
-    ),
+    params(("id" = String, Path, description = "Organization ID")),
     responses(
         (status = 204, description = "Organization deleted successfully"),
         (status = 401, description = "Unauthorized"),
@@ -270,40 +242,33 @@ pub async fn update_organization(
         (status = 500, description = "Internal server error")
     )
 )]
-#[delete("/{id}")]
-#[protect(any("super_admin", "organizations"))]
-pub async fn delete_organization(
-    req: HttpRequest,
-    params: web::Path<String>,
-) -> Result<HttpResponse, ErrorResponse> {
-    let ctx = take_audit_context(&req);
+pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
 
-    let id = params.into_inner();
+    let ctx = take_audit_context_from(req.extensions_mut());
+    let id: String = extract_path(&mut req).await?;
 
-    if let Ok(None) = crate::db::get_organization_by_id(&id).await {
+    if crate::db::get_organization_by_id(&id)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .is_none()
+    {
         return Err(ErrorResponse::from(HttpError::NotFound(format!(
             "Organization with id '{}' not found",
             id
         ))));
     }
 
-    match crate::db::delete_organization(&id, ctx).await {
-        Ok(()) => {}
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    }
+    crate::db::delete_organization(&id, ctx)
+        .await
+        .map_err(ErrorResponse::internal)?;
 
-    let message = MessageResponse::new("Organization deleted successfully", "organization_deleted");
-
-    Ok(HttpResponse::NoContent().json(message))
-}
-
-pub fn routes() -> actix_web::Scope {
-    web::scope("/organizations")
-        .service(get_organizations)
-        .service(create_organization)
-        .service(get_organization)
-        .service(update_organization)
-        .service(delete_organization)
+    Ok((
+        StatusCode::NO_CONTENT,
+        Json(MessageResponse::new(
+            "Organization deleted successfully",
+            "organization_deleted",
+        )),
+    )
+        .into_response())
 }

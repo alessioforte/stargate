@@ -10,14 +10,16 @@ license.workspace = true
 ace = { path = "../ace" }
 arc-swap = "1.8.1"
 chrono = "0.4.44"
+indexmap = { version = "2.12.0", features = ["serde"] }
 lb = { path = "../lb" }
 lim = { path = "../lim" }
 matchit = "0.9.1"
+regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_yaml_bw = "2.5.4"
 tools = { path = "../tools" }
 tracing = "0.1.44"
-utoipa = { version = "5.3.1", features = ["actix_extras", "yaml"] }
+utoipa = { version = "5.3.1", features = ["axum_extras", "yaml"] }
 
 [features]
 default = []

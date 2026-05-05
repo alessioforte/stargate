@@ -2,44 +2,39 @@ use super::SignupRequestBody;
 use crate::{
     act,
     err::{ErrorResponse, HttpError},
-    etc::{self, msg::MessageResponse},
+    etc::msg::MessageResponse,
 };
-use actix_web::{HttpResponse, post, web};
+use axum::Json;
 use smtp::{Smtp, Template};
 
 #[utoipa::path(
-    context_path = "/signup",
-    path = "",
+    post,
+    path = "/signup",
     tags = ["Signup"],
+    request_body = SignupRequestBody,
     responses(
         (status = 200, description = "OK", body = MessageResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 409, description = "Conflict", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
-
     )
 )]
-#[post("")]
-pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse, ErrorResponse> {
-    let body = body.into_inner();
-
-    let user = match crate::db::get_user_by_username(&body.email).await {
-        Ok(user) => user,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
-
+pub async fn post_signup(
+    Json(body): Json<SignupRequestBody>,
+) -> Result<Json<MessageResponse>, ErrorResponse> {
+    let user = crate::db::get_user_by_username(&body.email)
+        .await
+        .map_err(ErrorResponse::internal)?;
     if user.is_some() {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "User already exists".to_string(),
         )));
     }
 
-    let sr = act::check_email_verification_request(&body.email)
+    let pending = act::check_email_verification_request(&body.email)
         .await
-        .map_err(|e| ErrorResponse::internal(e))?;
-    if sr.is_some() {
+        .map_err(ErrorResponse::internal)?;
+    if pending.is_some() {
         return Err(ErrorResponse::from(HttpError::Conflict(
             "Signup request already exists".to_string(),
         )));
@@ -47,39 +42,27 @@ pub async fn handler(body: web::Json<SignupRequestBody>) -> Result<HttpResponse,
 
     let sid = act::create_email_verification_request(&body.email)
         .await
-        .map_err(|e| ErrorResponse::internal(e))?;
+        .map_err(ErrorResponse::internal)?;
 
     let claim = jwt::Claims::default()
         .subject("signup_request".to_string())
-        .sid(sid.clone())
+        .sid(sid)
         .email(body.email.clone());
 
-    let jwt = crate::etc::jwt::jwt_config();
-    let token = match jwt.generate_token(&claim) {
-        Ok(token) => token,
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    };
+    let token = crate::etc::jwt::jwt_config()
+        .generate_token(&claim)
+        .map_err(ErrorResponse::internal)?;
 
-    let sender = Smtp::new()
+    Smtp::new()
         .template(Template::SignupRequest)
         .to(body.email.clone())
         .token(token)
         .build()
-        .and_then(|smtp| smtp.send());
+        .and_then(|smtp| smtp.send())
+        .map_err(ErrorResponse::internal)?;
 
-    match sender {
-        Ok(_) => {
-            let message = etc::msg::MessageResponse::new(
-                "A signup request has been sent to your email. Please check your inbox.",
-                "signup_request",
-            );
-
-            Ok(HttpResponse::Ok().json(web::Json(message)))
-        }
-        Err(e) => {
-            return Err(ErrorResponse::internal(e));
-        }
-    }
+    Ok(Json(MessageResponse::new(
+        "A signup request has been sent to your email. Please check your inbox.",
+        "signup_request",
+    )))
 }

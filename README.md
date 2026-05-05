@@ -23,6 +23,18 @@ docker build --build-arg STARGATE_PROFILE=cluster -t stargate:cluster .
 
 At runtime, Stargate validates `STARGATE_RUNTIME_PROFILE` against the compiled backend set and fails fast if they do not match.
 
+## Gateway Config
+
+`config.yaml` uses the v2 schema:
+
+```yaml
+schema: stargate/v2alpha1
+```
+
+The v2 format models `upstreams`, `services`, `middlewares`, `policies`, and `routers` separately. It supports header/query/cookie/source-IP routing, regex and template paths, explicit route priority, fallback direct responses, path rewriting, weighted services, mirror traffic, and failover on selected response status codes.
+
+See [docs/config-v2alpha1.md](docs/config-v2alpha1.md) for examples and runtime notes.
+
 ## CLI
 
 Stargate includes a built-in CLI for administrative tasks. The server checks CLI arguments first, and when a command is provided it runs the CLI flow instead of starting the HTTP server.

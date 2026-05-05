@@ -1,9 +1,9 @@
 use crate::etc::store::use_store;
-use actix_web::web::Data;
-use gate::{Gate, cfg::Config};
+use gate::{
+    Gate,
+    cfg::{RuntimeConfig, Service},
+};
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
-use rustls::{ClientConfig, RootCertStore};
-use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::{
     collections::HashMap,
     env,
@@ -17,6 +17,14 @@ use std::{
 };
 use tokio::runtime::Handle;
 use tracing::{error, info};
+
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::TokioExecutor,
+};
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pemfile::{certs, pkcs8_private_keys};
 
 fn get_config_dir() -> String {
     env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string())
@@ -41,12 +49,12 @@ pub fn get_policies_path() -> String {
     path
 }
 
-fn load_config() -> Config {
+fn load_config() -> RuntimeConfig {
     let config_file_path = get_config_path();
-    gate::cfg::Config::from_file(&config_file_path)
+    RuntimeConfig::from_file(&config_file_path).expect("Unable to load gateway config")
 }
 
-pub fn init() -> Data<Gate> {
+pub fn init() -> std::sync::Arc<Gate> {
     let store = use_store();
     let config = get_config();
     let config_file_path = get_config_path();
@@ -55,7 +63,7 @@ pub fn init() -> Data<Gate> {
     let gate = Gate::new(Arc::new(store.clone())).build(config.as_ref(), &policies_path);
     watch_config_file(&config_file_path, &gate);
     watch_policies_file(&policies_path, &gate);
-    Data::new(gate)
+    Arc::new(gate)
 }
 
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
@@ -64,7 +72,7 @@ static CONFIG_CACHE: OnceLock<RwLock<CachedConfig>> = OnceLock::new();
 #[derive(Clone)]
 struct CachedConfig {
     version: u64,
-    config: Arc<Config>,
+    config: Arc<RuntimeConfig>,
 }
 
 fn config_cache() -> &'static RwLock<CachedConfig> {
@@ -76,7 +84,7 @@ fn config_cache() -> &'static RwLock<CachedConfig> {
     })
 }
 
-fn get_config() -> Arc<Config> {
+fn get_config() -> Arc<RuntimeConfig> {
     let cache = config_cache().read().expect("Config cache lock poisoned");
     cache.config.clone()
 }
@@ -88,20 +96,28 @@ fn get_config_snapshot() -> CachedConfig {
         .clone()
 }
 
-fn update_cached_config(config: Config) -> u64 {
+fn update_cached_config(config: RuntimeConfig) -> u64 {
     let mut cache = config_cache().write().expect("Config cache lock poisoned");
     cache.version += 1;
     cache.config = Arc::new(config);
     cache.version
 }
 
-/// Returns the full file content so change detection stays deterministic.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn set_config_for_test(config: RuntimeConfig) {
+    let version = update_cached_config(config);
+    CONFIG_VERSION.store(version, Ordering::SeqCst);
+    let mut pool = hyper_client_pool()
+        .write()
+        .expect("Hyper client pool lock poisoned");
+    *pool = None;
+}
+
 fn file_content(path: &str) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
-/// Returns true only for data-modification events (write/save),
-/// filtering out access, open, metadata, and rename events.
 fn is_write_event(kind: &EventKind) -> bool {
     matches!(
         kind,
@@ -171,7 +187,13 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         }
                         last_content = current_content;
 
-                        let config = Config::from_file(&file_path);
+                        let config = match RuntimeConfig::from_file(&file_path) {
+                            Ok(config) => config,
+                            Err(error) => {
+                                error!(%error, "Configuration file changed but did not validate; keeping previous config");
+                                continue;
+                            }
+                        };
                         let config_version = update_cached_config(config.clone());
                         CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                         info!(config_version, "Configuration file changed, reloading...");
@@ -225,146 +247,130 @@ pub fn get_config_version() -> u64 {
     CONFIG_VERSION.load(Ordering::SeqCst)
 }
 
-struct LocalClients {
+type HyperConnector = hyper_rustls::HttpsConnector<HttpConnector>;
+pub type HyperClient = Client<HyperConnector, axum::body::Body>;
+
+#[derive(Clone)]
+struct SharedHyperClients {
     version: u64,
-    clients: HashMap<String, awc::Client>,
-    streaming_clients: HashMap<String, awc::Client>,
+    clients: HashMap<String, HyperClient>,
 }
 
-thread_local! {
-    static CLIENT_POOL: std::cell::RefCell<Option<LocalClients>> = const { std::cell::RefCell::new(None) };
+static HYPER_CLIENT_POOL: OnceLock<RwLock<Option<SharedHyperClients>>> = OnceLock::new();
+
+fn hyper_client_pool() -> &'static RwLock<Option<SharedHyperClients>> {
+    HYPER_CLIENT_POOL.get_or_init(|| RwLock::new(None))
 }
 
-struct BuiltClients {
-    clients: HashMap<String, awc::Client>,
-    streaming_clients: HashMap<String, awc::Client>,
+struct BuiltHyperClients {
+    clients: HashMap<String, HyperClient>,
 }
 
-fn service_has_streaming_route(svc: &gate::cfg::service::Service) -> bool {
-    svc.routes
-        .as_ref()
-        .map(|rs| rs.iter().any(|r| r.streaming.is_some()))
-        .unwrap_or(false)
-}
+fn build_hyper_client(timeout: Duration, tls_config: Option<&ClientConfig>) -> HyperClient {
+    crate::etc::tls::install_crypto_provider();
 
-fn build_clients(config: &Config) -> BuiltClients {
-    let mut new_clients = HashMap::new();
-    let mut new_streaming_clients = HashMap::new();
+    let mut connector = HttpConnector::new();
+    connector.enforce_http(false);
+    connector.set_connect_timeout(Some(timeout));
 
-    let tls_config = if let Some(mtls) = &config.mtls {
-        Some(build_mtls(mtls))
-    } else {
-        None
+    let https = match tls_config {
+        Some(tls_config) => HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config.clone())
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(connector),
+        None => HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(connector),
     };
 
-    for svc in &config.services {
-        let timeout = svc.connect_timeout.unwrap_or(30);
-        let use_tls = tls_config.is_some() && svc.protocol == gate::protocol::Protocol::Https;
+    Client::builder(TokioExecutor::new()).build(https)
+}
 
-        let client = if use_tls
-            && let Some(tls_cfg) = &tls_config
-        {
-            let connector = awc::Connector::new().rustls_0_23(Arc::new(tls_cfg.clone()));
-            awc::Client::builder()
-                .timeout(Duration::from_secs(timeout))
-                .connector(connector)
-                .finish()
-        } else {
-            awc::Client::builder()
-                .timeout(Duration::from_secs(timeout))
-                .finish()
+fn build_hyper_clients(config: &RuntimeConfig) -> BuiltHyperClients {
+    let mut clients = HashMap::new();
+
+    let tls_config = config.mtls().map(build_mtls);
+
+    for (name, service) in &config.raw.http.services {
+        let Service::LoadBalancer { upstream } = service else {
+            continue;
         };
-        new_clients.insert(svc.name.clone(), client);
+        let Some(upstream) = config.raw.http.upstreams.get(upstream) else {
+            continue;
+        };
 
-        if service_has_streaming_route(svc) {
-            let streaming_client = if use_tls
-                && let Some(tls_cfg) = &tls_config
-            {
-                let connector = awc::Connector::new().rustls_0_23(Arc::new(tls_cfg.clone()));
-                awc::Client::builder()
-                    .disable_timeout()
-                    .connector(connector)
-                    .finish()
-            } else {
-                awc::Client::builder().disable_timeout().finish()
-            };
-            new_streaming_clients.insert(svc.name.clone(), streaming_client);
-        }
+        let timeout = upstream
+            .transport
+            .as_ref()
+            .and_then(|transport| transport.connect_timeout.as_deref())
+            .and_then(|duration| tools::parse_duration(duration).ok())
+            .and_then(|duration| duration.to_std().ok())
+            .unwrap_or_else(|| Duration::from_secs(30));
+        let use_tls = tls_config.is_some()
+            && upstream
+                .targets
+                .iter()
+                .any(|target| target.url.starts_with("https://"));
+        let tls = use_tls.then(|| tls_config.as_ref()).flatten();
+
+        let client = build_hyper_client(timeout, tls);
+        clients.insert(name.clone(), client);
     }
-    BuiltClients {
-        clients: new_clients,
-        streaming_clients: new_streaming_clients,
-    }
+
+    BuiltHyperClients { clients }
 }
 
 fn update_clients_if_needed() {
     let config_snapshot = get_config_snapshot();
-    CLIENT_POOL.with(|pool| {
-        let mut pool_ref = pool.borrow_mut();
-        let needs_update = match &*pool_ref {
-            Some(local_clients) => local_clients.version != config_snapshot.version,
-            None => true,
-        };
-        if needs_update {
-            let built = build_clients(config_snapshot.config.as_ref());
-            *pool_ref = Some(LocalClients {
-                version: config_snapshot.version,
-                clients: built.clients,
-                streaming_clients: built.streaming_clients,
-            });
-        }
-    });
+    let mut pool = hyper_client_pool()
+        .write()
+        .expect("Hyper client pool lock poisoned");
+
+    let needs_update = match &*pool {
+        Some(shared_clients) => shared_clients.version != config_snapshot.version,
+        None => true,
+    };
+
+    if needs_update {
+        let built = build_hyper_clients(config_snapshot.config.as_ref());
+        *pool = Some(SharedHyperClients {
+            version: config_snapshot.version,
+            clients: built.clients,
+        });
+    }
 }
 
-pub fn get_client(service_name: &str) -> Option<awc::Client> {
+pub fn get_client(service_name: &str) -> Option<HyperClient> {
     update_clients_if_needed();
-
-    let mut client_opt = None;
-    CLIENT_POOL.with(|pool| {
-        if let Some(local_clients) = &*pool.borrow() {
-            if let Some(client) = local_clients.clients.get(service_name) {
-                client_opt = Some(client.clone());
-            }
-        }
-    });
-    client_opt
+    hyper_client_pool()
+        .read()
+        .expect("Hyper client pool lock poisoned")
+        .as_ref()
+        .and_then(|pool| pool.clients.get(service_name))
+        .cloned()
 }
 
-pub fn get_streaming_client(service_name: &str) -> Option<awc::Client> {
-    update_clients_if_needed();
-
-    let mut client_opt = None;
-    CLIENT_POOL.with(|pool| {
-        if let Some(local_clients) = &*pool.borrow() {
-            if let Some(client) = local_clients.streaming_clients.get(service_name) {
-                client_opt = Some(client.clone());
-            }
-        }
-    });
-    client_opt
-}
-
-fn build_mtls(mtls: &gate::cfg::mtls::MtlsConfig) -> ClientConfig {
-    // read ca cert file
+fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
     let mut ca_cert_file = std::io::BufReader::new(
         std::fs::File::open(&mtls.ca_cert_path).expect("Unable to open CA cert file"),
     );
 
-    // load ca certs
     let ca_certs = certs(&mut ca_cert_file)
         .collect::<Result<Vec<_>, _>>()
         .expect("Unable to read CA certs");
 
-    // create root cert store
     let mut root_store = RootCertStore::empty();
-    // add ca certs to root store
     for cert in ca_certs {
         root_store
             .add(cert)
             .expect("Unable to add CA cert to root store");
     }
 
-    // read client cert file
     let mut client_cert_file = std::io::BufReader::new(
         std::fs::File::open(&mtls.client_cert_path).expect("Unable to open client cert file"),
     );
@@ -372,7 +378,6 @@ fn build_mtls(mtls: &gate::cfg::mtls::MtlsConfig) -> ClientConfig {
         .collect::<Result<Vec<_>, _>>()
         .expect("Unable to read client certs");
 
-    // read client key file
     let mut client_key_file = std::io::BufReader::new(
         std::fs::File::open(&mtls.client_key_path).expect("Unable to open client key file"),
     );
@@ -384,7 +389,6 @@ fn build_mtls(mtls: &gate::cfg::mtls::MtlsConfig) -> ClientConfig {
         panic!("No client private keys found");
     }
 
-    // Configure TLS with mTLS
     let tls_config = ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_client_auth_cert(client_certs, client_keys.remove(0).into())

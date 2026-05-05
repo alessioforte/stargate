@@ -1,12 +1,12 @@
 pub mod types;
 
-use actix_web::error::{JsonPayloadError, QueryPayloadError};
-use actix_web::http::StatusCode;
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use types::{Code, ErrorCode};
 use utoipa::ToSchema;
 
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
     #[error("A Content-Type header is missing. Accepted values for the Content-Type header are: {}",
@@ -31,6 +31,8 @@ pub enum HttpError {
     Forbidden(String),
     #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
+    PayloadTooLarge(String),
     #[error("{0}")]
     InternalServerError(String),
     #[error("{0}")]
@@ -62,6 +64,7 @@ impl ErrorCode for HttpError {
             HttpError::NotFound(_) => Code::NotFound,
             HttpError::Conflict(_) => Code::Conflict,
             HttpError::BadRequest(_) => Code::BadRequest,
+            HttpError::PayloadTooLarge(_) => Code::PayloadTooLarge,
             HttpError::BadGateway(_) => Code::BadGateway,
             HttpError::TooManyRequests(_) => Code::TooManyRequests,
             HttpError::ServiceUnavailable(_) => Code::ServiceUnavailable,
@@ -70,39 +73,9 @@ impl ErrorCode for HttpError {
     }
 }
 
-impl From<HttpError> for actix_web::Error {
-    fn from(err: HttpError) -> Self {
-        actix_web::Error::from(ErrorResponse::from(err))
-    }
-}
-
-impl From<actix_web::error::PayloadError> for HttpError {
-    fn from(error: actix_web::error::PayloadError) -> Self {
-        match error {
-            actix_web::error::PayloadError::Incomplete(_) => {
-                HttpError::Payload(PayloadError::Payload(ActixPayloadError::IncompleteError))
-            }
-            _ => HttpError::Payload(PayloadError::Payload(ActixPayloadError::OtherError(error))),
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ActixPayloadError {
-    #[error("The provided payload is incomplete and cannot be parsed")]
-    IncompleteError,
-    #[error(transparent)]
-    OtherError(actix_web::error::PayloadError),
-}
-
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadError {
-    #[error(transparent)]
-    Payload(ActixPayloadError),
-    #[error(transparent)]
-    Json(JsonPayloadError),
-    #[error(transparent)]
-    Query(QueryPayloadError),
     #[error("The json payload provided is malformed. `{0}`.")]
     MalformedPayload(serde_json::error::Error),
     #[error("A json payload is missing.")]
@@ -114,68 +87,10 @@ pub enum PayloadError {
 impl ErrorCode for PayloadError {
     fn error_code(&self) -> Code {
         match self {
-            PayloadError::Payload(e) => match e {
-                ActixPayloadError::IncompleteError => Code::BadRequest,
-                ActixPayloadError::OtherError(error) => match error {
-                    actix_web::error::PayloadError::EncodingCorrupted => Code::Internal,
-                    actix_web::error::PayloadError::Overflow => Code::PayloadTooLarge,
-                    actix_web::error::PayloadError::UnknownLength => Code::Internal,
-                    actix_web::error::PayloadError::Http2Payload(_) => Code::Internal,
-                    actix_web::error::PayloadError::Io(_) => Code::Internal,
-                    _ => Code::Internal,
-                },
-            },
-            PayloadError::Json(err) => match err {
-                JsonPayloadError::Overflow { .. } => Code::PayloadTooLarge,
-                JsonPayloadError::ContentType => Code::UnsupportedMediaType,
-                JsonPayloadError::Payload(actix_web::error::PayloadError::Overflow) => {
-                    Code::PayloadTooLarge
-                }
-                JsonPayloadError::Payload(_) => Code::BadRequest,
-                JsonPayloadError::Deserialize(_) => Code::BadRequest,
-                JsonPayloadError::Serialize(_) => Code::Internal,
-                _ => Code::Internal,
-            },
-            PayloadError::Query(err) => match err {
-                QueryPayloadError::Deserialize(_) => Code::BadRequest,
-                _ => Code::Internal,
-            },
             PayloadError::MissingPayload => Code::MissingPayload,
             PayloadError::MalformedPayload(_) => Code::MalformedPayload,
             PayloadError::ReceivePayload(_) => Code::Internal,
         }
-    }
-}
-
-impl From<JsonPayloadError> for PayloadError {
-    fn from(other: JsonPayloadError) -> Self {
-        match other {
-            JsonPayloadError::Deserialize(e)
-                if e.classify() == serde_json::error::Category::Eof
-                    && e.line() == 1
-                    && e.column() == 0 =>
-            {
-                Self::MissingPayload
-            }
-            JsonPayloadError::Deserialize(e)
-                if e.classify() != serde_json::error::Category::Data =>
-            {
-                Self::MalformedPayload(e)
-            }
-            _ => Self::Json(other),
-        }
-    }
-}
-
-impl From<QueryPayloadError> for PayloadError {
-    fn from(other: QueryPayloadError) -> Self {
-        Self::Query(other)
-    }
-}
-
-impl From<PayloadError> for actix_web::Error {
-    fn from(other: PayloadError) -> Self {
-        actix_web::Error::from(ErrorResponse::from(other))
     }
 }
 
@@ -217,6 +132,13 @@ impl ErrorResponse {
         self.headers.push((key.to_string(), value.to_string()));
         self
     }
+
+    fn body_json(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_else(|_| {
+            br#"{"message":"internal error","code":"internal_server_error","type":"internal"}"#
+                .to_vec()
+        })
+    }
 }
 
 impl fmt::Display for ErrorResponse {
@@ -236,28 +158,35 @@ where
     }
 }
 
-impl actix_web::error::ResponseError for ErrorResponse {
-    fn error_response(&self) -> actix_web::HttpResponse {
-        let json = serde_json::to_vec(self).unwrap_or_else(|_| {
-            br#"{"message":"internal error","code":"internal_server_error","type":"internal"}"#
-                .to_vec()
-        });
-        let mut builder = actix_web::HttpResponseBuilder::new(self.status_code());
-        builder.content_type("application/json");
+impl axum::response::IntoResponse for ErrorResponse {
+    fn into_response(self) -> axum::response::Response {
+        use http::header::{CONTENT_TYPE, HeaderName, HeaderValue, RETRY_AFTER};
+
+        let json = self.body_json();
+        let mut builder = http::Response::builder()
+            .status(self.code)
+            .header(CONTENT_TYPE, "application/json");
 
         if self.code == StatusCode::SERVICE_UNAVAILABLE {
-            builder.insert_header((actix_web::http::header::RETRY_AFTER, "10"));
+            builder = builder.header(RETRY_AFTER, "10");
         }
 
-        // Add custom headers
         for (key, value) in &self.headers {
-            builder.insert_header((key.as_str(), value.as_str()));
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(key.as_bytes()),
+                HeaderValue::from_str(value),
+            ) {
+                builder = builder.header(name, val);
+            }
         }
 
-        builder.body(json)
-    }
-
-    fn status_code(&self) -> StatusCode {
-        self.code
+        builder
+            .body(axum::body::Body::from(json))
+            .unwrap_or_else(|_| {
+                axum::response::Response::new(axum::body::Body::from(
+                    br#"{"message":"internal error","code":"internal_server_error","type":"internal"}"#
+                        .as_slice(),
+                ))
+            })
     }
 }
