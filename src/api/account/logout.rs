@@ -29,6 +29,10 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
 
     let sid = claims.sid.clone().unwrap_or_default();
+    crate::act::token_revocation::revoke_claims(&claims)
+        .await
+        .map_err(ErrorResponse::internal)?;
+
     use_store()
         .delete(&sid)
         .await

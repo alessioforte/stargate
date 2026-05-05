@@ -20,6 +20,8 @@ use utoipa::OpenApi;
         crate::api::signup::verification::get_signup,
         crate::api::signup::complete::put_signup,
         crate::api::oauth::post_state,
+        crate::api::oauth::post_introspect,
+        crate::api::oauth::post_revoke,
         crate::api::oauth::github::get_github,
         crate::api::oauth::google::get_google,
         crate::api::account::login::post_login,
@@ -160,6 +162,8 @@ mod tests {
         assert!(json["issuer"].is_string());
         assert!(json.get("authorization_endpoint").is_none());
         assert!(json.get("token_endpoint").is_none());
+        assert!(json["introspection_endpoint"].is_string());
+        assert!(json["revocation_endpoint"].is_string());
         assert!(json["jwks_uri"].is_string());
         assert_eq!(json["response_types_supported"], serde_json::json!([]));
         assert_eq!(json["grant_types_supported"], serde_json::json!([]));
@@ -182,6 +186,8 @@ mod tests {
         assert!(json["paths"]["/.well-known/oauth-authorization-server"].is_object());
         assert!(json["paths"]["/signup"].is_object());
         assert!(json["paths"]["/oauth/state"].is_object());
+        assert!(json["paths"]["/oauth/introspect"].is_object());
+        assert!(json["paths"]["/oauth/revoke"].is_object());
         assert!(json["paths"]["/oauth/github"].is_object());
         assert!(json["paths"]["/oauth/google"].is_object());
         assert!(json["paths"]["/account/login"].is_object());
@@ -305,6 +311,30 @@ mod tests {
     async fn oauth_google_missing_query_rejected() {
         let resp = send("/oauth/google").await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn oauth_introspect_missing_grant_forbidden() {
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri("/oauth/introspect")
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("token=abc"))
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn oauth_revoke_missing_grant_forbidden() {
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri("/oauth/revoke")
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from("token=abc"))
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

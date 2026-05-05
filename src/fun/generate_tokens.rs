@@ -6,12 +6,14 @@ pub fn generate_tokens(claims: jwt::Claims) -> Result<(String, String), jwt::Jwt
 
     let mut jwt_access_claims = claims.clone();
     jwt_access_claims.typ = Some("bearer".to_string());
+    jwt_access_claims.jti = Some(ulid::Ulid::new().to_string());
 
     let mut jwt_refresh_claims = jwt::Claims::default()
         .subject(claims.sub.clone())
         .sub_id(claims.sub_id.unwrap_or_default())
         .typ("refresh".to_string())
-        .sid(claims.sid.unwrap_or_default());
+        .sid(claims.sid.unwrap_or_default())
+        .jti(ulid::Ulid::new().to_string());
 
     let now = Utc::now();
 

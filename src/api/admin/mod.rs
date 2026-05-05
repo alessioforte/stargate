@@ -40,21 +40,32 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
             .ok()
             .filter(|c| c.typ.as_deref() == Some("bearer"))
         {
-            let sid = claims.sid.clone().unwrap_or_default();
-            let store = crate::etc::store::use_store();
-            let session = store.get::<Subject>(&sid).await.unwrap_or(None);
-            if session.is_some()
-                && let Some(user_id) = claims.sub_id.as_deref()
-            {
-                match crate::db::is_super_admin_user_id(user_id).await {
-                    Ok(true) => {
-                        ctx = ctx.with_actor(db::ent::ActorType::Admin, Some(user_id.to_string()));
-                        grants.insert(SUPER_ADMIN.to_string());
+            match crate::act::token_revocation::is_revoked(&claims).await {
+                Ok(false) => {
+                    let sid = claims.sid.clone().unwrap_or_default();
+                    let store = crate::etc::store::use_store();
+                    let session = store.get::<Subject>(&sid).await.unwrap_or(None);
+                    if session.is_some()
+                        && let Some(user_id) = claims.sub_id.as_deref()
+                    {
+                        match crate::db::is_super_admin_user_id(user_id).await {
+                            Ok(true) => {
+                                ctx = ctx.with_actor(
+                                    db::ent::ActorType::Admin,
+                                    Some(user_id.to_string()),
+                                );
+                                grants.insert(SUPER_ADMIN.to_string());
+                            }
+                            Ok(false) => {}
+                            Err(err) => {
+                                tracing::error!("Failed to resolve super admin grants: {}", err);
+                            }
+                        }
                     }
-                    Ok(false) => {}
-                    Err(err) => {
-                        tracing::error!("Failed to resolve super admin grants: {}", err);
-                    }
+                }
+                Ok(true) => {}
+                Err(err) => {
+                    tracing::error!("Failed to check token revocation state: {}", err);
                 }
             }
         }

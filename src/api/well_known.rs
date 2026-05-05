@@ -42,6 +42,8 @@ pub struct OAuthAuthorizationServerMetadata {
     authorization_endpoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     token_endpoint: Option<String>,
+    introspection_endpoint: String,
+    revocation_endpoint: String,
     jwks_uri: String,
     response_types_supported: Vec<String>,
     grant_types_supported: Vec<String>,
@@ -180,6 +182,8 @@ pub async fn get_oauth_metadata() -> Result<Json<OAuthAuthorizationServerMetadat
         issuer,
         authorization_endpoint: None,
         token_endpoint: None,
+        introspection_endpoint: endpoint_url(&base_url, "/oauth/introspect"),
+        revocation_endpoint: endpoint_url(&base_url, "/oauth/revoke"),
         jwks_uri: endpoint_url(&base_url, "/.well-known/jwks.json"),
         response_types_supported: Vec::new(),
         grant_types_supported: Vec::new(),

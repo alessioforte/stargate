@@ -9,6 +9,7 @@ use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use store::Store;
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
@@ -265,18 +266,22 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     let ctx = take_audit_context_from(req.extensions_mut());
     let id: String = extract_path(&mut req).await?;
 
-    if crate::db::get_api_key_by_id(&id)
+    let Some(api_key) = crate::db::get_api_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
-        .is_none()
-    {
+    else {
         return Err(ErrorResponse::from(HttpError::NotFound(format!(
             "API key with id '{}' not found",
             id
         ))));
-    }
+    };
 
     crate::db::delete_api_key(&id, ctx)
+        .await
+        .map_err(ErrorResponse::internal)?;
+
+    crate::etc::store::use_store()
+        .delete(&api_key.key_hash)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -323,6 +328,11 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     }
 
     crate::db::revoke_api_key(&id, ctx)
+        .await
+        .map_err(ErrorResponse::internal)?;
+
+    crate::etc::store::use_store()
+        .delete(&api_key.key_hash)
         .await
         .map_err(ErrorResponse::internal)?;
 

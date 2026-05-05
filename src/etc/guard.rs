@@ -79,6 +79,15 @@ pub async fn verify_jwt<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> {
         return None;
     }
 
+    match crate::act::token_revocation::is_revoked(&claims).await {
+        Ok(false) => {}
+        Ok(true) => return None,
+        Err(e) => {
+            error!("Failed to check token revocation state: {}", e);
+            return None;
+        }
+    }
+
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
     let session = match store.get::<Subject>(&sid).await {

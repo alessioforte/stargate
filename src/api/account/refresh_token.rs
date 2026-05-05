@@ -32,6 +32,15 @@ pub async fn put_refresh_token(
         )));
     }
 
+    if crate::act::token_revocation::is_revoked(&claims)
+        .await
+        .map_err(ErrorResponse::internal)?
+    {
+        return Err(ErrorResponse::from(HttpError::Unauthorized(
+            "Invalid Token".to_string(),
+        )));
+    }
+
     let sid = claims
         .sid
         .clone()
