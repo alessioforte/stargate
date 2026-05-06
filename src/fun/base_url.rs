@@ -4,7 +4,7 @@ pub fn get_base_url() -> String {
     } else {
         "http"
     };
-    let api_base_path = std::env::var("API_BASE_PATH").unwrap_or("stargate".to_string());
+    let hostname = std::env::var("HOSTNAME").unwrap_or("localhost".to_string());
     let port = std::env::var("PORT").unwrap_or("5050".to_string());
-    format!("{}://localhost:{}/{}", protocol, port, api_base_path)
+    format!("{}://{}:{}", protocol, hostname, port)
 }
