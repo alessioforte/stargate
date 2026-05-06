@@ -31,7 +31,6 @@ pub struct OperationStats {
     pub expired_entries_cleaned: u64,
 }
 
-
 #[derive(Debug)]
 pub struct AtomicOperationStats {
     pub gets: AtomicU64,
