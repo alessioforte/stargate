@@ -131,7 +131,7 @@ impl TokenBucketConfig {
         if self.refill_rate == 0 {
             return u64::MAX;
         }
-        (self.capacity + self.refill_rate - 1) / self.refill_rate // Ceiling division
+        self.capacity.div_ceil(self.refill_rate)
     }
 
     /// Calculate how long until N tokens are available (in milliseconds)
@@ -140,7 +140,7 @@ impl TokenBucketConfig {
             return u64::MAX;
         }
         // tokens / (refill_rate / 1000) = tokens * 1000 / refill_rate
-        (tokens * 1000 + self.refill_rate - 1) / self.refill_rate // Ceiling division
+        (tokens * 1000).div_ceil(self.refill_rate)
     }
 }
 

@@ -12,7 +12,7 @@ pub struct StorageStats {
     pub operations: OperationStats,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OperationStats {
     pub gets: u64,
     pub sets: u64,
@@ -31,27 +31,6 @@ pub struct OperationStats {
     pub expired_entries_cleaned: u64,
 }
 
-impl Default for OperationStats {
-    fn default() -> Self {
-        Self {
-            gets: 0,
-            sets: 0,
-            deletes: 0,
-            exists_checks: 0,
-            hash_gets: 0,
-            hash_sets: 0,
-            hash_deletes: 0,
-            hash_exists_checks: 0,
-            hash_getalls: 0,
-            hash_keys_calls: 0,
-            hash_vals_calls: 0,
-            hash_len_calls: 0,
-            cache_hits: 0,
-            cache_misses: 0,
-            expired_entries_cleaned: 0,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct AtomicOperationStats {

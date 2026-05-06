@@ -90,7 +90,7 @@ impl fmt::Display for ResourceAction {
 }
 
 impl ResourceAction {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "READ" => Some(ResourceAction::Read),
             "WRITE" => Some(ResourceAction::Write),
@@ -331,8 +331,8 @@ pub(crate) fn parse_iso_datetime(input: &str) -> Option<DateTime<FixedOffset>> {
         .ok()
         .or_else(|| DateTime::parse_from_str(input, "%Y-%m-%dT%H:%M%:z").ok())
         .or_else(|| {
-            if input.ends_with('Z') {
-                let s = format!("{}+00:00", &input[..input.len() - 1]);
+            if let Some(stripped) = input.strip_suffix('Z') {
+                let s = format!("{}+00:00", stripped);
                 DateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M%:z").ok()
             } else {
                 None

@@ -10,7 +10,15 @@ impl ServiceAccountRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for ServiceAccountRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ServiceAccountRepository {
     pub async fn create(
         &self,
         tx: &mut crate::backend::Tx<'_>,

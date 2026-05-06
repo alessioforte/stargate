@@ -10,6 +10,12 @@ impl IpHash {
     }
 }
 
+impl Default for IpHash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Strategy for IpHash {
     fn select<'a>(&self, upstreams: &'a [Upstream], ctx: &RequestContext) -> Option<&'a Upstream> {
         let available_count = upstreams.iter().filter(|u| u.is_available()).count();

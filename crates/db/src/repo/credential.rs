@@ -10,7 +10,15 @@ impl CredentialRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for CredentialRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CredentialRepository {
     pub async fn create(
         &self,
         tx: &mut crate::backend::Tx<'_>,

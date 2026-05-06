@@ -90,13 +90,11 @@ pub async fn verify_jwt<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> {
 
     let store = etc::store::use_store();
     let sid = claims.sid.clone().unwrap_or_default();
-    let session = match store.get::<Subject>(&sid).await {
+    match store.get::<Subject>(&sid).await {
         Ok(s) => s,
         Err(e) => {
             error!("Failed to get subject from the session store: {}", e);
             None
         }
-    };
-
-    session
+    }
 }

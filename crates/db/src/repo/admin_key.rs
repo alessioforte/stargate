@@ -10,7 +10,15 @@ impl AdminKeyRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for AdminKeyRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AdminKeyRepository {
     pub async fn create(
         &self,
         tx: &mut crate::backend::Tx<'_>,
@@ -34,7 +42,7 @@ impl AdminKeyRepository {
         .bind(&admin_key.key_hash)
         .bind(&admin_key.label)
         .bind(&admin_key.permissions)
-        .bind(&admin_key.revoked)
+        .bind(admin_key.revoked)
         .fetch_one(&mut **tx)
         .await?;
 

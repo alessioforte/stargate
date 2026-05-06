@@ -12,7 +12,15 @@ impl ApiKeyRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for ApiKeyRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ApiKeyRepository {
     pub async fn create(
         &self,
         tx: &mut crate::backend::Tx<'_>,
@@ -39,7 +47,7 @@ impl ApiKeyRepository {
         .bind(&api_key.id)
         .bind(&api_key.key_hash)
         .bind(&api_key.label)
-        .bind(&api_key.revoked)
+        .bind(api_key.revoked)
         .bind(&api_key.attrs)
         .fetch_one(&mut **tx)
         .await?;

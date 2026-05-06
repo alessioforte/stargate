@@ -11,6 +11,7 @@ use gate::{
 };
 use std::sync::Arc;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_policies(
     graph: &HttpGraph,
     router: &RouterNode,

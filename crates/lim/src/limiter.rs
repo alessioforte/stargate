@@ -7,6 +7,12 @@ pub struct Limiter {
     limits: HashMap<String, Box<dyn RateLimit>>,
 }
 
+impl Default for Limiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Limiter {
     pub fn new() -> Self {
         Self {
@@ -18,8 +24,8 @@ impl Limiter {
         self.limits.insert(name, limit);
     }
 
-    pub fn get_limit(&self, name: &str) -> Option<&Box<dyn RateLimit>> {
-        self.limits.get(name)
+    pub fn get_limit(&self, name: &str) -> Option<&dyn RateLimit> {
+        self.limits.get(name).map(Box::as_ref)
     }
 
     pub fn limit_names(&self) -> Vec<String> {

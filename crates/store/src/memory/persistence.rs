@@ -110,12 +110,10 @@ impl MemoryStore {
         }
 
         // Create parent directories if they don't exist
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).await.map_err(|e| {
-                    StoreError::InvalidInput(format!("Failed to create parent directories: {}", e))
-                })?;
-            }
+        if let Some(parent) = path.parent() && !parent.exists() {
+            fs::create_dir_all(parent).await.map_err(|e| {
+                StoreError::InvalidInput(format!("Failed to create parent directories: {}", e))
+            })?;
         }
 
         Ok(())

@@ -49,7 +49,7 @@ use std::sync::Arc;
 #[cfg(any(feature = "memory", feature = "redis"))]
 #[inline]
 fn ceil_div_u64(value: u64, divisor: u64) -> u64 {
-    value / divisor + u64::from(value % divisor != 0)
+    value.div_ceil(divisor)
 }
 
 // ========================== IN-MEMORY IMPLEMENTATION =========================

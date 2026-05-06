@@ -10,7 +10,15 @@ impl UserRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for UserRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UserRepository {
     pub async fn create(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
             format!(

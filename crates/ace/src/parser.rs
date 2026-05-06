@@ -60,7 +60,7 @@ impl PolicyParser {
         let resource_name = if let Some(colon_pos) = resource_content.find(':') {
             let (res_name, action_str) = resource_content.split_at(colon_pos);
             let action_str = &action_str[1..]; // Remove the colon
-            resource_action = ResourceAction::from_str(action_str);
+            resource_action = ResourceAction::parse(action_str);
             res_name.to_string()
         } else {
             resource_content.to_string()

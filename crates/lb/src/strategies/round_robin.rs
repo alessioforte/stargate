@@ -13,6 +13,12 @@ impl RoundRobin {
     }
 }
 
+impl Default for RoundRobin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Strategy for RoundRobin {
     fn select<'a>(&self, upstreams: &'a [Upstream], _ctx: &RequestContext) -> Option<&'a Upstream> {
         let available_count = upstreams.iter().filter(|u| u.is_available()).count();

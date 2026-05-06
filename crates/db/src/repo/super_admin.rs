@@ -10,7 +10,15 @@ impl SuperAdminRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for SuperAdminRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SuperAdminRepository {
     pub async fn create(
         &self,
         tx: &mut crate::backend::Tx<'_>,

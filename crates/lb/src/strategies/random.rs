@@ -9,6 +9,12 @@ impl Random {
     }
 }
 
+impl Default for Random {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Strategy for Random {
     fn select<'a>(&self, upstreams: &'a [Upstream], _ctx: &RequestContext) -> Option<&'a Upstream> {
         let available_count = upstreams.iter().filter(|u| u.is_available()).count();

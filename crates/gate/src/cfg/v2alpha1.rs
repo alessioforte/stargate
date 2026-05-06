@@ -365,13 +365,11 @@ fn compile_upstreams(
                     "target url must include a scheme",
                 ));
             }
-            if let Some(weight) = target.weight {
-                if weight == 0 {
-                    return Err(CompileError::new(
-                        format!("{}.weight", path),
-                        "target weight must be greater than zero",
-                    ));
-                }
+            if target.weight == Some(0) {
+                return Err(CompileError::new(
+                    format!("{}.weight", path),
+                    "target weight must be greater than zero",
+                ));
             }
             targets.push(UpstreamTargetNode {
                 url: target.url.clone(),

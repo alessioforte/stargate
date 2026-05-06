@@ -15,7 +15,15 @@ impl HealthCheck {
             handles: vec![],
         }
     }
+}
 
+impl Default for HealthCheck {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HealthCheck {
     pub fn register(&self, interval: Duration, lb: Arc<dyn LoadBalancer + Send + Sync>) {
         if let Some(mut vec) = self.lbs.get_mut(&interval) {
             vec.push(lb);

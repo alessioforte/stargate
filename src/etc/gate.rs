@@ -316,7 +316,7 @@ fn build_hyper_clients(config: &RuntimeConfig) -> BuiltHyperClients {
                 .targets
                 .iter()
                 .any(|target| target.url.starts_with("https://"));
-        let tls = use_tls.then(|| tls_config.as_ref()).flatten();
+        let tls = use_tls.then_some(tls_config.as_ref()).flatten();
 
         let client = build_hyper_client(timeout, tls);
         clients.insert(name.clone(), client);
@@ -389,10 +389,8 @@ fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
         panic!("No client private keys found");
     }
 
-    let tls_config = ClientConfig::builder()
+    ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_client_auth_cert(client_certs, client_keys.remove(0).into())
-        .expect("Unable to create MTLS client config");
-
-    tls_config
+        .expect("Unable to create MTLS client config")
 }

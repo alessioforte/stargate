@@ -110,11 +110,11 @@ pub(crate) fn percent_decode(s: &str) -> String {
             b'%' => {
                 let h = bytes.next();
                 let l = bytes.next();
-                if let (Some(h), Some(l)) = (h, l) {
-                    if let (Some(hi), Some(lo)) = (from_hex(h), from_hex(l)) {
-                        out.push((hi << 4) | lo);
-                        continue;
-                    }
+                if let (Some(h), Some(l)) = (h, l)
+                    && let (Some(hi), Some(lo)) = (from_hex(h), from_hex(l))
+                {
+                    out.push((hi << 4) | lo);
+                    continue;
                 }
                 out.push(b'%');
             }
@@ -140,15 +140,15 @@ fn peer_addr<B>(req: &Request<B>) -> Option<SocketAddr> {
 }
 
 fn forwarded_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    if let Some(xff) = header_str(headers, "x-forwarded-for") {
-        if let Some(ip) = parse_ip_str(xff) {
-            return Some(ip);
-        }
+    if let Some(xff) = header_str(headers, "x-forwarded-for")
+        && let Some(ip) = parse_ip_str(xff)
+    {
+        return Some(ip);
     }
-    if let Some(real) = header_str(headers, "x-real-ip") {
-        if let Some(ip) = parse_ip_str(real) {
-            return Some(ip);
-        }
+    if let Some(real) = header_str(headers, "x-real-ip")
+        && let Some(ip) = parse_ip_str(real)
+    {
+        return Some(ip);
     }
     None
 }
@@ -229,12 +229,11 @@ impl<B> RequestExt for Request<B> {
 
     fn get_client_ip_addr(&self) -> Option<IpAddr> {
         let peer_ip = peer_addr(self).map(|s| s.ip());
-        if let Some(ref peer) = peer_ip {
-            if crate::etc::proxy::is_trusted_proxy(peer) {
-                if let Some(ip) = forwarded_ip(self.headers()) {
-                    return Some(ip);
-                }
-            }
+        if let Some(ref peer) = peer_ip
+            && crate::etc::proxy::is_trusted_proxy(peer)
+            && let Some(ip) = forwarded_ip(self.headers())
+        {
+            return Some(ip);
         }
         peer_ip
     }

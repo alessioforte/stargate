@@ -11,7 +11,15 @@ impl OrganizationRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for OrganizationRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OrganizationRepository {
     pub async fn create(
         &self,
         tx: &mut crate::backend::Tx<'_>,
@@ -35,7 +43,7 @@ impl OrganizationRepository {
         .bind(&org.id)
         .bind(&org.name)
         .bind(&org.description)
-        .bind(&attrs)
+        .bind(attrs)
         .fetch_one(&mut **tx)
         .await?;
 

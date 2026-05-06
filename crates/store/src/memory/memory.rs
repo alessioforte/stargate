@@ -45,7 +45,15 @@ impl MemoryStore {
     pub fn new() -> Self {
         Self::with_config(MemoryStoreConfig::default())
     }
+}
 
+impl Default for MemoryStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MemoryStore {
     pub fn with_config(config: MemoryStoreConfig) -> Self {
         let data = if config.initial_capacity > 0 {
             Arc::new(DashMap::with_capacity(config.initial_capacity))
@@ -71,7 +79,7 @@ impl MemoryStore {
         }
 
         thread_local! {
-            static CACHED_TIME: std::cell::Cell<Option<(DateTime<Utc>, std::time::Instant)>> = std::cell::Cell::new(None);
+            static CACHED_TIME: std::cell::Cell<Option<(DateTime<Utc>, std::time::Instant)>> = const { std::cell::Cell::new(None) };
         }
 
         CACHED_TIME.with(|cached| {
@@ -332,10 +340,8 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
@@ -387,10 +393,8 @@ impl Store for MemoryStore {
                 "Field cannot be empty".to_string(),
             ));
         }
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         self.stats.hash_sets.fetch_add(1, Ordering::Relaxed);
@@ -585,7 +589,7 @@ impl Store for MemoryStore {
 
                     for entry in hash_map.iter() {
                         let (field, (value, field_exp)) = entry.pair();
-                        if field_exp.map_or(false, |exp| exp <= now) {
+                        if field_exp.is_some_and(|exp| exp <= now) {
                             expired_fields.push(field.clone());
                         } else {
                             let deserialized = self.deserialize(value)?;
@@ -708,7 +712,7 @@ impl Store for MemoryStore {
 
                     for entry in hash_map.iter() {
                         let (field, (_, field_exp)) = entry.pair();
-                        if field_exp.map_or(false, |exp| exp <= now) {
+                        if field_exp.is_some_and(|exp| exp <= now) {
                             expired_fields.push(field.clone());
                         } else {
                             keys.push(field.clone());
@@ -768,7 +772,7 @@ impl Store for MemoryStore {
 
                     for entry in hash_map.iter() {
                         let (field, (value, field_exp)) = entry.pair();
-                        if field_exp.map_or(false, |exp| exp <= now) {
+                        if field_exp.is_some_and(|exp| exp <= now) {
                             expired_fields.push(field.clone());
                         } else {
                             let deserialized = self.deserialize(value)?;
@@ -831,7 +835,7 @@ impl Store for MemoryStore {
 
                     for entry in hash_map.iter() {
                         let (field, (_, field_exp)) = entry.pair();
-                        if field_exp.map_or(false, |exp| exp <= now) {
+                        if field_exp.is_some_and(|exp| exp <= now) {
                             expired_fields.push(field.clone());
                         } else {
                             valid_count += 1;
@@ -957,10 +961,8 @@ impl AtomicStore for MemoryStore {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
@@ -976,10 +978,8 @@ impl AtomicStore for MemoryStore {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let exp = self.expiration_from_ttl(ttl);
@@ -1018,10 +1018,8 @@ impl AtomicStore for MemoryStore {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let exp = self.expiration_from_ttl(ttl);
@@ -1066,10 +1064,8 @@ impl AtomicStore for MemoryStore {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let exp = self.expiration_from_ttl(ttl);
@@ -1125,10 +1121,8 @@ impl MemoryStore {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let exp = self.expiration_from_ttl(ttl);
@@ -1183,10 +1177,8 @@ impl MemoryStore {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let exp = self.expiration_from_ttl(ttl);
@@ -1279,11 +1271,9 @@ impl MemoryStore {
                 continue;
             }
 
-            if let Some(ttl_val) = ttl {
-                if ttl_val == 0 {
-                    results.push(false);
-                    continue;
-                }
+            if ttl == Some(0) {
+                results.push(false);
+                continue;
             }
 
             self.stats.sets.fetch_add(1, Ordering::Relaxed);
@@ -1375,7 +1365,7 @@ impl MemoryStore {
                     // Clean expired hash fields
                     let mut fields_removed = 0;
                     hash_map.retain(|_, (_, field_exp)| {
-                        let keep = field_exp.map_or(true, |e| e > now);
+                        let keep = field_exp.is_none_or(|e| e > now);
                         if !keep {
                             fields_removed += 1;
                         }
@@ -1468,7 +1458,7 @@ impl MemoryStore {
                         // Count expired fields within the hash
                         for field_entry in hash_map.iter() {
                             let (_, (_, field_exp)) = field_entry.pair();
-                            if field_exp.map_or(false, |exp| exp <= now) {
+                            if field_exp.is_some_and(|exp| exp <= now) {
                                 expired_keys += 1;
                             }
                         }
@@ -1604,7 +1594,7 @@ impl MemoryStore {
                             // Clean expired fields within the hash atomically
                             let mut fields_removed = 0;
                             hash_map.retain(|_, (_, field_exp)| {
-                                let keep = field_exp.map_or(true, |exp_time| exp_time > now);
+                                let keep = field_exp.is_none_or(|exp_time| exp_time > now);
                                 if !keep {
                                     fields_removed += 1;
                                 }
@@ -1614,21 +1604,21 @@ impl MemoryStore {
 
                             // Keep the hash if it's not expired and has fields
                             let keep_hash =
-                                exp.map_or(true, |exp_time| exp_time > now) && !hash_map.is_empty();
+                                exp.is_none_or(|exp_time| exp_time > now) && !hash_map.is_empty();
                             if !keep_hash {
                                 removed += 1;
                             }
                             keep_hash
                         }
                         StoreValue::Simple(_, exp) => {
-                            let keep = exp.map_or(true, |exp_time| exp_time > now);
+                            let keep = exp.is_none_or(|exp_time| exp_time > now);
                             if !keep {
                                 removed += 1;
                             }
                             keep
                         }
                         StoreValue::AtomicI64(_, exp) => {
-                            let keep = exp.map_or(true, |exp_time| exp_time > now);
+                            let keep = exp.is_none_or(|exp_time| exp_time > now);
                             if !keep {
                                 removed += 1;
                             }
@@ -1657,7 +1647,7 @@ impl MemoryStore {
                 if removed > 0 {
                     stats
                         .expired_entries_cleaned
-                        .fetch_add(removed as u64, Ordering::Relaxed);
+                        .fetch_add(removed, Ordering::Relaxed);
                     tracing::info!(
                         "MemoryStore cleaner: removed {} expired entries, processed {}/{} items in {:?}, next interval: {}s",
                         removed,

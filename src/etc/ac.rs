@@ -96,7 +96,7 @@ pub fn access_control(
 
 fn parse_resource(resource: &str) -> (&str, Option<ace::ResourceAction>) {
     if let Some((res_name, action_str)) = resource.split_once(':') {
-        return (res_name, ace::ResourceAction::from_str(action_str));
+        return (res_name, ace::ResourceAction::parse(action_str));
     }
     (resource, None)
 }
@@ -105,10 +105,10 @@ fn attrs_hash(subject: &Subject) -> u64 {
     if subject.attrs.is_null() {
         return 0;
     }
-    if let Some(attrs) = subject.attrs.as_object() {
-        if attrs.is_empty() {
-            return 0;
-        }
+    if let Some(attrs) = subject.attrs.as_object()
+        && attrs.is_empty()
+    {
+        return 0;
     }
     let mut hasher = DefaultHasher::new();
     hash_json_value(&subject.attrs, &mut hasher);

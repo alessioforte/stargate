@@ -31,10 +31,10 @@ pub async fn revoke_claims(claims: &jwt::Claims) -> Result<(), StoreError> {
         jti_revoked = true;
     }
 
-    if claims.typ.as_deref() == Some("refresh") || !jti_revoked {
-        if let Some(sid) = claims.sid.as_deref() {
-            store.delete(sid).await?;
-        }
+    if (claims.typ.as_deref() == Some("refresh") || !jti_revoked)
+        && let Some(sid) = claims.sid.as_deref()
+    {
+        store.delete(sid).await?;
     }
 
     Ok(())

@@ -33,7 +33,7 @@ impl PasswordPolicy {
     pub fn new(policies: Vec<&str>) -> Vec<PasswordPolicy> {
         policies
             .iter()
-            .filter_map(|policy| PasswordPolicy::from_str(policy))
+            .filter_map(|policy| PasswordPolicy::parse(policy))
             .collect()
     }
 
@@ -48,7 +48,7 @@ impl PasswordPolicy {
         ]
     }
 
-    pub fn from_str(policy: &str) -> Option<PasswordPolicy> {
+    pub fn parse(policy: &str) -> Option<PasswordPolicy> {
         match policy {
             "min_length" => Some(PasswordPolicy::MinLength(8)),
             "max_length" => Some(PasswordPolicy::MaxLength(64)),

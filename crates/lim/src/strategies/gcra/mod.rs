@@ -146,7 +146,7 @@ impl RateLimit for Gcra {
         } else {
             // Retry after: ceil to milliseconds for consistent units across all strategies
             let wait_micros = tat.saturating_sub(burst).saturating_sub(t0);
-            let wait_millis = wait_micros / 1_000 + u64::from(wait_micros % 1_000 != 0);
+            let wait_millis = wait_micros.div_ceil(1_000);
             let retry_after = Duration::from_millis(wait_millis);
             Ok(RateLimitDecision::denied(
                 limit,

@@ -73,7 +73,7 @@ impl ErrorCode for HttpError {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::enum_variant_names)]
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadError {
     #[error("The json payload provided is malformed. `{0}`.")]
@@ -103,11 +103,11 @@ pub struct ErrorResponse {
     pub headers: Vec<(String, String)>,
     pub message: String,
     #[serde(rename = "code")]
-    error_code: String,
+    error_code: Box<str>,
     #[serde(rename = "type")]
-    error_type: String,
+    error_type: Box<str>,
     #[serde(rename = "link")]
-    error_link: String,
+    error_link: Box<str>,
 }
 
 impl ErrorResponse {
@@ -117,9 +117,9 @@ impl ErrorResponse {
             code: code.http(),
             message,
             headers: Vec::new(),
-            error_code: code.name().to_string(),
-            error_type: code.type_().to_string(),
-            error_link: code.url(),
+            error_code: code.name().into(),
+            error_type: code.type_().into(),
+            error_link: code.url().into(),
         }
     }
 

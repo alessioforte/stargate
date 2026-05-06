@@ -11,7 +11,7 @@ impl Hash {
     /// * `value` - The string to be hashed.
     /// # Returns
     /// * `Result<String, argon2::password_hash::Error>` - The hashed string on success, or an error on failure.
-    /// /// # Example
+    /// # Example
     /// ```rust
     /// use pw::Hash;
     ///

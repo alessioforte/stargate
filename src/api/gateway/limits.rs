@@ -21,20 +21,19 @@ pub async fn apply_limits(
     let mut quota_cost = quota_override.as_ref().map(|(_, cost)| *cost).unwrap_or(1);
 
     if let Some(subject) = subject {
-        if rate_limit_override.is_none() {
-            if let Some(rate_limit) = subject
+        if rate_limit_override.is_none()
+            && let Some(rate_limit) = subject
                 .get_attr("rate_limit")
                 .and_then(|value| value.as_str())
-            {
-                limit_name = rate_limit.to_string();
-            }
+        {
+            limit_name = rate_limit.to_string();
         }
 
-        if quota_override.is_none() {
-            if let Some(quota) = subject.get_attr("quota").and_then(|value| value.as_str()) {
-                quota_name = Some(quota.to_string());
-                quota_cost = 1;
-            }
+        if quota_override.is_none()
+            && let Some(quota) = subject.get_attr("quota").and_then(|value| value.as_str())
+        {
+            quota_name = Some(quota.to_string());
+            quota_cost = 1;
         }
 
         sub_key = subject.id.clone();

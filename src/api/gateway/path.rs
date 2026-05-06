@@ -74,10 +74,10 @@ pub(super) fn strip_prefix(path: &str, prefix: &str) -> String {
         return "/".to_string();
     }
 
-    if let Some(rest) = path.strip_prefix(&prefix) {
-        if rest.starts_with('/') {
-            return normalize_path(rest);
-        }
+    if let Some(rest) = path.strip_prefix(&prefix)
+        && rest.starts_with('/')
+    {
+        return normalize_path(rest);
     }
 
     path.to_string()

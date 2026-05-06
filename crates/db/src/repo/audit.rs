@@ -12,7 +12,15 @@ impl AuditRepository {
     pub fn new() -> Self {
         Self {}
     }
+}
 
+impl Default for AuditRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AuditRepository {
     pub async fn insert(&self, tx: &mut crate::backend::Tx<'_>, log: &Audit) -> Result<Audit> {
         let row = sqlx::query_as::<_, Audit>(
             format!(
@@ -26,7 +34,7 @@ impl AuditRepository {
             .as_str(),
         )
         .bind(&log.id)
-        .bind(&log.timestamp)
+        .bind(log.timestamp)
         .bind(&log.actor_type)
         .bind(&log.actor_id)
         .bind(&log.action)
@@ -56,7 +64,7 @@ impl AuditRepository {
 
             builder.push_values(chunk.iter(), |mut row, log| {
                 row.push_bind(&log.id)
-                    .push_bind(&log.timestamp)
+                    .push_bind(log.timestamp)
                     .push_bind(&log.actor_type)
                     .push_bind(&log.actor_id)
                     .push_bind(&log.action)
