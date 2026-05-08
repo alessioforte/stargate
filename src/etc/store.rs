@@ -40,6 +40,29 @@ mod memory {
         &STORE
     }
 
+    /// Restores the in-memory store from the binary snapshot written by a previous process run.
+    ///
+    /// # When it runs
+    ///
+    /// Called once during [`init`], before the backup task starts. The [`RESTORE_ATTEMPTED`]
+    /// flag ensures idempotence: even if `init` is somehow invoked concurrently, only the first
+    /// caller performs the restore. Subsequent callers return immediately.
+    ///
+    /// # What it does
+    ///
+    /// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`] (`.stargate/memory.bin`).
+    /// 2. Clears the already-initialised global [`STORE`] (which is empty at this point since
+    ///    the `Lazy` constructor does not populate any data).
+    /// 3. Copies every entry from the restored store into the global store via a DashMap
+    ///    iterator. No locking is needed: the store is not yet shared with other tasks.
+    /// 4. Resets operational stats to zero so metrics reflect the current process lifetime,
+    ///    not the previous one.
+    ///
+    /// # Failure handling
+    ///
+    /// A missing or corrupt snapshot is treated as a normal cold start — the error is logged
+    /// at `INFO` level and the empty store is used. The process never panics here; losing
+    /// the snapshot is recoverable (state will rebuild from application traffic).
     async fn restore_memory_backup() {
         if RESTORE_ATTEMPTED.swap(true, Ordering::AcqRel) {
             return;
@@ -70,6 +93,52 @@ mod memory {
         }
     }
 
+    /// Spawns the background task that periodically persists the memory store to disk.
+    ///
+    /// # Idempotence
+    ///
+    /// [`BACKUP_TASK_STARTED`] is a one-shot flag. Only the first call spawns a task;
+    /// any subsequent call (e.g. from a test harness calling `init` twice) is a no-op.
+    ///
+    /// # Configuration (env vars)
+    ///
+    /// | Variable                     | Default | Meaning                                                    |
+    /// |------------------------------|---------|------------------------------------------------------------|
+    /// | `STORE_BACKUP_INTERVAL_SECS` | `30`    | Maximum seconds between two consecutive writes             |
+    /// | `STORE_BACKUP_WRITE_THRESHOLD` | `100` | Minimum mutations accumulated before an early write fires; set to `0` to disable threshold-based flushing |
+    ///
+    /// # How the flush decision works
+    ///
+    /// The task wakes up every second ([`MEMORY_BACKUP_CHECK_INTERVAL_SECS`]) with
+    /// `MissedTickBehavior::Skip` so a slow disk write never queues up extra ticks.
+    ///
+    /// On each wake-up the task reads [`MemoryStore::persistence_revision`] — a monotonically
+    /// increasing counter that advances with every mutation (set, delete, hash-set, hash-delete,
+    /// and expired-entry cleanup). If the revision has not changed since the last successful
+    /// write the store is clean and the task sleeps again.
+    ///
+    /// When the revision has advanced, a write is triggered if **either** condition is true:
+    ///
+    /// - **Time condition** — at least `STORE_BACKUP_INTERVAL_SECS` have elapsed since the
+    ///   last successful write. Guarantees a worst-case data-loss window regardless of write rate.
+    /// - **Threshold condition** — the number of mutations accumulated since the last write has
+    ///   reached `STORE_BACKUP_WRITE_THRESHOLD`. Triggers an early flush under write bursts so a
+    ///   sudden crash does not lose a large batch of work.
+    ///
+    /// Both conditions must be false for the write to be skipped. If either fires the store is
+    /// serialised to [`MEMORY_BACKUP_PATH`] as a MessagePack binary via an atomic temp-file +
+    /// rename operation (performed inside `save_to_binary`).
+    ///
+    /// # Failure handling
+    ///
+    /// A failed write is logged at `WARN` level. `last_persisted_revision` and
+    /// `last_persisted_at` are **not** updated on failure, so the next check will retry
+    /// immediately on the next tick that satisfies the flush conditions.
+    ///
+    /// # Shutdown
+    ///
+    /// This task runs indefinitely. A final synchronous flush is performed by [`save`] during
+    /// graceful shutdown to minimise data loss between the last periodic write and process exit.
     fn run_memory_backup() {
         if BACKUP_TASK_STARTED.swap(true, Ordering::AcqRel) {
             return;
