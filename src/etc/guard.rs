@@ -68,16 +68,12 @@ pub async fn verify_jwt<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> {
     let token = req.get_token()?;
 
     let jwt = etc::jwt::jwt_config();
-    let claims = match jwt.validate_token(&token) {
+    let claims = match jwt.validate_session_access_token(&token) {
         Ok(claims) => claims,
         Err(_) => {
             return None;
         }
     };
-
-    if claims.typ.as_deref() != Some("bearer") {
-        return None;
-    }
 
     match crate::act::token_revocation::is_revoked(&claims).await {
         Ok(false) => {}

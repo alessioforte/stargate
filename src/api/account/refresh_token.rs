@@ -1,6 +1,7 @@
-use super::{AuthResponse, RefreshTokenRequestBody, build_jwt_cookie};
+use super::{AuthResponse, RefreshTokenRequestBody};
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{self, jwt::jwt_config, sub::Subject};
+use crate::fun::build_jwt_cookie;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
@@ -23,14 +24,8 @@ pub async fn put_refresh_token(
     Json(body): Json<RefreshTokenRequestBody>,
 ) -> Result<Response, ErrorResponse> {
     let claims = jwt_config()
-        .validate_token(&body.refresh_token)
+        .validate_session_refresh_token(&body.refresh_token)
         .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
-
-    if claims.typ.as_deref() != Some("refresh") {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid Token".to_string(),
-        )));
-    }
 
     if crate::act::token_revocation::is_revoked(&claims)
         .await

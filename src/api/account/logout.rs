@@ -25,7 +25,7 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
     })?;
 
     let claims = jwt_config()
-        .validate_token(&token)
+        .validate_session_access_token(&token)
         .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
 
     let sid = claims.sid.clone().unwrap_or_default();

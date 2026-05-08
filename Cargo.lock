@@ -1976,6 +1976,7 @@ dependencies = [
  "rsa",
  "serde",
  "serde_with",
+ "ulid",
 ]
 
 [[package]]
@@ -3810,6 +3811,7 @@ dependencies = [
  "ace",
  "anyhow",
  "axum",
+ "base64",
  "chrono",
  "clap",
  "db",
@@ -3838,6 +3840,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_bw",
+ "sha2",
  "smtp",
  "store",
  "thiserror 2.0.18",
@@ -3851,6 +3854,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "ulid",
+ "url",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",

@@ -5,12 +5,13 @@ use anyhow::Result;
 use db::{
     Transaction,
     ent::{
-        ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, Organization,
-        Profile, ServiceAccount, SuperAdmin, User,
+        ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient,
+        OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
     },
     repo::ADMIN_KEY,
     repo::API_KEY,
     repo::CREDENTIAL,
+    repo::OAUTH_CLIENT,
     repo::ORGANIZATION,
     repo::SERVICE_ACCOUNT,
     repo::SUPER_ADMIN,
@@ -186,6 +187,147 @@ pub async fn get_credential(
 ) -> Result<Option<Credential>> {
     let svc = service();
     svc.get_credential(user_id, credential_type).await
+}
+
+// ── OAuth Clients ──────────────────────────────────────────────────────────
+
+pub async fn create_oauth_client(client: OAuthClient, ctx: AuditContext) -> Result<OAuthClient> {
+    let svc = service();
+    match svc.create_oauth_client(client).await {
+        Ok(client) => {
+            let metadata = serde_json::to_value(&client).unwrap_or_default();
+            let ctx = ctx
+                .with_resource(OAUTH_CLIENT.to_string())
+                .with_resource_id(client.client_id.clone())
+                .with_metadata(metadata);
+            audit::creation!(ctx);
+            Ok(client)
+        }
+        Err(e) => {
+            tracing::error!("Error creating OAuth client: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn get_oauth_client_by_client_id(client_id: &str) -> Result<Option<OAuthClient>> {
+    let svc = service();
+    svc.get_oauth_client_by_client_id(client_id).await
+}
+
+pub async fn get_all_oauth_clients(limit: i64, offset: i64) -> Result<Vec<OAuthClient>> {
+    let svc = service();
+    svc.get_all_oauth_clients(limit, offset).await
+}
+
+pub async fn count_oauth_clients() -> Result<i64> {
+    let svc = service();
+    svc.count_oauth_clients().await
+}
+
+pub async fn search_oauth_clients(
+    query: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<OAuthClient>> {
+    let svc = service();
+    svc.search_oauth_clients(query, limit, offset).await
+}
+
+pub async fn count_search_oauth_clients(query: &str) -> Result<i64> {
+    let svc = service();
+    svc.count_search_oauth_clients(query).await
+}
+
+pub async fn update_oauth_client(client: OAuthClient, ctx: AuditContext) -> Result<OAuthClient> {
+    let svc = service();
+    match svc.update_oauth_client(client).await {
+        Ok(updated) => {
+            let metadata = serde_json::to_value(&updated).unwrap_or_default();
+            let ctx = ctx
+                .with_resource(OAUTH_CLIENT.to_string())
+                .with_resource_id(updated.client_id.clone())
+                .with_metadata(metadata);
+            audit::modification!(ctx);
+            Ok(updated)
+        }
+        Err(e) => {
+            tracing::error!("Error updating OAuth client: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn update_oauth_client_secret_hash(
+    client_id: &str,
+    client_secret_hash: Option<&str>,
+    ctx: AuditContext,
+) -> Result<OAuthClient> {
+    let svc = service();
+    match svc
+        .update_oauth_client_secret_hash(client_id, client_secret_hash)
+        .await
+    {
+        Ok(updated) => {
+            let ctx = ctx
+                .with_resource(OAUTH_CLIENT.to_string())
+                .with_resource_id(updated.client_id.clone());
+            audit::modification!(ctx);
+            Ok(updated)
+        }
+        Err(e) => {
+            tracing::error!("Error rotating OAuth client secret: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn set_oauth_client_enabled(
+    client_id: &str,
+    enabled: bool,
+    ctx: AuditContext,
+) -> Result<OAuthClient> {
+    let svc = service();
+    match svc.set_oauth_client_enabled(client_id, enabled).await {
+        Ok(updated) => {
+            let metadata = serde_json::json!({ "enabled": enabled });
+            let ctx = ctx
+                .with_resource(OAUTH_CLIENT.to_string())
+                .with_resource_id(updated.client_id.clone())
+                .with_metadata(metadata);
+            audit::modification!(ctx);
+            Ok(updated)
+        }
+        Err(e) => {
+            tracing::error!("Error setting OAuth client enabled state: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn delete_oauth_client(client_id: &str, ctx: AuditContext) -> Result<()> {
+    let svc = service();
+    match svc.delete_oauth_client(client_id).await {
+        Ok(()) => {
+            let ctx = ctx
+                .with_resource(OAUTH_CLIENT.to_string())
+                .with_resource_id(client_id.to_string());
+            audit::deletion!(ctx);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Error deleting OAuth client: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn get_active_oauth_consent(
+    user_id: &str,
+    client_id: &str,
+) -> Result<Option<OAuthConsent>> {
+    let svc = service();
+    svc.get_active_oauth_consent(user_id, client_id).await
 }
 
 // ── Api Keys ────────────────────────────────────────────────────────────────

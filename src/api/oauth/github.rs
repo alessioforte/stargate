@@ -1,9 +1,9 @@
-use super::build_jwt_cookie;
 use crate::act::oauth_state;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
 use crate::etc::reqctx::take_audit_context_from;
+use crate::fun::build_jwt_cookie;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{Query, Request};

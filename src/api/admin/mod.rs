@@ -2,6 +2,7 @@ pub mod admin_keys;
 pub mod api_keys;
 pub mod configurations;
 pub mod health;
+pub mod oauth_clients;
 pub mod organizations;
 pub mod service_accounts;
 pub mod users;
@@ -35,11 +36,7 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
 
     if let Some(token) = req.get_token() {
         let jwt = jwt_config();
-        if let Some(claims) = jwt
-            .validate_token(&token)
-            .ok()
-            .filter(|c| c.typ.as_deref() == Some("bearer"))
-        {
+        if let Ok(claims) = jwt.validate_session_access_token(&token) {
             match crate::act::token_revocation::is_revoked(&claims).await {
                 Ok(false) => {
                     let sid = claims.sid.clone().unwrap_or_default();
@@ -209,6 +206,29 @@ pub fn router() -> axum::Router {
         .route(
             "/admin/admin-keys/{id}/permissions",
             put(admin_keys::update_admin_key_permissions),
+        )
+        .route(
+            "/admin/oauth/clients",
+            get(oauth_clients::get_oauth_clients).post(oauth_clients::create_oauth_client),
+        )
+        .route(
+            "/admin/oauth/clients/{client_id}",
+            get(oauth_clients::get_oauth_client)
+                .put(oauth_clients::update_oauth_client)
+                .patch(oauth_clients::patch_oauth_client)
+                .delete(oauth_clients::delete_oauth_client),
+        )
+        .route(
+            "/admin/oauth/clients/{client_id}/disable",
+            put(oauth_clients::disable_oauth_client),
+        )
+        .route(
+            "/admin/oauth/clients/{client_id}/enable",
+            put(oauth_clients::enable_oauth_client),
+        )
+        .route(
+            "/admin/oauth/clients/{client_id}/rotate-secret",
+            put(oauth_clients::rotate_oauth_client_secret),
         )
         .route(
             "/admin/service-accounts",

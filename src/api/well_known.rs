@@ -9,6 +9,13 @@ use serde::Serialize;
 use std::env;
 use utoipa::ToSchema;
 
+const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
+const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
+const GRANT_REFRESH_TOKEN: &str = "refresh_token";
+const RESPONSE_CODE: &str = "code";
+const AUTH_METHOD_CLIENT_SECRET_BASIC: &str = "client_secret_basic";
+const AUTH_METHOD_CLIENT_SECRET_POST: &str = "client_secret_post";
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PublicJwk {
     kty: String,
@@ -49,6 +56,26 @@ pub struct OAuthAuthorizationServerMetadata {
     grant_types_supported: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     token_endpoint_auth_methods_supported: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code_challenge_methods_supported: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OpenIdConfiguration {
+    issuer: String,
+    authorization_endpoint: String,
+    token_endpoint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    userinfo_endpoint: Option<String>,
+    jwks_uri: String,
+    response_types_supported: Vec<String>,
+    grant_types_supported: Vec<String>,
+    subject_types_supported: Vec<String>,
+    id_token_signing_alg_values_supported: Vec<String>,
+    scopes_supported: Vec<String>,
+    claims_supported: Vec<String>,
+    code_challenge_methods_supported: Vec<String>,
+    token_endpoint_auth_methods_supported: Vec<String>,
 }
 
 fn endpoint_base_url(issuer: &str) -> String {
@@ -98,6 +125,23 @@ fn elliptic_curve_name(curve: &EllipticCurve) -> &'static str {
         EllipticCurve::P384 => "P-384",
         EllipticCurve::P521 => "P-521",
         EllipticCurve::Ed25519 => "Ed25519",
+    }
+}
+
+fn jwt_algorithm_name(algorithm: jwt::Algorithm) -> &'static str {
+    match algorithm {
+        jwt::Algorithm::HS256 => "HS256",
+        jwt::Algorithm::HS384 => "HS384",
+        jwt::Algorithm::HS512 => "HS512",
+        jwt::Algorithm::ES256 => "ES256",
+        jwt::Algorithm::ES384 => "ES384",
+        jwt::Algorithm::RS256 => "RS256",
+        jwt::Algorithm::RS384 => "RS384",
+        jwt::Algorithm::RS512 => "RS512",
+        jwt::Algorithm::PS256 => "PS256",
+        jwt::Algorithm::PS384 => "PS384",
+        jwt::Algorithm::PS512 => "PS512",
+        jwt::Algorithm::EdDSA => "EdDSA",
     }
 }
 
@@ -180,13 +224,78 @@ pub async fn get_oauth_metadata() -> Result<Json<OAuthAuthorizationServerMetadat
 
     Ok(Json(OAuthAuthorizationServerMetadata {
         issuer,
-        authorization_endpoint: None,
-        token_endpoint: None,
+        authorization_endpoint: Some(endpoint_url(&base_url, "/oauth/authorize")),
+        token_endpoint: Some(endpoint_url(&base_url, "/oauth/token")),
         introspection_endpoint: endpoint_url(&base_url, "/oauth/introspect"),
         revocation_endpoint: endpoint_url(&base_url, "/oauth/revoke"),
         jwks_uri: endpoint_url(&base_url, "/.well-known/jwks.json"),
-        response_types_supported: Vec::new(),
-        grant_types_supported: Vec::new(),
-        token_endpoint_auth_methods_supported: None,
+        response_types_supported: vec![RESPONSE_CODE.to_string()],
+        grant_types_supported: vec![
+            GRANT_AUTHORIZATION_CODE.to_string(),
+            GRANT_CLIENT_CREDENTIALS.to_string(),
+            GRANT_REFRESH_TOKEN.to_string(),
+        ],
+        token_endpoint_auth_methods_supported: Some(vec![
+            AUTH_METHOD_CLIENT_SECRET_BASIC.to_string(),
+            AUTH_METHOD_CLIENT_SECRET_POST.to_string(),
+            "none".to_string(),
+        ]),
+        code_challenge_methods_supported: Some(vec!["S256".to_string()]),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/.well-known/openid-configuration",
+    responses(
+        (status = 200, description = "OK", body = OpenIdConfiguration)
+    )
+)]
+pub async fn get_openid_configuration() -> Result<Json<OpenIdConfiguration>, ErrorResponse> {
+    let issuer = jwt::issuer_from_env();
+    let base_url = endpoint_base_url(&issuer);
+
+    Ok(Json(OpenIdConfiguration {
+        issuer,
+        authorization_endpoint: endpoint_url(&base_url, "/oauth/authorize"),
+        token_endpoint: endpoint_url(&base_url, "/oauth/token"),
+        userinfo_endpoint: Some(endpoint_url(&base_url, "/oauth/userinfo")),
+        jwks_uri: endpoint_url(&base_url, "/.well-known/jwks.json"),
+        response_types_supported: vec![RESPONSE_CODE.to_string()],
+        grant_types_supported: vec![
+            GRANT_AUTHORIZATION_CODE.to_string(),
+            GRANT_CLIENT_CREDENTIALS.to_string(),
+            GRANT_REFRESH_TOKEN.to_string(),
+        ],
+        subject_types_supported: vec!["public".to_string()],
+        id_token_signing_alg_values_supported: vec![
+            jwt_algorithm_name(jwt_config().algorithm()).to_string(),
+        ],
+        scopes_supported: vec![
+            "openid".to_string(),
+            "email".to_string(),
+            "profile".to_string(),
+            "offline_access".to_string(),
+        ],
+        claims_supported: vec![
+            "sub".to_string(),
+            "aud".to_string(),
+            "azp".to_string(),
+            "iat".to_string(),
+            "exp".to_string(),
+            "auth_time".to_string(),
+            "nonce".to_string(),
+            "email".to_string(),
+            "email_verified".to_string(),
+            "name".to_string(),
+            "preferred_username".to_string(),
+            "picture".to_string(),
+        ],
+        code_challenge_methods_supported: vec!["S256".to_string()],
+        token_endpoint_auth_methods_supported: vec![
+            AUTH_METHOD_CLIENT_SECRET_BASIC.to_string(),
+            AUTH_METHOD_CLIENT_SECRET_POST.to_string(),
+            "none".to_string(),
+        ],
     }))
 }
