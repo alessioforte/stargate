@@ -2,26 +2,15 @@ use crate::err::{ErrorResponse, HttpError};
 use axum::extract::Request;
 use base64::Engine;
 use http::header::AUTHORIZATION;
-use std::collections::HashSet;
 
-pub(super) const OAUTH_TOKENS_GRANT: &str = "oauth_tokens";
-pub(super) const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
-pub(super) const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
-pub(super) const GRANT_REFRESH_TOKEN: &str = "refresh_token";
-pub(super) const AUTH_METHOD_CLIENT_SECRET_BASIC: &str = "client_secret_basic";
-pub(super) const AUTH_METHOD_CLIENT_SECRET_POST: &str = "client_secret_post";
-pub(super) const AUTH_METHOD_NONE: &str = "none";
-pub(super) const RESPONSE_CODE: &str = "code";
-pub(super) const SCOPE_OPENID: &str = "openid";
-pub(super) const SCOPE_EMAIL: &str = "email";
-pub(super) const SCOPE_PROFILE: &str = "profile";
-pub(super) const SCOPE_OFFLINE_ACCESS: &str = "offline_access";
-pub(super) const PKCE_METHOD_S256: &str = "S256";
-pub(super) const AUTHORIZATION_CODE_TTL_SECS: i64 = 600;
-pub(super) const OAUTH_INTROSPECT_SCOPE: &str = "oauth:introspect";
-pub(super) const OAUTH_REVOKE_SCOPE: &str = "oauth:revoke";
-pub(super) const OAUTH_CAN_INTROSPECT_ATTR: &str = "can_introspect";
-pub(super) const OAUTH_CAN_REVOKE_ATTR: &str = "can_revoke";
+pub(super) use oidc::scopes::{
+    AUTH_METHOD_CLIENT_SECRET_BASIC, AUTH_METHOD_CLIENT_SECRET_POST, AUTH_METHOD_NONE,
+    AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS,
+    GRANT_REFRESH_TOKEN, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE,
+    OAUTH_REVOKE_SCOPE, OAUTH_TOKENS_GRANT, PKCE_METHOD_S256, RESPONSE_CODE, SCOPE_EMAIL,
+    SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, SCOPE_PROFILE, contains as scope_contains,
+    parse_space_delimited, resolve_audience, resolve_scopes,
+};
 
 #[derive(Debug)]
 pub(super) struct ClientCredentials {
@@ -38,6 +27,26 @@ pub(super) fn oauth_invalid_client(message: impl Into<String>) -> ErrorResponse 
     let mut err = ErrorResponse::from(HttpError::Unauthorized(message.into()));
     err.insert_header("WWW-Authenticate", "Basic realm=\"stargate-oauth-token\"");
     err
+}
+
+impl From<oidc::OAuthError> for ErrorResponse {
+    fn from(error: oidc::OAuthError) -> Self {
+        match error.code {
+            oidc::OAuthErrorCode::InvalidClient => oauth_invalid_client(error.description),
+            oidc::OAuthErrorCode::ServerError => ErrorResponse::internal(error.description),
+            oidc::OAuthErrorCode::InvalidGrant => {
+                oauth_bad_request(format!("invalid_grant: {}", error.description))
+            }
+            oidc::OAuthErrorCode::InvalidScope => oauth_bad_request(error.description),
+            oidc::OAuthErrorCode::UnsupportedGrantType => {
+                oauth_bad_request(format!("unsupported_grant_type: {}", error.description))
+            }
+            oidc::OAuthErrorCode::UnauthorizedClient => {
+                oauth_bad_request(format!("unauthorized_client: {}", error.description))
+            }
+            oidc::OAuthErrorCode::InvalidRequest => oauth_bad_request(error.description),
+        }
+    }
 }
 
 pub(super) fn extract_basic_client_credentials(
@@ -116,97 +125,6 @@ pub(super) fn resolve_client_credentials_parts(
         (Some(credentials), None) | (None, Some(credentials)) => Ok(credentials),
         (None, None) => Err(oauth_invalid_client("client authentication is required")),
     }
-}
-
-pub(super) fn parse_space_delimited(
-    value: Option<&str>,
-    field: &str,
-) -> Result<Vec<String>, ErrorResponse> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for item in value.split_whitespace() {
-        let item = item.trim();
-        if item.is_empty() {
-            continue;
-        }
-        if seen.insert(item.to_string()) {
-            out.push(item.to_string());
-        }
-    }
-
-    if out
-        .iter()
-        .any(|item| item.contains('"') || item.contains('\\'))
-    {
-        return Err(oauth_bad_request(format!(
-            "{field} contains unsupported characters"
-        )));
-    }
-
-    Ok(out)
-}
-
-pub(super) fn resolve_scopes(
-    requested_scope: Option<&str>,
-    allowed_scopes: &[String],
-) -> Result<Vec<String>, ErrorResponse> {
-    let requested = parse_space_delimited(requested_scope, "scope")?;
-    if requested.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let allowed = allowed_scopes
-        .iter()
-        .map(String::as_str)
-        .collect::<HashSet<_>>();
-    for scope in &requested {
-        if !allowed.contains(scope.as_str()) {
-            return Err(oauth_bad_request(format!(
-                "requested scope '{scope}' is not allowed for this client"
-            )));
-        }
-    }
-
-    Ok(requested)
-}
-
-pub(super) fn resolve_audience(
-    requested_audience: Option<&str>,
-    allowed_audiences: &[String],
-) -> Result<Option<String>, ErrorResponse> {
-    let requested = requested_audience
-        .map(str::trim)
-        .filter(|audience| !audience.is_empty());
-
-    if let Some(audience) = requested {
-        if audience.split_whitespace().count() != 1 {
-            return Err(oauth_bad_request("audience must be a single value"));
-        }
-        if allowed_audiences.is_empty() {
-            return Err(oauth_bad_request(
-                "client has no registered audiences for requested audience",
-            ));
-        }
-        if !allowed_audiences.iter().any(|allowed| allowed == audience) {
-            return Err(oauth_bad_request(format!(
-                "requested audience '{audience}' is not allowed for this client"
-            )));
-        }
-        return Ok(Some(audience.to_string()));
-    }
-
-    if allowed_audiences.len() == 1 {
-        Ok(Some(allowed_audiences[0].clone()))
-    } else {
-        Ok(None)
-    }
-}
-
-pub(super) fn scope_contains(scopes: &[String], scope: &str) -> bool {
-    scopes.iter().any(|candidate| candidate == scope)
 }
 
 pub(super) async fn authenticate_oauth_client(

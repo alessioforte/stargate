@@ -11,8 +11,8 @@ use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
 use db::ent::{CredentialType, Profile};
 use http::header::SET_COOKIE;
+use idp::google::{get_google_oauth_token, get_google_user};
 use jwt::Claims;
-use oauth::google::{get_google_oauth_token, get_google_user};
 use serde::{Deserialize, Serialize};
 use store::Store;
 

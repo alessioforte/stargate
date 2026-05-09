@@ -3,9 +3,9 @@ pub mod admin;
 pub mod docs;
 pub mod gateway;
 pub mod health;
-pub mod oauth;
+pub mod oidc;
 pub mod signup;
-pub mod well_known;
+pub mod social;
 
 use utoipa::OpenApi;
 
@@ -13,22 +13,22 @@ use utoipa::OpenApi;
 #[openapi(
     paths(
         crate::api::health::get_health,
-        crate::api::well_known::get_jwks,
-        crate::api::well_known::get_oauth_metadata,
-        crate::api::well_known::get_openid_configuration,
+        crate::api::oidc::well_known::get_jwks,
+        crate::api::oidc::well_known::get_oauth_metadata,
+        crate::api::oidc::well_known::get_openid_configuration,
         crate::api::docs::get_api_doc,
         crate::api::signup::request::post_signup,
         crate::api::signup::verification::get_signup,
         crate::api::signup::complete::put_signup,
-        crate::api::oauth::state::post_state,
-        crate::api::oauth::authorize::get_authorize,
-        crate::api::oauth::token::post_token,
-        crate::api::oauth::userinfo::get_userinfo,
-        crate::api::oauth::userinfo::post_userinfo,
-        crate::api::oauth::token_ops::post_introspect,
-        crate::api::oauth::token_ops::post_revoke,
-        crate::api::oauth::github::get_github,
-        crate::api::oauth::google::get_google,
+        crate::api::social::state::post_state,
+        crate::api::oidc::authorize::get_authorize,
+        crate::api::oidc::token::post_token,
+        crate::api::oidc::userinfo::get_userinfo,
+        crate::api::oidc::userinfo::post_userinfo,
+        crate::api::oidc::token_ops::post_introspect,
+        crate::api::oidc::token_ops::post_revoke,
+        crate::api::social::github::get_github,
+        crate::api::social::google::get_google,
         crate::api::account::login::post_login,
         crate::api::account::logout::delete_logout,
         crate::api::account::profile::get_profile,
@@ -95,18 +95,10 @@ pub fn router() -> axum::Router {
 
     axum::Router::new()
         .route("/health", get(health::get_health))
-        .route("/.well-known/jwks.json", get(well_known::get_jwks))
-        .route(
-            "/.well-known/oauth-authorization-server",
-            get(well_known::get_oauth_metadata),
-        )
-        .route(
-            "/.well-known/openid-configuration",
-            get(well_known::get_openid_configuration),
-        )
         .route("/docs", get(docs::get_api_doc))
         .merge(signup::router())
-        .merge(oauth::router())
+        .merge(oidc::router())
+        .merge(social::router())
         .merge(account::router())
         .merge(admin::router())
 }

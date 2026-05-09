@@ -349,36 +349,6 @@ fn validate_authorize_request(
     Ok((scopes, audience))
 }
 
-fn client_is_first_party(client: &db::ent::OAuthClient) -> bool {
-    ["first_party", "firstParty", "trusted"]
-        .into_iter()
-        .any(|key| client.attrs.get(key).and_then(serde_json::Value::as_bool) == Some(true))
-}
-
-fn consent_covers(
-    consent: &db::ent::OAuthConsent,
-    scopes: &[String],
-    audience: Option<&str>,
-) -> bool {
-    let granted_scopes = consent
-        .scopes
-        .iter()
-        .map(String::as_str)
-        .collect::<HashSet<_>>();
-    if !scopes
-        .iter()
-        .all(|scope| granted_scopes.contains(scope.as_str()))
-    {
-        return false;
-    }
-
-    let Some(audience) = audience else {
-        return true;
-    };
-
-    consent.audiences.iter().any(|granted| granted == audience)
-}
-
 async fn consent_satisfied(
     client: &db::ent::OAuthClient,
     user: &db::ent::User,
@@ -386,7 +356,7 @@ async fn consent_satisfied(
     audience: Option<&str>,
     prompt: &AuthorizePrompt,
 ) -> Result<bool, ErrorResponse> {
-    if client_is_first_party(client) {
+    if oidc::consent::client_is_first_party(&client.attrs) {
         return Ok(true);
     }
 
@@ -401,15 +371,18 @@ async fn consent_satisfied(
         return Ok(false);
     };
 
-    if prompt.none && !consent_covers(&consent, scopes, audience) {
+    if prompt.none
+        && !oidc::consent::consent_covers(&consent.scopes, &consent.audiences, scopes, audience)
+    {
         return Ok(false);
     }
 
-    Ok(consent_covers(&consent, scopes, audience))
-}
-
-fn authorization_code() -> String {
-    format!("code_{}_{}", ulid::Ulid::new(), pw::generate_api_key())
+    Ok(oidc::consent::consent_covers(
+        &consent.scopes,
+        &consent.audiences,
+        scopes,
+        audience,
+    ))
 }
 
 async fn store_authorization_code(
@@ -419,7 +392,7 @@ async fn store_authorization_code(
     scopes: &[String],
     audience: Option<String>,
 ) -> Result<String, ErrorResponse> {
-    let code = authorization_code();
+    let code = oidc::codes::authorization_code();
     let code_hash = pw::hash_api_key(&code);
     let record = AuthorizationCodeRecord {
         client_id: client.client_id.clone(),

@@ -1,4 +1,4 @@
-use crate::err::ErrorResponse;
+use crate::OAuthError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use store::Store;
@@ -7,27 +7,27 @@ const FAMILY_KEY_PREFIX: &str = "oauth:refresh-family:";
 const TOKEN_PREFIX: &str = "rt_";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub(super) struct RefreshTokenFamily {
-    pub(super) client_id: String,
-    pub(super) user_id: String,
-    pub(super) current_secret_hash: String,
-    pub(super) scope: String,
-    pub(super) audience: Option<String>,
-    pub(super) auth_time: DateTime<Utc>,
-    pub(super) expires_at: DateTime<Utc>,
-    pub(super) generation: u64,
-    pub(super) revoked_at: Option<DateTime<Utc>>,
+pub struct RefreshTokenFamily {
+    pub client_id: String,
+    pub user_id: String,
+    pub current_secret_hash: String,
+    pub scope: String,
+    pub audience: Option<String>,
+    pub auth_time: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub generation: u64,
+    pub revoked_at: Option<DateTime<Utc>>,
 }
 
-fn family_key(family_id: &str) -> String {
+pub fn family_key(family_id: &str) -> String {
     format!("{FAMILY_KEY_PREFIX}{family_id}")
 }
 
-fn refresh_token(family_id: &str, secret: &str) -> String {
+pub fn refresh_token(family_id: &str, secret: &str) -> String {
     format!("{TOKEN_PREFIX}{family_id}.{secret}")
 }
 
-fn parse_refresh_token(token: &str) -> Option<(&str, &str)> {
+pub fn parse_refresh_token(token: &str) -> Option<(&str, &str)> {
     let token = token.strip_prefix(TOKEN_PREFIX)?;
     let (family_id, secret) = token.split_once('.')?;
     (!family_id.is_empty() && !secret.is_empty()).then_some((family_id, secret))
@@ -42,14 +42,15 @@ fn new_secret() -> String {
     pw::generate_api_key()
 }
 
-pub(super) async fn issue(
+pub async fn issue<S: Store>(
+    store: &S,
     client_id: String,
     user_id: String,
     scope: String,
     audience: Option<String>,
     auth_time: DateTime<Utc>,
     ttl_secs: u64,
-) -> Result<String, ErrorResponse> {
+) -> Result<String, OAuthError> {
     let ttl_secs = ttl_secs.max(1);
     let family_id = ulid::Ulid::new().to_string();
     let secret = new_secret();
@@ -66,15 +67,18 @@ pub(super) async fn issue(
         revoked_at: None,
     };
 
-    crate::etc::store::use_store()
+    store
         .set(&family_key(&family_id), &family, Some(ttl_secs))
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
 
     Ok(refresh_token(&family_id, &secret))
 }
 
-async fn revoke_family(family_id: &str, current: &RefreshTokenFamily) -> Result<(), ErrorResponse> {
+async fn revoke_family<S: Store>(
+    store: &S,
+    family_id: &str,
+    current: &RefreshTokenFamily,
+) -> Result<(), OAuthError> {
     if current.revoked_at.is_some() {
         return Ok(());
     }
@@ -82,28 +86,23 @@ async fn revoke_family(family_id: &str, current: &RefreshTokenFamily) -> Result<
     let mut revoked = current.clone();
     revoked.revoked_at = Some(Utc::now());
     let ttl = ttl_until(revoked.expires_at).unwrap_or(1);
-    let _ = crate::etc::store::use_store()
+    let _ = store
         .compare_and_swap(&family_key(family_id), current, &revoked, Some(ttl))
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
     Ok(())
 }
 
-pub(super) async fn rotate(
+pub async fn rotate<S: Store>(
+    store: &S,
     token: &str,
     client_id: &str,
-) -> Result<Option<(String, RefreshTokenFamily)>, ErrorResponse> {
+) -> Result<Option<(String, RefreshTokenFamily)>, OAuthError> {
     let Some((family_id, secret)) = parse_refresh_token(token.trim()) else {
         return Ok(None);
     };
 
     let key = family_key(family_id);
-    let store = crate::etc::store::use_store();
-    let Some(current) = store
-        .get::<RefreshTokenFamily>(&key)
-        .await
-        .map_err(ErrorResponse::internal)?
-    else {
+    let Some(current) = store.get::<RefreshTokenFamily>(&key).await? else {
         return Ok(None);
     };
 
@@ -116,7 +115,7 @@ pub(super) async fn rotate(
 
     let supplied_secret_hash = pw::hash_api_key(secret);
     if supplied_secret_hash != current.current_secret_hash {
-        revoke_family(family_id, &current).await?;
+        revoke_family(store, family_id, &current).await?;
         return Ok(None);
     }
 
@@ -127,18 +126,14 @@ pub(super) async fn rotate(
     let ttl = ttl_until(next.expires_at).unwrap_or(1);
     let swapped = store
         .compare_and_swap(&key, &current, &next, Some(ttl))
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
 
     if !swapped {
-        if let Some(latest) = store
-            .get::<RefreshTokenFamily>(&key)
-            .await
-            .map_err(ErrorResponse::internal)?
+        if let Some(latest) = store.get::<RefreshTokenFamily>(&key).await?
             && latest.revoked_at.is_none()
             && latest.current_secret_hash != supplied_secret_hash
         {
-            revoke_family(family_id, &latest).await?;
+            revoke_family(store, family_id, &latest).await?;
         }
         return Ok(None);
     }
@@ -149,10 +144,13 @@ pub(super) async fn rotate(
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::*;
+    use store::MemoryStore;
 
     #[tokio::test]
     async fn refresh_token_rotates_once_and_replay_revokes_family() {
+        let store = MemoryStore::new();
         let token = issue(
+            &store,
             "client-1".to_string(),
             "user-1".to_string(),
             "openid offline_access".to_string(),
@@ -163,14 +161,14 @@ mod tests {
         .await
         .unwrap();
 
-        let rotated = rotate(&token, "client-1").await.unwrap();
+        let rotated = rotate(&store, &token, "client-1").await.unwrap();
         assert!(rotated.is_some());
 
-        let replay = rotate(&token, "client-1").await.unwrap();
+        let replay = rotate(&store, &token, "client-1").await.unwrap();
         assert!(replay.is_none());
 
         let (next_token, _) = rotated.unwrap();
-        let after_replay = rotate(&next_token, "client-1").await.unwrap();
+        let after_replay = rotate(&store, &next_token, "client-1").await.unwrap();
         assert!(after_replay.is_none());
     }
 }

@@ -1,10 +1,10 @@
-use super::authorization_codes::AuthorizationCodeRecord;
-use super::shared::{PKCE_METHOD_S256, oauth_bad_request};
-use crate::err::ErrorResponse;
+use crate::OAuthError;
+use crate::codes::AuthorizationCodeRecord;
+use crate::scopes::PKCE_METHOD_S256;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 
-pub(super) fn valid_code_verifier(verifier: &str) -> bool {
+pub fn valid_code_verifier(verifier: &str) -> bool {
     (43..=128).contains(&verifier.len())
         && verifier.bytes().all(|byte| {
             matches!(
@@ -14,24 +14,22 @@ pub(super) fn valid_code_verifier(verifier: &str) -> bool {
         })
 }
 
-pub(super) fn s256_challenge(verifier: &str) -> String {
+pub fn s256_challenge(verifier: &str) -> String {
     let digest = Sha256::digest(verifier.as_bytes());
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&digest[..])
 }
 
-pub(super) fn verify(code: &AuthorizationCodeRecord, verifier: &str) -> Result<(), ErrorResponse> {
+pub fn verify(code: &AuthorizationCodeRecord, verifier: &str) -> Result<(), OAuthError> {
     if code.code_challenge_method != PKCE_METHOD_S256 {
-        return Err(oauth_bad_request(
-            "invalid_grant: unsupported code challenge",
-        ));
+        return Err(OAuthError::invalid_grant("unsupported code challenge"));
     }
 
     if !valid_code_verifier(verifier) {
-        return Err(oauth_bad_request("invalid_grant: invalid code_verifier"));
+        return Err(OAuthError::invalid_grant("invalid code_verifier"));
     }
 
     if s256_challenge(verifier) != code.code_challenge {
-        return Err(oauth_bad_request("invalid_grant: invalid code_verifier"));
+        return Err(OAuthError::invalid_grant("invalid code_verifier"));
     }
 
     Ok(())

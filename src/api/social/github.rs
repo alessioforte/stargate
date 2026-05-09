@@ -10,8 +10,8 @@ use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
 use db::ent::{CredentialType, Profile};
 use http::header::SET_COOKIE;
+use idp::github::{get_github_oauth_token, get_github_user};
 use jwt::Claims;
-use oauth::github::{get_github_oauth_token, get_github_user};
 use serde::{Deserialize, Serialize};
 use store::Store;
 

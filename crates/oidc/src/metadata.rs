@@ -1,20 +1,11 @@
-use crate::err::ErrorResponse;
-use crate::etc::jwt::jwt_config;
-use axum::Json;
-use axum::response::IntoResponse;
-use http::HeaderMap;
-use http::header::CACHE_CONTROL;
+use crate::scopes::{
+    AUTH_METHOD_CLIENT_SECRET_BASIC, AUTH_METHOD_CLIENT_SECRET_POST, AUTH_METHOD_NONE,
+    GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, PKCE_METHOD_S256,
+    RESPONSE_CODE, SCOPE_EMAIL, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, SCOPE_PROFILE,
+};
 use jwt::{AlgorithmParameters, EllipticCurve, PublicKeyUse};
 use serde::Serialize;
-use std::env;
 use utoipa::ToSchema;
-
-const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
-const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
-const GRANT_REFRESH_TOKEN: &str = "refresh_token";
-const RESPONSE_CODE: &str = "code";
-const AUTH_METHOD_CLIENT_SECRET_BASIC: &str = "client_secret_basic";
-const AUTH_METHOD_CLIENT_SECRET_POST: &str = "client_secret_post";
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PublicJwk {
@@ -78,31 +69,20 @@ pub struct OpenIdConfiguration {
     token_endpoint_auth_methods_supported: Vec<String>,
 }
 
-fn endpoint_base_url(issuer: &str) -> String {
-    env::var("OAUTH_BASE_URL")
-        .ok()
+pub fn endpoint_base_url(issuer: &str, configured_base_url: Option<&str>, port: &str) -> String {
+    configured_base_url
         .filter(|base_url| !base_url.trim().is_empty())
+        .map(str::to_string)
         .or_else(|| issuer.contains("://").then(|| issuer.to_string()))
-        .unwrap_or_else(|| {
-            let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
-            format!("http://localhost:{port}")
-        })
+        .unwrap_or_else(|| format!("http://localhost:{port}"))
 }
 
-fn endpoint_url(base_url: &str, path: &str) -> String {
+pub fn endpoint_url(base_url: &str, path: &str) -> String {
     format!(
         "{}/{}",
         base_url.trim_end_matches('/'),
         path.trim_start_matches('/')
     )
-}
-
-fn jwks_cache_control() -> String {
-    let max_age = env::var("JWKS_CACHE_MAX_AGE_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(300);
-    format!("public, max-age={max_age}")
 }
 
 fn public_key_use_name(jwk: &jwt::Jwk) -> Option<&str> {
@@ -128,7 +108,7 @@ fn elliptic_curve_name(curve: &EllipticCurve) -> &'static str {
     }
 }
 
-fn jwt_algorithm_name(algorithm: jwt::Algorithm) -> &'static str {
+pub fn jwt_algorithm_name(algorithm: jwt::Algorithm) -> &'static str {
     match algorithm {
         jwt::Algorithm::HS256 => "HS256",
         jwt::Algorithm::HS384 => "HS384",
@@ -177,7 +157,7 @@ fn public_jwk_from_jwk(jwk: jwt::Jwk) -> Option<PublicJwk> {
     }
 }
 
-fn jwks_response(jwk_set: jwt::JwkSet) -> Jwks {
+pub fn jwks_response(jwk_set: jwt::JwkSet) -> Jwks {
     let mut keys = Vec::with_capacity(jwk_set.keys.len());
     for jwk in jwk_set.keys {
         if let Some(key) = public_jwk_from_jwk(jwk) {
@@ -187,48 +167,17 @@ fn jwks_response(jwk_set: jwt::JwkSet) -> Jwks {
     Jwks { keys }
 }
 
-#[utoipa::path(
-    get,
-    path = "/.well-known/jwks.json",
-    responses(
-        (status = 200, description = "OK", body = Jwks)
-    )
-)]
-pub async fn get_jwks() -> Result<impl IntoResponse, ErrorResponse> {
-    let jwks = jwt_config()
-        .public_jwks()
-        .map_err(ErrorResponse::internal)?;
-    let jwks = jwks_response(jwks);
-
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        CACHE_CONTROL,
-        jwks_cache_control()
-            .parse()
-            .map_err(ErrorResponse::internal)?,
-    );
-
-    Ok((headers, Json(jwks)))
-}
-
-#[utoipa::path(
-    get,
-    path = "/.well-known/oauth-authorization-server",
-    responses(
-        (status = 200, description = "OK", body = OAuthAuthorizationServerMetadata)
-    )
-)]
-pub async fn get_oauth_metadata() -> Result<Json<OAuthAuthorizationServerMetadata>, ErrorResponse> {
-    let issuer = jwt::issuer_from_env();
-    let base_url = endpoint_base_url(&issuer);
-
-    Ok(Json(OAuthAuthorizationServerMetadata {
+pub fn authorization_server_metadata(
+    issuer: String,
+    base_url: &str,
+) -> OAuthAuthorizationServerMetadata {
+    OAuthAuthorizationServerMetadata {
         issuer,
-        authorization_endpoint: Some(endpoint_url(&base_url, "/oauth/authorize")),
-        token_endpoint: Some(endpoint_url(&base_url, "/oauth/token")),
-        introspection_endpoint: endpoint_url(&base_url, "/oauth/introspect"),
-        revocation_endpoint: endpoint_url(&base_url, "/oauth/revoke"),
-        jwks_uri: endpoint_url(&base_url, "/.well-known/jwks.json"),
+        authorization_endpoint: Some(endpoint_url(base_url, "/oauth/authorize")),
+        token_endpoint: Some(endpoint_url(base_url, "/oauth/token")),
+        introspection_endpoint: endpoint_url(base_url, "/oauth/introspect"),
+        revocation_endpoint: endpoint_url(base_url, "/oauth/revoke"),
+        jwks_uri: endpoint_url(base_url, "/.well-known/jwks.json"),
         response_types_supported: vec![RESPONSE_CODE.to_string()],
         grant_types_supported: vec![
             GRANT_AUTHORIZATION_CODE.to_string(),
@@ -238,29 +187,23 @@ pub async fn get_oauth_metadata() -> Result<Json<OAuthAuthorizationServerMetadat
         token_endpoint_auth_methods_supported: Some(vec![
             AUTH_METHOD_CLIENT_SECRET_BASIC.to_string(),
             AUTH_METHOD_CLIENT_SECRET_POST.to_string(),
-            "none".to_string(),
+            AUTH_METHOD_NONE.to_string(),
         ]),
-        code_challenge_methods_supported: Some(vec!["S256".to_string()]),
-    }))
+        code_challenge_methods_supported: Some(vec![PKCE_METHOD_S256.to_string()]),
+    }
 }
 
-#[utoipa::path(
-    get,
-    path = "/.well-known/openid-configuration",
-    responses(
-        (status = 200, description = "OK", body = OpenIdConfiguration)
-    )
-)]
-pub async fn get_openid_configuration() -> Result<Json<OpenIdConfiguration>, ErrorResponse> {
-    let issuer = jwt::issuer_from_env();
-    let base_url = endpoint_base_url(&issuer);
-
-    Ok(Json(OpenIdConfiguration {
+pub fn openid_configuration(
+    issuer: String,
+    base_url: &str,
+    signing_algorithm: jwt::Algorithm,
+) -> OpenIdConfiguration {
+    OpenIdConfiguration {
         issuer,
-        authorization_endpoint: endpoint_url(&base_url, "/oauth/authorize"),
-        token_endpoint: endpoint_url(&base_url, "/oauth/token"),
-        userinfo_endpoint: Some(endpoint_url(&base_url, "/oauth/userinfo")),
-        jwks_uri: endpoint_url(&base_url, "/.well-known/jwks.json"),
+        authorization_endpoint: endpoint_url(base_url, "/oauth/authorize"),
+        token_endpoint: endpoint_url(base_url, "/oauth/token"),
+        userinfo_endpoint: Some(endpoint_url(base_url, "/oauth/userinfo")),
+        jwks_uri: endpoint_url(base_url, "/.well-known/jwks.json"),
         response_types_supported: vec![RESPONSE_CODE.to_string()],
         grant_types_supported: vec![
             GRANT_AUTHORIZATION_CODE.to_string(),
@@ -269,13 +212,13 @@ pub async fn get_openid_configuration() -> Result<Json<OpenIdConfiguration>, Err
         ],
         subject_types_supported: vec!["public".to_string()],
         id_token_signing_alg_values_supported: vec![
-            jwt_algorithm_name(jwt_config().algorithm()).to_string(),
+            jwt_algorithm_name(signing_algorithm).to_string(),
         ],
         scopes_supported: vec![
-            "openid".to_string(),
-            "email".to_string(),
-            "profile".to_string(),
-            "offline_access".to_string(),
+            SCOPE_OPENID.to_string(),
+            SCOPE_EMAIL.to_string(),
+            SCOPE_PROFILE.to_string(),
+            SCOPE_OFFLINE_ACCESS.to_string(),
         ],
         claims_supported: vec![
             "sub".to_string(),
@@ -291,11 +234,27 @@ pub async fn get_openid_configuration() -> Result<Json<OpenIdConfiguration>, Err
             "preferred_username".to_string(),
             "picture".to_string(),
         ],
-        code_challenge_methods_supported: vec!["S256".to_string()],
+        code_challenge_methods_supported: vec![PKCE_METHOD_S256.to_string()],
         token_endpoint_auth_methods_supported: vec![
             AUTH_METHOD_CLIENT_SECRET_BASIC.to_string(),
             AUTH_METHOD_CLIENT_SECRET_POST.to_string(),
-            "none".to_string(),
+            AUTH_METHOD_NONE.to_string(),
         ],
-    }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn endpoint_base_url_prefers_explicit_base() {
+        let base = endpoint_base_url(
+            "http://issuer.example",
+            Some("https://public.example/oauth"),
+            "5050",
+        );
+
+        assert_eq!(base, "https://public.example/oauth");
+    }
 }

@@ -3,10 +3,10 @@ use super::pkce;
 use super::refresh_tokens;
 use super::shared::{
     AUTH_METHOD_NONE, ClientCredentials, GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS,
-    GRANT_REFRESH_TOKEN, SCOPE_EMAIL, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, SCOPE_PROFILE,
-    authenticate_oauth_client, extract_basic_client_credentials, oauth_bad_request,
-    oauth_invalid_client, parse_space_delimited, resolve_audience,
-    resolve_client_credentials_parts, resolve_scopes, scope_contains,
+    GRANT_REFRESH_TOKEN, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, authenticate_oauth_client,
+    extract_basic_client_credentials, oauth_bad_request, oauth_invalid_client,
+    parse_space_delimited, resolve_audience, resolve_client_credentials_parts, resolve_scopes,
+    scope_contains,
 };
 use crate::err::{ErrorResponse, HttpError};
 use axum::Json;
@@ -125,17 +125,13 @@ fn issue_client_credentials_token(
     audience: Option<String>,
 ) -> Result<TokenResponse, ErrorResponse> {
     let jwt = crate::etc::jwt::jwt_config();
-    let sub = client
-        .service_account_id
-        .clone()
-        .unwrap_or_else(|| client.client_id.clone());
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
-
-    let mut claims = jwt::Claims::default().subject(sub);
-    claims.azp = Some(client.client_id.clone());
-    claims.scope = scope.clone();
-    claims.aud = audience;
-    claims.sub_id = client.service_account_id.clone();
+    let claims = oidc::claims::client_credentials_access_claims(
+        &client.client_id,
+        client.service_account_id.as_deref(),
+        scope.clone(),
+        audience,
+    );
 
     let access_token = jwt
         .generate_oauth_access_token(claims)
@@ -245,6 +241,17 @@ async fn resolve_refresh_token_client(
     resolve_public_or_confidential_client(basic, form, GRANT_REFRESH_TOKEN).await
 }
 
+fn user_claims_profile(user: &db::ent::User) -> oidc::claims::UserClaimsProfile {
+    oidc::claims::UserClaimsProfile {
+        id: user.id.clone(),
+        email: user.email.clone(),
+        given_name: user.given_name.clone(),
+        family_name: user.family_name.clone(),
+        nickname: user.nickname.clone(),
+        picture: user.picture.clone(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn issue_user_token_response(
     client: &db::ent::OAuthClient,
@@ -257,37 +264,16 @@ fn issue_user_token_response(
 ) -> Result<TokenResponse, ErrorResponse> {
     let jwt = crate::etc::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
-    let include_email = scope_contains(scopes, SCOPE_EMAIL);
-    let include_profile = scope_contains(scopes, SCOPE_PROFILE);
-
-    let mut access_claims = jwt::Claims::default()
-        .subject(user.id.clone())
-        .sub_id(user.id.clone());
-    access_claims.azp = Some(client.client_id.clone());
-    access_claims.scope = scope.clone();
-    access_claims.aud = audience;
-    access_claims.auth_time = Some(auth_time.timestamp() as usize);
-
-    let mut id_claims = jwt::Claims::default()
-        .subject(user.id.clone())
-        .sub_id(user.id.clone())
-        .aud(client.client_id.clone());
-    id_claims.azp = Some(client.client_id.clone());
-    id_claims.auth_time = Some(auth_time.timestamp() as usize);
-    id_claims.nonce = nonce;
-
-    if include_email {
-        id_claims.email = Some(user.email.clone());
-        id_claims.email_verified = Some(true);
-    }
-
-    if include_profile {
-        let given_name = user.given_name.clone().unwrap_or_default();
-        let family_name = user.family_name.clone().unwrap_or_default();
-        id_claims.name = Some(crate::fun::format_name(&given_name, &family_name));
-        id_claims.preferred_username = Some(user.nickname.clone());
-        id_claims.picture = user.picture.clone();
-    }
+    let profile = user_claims_profile(user);
+    let access_claims = oidc::claims::user_access_claims(
+        &profile,
+        &client.client_id,
+        scope.clone(),
+        audience,
+        auth_time,
+    );
+    let id_claims =
+        oidc::claims::id_token_claims(&profile, &client.client_id, scopes, auth_time, nonce);
 
     let access_token = jwt
         .generate_oauth_access_token(access_claims)

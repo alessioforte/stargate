@@ -1754,6 +1754,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "idp"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2382,15 +2394,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "oauth"
+name = "oidc"
 version = "0.1.0"
 dependencies = [
- "reqwest",
+ "base64",
+ "chrono",
+ "jwt",
+ "pw",
  "serde",
  "serde_json",
+ "sha2",
+ "store",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
- "url",
+ "ulid",
+ "utoipa",
 ]
 
 [[package]]
@@ -3824,6 +3843,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-tungstenite",
  "hyper-util",
+ "idp",
  "jwt",
  "lb",
  "lim",
@@ -3832,7 +3852,7 @@ dependencies = [
  "mime",
  "moka",
  "notify",
- "oauth",
+ "oidc",
  "once_cell",
  "pw",
  "rustls",
