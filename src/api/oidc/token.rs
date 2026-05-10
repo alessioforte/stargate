@@ -3,12 +3,12 @@ use super::pkce;
 use super::refresh_tokens;
 use super::shared::{
     AUTH_METHOD_NONE, ClientCredentials, GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS,
-    GRANT_REFRESH_TOKEN, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, authenticate_oauth_client,
-    extract_basic_client_credentials, oauth_bad_request, oauth_invalid_client,
-    parse_space_delimited, resolve_audience, resolve_client_credentials_parts, resolve_scopes,
-    scope_contains,
+    GRANT_REFRESH_TOKEN, OAuthResult, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID,
+    authenticate_oauth_client, extract_basic_client_credentials, oauth_bad_request,
+    oauth_invalid_client, oauth_invalid_grant, oauth_unsupported_grant_type, parse_space_delimited,
+    resolve_audience, resolve_client_credentials_parts, resolve_scopes, scope_contains,
 };
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::OAuthErrorResponse;
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use chrono::Utc;
@@ -47,12 +47,12 @@ pub struct TokenResponse {
     request_body(content = TokenEndpointForm, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "OK", body = TokenResponse),
-        (status = 400, description = "Bad Request", body = ErrorResponse),
-        (status = 401, description = "Unauthorized", body = ErrorResponse),
-        (status = 500, description = "Internal Server Error", body = ErrorResponse),
+        (status = 400, description = "Bad Request", body = OAuthErrorResponse),
+        (status = 401, description = "Unauthorized", body = OAuthErrorResponse),
+        (status = 500, description = "Internal Server Error", body = OAuthErrorResponse),
     )
 )]
-pub async fn post_token(req: Request) -> Result<Json<TokenResponse>, ErrorResponse> {
+pub async fn post_token(req: Request) -> OAuthResult<Json<TokenResponse>> {
     let basic = extract_basic_client_credentials(&req)?;
     let form = extract_token_endpoint_form(req).await?;
 
@@ -72,16 +72,16 @@ pub async fn post_token(req: Request) -> Result<Json<TokenResponse>, ErrorRespon
             let client = resolve_refresh_token_client(basic, &form).await?;
             issue_refresh_token_grant(&client, &form).await?
         }
-        _ => return Err(oauth_bad_request("unsupported grant_type")),
+        _ => return Err(oauth_unsupported_grant_type("unsupported grant_type")),
     };
 
     Ok(Json(body))
 }
 
-async fn extract_token_endpoint_form(req: Request) -> Result<TokenEndpointForm, ErrorResponse> {
+async fn extract_token_endpoint_form(req: Request) -> OAuthResult<TokenEndpointForm> {
     let Form(form) = Form::<TokenEndpointForm>::from_request(req, &())
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+        .map_err(|e| oauth_bad_request(e.body_text()))?;
 
     if form.grant_type.trim().is_empty() {
         return Err(oauth_bad_request("grant_type is required"));
@@ -93,7 +93,7 @@ async fn extract_token_endpoint_form(req: Request) -> Result<TokenEndpointForm, 
 fn resolve_client_credentials(
     basic: Option<ClientCredentials>,
     form: &TokenEndpointForm,
-) -> Result<ClientCredentials, ErrorResponse> {
+) -> OAuthResult<ClientCredentials> {
     resolve_client_credentials_parts(
         basic,
         form.client_id.as_deref(),
@@ -103,7 +103,7 @@ fn resolve_client_credentials(
 
 async fn validate_client_credentials_client(
     credentials: &ClientCredentials,
-) -> Result<db::ent::OAuthClient, ErrorResponse> {
+) -> OAuthResult<db::ent::OAuthClient> {
     let client = authenticate_oauth_client(credentials).await?;
 
     if !client
@@ -123,7 +123,7 @@ fn issue_client_credentials_token(
     client: &db::ent::OAuthClient,
     scopes: &[String],
     audience: Option<String>,
-) -> Result<TokenResponse, ErrorResponse> {
+) -> OAuthResult<TokenResponse> {
     let jwt = crate::etc::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let claims = oidc::claims::client_credentials_access_claims(
@@ -135,7 +135,7 @@ fn issue_client_credentials_token(
 
     let access_token = jwt
         .generate_oauth_access_token(claims)
-        .map_err(ErrorResponse::internal)?;
+        .map_err(OAuthErrorResponse::internal)?;
     Ok(TokenResponse {
         access_token,
         id_token: None,
@@ -156,7 +156,7 @@ fn client_allows_grant(client: &db::ent::OAuthClient, grant_type: &str) -> bool 
 fn validate_client_grant(
     client: db::ent::OAuthClient,
     grant_type: &str,
-) -> Result<db::ent::OAuthClient, ErrorResponse> {
+) -> OAuthResult<db::ent::OAuthClient> {
     if !client_allows_grant(&client, grant_type) {
         return Err(oauth_bad_request(format!(
             "{grant_type} grant is not allowed for this client"
@@ -170,7 +170,7 @@ async fn resolve_public_or_confidential_client(
     basic: Option<ClientCredentials>,
     form: &TokenEndpointForm,
     grant_type: &str,
-) -> Result<db::ent::OAuthClient, ErrorResponse> {
+) -> OAuthResult<db::ent::OAuthClient> {
     if basic.is_some() && form.client_secret.is_some() {
         return Err(oauth_bad_request(
             "multiple client authentication methods are not allowed",
@@ -211,7 +211,7 @@ async fn resolve_public_or_confidential_client(
 
     let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Err(oauth_invalid_client("invalid client"));
     };
@@ -230,14 +230,14 @@ async fn resolve_public_or_confidential_client(
 async fn resolve_authorization_code_client(
     basic: Option<ClientCredentials>,
     form: &TokenEndpointForm,
-) -> Result<db::ent::OAuthClient, ErrorResponse> {
+) -> OAuthResult<db::ent::OAuthClient> {
     resolve_public_or_confidential_client(basic, form, GRANT_AUTHORIZATION_CODE).await
 }
 
 async fn resolve_refresh_token_client(
     basic: Option<ClientCredentials>,
     form: &TokenEndpointForm,
-) -> Result<db::ent::OAuthClient, ErrorResponse> {
+) -> OAuthResult<db::ent::OAuthClient> {
     resolve_public_or_confidential_client(basic, form, GRANT_REFRESH_TOKEN).await
 }
 
@@ -261,7 +261,7 @@ fn issue_user_token_response(
     auth_time: chrono::DateTime<Utc>,
     nonce: Option<String>,
     refresh_token: Option<String>,
-) -> Result<TokenResponse, ErrorResponse> {
+) -> OAuthResult<TokenResponse> {
     let jwt = crate::etc::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let profile = user_claims_profile(user);
@@ -277,12 +277,12 @@ fn issue_user_token_response(
 
     let access_token = jwt
         .generate_oauth_access_token(access_claims)
-        .map_err(ErrorResponse::internal)?;
+        .map_err(OAuthErrorResponse::internal)?;
 
     let id_token = if scope_contains(scopes, SCOPE_OPENID) {
         Some(
             jwt.generate_oidc_id_token(id_claims)
-                .map_err(ErrorResponse::internal)?,
+                .map_err(OAuthErrorResponse::internal)?,
         )
     } else {
         None
@@ -303,11 +303,11 @@ async fn issue_authorization_code_token(
     code: &AuthorizationCodeRecord,
     user: &db::ent::User,
     scopes: &[String],
-) -> Result<TokenResponse, ErrorResponse> {
+) -> OAuthResult<TokenResponse> {
     let refresh_token = if scope_contains(scopes, SCOPE_OFFLINE_ACCESS) {
         if !client_allows_grant(client, GRANT_REFRESH_TOKEN) {
-            return Err(oauth_bad_request(
-                "invalid_grant: refresh_token grant is not allowed for this client",
+            return Err(oauth_invalid_grant(
+                "refresh_token grant is not allowed for this client",
             ));
         }
         Some(
@@ -317,6 +317,7 @@ async fn issue_authorization_code_token(
                 scopes.join(" "),
                 code.audience.clone(),
                 code.auth_time,
+                code.nonce.clone(),
                 refresh_token_ttl_secs(),
             )
             .await?,
@@ -346,7 +347,7 @@ fn refresh_token_ttl_secs() -> u64 {
 async fn issue_authorization_code_grant(
     client: &db::ent::OAuthClient,
     form: &TokenEndpointForm,
-) -> Result<TokenResponse, ErrorResponse> {
+) -> OAuthResult<TokenResponse> {
     let code = form
         .code
         .as_deref()
@@ -371,34 +372,30 @@ async fn issue_authorization_code_grant(
     let code_hash = pw::hash_api_key(code);
 
     let Some(record) = authorization_codes::get(&code_hash).await? else {
-        return Err(oauth_bad_request(
-            "invalid_grant: invalid authorization code",
-        ));
+        return Err(oauth_invalid_grant("invalid authorization code"));
     };
 
     if record.client_id != client.client_id {
-        return Err(oauth_bad_request("invalid_grant: client mismatch"));
+        return Err(oauth_invalid_grant("client mismatch"));
     }
 
     if record.redirect_uri != redirect_uri {
-        return Err(oauth_bad_request("invalid_grant: redirect_uri mismatch"));
+        return Err(oauth_invalid_grant("redirect_uri mismatch"));
     }
 
     pkce::verify(&record, verifier)?;
 
     let Some(user) = crate::db::get_user_by_id(&record.user_id)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
-        return Err(oauth_bad_request("invalid_grant: user not found"));
+        return Err(oauth_invalid_grant("user not found"));
     };
 
     let scopes = parse_space_delimited(Some(record.scope.as_str()), "scope")?;
 
     if !authorization_codes::consume(&code_hash, &record).await? {
-        return Err(oauth_bad_request(
-            "invalid_grant: invalid authorization code",
-        ));
+        return Err(oauth_invalid_grant("invalid authorization code"));
     }
 
     issue_authorization_code_token(client, &record, &user, &scopes).await
@@ -407,7 +404,7 @@ async fn issue_authorization_code_grant(
 async fn issue_refresh_token_grant(
     client: &db::ent::OAuthClient,
     form: &TokenEndpointForm,
-) -> Result<TokenResponse, ErrorResponse> {
+) -> OAuthResult<TokenResponse> {
     let token = form
         .refresh_token
         .as_deref()
@@ -418,14 +415,14 @@ async fn issue_refresh_token_grant(
     let Some((new_refresh_token, family)) =
         refresh_tokens::rotate(token, &client.client_id).await?
     else {
-        return Err(oauth_bad_request("invalid_grant: invalid refresh token"));
+        return Err(oauth_invalid_grant("invalid refresh token"));
     };
 
     let Some(user) = crate::db::get_user_by_id(&family.user_id)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
-        return Err(oauth_bad_request("invalid_grant: user not found"));
+        return Err(oauth_invalid_grant("user not found"));
     };
 
     let scopes = parse_space_delimited(Some(family.scope.as_str()), "scope")?;
@@ -435,7 +432,7 @@ async fn issue_refresh_token_grant(
         &scopes,
         family.audience.clone(),
         family.auth_time,
-        None,
+        family.nonce.clone(),
         Some(new_refresh_token),
     )
 }

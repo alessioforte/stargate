@@ -1,4 +1,4 @@
-use crate::err::ErrorResponse;
+use super::shared::OAuthResult;
 
 pub(super) use oidc::codes::AuthorizationCodeRecord;
 
@@ -6,25 +6,25 @@ pub(super) async fn store(
     code_hash: &str,
     record: AuthorizationCodeRecord,
     ttl_secs: u64,
-) -> Result<(), ErrorResponse> {
+) -> OAuthResult<()> {
     oidc::codes::store(crate::etc::store::use_store(), code_hash, record, ttl_secs)
         .await
-        .map_err(ErrorResponse::from)
+        .map_err(Into::into)
 }
 
-pub(super) async fn get(code_hash: &str) -> Result<Option<AuthorizationCodeRecord>, ErrorResponse> {
+pub(super) async fn get(code_hash: &str) -> OAuthResult<Option<AuthorizationCodeRecord>> {
     oidc::codes::get(crate::etc::store::use_store(), code_hash)
         .await
-        .map_err(ErrorResponse::from)
+        .map_err(Into::into)
 }
 
 pub(super) async fn consume(
     code_hash: &str,
     record: &AuthorizationCodeRecord,
-) -> Result<bool, ErrorResponse> {
+) -> OAuthResult<bool> {
     oidc::codes::consume(crate::etc::store::use_store(), code_hash, record)
         .await
-        .map_err(ErrorResponse::from)
+        .map_err(Into::into)
 }
 
 #[cfg(all(test, feature = "memory"))]

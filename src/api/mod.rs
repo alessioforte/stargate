@@ -424,6 +424,10 @@ mod tests {
             .unwrap();
         let resp = send_req(req).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "invalid_request");
+        assert!(json.get("message").is_none());
     }
 
     #[tokio::test]
@@ -442,6 +446,10 @@ mod tests {
             .unwrap();
         let resp = send_req(req).await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "insufficient_scope");
+        assert!(json.get("message").is_none());
     }
 
     #[tokio::test]
@@ -454,6 +462,10 @@ mod tests {
             .unwrap();
         let resp = send_req(req).await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "insufficient_scope");
+        assert!(json.get("message").is_none());
     }
 
     #[tokio::test]

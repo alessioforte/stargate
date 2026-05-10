@@ -1,6 +1,6 @@
 use super::authorization_codes::AuthorizationCodeRecord;
-use crate::err::ErrorResponse;
+use super::shared::OAuthResult;
 
-pub(super) fn verify(code: &AuthorizationCodeRecord, verifier: &str) -> Result<(), ErrorResponse> {
-    oidc::pkce::verify(code, verifier).map_err(ErrorResponse::from)
+pub(super) fn verify(code: &AuthorizationCodeRecord, verifier: &str) -> OAuthResult<()> {
+    oidc::pkce::verify(code, verifier).map_err(Into::into)
 }

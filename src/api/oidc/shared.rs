@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::OAuthErrorResponse;
 use axum::extract::Request;
 use base64::Engine;
 use http::header::AUTHORIZATION;
@@ -19,39 +19,27 @@ pub(super) struct ClientCredentials {
     pub(super) auth_method: &'static str,
 }
 
-pub(super) fn oauth_bad_request(message: impl Into<String>) -> ErrorResponse {
-    ErrorResponse::from(HttpError::BadRequest(message.into()))
+pub(super) type OAuthResult<T> = Result<T, OAuthErrorResponse>;
+
+pub(super) fn oauth_bad_request(message: impl Into<String>) -> OAuthErrorResponse {
+    OAuthErrorResponse::bad_request(message)
 }
 
-pub(super) fn oauth_invalid_client(message: impl Into<String>) -> ErrorResponse {
-    let mut err = ErrorResponse::from(HttpError::Unauthorized(message.into()));
-    err.insert_header("WWW-Authenticate", "Basic realm=\"stargate-oauth-token\"");
-    err
+pub(super) fn oauth_invalid_client(message: impl Into<String>) -> OAuthErrorResponse {
+    OAuthErrorResponse::invalid_client(message)
 }
 
-impl From<oidc::OAuthError> for ErrorResponse {
-    fn from(error: oidc::OAuthError) -> Self {
-        match error.code {
-            oidc::OAuthErrorCode::InvalidClient => oauth_invalid_client(error.description),
-            oidc::OAuthErrorCode::ServerError => ErrorResponse::internal(error.description),
-            oidc::OAuthErrorCode::InvalidGrant => {
-                oauth_bad_request(format!("invalid_grant: {}", error.description))
-            }
-            oidc::OAuthErrorCode::InvalidScope => oauth_bad_request(error.description),
-            oidc::OAuthErrorCode::UnsupportedGrantType => {
-                oauth_bad_request(format!("unsupported_grant_type: {}", error.description))
-            }
-            oidc::OAuthErrorCode::UnauthorizedClient => {
-                oauth_bad_request(format!("unauthorized_client: {}", error.description))
-            }
-            oidc::OAuthErrorCode::InvalidRequest => oauth_bad_request(error.description),
-        }
-    }
+pub(super) fn oauth_invalid_grant(message: impl Into<String>) -> OAuthErrorResponse {
+    OAuthErrorResponse::invalid_grant(message)
+}
+
+pub(super) fn oauth_unsupported_grant_type(message: impl Into<String>) -> OAuthErrorResponse {
+    OAuthErrorResponse::unsupported_grant_type(message)
 }
 
 pub(super) fn extract_basic_client_credentials(
     req: &Request,
-) -> Result<Option<ClientCredentials>, ErrorResponse> {
+) -> OAuthResult<Option<ClientCredentials>> {
     let Some(value) = req.headers().get(AUTHORIZATION) else {
         return Ok(None);
     };
@@ -92,7 +80,7 @@ pub(super) fn extract_basic_client_credentials(
 fn extract_post_client_credentials_parts(
     client_id: Option<&str>,
     client_secret: Option<&str>,
-) -> Result<Option<ClientCredentials>, ErrorResponse> {
+) -> OAuthResult<Option<ClientCredentials>> {
     match (client_id, client_secret) {
         (None, None) => Ok(None),
         (Some(client_id), Some(client_secret)) => {
@@ -116,7 +104,7 @@ pub(super) fn resolve_client_credentials_parts(
     basic: Option<ClientCredentials>,
     client_id: Option<&str>,
     client_secret: Option<&str>,
-) -> Result<ClientCredentials, ErrorResponse> {
+) -> OAuthResult<ClientCredentials> {
     let post = extract_post_client_credentials_parts(client_id, client_secret)?;
     match (basic, post) {
         (Some(_), Some(_)) => Err(oauth_bad_request(
@@ -129,10 +117,10 @@ pub(super) fn resolve_client_credentials_parts(
 
 pub(super) async fn authenticate_oauth_client(
     credentials: &ClientCredentials,
-) -> Result<db::ent::OAuthClient, ErrorResponse> {
+) -> OAuthResult<db::ent::OAuthClient> {
     let Some(client) = crate::db::get_oauth_client_by_client_id(&credentials.client_id)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Err(oauth_invalid_client("invalid client credentials"));
     };

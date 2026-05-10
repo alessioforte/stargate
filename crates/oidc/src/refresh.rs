@@ -14,6 +14,8 @@ pub struct RefreshTokenFamily {
     pub scope: String,
     pub audience: Option<String>,
     pub auth_time: DateTime<Utc>,
+    #[serde(default)]
+    pub nonce: Option<String>,
     pub expires_at: DateTime<Utc>,
     pub generation: u64,
     pub revoked_at: Option<DateTime<Utc>>,
@@ -49,6 +51,7 @@ pub async fn issue<S: Store>(
     scope: String,
     audience: Option<String>,
     auth_time: DateTime<Utc>,
+    nonce: Option<String>,
     ttl_secs: u64,
 ) -> Result<String, OAuthError> {
     let ttl_secs = ttl_secs.max(1);
@@ -62,6 +65,7 @@ pub async fn issue<S: Store>(
         scope,
         audience,
         auth_time,
+        nonce,
         expires_at,
         generation: 0,
         revoked_at: None,
@@ -156,13 +160,17 @@ mod tests {
             "openid offline_access".to_string(),
             Some("gateway".to_string()),
             Utc::now(),
+            Some("nonce-1".to_string()),
             60,
         )
         .await
         .unwrap();
 
         let rotated = rotate(&store, &token, "client-1").await.unwrap();
-        assert!(rotated.is_some());
+        assert_eq!(
+            rotated.as_ref().unwrap().1.nonce.as_deref(),
+            Some("nonce-1")
+        );
 
         let replay = rotate(&store, &token, "client-1").await.unwrap();
         assert!(replay.is_none());

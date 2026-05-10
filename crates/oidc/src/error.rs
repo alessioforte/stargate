@@ -8,6 +8,7 @@ pub enum OAuthErrorCode {
     UnauthorizedClient,
     UnsupportedGrantType,
     InvalidScope,
+    InsufficientScope,
     ServerError,
 }
 
@@ -20,6 +21,7 @@ impl OAuthErrorCode {
             Self::UnauthorizedClient => "unauthorized_client",
             Self::UnsupportedGrantType => "unsupported_grant_type",
             Self::InvalidScope => "invalid_scope",
+            Self::InsufficientScope => "insufficient_scope",
             Self::ServerError => "server_error",
         }
     }
@@ -64,6 +66,10 @@ impl OAuthError {
 
     pub fn invalid_scope(description: impl Into<String>) -> Self {
         Self::new(OAuthErrorCode::InvalidScope, description)
+    }
+
+    pub fn insufficient_scope(description: impl Into<String>) -> Self {
+        Self::new(OAuthErrorCode::InsufficientScope, description)
     }
 
     pub fn server_error(error: impl fmt::Display) -> Self {

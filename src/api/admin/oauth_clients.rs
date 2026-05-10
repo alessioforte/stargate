@@ -292,8 +292,29 @@ fn validate_redirect_uris(redirect_uris: &[String]) -> Result<(), ErrorResponse>
                 "redirect_uris cannot contain wildcards, fragments, or whitespace".to_string(),
             )));
         }
+
+        let parsed = url::Url::parse(uri).map_err(|_| {
+            ErrorResponse::from(HttpError::BadRequest(
+                "redirect_uris must be absolute URIs".to_string(),
+            ))
+        })?;
+
+        match parsed.scheme() {
+            "https" => {}
+            "http" if is_loopback_redirect_host(parsed.host_str()) => {}
+            _ => {
+                return Err(ErrorResponse::from(HttpError::BadRequest(
+                    "redirect_uris must use https, except http loopback redirects for local clients"
+                        .to_string(),
+                )));
+            }
+        }
     }
     Ok(())
+}
+
+fn is_loopback_redirect_host(host: Option<&str>) -> bool {
+    matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
 }
 
 fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResponse> {
@@ -867,4 +888,27 @@ pub async fn delete_oauth_client(mut req: Request) -> Result<Response, ErrorResp
         "oauth_client_deleted",
     ))
     .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redirect_uris_reject_public_http() {
+        let uris = vec!["http://evil.example.com/cb".to_string()];
+
+        assert!(validate_redirect_uris(&uris).is_err());
+    }
+
+    #[test]
+    fn redirect_uris_allow_https_and_loopback_http() {
+        let uris = vec![
+            "https://app.example.com/cb".to_string(),
+            "http://localhost:3000/cb".to_string(),
+            "http://127.0.0.1:3000/cb".to_string(),
+        ];
+
+        assert!(validate_redirect_uris(&uris).is_ok());
+    }
 }

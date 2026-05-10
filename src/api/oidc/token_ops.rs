@@ -1,9 +1,9 @@
 use super::shared::{
     ClientCredentials, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE,
-    OAUTH_REVOKE_SCOPE, OAUTH_TOKENS_GRANT, authenticate_oauth_client,
-    extract_basic_client_credentials, resolve_client_credentials_parts,
+    OAUTH_REVOKE_SCOPE, OAUTH_TOKENS_GRANT, OAuthResult, authenticate_oauth_client,
+    extract_basic_client_credentials, oauth_bad_request, resolve_client_credentials_parts,
 };
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::OAuthErrorResponse;
 use crate::etc::reqctx::take_audit_context_from;
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
@@ -75,12 +75,12 @@ enum TokenOperationCaller {
     request_body(content = TokenForm, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "OK", body = IntrospectionResponse),
-        (status = 400, description = "Bad Request", body = ErrorResponse),
-        (status = 403, description = "Forbidden", body = ErrorResponse),
-        (status = 500, description = "Internal Server Error", body = ErrorResponse),
+        (status = 400, description = "Bad Request", body = OAuthErrorResponse),
+        (status = 403, description = "Forbidden", body = OAuthErrorResponse),
+        (status = 500, description = "Internal Server Error", body = OAuthErrorResponse),
     )
 )]
-pub async fn post_introspect(req: Request) -> Result<Json<IntrospectionResponse>, ErrorResponse> {
+pub async fn post_introspect(req: Request) -> OAuthResult<Json<IntrospectionResponse>> {
     let basic = extract_basic_client_credentials(&req)?;
     let has_admin_grant = has_token_operation_grant(&req);
     let form = extract_token_form(req).await?;
@@ -116,12 +116,12 @@ pub async fn post_introspect(req: Request) -> Result<Json<IntrospectionResponse>
     request_body(content = TokenForm, content_type = "application/x-www-form-urlencoded"),
     responses(
         (status = 200, description = "OK"),
-        (status = 400, description = "Bad Request", body = ErrorResponse),
-        (status = 403, description = "Forbidden", body = ErrorResponse),
-        (status = 500, description = "Internal Server Error", body = ErrorResponse),
+        (status = 400, description = "Bad Request", body = OAuthErrorResponse),
+        (status = 403, description = "Forbidden", body = OAuthErrorResponse),
+        (status = 500, description = "Internal Server Error", body = OAuthErrorResponse),
     )
 )]
-pub async fn post_revoke(mut req: Request) -> Result<StatusCode, ErrorResponse> {
+pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
     let basic = extract_basic_client_credentials(&req)?;
     let has_admin_grant = has_token_operation_grant(&req);
     let ctx = take_audit_context_from(req.extensions_mut());
@@ -151,7 +151,7 @@ pub async fn post_revoke(mut req: Request) -> Result<StatusCode, ErrorResponse> 
         Ok(claims) => {
             crate::act::token_revocation::revoke_claims(&claims)
                 .await
-                .map_err(ErrorResponse::internal)?;
+                .map_err(OAuthErrorResponse::internal)?;
         }
         Err(_) => {
             revoke_api_key_token(&form.token, ctx).await?;
@@ -161,15 +161,13 @@ pub async fn post_revoke(mut req: Request) -> Result<StatusCode, ErrorResponse> 
     Ok(StatusCode::OK)
 }
 
-async fn extract_token_form(req: Request) -> Result<TokenForm, ErrorResponse> {
+async fn extract_token_form(req: Request) -> OAuthResult<TokenForm> {
     let Form(form) = Form::<TokenForm>::from_request(req, &())
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+        .map_err(|e| oauth_bad_request(e.body_text()))?;
 
     if form.token.trim().is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "token is required".to_string(),
-        )));
+        return Err(oauth_bad_request("token is required"));
     }
 
     Ok(form)
@@ -200,12 +198,12 @@ fn scope_from_attrs(attrs: &JsonValue) -> Option<String> {
         .filter(|scope| !scope.is_empty())
 }
 
-async fn jwt_session_active(claims: &jwt::Claims) -> Result<bool, ErrorResponse> {
+async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     if let Some(sid) = claims.sid.as_deref() {
         return crate::etc::store::use_store()
             .exists(sid)
             .await
-            .map_err(ErrorResponse::internal);
+            .map_err(OAuthErrorResponse::internal);
     }
 
     let Some(client_id) = claims.azp.as_deref() else {
@@ -213,23 +211,21 @@ async fn jwt_session_active(claims: &jwt::Claims) -> Result<bool, ErrorResponse>
     };
     let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(false);
     };
     Ok(client.enabled)
 }
 
-async fn introspect_jwt_claims(
-    claims: jwt::Claims,
-) -> Result<IntrospectionResponse, ErrorResponse> {
+async fn introspect_jwt_claims(claims: jwt::Claims) -> OAuthResult<IntrospectionResponse> {
     if !matches!(claims.typ.as_deref(), Some("bearer" | "refresh")) {
         return Ok(IntrospectionResponse::inactive());
     }
 
     if crate::act::token_revocation::is_revoked(&claims)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
         || !jwt_session_active(&claims).await?
     {
         return Ok(IntrospectionResponse::inactive());
@@ -250,7 +246,7 @@ async fn introspect_jwt_claims(
     })
 }
 
-async fn introspect_api_key(token: &str) -> Result<IntrospectionResponse, ErrorResponse> {
+async fn introspect_api_key(token: &str) -> OAuthResult<IntrospectionResponse> {
     if !looks_like_api_key(token) {
         return Ok(IntrospectionResponse::inactive());
     }
@@ -258,7 +254,7 @@ async fn introspect_api_key(token: &str) -> Result<IntrospectionResponse, ErrorR
     let hash = pw::hash_api_key(token);
     let Some(key) = crate::db::get_api_key_by_hash(&hash)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(IntrospectionResponse::inactive());
     };
@@ -282,7 +278,7 @@ async fn introspect_api_key(token: &str) -> Result<IntrospectionResponse, ErrorR
     })
 }
 
-async fn introspect_token(token: &str) -> Result<IntrospectionResponse, ErrorResponse> {
+async fn introspect_token(token: &str) -> OAuthResult<IntrospectionResponse> {
     match validate_introspectable_jwt(token) {
         Ok(claims) => introspect_jwt_claims(claims).await,
         Err(_) => introspect_api_key(token).await,
@@ -300,8 +296,8 @@ fn validate_revocable_jwt(token: &str) -> Result<jwt::Claims, jwt::JwtValidation
     validate_introspectable_jwt(token)
 }
 
-fn token_operation_missing_permission() -> ErrorResponse {
-    ErrorResponse::from(HttpError::Forbidden("Insufficient permissions".to_string()))
+fn token_operation_missing_permission() -> OAuthErrorResponse {
+    OAuthErrorResponse::insufficient_scope("insufficient permissions")
 }
 
 fn has_oauth_client_permission(client: &db::ent::OAuthClient, scope: &str, attr: &str) -> bool {
@@ -349,7 +345,7 @@ async fn authorize_token_operation(
     has_admin_grant: bool,
     form: &TokenForm,
     basic: Option<ClientCredentials>,
-) -> Result<TokenOperationCaller, ErrorResponse> {
+) -> OAuthResult<TokenOperationCaller> {
     if has_admin_grant {
         return Ok(TokenOperationCaller::Admin);
     }
@@ -367,10 +363,7 @@ async fn authorize_token_operation(
     Ok(TokenOperationCaller::Client(Box::new(client)))
 }
 
-async fn revoke_api_key_token(
-    token: &str,
-    ctx: db::ent::AuditContext,
-) -> Result<(), ErrorResponse> {
+async fn revoke_api_key_token(token: &str, ctx: db::ent::AuditContext) -> OAuthResult<()> {
     if !looks_like_api_key(token) {
         return Ok(());
     }
@@ -378,7 +371,7 @@ async fn revoke_api_key_token(
     let hash = pw::hash_api_key(token);
     let Some(key) = crate::db::get_api_key_by_hash(&hash)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(());
     };
@@ -389,11 +382,11 @@ async fn revoke_api_key_token(
 
     crate::db::revoke_api_key(&key.id, ctx)
         .await
-        .map_err(ErrorResponse::internal)?;
+        .map_err(OAuthErrorResponse::internal)?;
     crate::etc::store::use_store()
         .delete(&hash)
         .await
-        .map_err(ErrorResponse::internal)?;
+        .map_err(OAuthErrorResponse::internal)?;
 
     Ok(())
 }

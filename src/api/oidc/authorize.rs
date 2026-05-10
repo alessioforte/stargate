@@ -1,10 +1,10 @@
 use super::authorization_codes::{self, AuthorizationCodeRecord};
 use super::shared::{
-    AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN, PKCE_METHOD_S256,
-    RESPONSE_CODE, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, oauth_bad_request, resolve_audience,
-    resolve_scopes, scope_contains,
+    AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN, OAuthResult,
+    PKCE_METHOD_S256, RESPONSE_CODE, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, oauth_bad_request,
+    resolve_audience, resolve_scopes, scope_contains,
 };
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::OAuthErrorResponse;
 use crate::etc::ext::RequestExt;
 use axum::body::Body;
 use axum::extract::{Query, Request};
@@ -50,17 +50,17 @@ struct AuthorizePrompt {
     tags = ["OAuth"],
     responses(
         (status = 302, description = "Redirects to the registered redirect_uri with an authorization code or OAuth error"),
-        (status = 400, description = "Bad Request", body = ErrorResponse),
-        (status = 500, description = "Internal Server Error", body = ErrorResponse),
+        (status = 400, description = "Bad Request", body = OAuthErrorResponse),
+        (status = 500, description = "Internal Server Error", body = OAuthErrorResponse),
     )
 )]
-pub async fn get_authorize(req: Request) -> Result<Response, ErrorResponse> {
+pub async fn get_authorize(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
     let uri = req.uri().clone();
     drop(req);
 
-    let Query(query): Query<AuthorizeQuery> = Query::try_from_uri(&uri)
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+    let Query(query): Query<AuthorizeQuery> =
+        Query::try_from_uri(&uri).map_err(|e| oauth_bad_request(e.body_text()))?;
 
     let client = authorization_client(&query).await?;
     let redirect_uri = query.redirect_uri.as_str();
@@ -69,24 +69,14 @@ pub async fn get_authorize(req: Request) -> Result<Response, ErrorResponse> {
     let prompt = match validate_authorize_prompt(query.prompt.as_deref()) {
         Ok(prompt) => prompt,
         Err(err) => {
-            return oauth_error_redirect(
-                redirect_uri,
-                "invalid_request",
-                err.message.as_str(),
-                state,
-            );
+            return oauth_error_redirect(redirect_uri, "invalid_request", err.description(), state);
         }
     };
 
     let (scopes, audience) = match validate_authorize_request(&client, &query) {
         Ok(value) => value,
         Err(err) => {
-            return oauth_error_redirect(
-                redirect_uri,
-                "invalid_request",
-                err.message.as_str(),
-                state,
-            );
+            return oauth_error_redirect(redirect_uri, "invalid_request", err.description(), state);
         }
     };
 
@@ -116,6 +106,14 @@ pub async fn get_authorize(req: Request) -> Result<Response, ErrorResponse> {
     }
 
     if !consent_satisfied(&client, &user.user, &scopes, audience.as_deref(), &prompt).await? {
+        if prompt.none {
+            return oauth_error_redirect(
+                redirect_uri,
+                "interaction_required",
+                "interaction required",
+                state,
+            );
+        }
         return oauth_error_redirect(redirect_uri, "consent_required", "consent required", state);
     }
 
@@ -123,7 +121,7 @@ pub async fn get_authorize(req: Request) -> Result<Response, ErrorResponse> {
     oauth_code_redirect(redirect_uri, &code, state)
 }
 
-fn redirect_location(redirect_uri: &str, params: &[(&str, &str)]) -> Result<String, ErrorResponse> {
+fn redirect_location(redirect_uri: &str, params: &[(&str, &str)]) -> OAuthResult<String> {
     let mut url = Url::parse(redirect_uri)
         .map_err(|_| oauth_bad_request("redirect_uri must be an absolute URI"))?;
     {
@@ -135,19 +133,19 @@ fn redirect_location(redirect_uri: &str, params: &[(&str, &str)]) -> Result<Stri
     Ok(url.to_string())
 }
 
-fn found_redirect(location: String) -> Result<Response, ErrorResponse> {
+fn found_redirect(location: String) -> OAuthResult<Response> {
     Response::builder()
         .status(StatusCode::FOUND)
         .header(LOCATION, location)
         .body(Body::empty())
-        .map_err(ErrorResponse::internal)
+        .map_err(OAuthErrorResponse::internal)
 }
 
 fn oauth_code_redirect(
     redirect_uri: &str,
     code: &str,
     state: Option<&str>,
-) -> Result<Response, ErrorResponse> {
+) -> OAuthResult<Response> {
     let location = match state {
         Some(state) => redirect_location(redirect_uri, &[("code", code), ("state", state)])?,
         None => redirect_location(redirect_uri, &[("code", code)])?,
@@ -160,7 +158,7 @@ fn oauth_error_redirect(
     error: &str,
     description: &str,
     state: Option<&str>,
-) -> Result<Response, ErrorResponse> {
+) -> OAuthResult<Response> {
     let location = match state {
         Some(state) => redirect_location(
             redirect_uri,
@@ -182,9 +180,7 @@ fn exact_redirect_uri_allowed(client: &db::ent::OAuthClient, redirect_uri: &str)
     client.redirect_uris.iter().any(|uri| uri == redirect_uri)
 }
 
-async fn authorization_client(
-    query: &AuthorizeQuery,
-) -> Result<db::ent::OAuthClient, ErrorResponse> {
+async fn authorization_client(query: &AuthorizeQuery) -> OAuthResult<db::ent::OAuthClient> {
     if query.client_id.trim().is_empty() {
         return Err(oauth_bad_request("client_id is required"));
     }
@@ -194,7 +190,7 @@ async fn authorization_client(
 
     let Some(client) = crate::db::get_oauth_client_by_client_id(query.client_id.trim())
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Err(oauth_bad_request("unknown client_id"));
     };
@@ -212,7 +208,7 @@ async fn authorization_client(
     Ok(client)
 }
 
-fn validate_authorize_prompt(prompt: Option<&str>) -> Result<AuthorizePrompt, ErrorResponse> {
+fn validate_authorize_prompt(prompt: Option<&str>) -> OAuthResult<AuthorizePrompt> {
     let Some(prompt) = prompt else {
         return Ok(AuthorizePrompt::default());
     };
@@ -242,9 +238,7 @@ fn validate_authorize_prompt(prompt: Option<&str>) -> Result<AuthorizePrompt, Er
     })
 }
 
-async fn current_authorized_user(
-    token: Option<String>,
-) -> Result<Option<AuthorizedUser>, ErrorResponse> {
+async fn current_authorized_user(token: Option<String>) -> OAuthResult<Option<AuthorizedUser>> {
     let Some(token) = token else {
         return Ok(None);
     };
@@ -256,7 +250,7 @@ async fn current_authorized_user(
 
     if crate::act::token_revocation::is_revoked(&claims)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     {
         return Ok(None);
     }
@@ -267,7 +261,7 @@ async fn current_authorized_user(
     let Some(subject) = crate::etc::store::use_store()
         .get::<crate::etc::sub::Subject>(sid)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(None);
     };
@@ -279,12 +273,14 @@ async fn current_authorized_user(
     let user_id = claims.sub_id.as_deref().unwrap_or(subject.id.as_str());
     let Some(user) = crate::db::get_user_by_id(user_id)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(None);
     };
 
-    let auth_time = claims.auth_time.unwrap_or(claims.iat);
+    let Some(auth_time) = claims.auth_time else {
+        return Ok(None);
+    };
     let auth_time = Utc
         .timestamp_opt(auth_time as i64, 0)
         .single()
@@ -296,7 +292,7 @@ async fn current_authorized_user(
 fn validate_authorize_request(
     client: &db::ent::OAuthClient,
     query: &AuthorizeQuery,
-) -> Result<(Vec<String>, Option<String>), ErrorResponse> {
+) -> OAuthResult<(Vec<String>, Option<String>)> {
     if query.response_type.trim() != RESPONSE_CODE {
         return Err(oauth_bad_request("unsupported response_type"));
     }
@@ -355,7 +351,7 @@ async fn consent_satisfied(
     scopes: &[String],
     audience: Option<&str>,
     prompt: &AuthorizePrompt,
-) -> Result<bool, ErrorResponse> {
+) -> OAuthResult<bool> {
     if oidc::consent::client_is_first_party(&client.attrs) {
         return Ok(true);
     }
@@ -366,7 +362,7 @@ async fn consent_satisfied(
 
     let Some(consent) = crate::db::get_active_oauth_consent(&user.id, &client.client_id)
         .await
-        .map_err(ErrorResponse::internal)?
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(false);
     };
@@ -391,7 +387,7 @@ async fn store_authorization_code(
     user: &AuthorizedUser,
     scopes: &[String],
     audience: Option<String>,
-) -> Result<String, ErrorResponse> {
+) -> OAuthResult<String> {
     let code = oidc::codes::authorization_code();
     let code_hash = pw::hash_api_key(&code);
     let record = AuthorizationCodeRecord {

@@ -1,4 +1,4 @@
-use crate::err::ErrorResponse;
+use super::shared::OAuthResult;
 use chrono::{DateTime, Utc};
 
 pub(super) use oidc::refresh::RefreshTokenFamily;
@@ -9,8 +9,9 @@ pub(super) async fn issue(
     scope: String,
     audience: Option<String>,
     auth_time: DateTime<Utc>,
+    nonce: Option<String>,
     ttl_secs: u64,
-) -> Result<String, ErrorResponse> {
+) -> OAuthResult<String> {
     oidc::refresh::issue(
         crate::etc::store::use_store(),
         client_id,
@@ -18,19 +19,20 @@ pub(super) async fn issue(
         scope,
         audience,
         auth_time,
+        nonce,
         ttl_secs,
     )
     .await
-    .map_err(ErrorResponse::from)
+    .map_err(Into::into)
 }
 
 pub(super) async fn rotate(
     token: &str,
     client_id: &str,
-) -> Result<Option<(String, RefreshTokenFamily)>, ErrorResponse> {
+) -> OAuthResult<Option<(String, RefreshTokenFamily)>> {
     oidc::refresh::rotate(crate::etc::store::use_store(), token, client_id)
         .await
-        .map_err(ErrorResponse::from)
+        .map_err(Into::into)
 }
 
 #[cfg(all(test, feature = "memory"))]
@@ -45,13 +47,17 @@ mod tests {
             "openid offline_access".to_string(),
             Some("gateway".to_string()),
             Utc::now(),
+            Some("nonce-1".to_string()),
             60,
         )
         .await
         .unwrap();
 
         let rotated = rotate(&token, "client-1").await.unwrap();
-        assert!(rotated.is_some());
+        assert_eq!(
+            rotated.as_ref().unwrap().1.nonce.as_deref(),
+            Some("nonce-1")
+        );
 
         let replay = rotate(&token, "client-1").await.unwrap();
         assert!(replay.is_none());

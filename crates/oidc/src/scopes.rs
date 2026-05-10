@@ -100,10 +100,12 @@ pub fn resolve_audience(
         return Ok(Some(audience.to_string()));
     }
 
-    if allowed_audiences.len() == 1 {
-        Ok(Some(allowed_audiences[0].clone()))
-    } else {
-        Ok(None)
+    match allowed_audiences {
+        [] => Ok(None),
+        [audience] => Ok(Some(audience.clone())),
+        _ => Err(OAuthError::invalid_request(
+            "audience is required when client has multiple registered audiences",
+        )),
     }
 }
 
@@ -128,5 +130,12 @@ mod tests {
         let audience = resolve_audience(None, &["gateway".to_string()]).unwrap();
 
         assert_eq!(audience.as_deref(), Some("gateway"));
+    }
+
+    #[test]
+    fn resolve_audience_requires_explicit_value_for_multiple_registered_audiences() {
+        let allowed = vec!["gateway".to_string(), "admin-api".to_string()];
+
+        assert!(resolve_audience(None, &allowed).is_err());
     }
 }

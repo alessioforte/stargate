@@ -67,6 +67,9 @@ pub async fn put_refresh_token(
     let family_name = user.family_name.clone().unwrap_or_default();
     let name = crate::fun::format_name(&given_name, &family_name);
 
+    let auth_time = claims
+        .auth_time
+        .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
     let new_sid = ulid::Ulid::new().to_string();
     let mut new_claims = jwt::Claims::default()
         .subject(user.email.to_owned())
@@ -75,6 +78,7 @@ pub async fn put_refresh_token(
         .email(user.email.to_owned())
         .email_verified(true)
         .sid(new_sid.clone());
+    new_claims.auth_time = Some(auth_time);
 
     let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
         .await

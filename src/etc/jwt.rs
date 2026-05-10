@@ -6,7 +6,7 @@ use tracing::info;
 
 pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
     let algorithm = env::var("JWT_ALGORITHM")
-        .unwrap_or_else(|_| "HS256".to_string()) // default algorithm
+        .unwrap_or_else(|_| "RS256".to_string()) // default algorithm
         .parse::<Algorithm>()
         .expect("Invalid JWT algorithm");
 
