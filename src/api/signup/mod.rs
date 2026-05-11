@@ -33,11 +33,14 @@ pub struct EmailVerificationResponse {
 }
 
 pub fn router() -> axum::Router {
+    use axum::middleware::from_fn;
     use axum::routing::get;
-    axum::Router::new().route(
-        "/signup",
-        get(verification::get_signup)
-            .post(request::post_signup)
-            .put(complete::put_signup),
-    )
+    axum::Router::new()
+        .route(
+            "/signup",
+            get(verification::get_signup)
+                .post(request::post_signup)
+                .put(complete::put_signup),
+        )
+        .layer(from_fn(crate::etc::origin::trusted_origin_middleware))
 }

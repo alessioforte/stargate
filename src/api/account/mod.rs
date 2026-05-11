@@ -27,11 +27,12 @@ pub struct UserCredentials {
 }
 
 pub fn router() -> axum::Router {
+    use axum::middleware::from_fn;
     use axum::routing::{delete, get, post, put};
-    axum::Router::new()
+
+    let sensitive = axum::Router::new()
         .route("/account/login", post(login::post_login))
         .route("/account/logout", delete(logout::delete_logout))
-        .route("/account/profile", get(profile::get_profile))
         .route(
             "/account/refresh-token",
             put(refresh_token::put_refresh_token),
@@ -40,4 +41,9 @@ pub fn router() -> axum::Router {
             "/account/credentials",
             post(credentials::forgot::post_credentials).put(credentials::reset::put_credentials),
         )
+        .layer(from_fn(crate::etc::origin::trusted_origin_middleware));
+
+    axum::Router::new()
+        .merge(sensitive)
+        .route("/account/profile", get(profile::get_profile))
 }

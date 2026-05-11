@@ -10,6 +10,7 @@ pub mod log;
 pub mod logo;
 pub mod mid;
 pub mod msg;
+pub mod origin;
 pub mod profile;
 pub mod proxy;
 pub mod reqctx;
