@@ -20,10 +20,11 @@ members = [
     "crates/ace",
     "crates/db",
     "crates/gate",
+    "crates/idp",
     "crates/jwt",
     "crates/lb",
     "crates/lim",
-    "crates/oauth",
+    "crates/oidc",
     "crates/pw",
     "crates/smtp",
     "crates/store",
@@ -72,7 +73,8 @@ gate = { path = "crates/gate" }
 jwt = { path = "crates/jwt" }
 lb = { path = "crates/lb" }
 mime = "0.3.17"
-oauth = { path = "crates/oauth" }
+idp = { path = "crates/idp" }
+oidc = { path = "crates/oidc" }
 pw = { path = "crates/pw" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
@@ -90,6 +92,9 @@ anyhow = "1.0.102"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json", "time"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
+base64 = "0.22.1"
+sha2 = "0.10.9"
+url = "2.5.8"
 ulid = "1.2.1"
 lru = "0.17"
 maxminddb = { version = "0.27.3", features = ["simdutf8"] }
@@ -106,6 +111,6 @@ edge = ["sqlite", "memory"]
 cluster = ["postgres", "redis"]
 postgres = ["db/postgres"]
 sqlite = ["db/sqlite"]
-memory = ["store/memory", "gate/memory"]
+memory = ["store/memory", "gate/memory", "oidc/memory"]
 redis = ["store/redis", "gate/redis"]
 memory-compression = ["store/compression"]

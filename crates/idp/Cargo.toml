@@ -1,5 +1,5 @@
 [package]
-name = "oauth"
+name = "idp"
 version.workspace = true
 authors.workspace = true
 readme.workspace = true

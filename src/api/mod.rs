@@ -3,9 +3,9 @@ pub mod admin;
 pub mod docs;
 pub mod gateway;
 pub mod health;
-pub mod oauth;
+pub mod oidc;
 pub mod signup;
-pub mod well_known;
+pub mod social;
 
 use utoipa::OpenApi;
 
@@ -13,17 +13,22 @@ use utoipa::OpenApi;
 #[openapi(
     paths(
         crate::api::health::get_health,
-        crate::api::well_known::get_jwks,
-        crate::api::well_known::get_oauth_metadata,
+        crate::api::oidc::well_known::get_jwks,
+        crate::api::oidc::well_known::get_oauth_metadata,
+        crate::api::oidc::well_known::get_openid_configuration,
         crate::api::docs::get_api_doc,
         crate::api::signup::request::post_signup,
         crate::api::signup::verification::get_signup,
         crate::api::signup::complete::put_signup,
-        crate::api::oauth::post_state,
-        crate::api::oauth::post_introspect,
-        crate::api::oauth::post_revoke,
-        crate::api::oauth::github::get_github,
-        crate::api::oauth::google::get_google,
+        crate::api::social::state::post_state,
+        crate::api::oidc::authorize::get_authorize,
+        crate::api::oidc::token::post_token,
+        crate::api::oidc::userinfo::get_userinfo,
+        crate::api::oidc::userinfo::post_userinfo,
+        crate::api::oidc::token_ops::post_introspect,
+        crate::api::oidc::token_ops::post_revoke,
+        crate::api::social::github::get_github,
+        crate::api::social::google::get_google,
         crate::api::account::login::post_login,
         crate::api::account::logout::delete_logout,
         crate::api::account::profile::get_profile,
@@ -61,6 +66,15 @@ use utoipa::OpenApi;
         crate::api::admin::admin_keys::update_admin_key_permissions,
         crate::api::admin::admin_keys::revoke_admin_key,
         crate::api::admin::admin_keys::delete_admin_key,
+        crate::api::admin::oauth_clients::get_oauth_clients,
+        crate::api::admin::oauth_clients::get_oauth_client,
+        crate::api::admin::oauth_clients::create_oauth_client,
+        crate::api::admin::oauth_clients::update_oauth_client,
+        crate::api::admin::oauth_clients::patch_oauth_client,
+        crate::api::admin::oauth_clients::disable_oauth_client,
+        crate::api::admin::oauth_clients::enable_oauth_client,
+        crate::api::admin::oauth_clients::rotate_oauth_client_secret,
+        crate::api::admin::oauth_clients::delete_oauth_client,
         crate::api::admin::service_accounts::get_service_accounts,
         crate::api::admin::service_accounts::get_service_account,
         crate::api::admin::service_accounts::create_service_account,
@@ -81,14 +95,10 @@ pub fn router() -> axum::Router {
 
     axum::Router::new()
         .route("/health", get(health::get_health))
-        .route("/.well-known/jwks.json", get(well_known::get_jwks))
-        .route(
-            "/.well-known/oauth-authorization-server",
-            get(well_known::get_oauth_metadata),
-        )
         .route("/docs", get(docs::get_api_doc))
         .merge(signup::router())
-        .merge(oauth::router())
+        .merge(oidc::router())
+        .merge(social::router())
         .merge(account::router())
         .merge(admin::router())
 }
@@ -160,14 +170,78 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["issuer"].is_string());
-        assert!(json.get("authorization_endpoint").is_none());
-        assert!(json.get("token_endpoint").is_none());
+        assert!(
+            json["authorization_endpoint"]
+                .as_str()
+                .unwrap()
+                .ends_with("/oauth/authorize")
+        );
+        assert!(
+            json["token_endpoint"]
+                .as_str()
+                .unwrap()
+                .ends_with("/oauth/token")
+        );
         assert!(json["introspection_endpoint"].is_string());
         assert!(json["revocation_endpoint"].is_string());
         assert!(json["jwks_uri"].is_string());
-        assert_eq!(json["response_types_supported"], serde_json::json!([]));
-        assert_eq!(json["grant_types_supported"], serde_json::json!([]));
-        assert!(json.get("token_endpoint_auth_methods_supported").is_none());
+        assert_eq!(
+            json["response_types_supported"],
+            serde_json::json!(["code"])
+        );
+        assert_eq!(
+            json["grant_types_supported"],
+            serde_json::json!(["authorization_code", "client_credentials", "refresh_token"])
+        );
+        assert_eq!(
+            json["token_endpoint_auth_methods_supported"],
+            serde_json::json!(["client_secret_basic", "client_secret_post", "none"])
+        );
+        assert_eq!(
+            json["code_challenge_methods_supported"],
+            serde_json::json!(["S256"])
+        );
+    }
+
+    #[tokio::test]
+    async fn openid_configuration_returns_200() {
+        let resp = send("/.well-known/openid-configuration").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["issuer"].is_string());
+        assert!(
+            json["authorization_endpoint"]
+                .as_str()
+                .unwrap()
+                .ends_with("/oauth/authorize")
+        );
+        assert!(
+            json["userinfo_endpoint"]
+                .as_str()
+                .unwrap()
+                .ends_with("/oauth/userinfo")
+        );
+        assert_eq!(
+            json["response_types_supported"],
+            serde_json::json!(["code"])
+        );
+        assert_eq!(
+            json["grant_types_supported"],
+            serde_json::json!(["authorization_code", "client_credentials", "refresh_token"])
+        );
+        assert_eq!(
+            json["scopes_supported"],
+            serde_json::json!(["openid", "email", "profile", "offline_access"])
+        );
+        assert_eq!(
+            json["code_challenge_methods_supported"],
+            serde_json::json!(["S256"])
+        );
     }
 
     #[tokio::test]
@@ -184,8 +258,12 @@ mod tests {
         assert!(json["paths"]["/health"].is_object());
         assert!(json["paths"]["/.well-known/jwks.json"].is_object());
         assert!(json["paths"]["/.well-known/oauth-authorization-server"].is_object());
+        assert!(json["paths"]["/.well-known/openid-configuration"].is_object());
         assert!(json["paths"]["/signup"].is_object());
         assert!(json["paths"]["/oauth/state"].is_object());
+        assert!(json["paths"]["/oauth/authorize"].is_object());
+        assert!(json["paths"]["/oauth/token"].is_object());
+        assert!(json["paths"]["/oauth/userinfo"].is_object());
         assert!(json["paths"]["/oauth/introspect"].is_object());
         assert!(json["paths"]["/oauth/revoke"].is_object());
         assert!(json["paths"]["/oauth/github"].is_object());
@@ -212,6 +290,11 @@ mod tests {
         assert!(json["paths"]["/admin/admin-keys/{id}"].is_object());
         assert!(json["paths"]["/admin/admin-keys/{id}/revoke"].is_object());
         assert!(json["paths"]["/admin/admin-keys/{id}/permissions"].is_object());
+        assert!(json["paths"]["/admin/oauth/clients"].is_object());
+        assert!(json["paths"]["/admin/oauth/clients/{client_id}"].is_object());
+        assert!(json["paths"]["/admin/oauth/clients/{client_id}/disable"].is_object());
+        assert!(json["paths"]["/admin/oauth/clients/{client_id}/enable"].is_object());
+        assert!(json["paths"]["/admin/oauth/clients/{client_id}/rotate-secret"].is_object());
         assert!(json["paths"]["/admin/service-accounts"].is_object());
         assert!(json["paths"]["/admin/service-accounts/{id}"].is_object());
         assert!(json["paths"]["/admin/configurations"].is_object());
@@ -272,6 +355,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_oauth_clients_missing_grant_forbidden() {
+        let resp = send("/admin/oauth/clients").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_oauth_client_by_id_missing_grant_forbidden() {
+        let resp = send("/admin/oauth/clients/client_abc").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
     async fn admin_service_accounts_missing_grant_forbidden() {
         let resp = send("/admin/service-accounts").await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
@@ -314,6 +409,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oauth_authorize_missing_query_rejected() {
+        let resp = send("/oauth/authorize").await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn oauth_token_missing_form_rejected() {
+        let req = Request::builder()
+            .method(http::Method::POST)
+            .uri("/oauth/token")
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::empty())
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "invalid_request");
+        assert!(json.get("message").is_none());
+    }
+
+    #[tokio::test]
+    async fn oauth_userinfo_missing_token_unauthorized() {
+        let resp = send("/oauth/userinfo").await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn oauth_introspect_missing_grant_forbidden() {
         let req = Request::builder()
             .method(http::Method::POST)
@@ -323,6 +446,10 @@ mod tests {
             .unwrap();
         let resp = send_req(req).await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "insufficient_scope");
+        assert!(json.get("message").is_none());
     }
 
     #[tokio::test]
@@ -335,6 +462,10 @@ mod tests {
             .unwrap();
         let resp = send_req(req).await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "insufficient_scope");
+        assert!(json.get("message").is_none());
     }
 
     #[tokio::test]

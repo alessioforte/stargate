@@ -1,18 +1,18 @@
-use super::build_jwt_cookie;
 use super::github::AuthResponse;
 use crate::act::oauth_state;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
 use crate::etc::reqctx::take_audit_context_from;
+use crate::fun::build_jwt_cookie;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
 use db::ent::{CredentialType, Profile};
 use http::header::SET_COOKIE;
+use idp::google::{get_google_oauth_token, get_google_user};
 use jwt::Claims;
-use oauth::google::{get_google_oauth_token, get_google_user};
 use serde::{Deserialize, Serialize};
 use store::Store;
 
@@ -121,6 +121,7 @@ pub async fn get_google(mut req: Request) -> Result<Response, ErrorResponse> {
     let name = format_name(&given_name, &family_name);
 
     let sid = ulid::Ulid::new().to_string();
+    let auth_time = chrono::Utc::now().timestamp() as usize;
     let mut claims = Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
@@ -128,6 +129,7 @@ pub async fn get_google(mut req: Request) -> Result<Response, ErrorResponse> {
         .email(user.email.to_owned())
         .email_verified(google_user.verified_email)
         .sid(sid.clone());
+    claims.auth_time = Some(auth_time);
 
     let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
         .await

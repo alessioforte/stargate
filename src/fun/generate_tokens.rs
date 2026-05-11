@@ -1,29 +1,38 @@
 use crate::etc::jwt::jwt_config;
-use chrono::Utc;
 
 pub fn generate_tokens(claims: jwt::Claims) -> Result<(String, String), jwt::JwtError> {
     let jwt = jwt_config();
 
-    let mut jwt_access_claims = claims.clone();
-    jwt_access_claims.typ = Some("bearer".to_string());
-    jwt_access_claims.jti = Some(ulid::Ulid::new().to_string());
-
     let mut jwt_refresh_claims = jwt::Claims::default()
         .subject(claims.sub.clone())
-        .sub_id(claims.sub_id.unwrap_or_default())
-        .typ("refresh".to_string())
-        .sid(claims.sid.unwrap_or_default())
-        .jti(ulid::Ulid::new().to_string());
+        .sub_id(claims.sub_id.clone().unwrap_or_default())
+        .sid(claims.sid.clone().unwrap_or_default());
+    jwt_refresh_claims.auth_time = claims.auth_time;
 
-    let now = Utc::now();
-
-    jwt_access_claims.iat = now.timestamp() as usize;
-    jwt_access_claims.exp = (now + jwt.access_exp).timestamp() as usize;
-    let jwt_access = jwt.generate_token(&jwt_access_claims)?;
-
-    jwt_refresh_claims.iat = now.timestamp() as usize;
-    jwt_refresh_claims.exp = (now + jwt.refresh_exp).timestamp() as usize;
-    let jwt_refresh = jwt.generate_token(&jwt_refresh_claims)?;
+    let jwt_access = jwt.generate_session_access_token(claims)?;
+    let jwt_refresh = jwt.generate_session_refresh_token(jwt_refresh_claims)?;
 
     Ok((jwt_access, jwt_refresh))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_refresh_token_preserves_auth_time() {
+        crate::etc::tls::install_crypto_provider();
+        let mut claims = jwt::Claims::default()
+            .subject("alice@example.com".to_string())
+            .sub_id("user-1".to_string())
+            .sid("sid-1".to_string());
+        claims.auth_time = Some(1_700_000_000);
+
+        let (_, refresh_token) = generate_tokens(claims).unwrap();
+        let refresh_claims = jwt_config()
+            .validate_session_refresh_token(&refresh_token)
+            .unwrap();
+
+        assert_eq!(refresh_claims.auth_time, Some(1_700_000_000));
+    }
 }

@@ -1,11 +1,12 @@
 use super::repo::{
     AdminKeyRepository, ApiKeyRepository, AuditRepository, CredentialRepository,
-    OrganizationRepository, ServiceAccountRepository, SuperAdminRepository, UserRepository,
+    OAuthClientRepository, OAuthConsentRepository, OrganizationRepository,
+    ServiceAccountRepository, SuperAdminRepository, UserRepository,
 };
 use crate::backend::Pool;
 use crate::ent::{
-    AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount,
-    SuperAdmin, User,
+    AdminKey, ApiKey, Credential, CredentialType, OAuthClient, OAuthConsent, Organization, Profile,
+    ServiceAccount, SuperAdmin, User,
 };
 use crate::tx::Transaction;
 use anyhow::Result;
@@ -18,6 +19,8 @@ pub struct Service {
     admin_key: AdminKeyRepository,
     user: UserRepository,
     credential: CredentialRepository,
+    oauth_client: OAuthClientRepository,
+    oauth_consent: OAuthConsentRepository,
     api_key: ApiKeyRepository,
     audit: AuditRepository,
     service_account: ServiceAccountRepository,
@@ -32,6 +35,8 @@ impl Service {
             admin_key: AdminKeyRepository::new(),
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
+            oauth_client: OAuthClientRepository::new(),
+            oauth_consent: OAuthConsentRepository::new(),
             api_key: ApiKeyRepository::new(),
             audit: AuditRepository::new(),
             service_account: ServiceAccountRepository::new(),
@@ -250,6 +255,116 @@ impl Transaction for Service {
         self.credential
             .get_by_user_id(&self.pool, user_id, credential_type)
             .await
+    }
+
+    // ── OAuth Clients ──────────────────────────────────────────────────────
+
+    async fn create_oauth_client(&self, client: OAuthClient) -> Result<OAuthClient> {
+        let mut tx = self.pool.begin().await?;
+        let client = self.oauth_client.create(&mut tx, client).await?;
+        tx.commit().await?;
+        Ok(client)
+    }
+
+    async fn get_oauth_client_by_client_id(&self, client_id: &str) -> Result<Option<OAuthClient>> {
+        self.oauth_client
+            .get_by_client_id(&self.pool, client_id)
+            .await
+    }
+
+    async fn get_all_oauth_clients(&self, limit: i64, offset: i64) -> Result<Vec<OAuthClient>> {
+        self.oauth_client.get_all(&self.pool, limit, offset).await
+    }
+
+    async fn count_oauth_clients(&self) -> Result<i64> {
+        self.oauth_client.count(&self.pool).await
+    }
+
+    async fn search_oauth_clients(
+        &self,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<OAuthClient>> {
+        self.oauth_client
+            .search(&self.pool, query, limit, offset)
+            .await
+    }
+
+    async fn count_search_oauth_clients(&self, query: &str) -> Result<i64> {
+        self.oauth_client.count_search(&self.pool, query).await
+    }
+
+    async fn update_oauth_client(&self, client: OAuthClient) -> Result<OAuthClient> {
+        let mut tx = self.pool.begin().await?;
+        let client = self.oauth_client.update(&mut tx, client).await?;
+        tx.commit().await?;
+        Ok(client)
+    }
+
+    async fn update_oauth_client_secret_hash(
+        &self,
+        client_id: &str,
+        client_secret_hash: Option<&str>,
+    ) -> Result<OAuthClient> {
+        let mut tx = self.pool.begin().await?;
+        let client = self
+            .oauth_client
+            .update_secret_hash(&mut tx, client_id, client_secret_hash)
+            .await?;
+        tx.commit().await?;
+        Ok(client)
+    }
+
+    async fn set_oauth_client_enabled(
+        &self,
+        client_id: &str,
+        enabled: bool,
+    ) -> Result<OAuthClient> {
+        let mut tx = self.pool.begin().await?;
+        let client = self
+            .oauth_client
+            .set_enabled(&mut tx, client_id, enabled)
+            .await?;
+        tx.commit().await?;
+        Ok(client)
+    }
+
+    async fn delete_oauth_client(&self, client_id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.oauth_client
+            .delete_by_client_id(&mut tx, client_id)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    // ── OAuth Consents ─────────────────────────────────────────────────────
+
+    async fn upsert_oauth_consent(&self, consent: OAuthConsent) -> Result<OAuthConsent> {
+        let mut tx = self.pool.begin().await?;
+        let consent = self.oauth_consent.upsert(&mut tx, consent).await?;
+        tx.commit().await?;
+        Ok(consent)
+    }
+
+    async fn get_active_oauth_consent(
+        &self,
+        user_id: &str,
+        client_id: &str,
+    ) -> Result<Option<OAuthConsent>> {
+        self.oauth_consent
+            .get_active_for_user_client(&self.pool, user_id, client_id, chrono::Utc::now())
+            .await
+    }
+
+    async fn revoke_oauth_consent(&self, user_id: &str, client_id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.oauth_consent
+            .revoke_for_user_client(&mut tx, user_id, client_id)
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     // ── API Keys ────────────────────────────────────────────────────────────

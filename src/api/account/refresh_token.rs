@@ -1,6 +1,7 @@
-use super::{AuthResponse, RefreshTokenRequestBody, build_jwt_cookie};
+use super::{AuthResponse, RefreshTokenRequestBody};
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{self, jwt::jwt_config, sub::Subject};
+use crate::fun::build_jwt_cookie;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
@@ -23,14 +24,8 @@ pub async fn put_refresh_token(
     Json(body): Json<RefreshTokenRequestBody>,
 ) -> Result<Response, ErrorResponse> {
     let claims = jwt_config()
-        .validate_token(&body.refresh_token)
+        .validate_session_refresh_token(&body.refresh_token)
         .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
-
-    if claims.typ.as_deref() != Some("refresh") {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid Token".to_string(),
-        )));
-    }
 
     if crate::act::token_revocation::is_revoked(&claims)
         .await
@@ -72,6 +67,9 @@ pub async fn put_refresh_token(
     let family_name = user.family_name.clone().unwrap_or_default();
     let name = crate::fun::format_name(&given_name, &family_name);
 
+    let auth_time = claims
+        .auth_time
+        .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
     let new_sid = ulid::Ulid::new().to_string();
     let mut new_claims = jwt::Claims::default()
         .subject(user.email.to_owned())
@@ -80,6 +78,7 @@ pub async fn put_refresh_token(
         .email(user.email.to_owned())
         .email_verified(true)
         .sid(new_sid.clone());
+    new_claims.auth_time = Some(auth_time);
 
     let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
         .await

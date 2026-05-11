@@ -1,6 +1,6 @@
 use crate::ent::{
-    AdminKey, ApiKey, Credential, CredentialType, Organization, Profile, ServiceAccount,
-    SuperAdmin, User,
+    AdminKey, ApiKey, Credential, CredentialType, OAuthClient, OAuthConsent, Organization, Profile,
+    ServiceAccount, SuperAdmin, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -36,6 +36,37 @@ pub trait Transaction {
         user_id: &str,
         credential_type: CredentialType,
     ) -> Result<Option<Credential>>;
+
+    // ── OAuth Clients ──────────────────────────────────────────────────────
+    async fn create_oauth_client(&self, client: OAuthClient) -> Result<OAuthClient>;
+    async fn get_oauth_client_by_client_id(&self, client_id: &str) -> Result<Option<OAuthClient>>;
+    async fn get_all_oauth_clients(&self, limit: i64, offset: i64) -> Result<Vec<OAuthClient>>;
+    async fn count_oauth_clients(&self) -> Result<i64>;
+    async fn search_oauth_clients(
+        &self,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<OAuthClient>>;
+    async fn count_search_oauth_clients(&self, query: &str) -> Result<i64>;
+    async fn update_oauth_client(&self, client: OAuthClient) -> Result<OAuthClient>;
+    async fn update_oauth_client_secret_hash(
+        &self,
+        client_id: &str,
+        client_secret_hash: Option<&str>,
+    ) -> Result<OAuthClient>;
+    async fn set_oauth_client_enabled(&self, client_id: &str, enabled: bool)
+    -> Result<OAuthClient>;
+    async fn delete_oauth_client(&self, client_id: &str) -> Result<()>;
+
+    // ── OAuth Consents ─────────────────────────────────────────────────────
+    async fn upsert_oauth_consent(&self, consent: OAuthConsent) -> Result<OAuthConsent>;
+    async fn get_active_oauth_consent(
+        &self,
+        user_id: &str,
+        client_id: &str,
+    ) -> Result<Option<OAuthConsent>>;
+    async fn revoke_oauth_consent(&self, user_id: &str, client_id: &str) -> Result<()>;
 
     // ── API Keys ────────────────────────────────────────────────────────────
     async fn create_api_key(

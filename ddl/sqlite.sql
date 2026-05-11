@@ -14,6 +14,25 @@ CREATE TABLE IF NOT EXISTS "service_accounts" (
     "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS "oauth_clients" (
+    "client_id" TEXT PRIMARY KEY,
+    "client_secret_hash" TEXT UNIQUE,
+    "name" VARCHAR(100) NOT NULL,
+    "description" TEXT,
+    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE SET NULL,
+    "service_account_id" TEXT REFERENCES "service_accounts" ("id") ON DELETE SET NULL,
+    "enabled" BOOLEAN NOT NULL DEFAULT TRUE,
+    "token_endpoint_auth_method" TEXT NOT NULL,
+    "grant_types" JSON NOT NULL DEFAULT '[]',
+    "response_types" JSON NOT NULL DEFAULT '[]',
+    "redirect_uris" JSON NOT NULL DEFAULT '[]',
+    "scopes" JSON NOT NULL DEFAULT '[]',
+    "audiences" JSON NOT NULL DEFAULT '[]',
+    "attrs" JSON NOT NULL DEFAULT '{}',
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS "users" (
     "id" TEXT PRIMARY KEY,
     "email" VARCHAR(100) NOT NULL UNIQUE,
@@ -23,6 +42,21 @@ CREATE TABLE IF NOT EXISTS "users" (
     "picture" TEXT,
     "phone_number" VARCHAR(20) UNIQUE,
     "attrs" JSON NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS "oauth_consents" (
+    "id" TEXT PRIMARY KEY,
+    "client_id" TEXT NOT NULL REFERENCES "oauth_clients" ("client_id") ON DELETE CASCADE,
+    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "scopes" JSON NOT NULL DEFAULT '[]',
+    "audiences" JSON NOT NULL DEFAULT '[]',
+    "granted_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "expires_at" TEXT,
+    "revoked_at" TEXT,
+    "attrs" JSON NOT NULL DEFAULT '{}',
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE ("client_id", "user_id")
 );
 
 CREATE TABLE IF NOT EXISTS "super_admins" (
@@ -83,6 +117,12 @@ CREATE TABLE IF NOT EXISTS "service_account_api_keys" (
 
 -- Indexes on foreign keys
 CREATE INDEX IF NOT EXISTS "idx_service_accounts_org_id" ON "service_accounts" ("org_id");
+CREATE INDEX IF NOT EXISTS "idx_oauth_clients_org_id" ON "oauth_clients" ("org_id");
+CREATE INDEX IF NOT EXISTS "idx_oauth_clients_service_account_id" ON "oauth_clients" ("service_account_id");
+CREATE INDEX IF NOT EXISTS "idx_oauth_clients_enabled" ON "oauth_clients" ("enabled");
+CREATE INDEX IF NOT EXISTS "idx_oauth_consents_user_client" ON "oauth_consents" ("user_id", "client_id");
+CREATE INDEX IF NOT EXISTS "idx_oauth_consents_client_id" ON "oauth_consents" ("client_id");
+CREATE INDEX IF NOT EXISTS "idx_oauth_consents_revoked_at" ON "oauth_consents" ("revoked_at");
 CREATE INDEX IF NOT EXISTS "idx_credentials_user_id" ON "credentials" ("user_id");
 CREATE INDEX IF NOT EXISTS "idx_super_admins_active" ON "super_admins" ("active");
 CREATE INDEX IF NOT EXISTS "idx_user_api_keys_user_id" ON "user_api_keys" ("user_id");

@@ -40,8 +40,8 @@ pub async fn get_profile(req: Request) -> Result<Json<db::ent::User>, ErrorRespo
         ErrorResponse::from(HttpError::Unauthorized("Token not found".to_string()))
     })?;
 
-    let claims = match jwt_config().validate_token(&token) {
-        Ok(c) if c.typ.as_deref() == Some("bearer") => c,
+    let claims = match jwt_config().validate_session_access_token(&token) {
+        Ok(c) => c,
         _ => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
                 "Invalid Token".to_string(),

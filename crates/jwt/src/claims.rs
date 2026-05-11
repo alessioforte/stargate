@@ -12,22 +12,26 @@ pub fn issuer_from_env() -> String {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub iat: usize,                   // issued at
-    pub iss: String,                  // issuer
-    pub exp: usize,                   // expiration
-    pub sub: String,                  // subject
-    pub sub_id: Option<String>,       // subject id
-    pub email: Option<String>,        // email
-    pub name: Option<String>,         // name
-    pub email_verified: Option<bool>, // email_verified
-    pub nickname: Option<String>,     // nickname
-    pub jti: Option<String>,          // JWT ID
-    pub aud: Option<String>,          // audience
-    pub typ: Option<String>,          // type
-    pub azp: Option<String>,          // authorized party
-    pub sid: Option<String>,          // session ID
-    pub scope: Option<String>,        // scope
-    pub role: Option<String>,         // role
+    pub iat: usize,                         // issued at
+    pub iss: String,                        // issuer
+    pub exp: usize,                         // expiration
+    pub sub: String,                        // subject
+    pub sub_id: Option<String>,             // subject id
+    pub email: Option<String>,              // email
+    pub name: Option<String>,               // name
+    pub email_verified: Option<bool>,       // email_verified
+    pub nickname: Option<String>,           // nickname
+    pub jti: Option<String>,                // JWT ID
+    pub aud: Option<String>,                // audience
+    pub typ: Option<String>,                // type
+    pub azp: Option<String>,                // authorized party
+    pub sid: Option<String>,                // session ID
+    pub scope: Option<String>,              // scope
+    pub role: Option<String>,               // role
+    pub auth_time: Option<usize>,           // authentication time
+    pub nonce: Option<String>,              // OIDC nonce
+    pub preferred_username: Option<String>, // OIDC preferred username
+    pub picture: Option<String>,            // OIDC profile picture
 }
 
 impl Default for Claims {
@@ -52,6 +56,10 @@ impl Default for Claims {
             sid: None,
             scope: None,
             role: None,
+            auth_time: None,
+            nonce: None,
+            preferred_username: None,
+            picture: None,
         }
     }
 }

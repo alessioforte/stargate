@@ -5,6 +5,11 @@ use jsonwebtoken::Algorithm;
 use jsonwebtoken::jwk::{Jwk, JwkSet, PublicKeyUse};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use std::fs;
+use std::{error::Error, fmt};
+
+const TOKEN_TYPE_BEARER: &str = "bearer";
+const TOKEN_TYPE_REFRESH: &str = "refresh";
+const TOKEN_TYPE_ID_TOKEN: &str = "id_token";
 
 /// Represents the key material needed for a given JWT algorithm.
 pub enum KeySource {
@@ -30,6 +35,53 @@ pub struct JwtConfig {
     decoding_key: DecodingKey,
     pub access_exp: Duration,
     pub refresh_exp: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JwtValidationError {
+    Decode(String),
+    InvalidType {
+        expected: &'static str,
+        actual: Option<String>,
+    },
+    MissingClaim(&'static str),
+    AudienceMismatch {
+        expected: String,
+        actual: Option<String>,
+    },
+    NonceMismatch {
+        expected: String,
+        actual: Option<String>,
+    },
+}
+
+impl fmt::Display for JwtValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JwtValidationError::Decode(error) => write!(f, "JWT decode failed: {error}"),
+            JwtValidationError::InvalidType { expected, actual } => {
+                write!(f, "invalid JWT type: expected {expected}, got {actual:?}")
+            }
+            JwtValidationError::MissingClaim(claim) => write!(f, "missing JWT claim: {claim}"),
+            JwtValidationError::AudienceMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "invalid JWT audience: expected {expected}, got {actual:?}"
+                )
+            }
+            JwtValidationError::NonceMismatch { expected, actual } => {
+                write!(f, "invalid JWT nonce: expected {expected}, got {actual:?}")
+            }
+        }
+    }
+}
+
+impl Error for JwtValidationError {}
+
+impl From<jsonwebtoken::errors::Error> for JwtValidationError {
+    fn from(error: jsonwebtoken::errors::Error) -> Self {
+        JwtValidationError::Decode(error.to_string())
+    }
 }
 
 impl JwtConfig {
@@ -103,11 +155,155 @@ impl JwtConfig {
         encode(&header, claims, &self.encoding_key)
     }
 
-    /// Validate a JWT token
-    pub fn validate_token(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-        let validation = Validation::new(self.algorithm);
+    fn timed_claims(&self, mut claims: Claims, token_type: &str, ttl: Duration) -> Claims {
+        let now = chrono::Utc::now();
+        claims.typ = Some(token_type.to_string());
+        claims.iat = now.timestamp() as usize;
+        claims.exp = (now + ttl).timestamp() as usize;
+        if claims.jti.is_none() {
+            claims.jti = Some(ulid::Ulid::new().to_string());
+        }
+        claims
+    }
+
+    pub fn generate_session_access_token(
+        &self,
+        claims: Claims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        let claims = self.timed_claims(claims, TOKEN_TYPE_BEARER, self.access_exp);
+        self.generate_token(&claims)
+    }
+
+    pub fn generate_session_refresh_token(
+        &self,
+        claims: Claims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        let claims = self.timed_claims(claims, TOKEN_TYPE_REFRESH, self.refresh_exp);
+        self.generate_token(&claims)
+    }
+
+    pub fn generate_oauth_access_token(
+        &self,
+        claims: Claims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        let claims = self.timed_claims(claims, TOKEN_TYPE_BEARER, self.access_exp);
+        self.generate_token(&claims)
+    }
+
+    pub fn generate_oidc_id_token(
+        &self,
+        claims: Claims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        let claims = self.timed_claims(claims, TOKEN_TYPE_ID_TOKEN, self.access_exp);
+        self.generate_token(&claims)
+    }
+
+    fn decode_without_audience(&self, token: &str) -> Result<Claims, JwtValidationError> {
+        let mut validation = Validation::new(self.algorithm);
+        validation.validate_aud = false;
         let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
         Ok(token_data.claims)
+    }
+
+    /// Validate a JWT token without enforcing caller intent.
+    ///
+    /// Prefer the intent-specific helpers for application handlers.
+    pub fn validate_token(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+        let mut validation = Validation::new(self.algorithm);
+        validation.validate_aud = false;
+        let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
+        Ok(token_data.claims)
+    }
+
+    fn require_type(claims: &Claims, expected: &'static str) -> Result<(), JwtValidationError> {
+        if claims.typ.as_deref() == Some(expected) {
+            return Ok(());
+        }
+
+        Err(JwtValidationError::InvalidType {
+            expected,
+            actual: claims.typ.clone(),
+        })
+    }
+
+    fn require_non_empty_claim(
+        value: Option<&str>,
+        claim: &'static str,
+    ) -> Result<(), JwtValidationError> {
+        if value.is_some_and(|value| !value.trim().is_empty()) {
+            return Ok(());
+        }
+        Err(JwtValidationError::MissingClaim(claim))
+    }
+
+    pub fn validate_session_access_token(&self, token: &str) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_without_audience(token)?;
+        Self::require_type(&claims, TOKEN_TYPE_BEARER)?;
+        Self::require_non_empty_claim(claims.sid.as_deref(), "sid")?;
+        Ok(claims)
+    }
+
+    pub fn validate_session_refresh_token(
+        &self,
+        token: &str,
+    ) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_without_audience(token)?;
+        Self::require_type(&claims, TOKEN_TYPE_REFRESH)?;
+        Self::require_non_empty_claim(claims.sid.as_deref(), "sid")?;
+        Ok(claims)
+    }
+
+    pub fn validate_oauth_access_token(
+        &self,
+        token: &str,
+        audience: Option<&str>,
+    ) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_without_audience(token)?;
+        Self::require_type(&claims, TOKEN_TYPE_BEARER)?;
+        Self::require_non_empty_claim(claims.azp.as_deref(), "azp")?;
+        if let Some(expected) = audience {
+            match claims.aud.as_deref() {
+                Some(actual) if actual == expected => {}
+                actual => {
+                    return Err(JwtValidationError::AudienceMismatch {
+                        expected: expected.to_string(),
+                        actual: actual.map(str::to_string),
+                    });
+                }
+            }
+        }
+        Ok(claims)
+    }
+
+    pub fn validate_oidc_id_token(
+        &self,
+        token: &str,
+        client_id: &str,
+        nonce: Option<&str>,
+    ) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_without_audience(token)?;
+        Self::require_type(&claims, TOKEN_TYPE_ID_TOKEN)?;
+        match claims.aud.as_deref() {
+            Some(actual) if actual == client_id => {}
+            actual => {
+                return Err(JwtValidationError::AudienceMismatch {
+                    expected: client_id.to_string(),
+                    actual: actual.map(str::to_string),
+                });
+            }
+        }
+        if let Some(expected) = nonce {
+            match claims.nonce.as_deref() {
+                Some(actual) if actual == expected => {}
+                actual => {
+                    return Err(JwtValidationError::NonceMismatch {
+                        expected: expected.to_string(),
+                        actual: actual.map(str::to_string),
+                    });
+                }
+            }
+        }
+        Ok(claims)
     }
 
     pub fn algorithm(&self) -> Algorithm {
@@ -169,5 +365,92 @@ mod tests {
         let jwks = config.public_jwks().unwrap();
 
         assert!(jwks.keys.is_empty());
+    }
+
+    #[test]
+    fn validates_token_with_audience_without_resource_audience_policy() {
+        let config = JwtConfig::new_with_key_id(
+            Algorithm::HS256,
+            KeySource::Secret("secret".to_string()),
+            Duration::minutes(5),
+            Duration::minutes(5),
+            Some("stargate-test".to_string()),
+        );
+
+        let claims = Claims::default()
+            .subject("client-1".to_string())
+            .aud("gateway".to_string());
+        let token = config.generate_token(&claims).unwrap();
+        let decoded = config.validate_token(&token).unwrap();
+
+        assert_eq!(decoded.aud.as_deref(), Some("gateway"));
+    }
+
+    #[test]
+    fn session_access_validation_requires_bearer_with_session_id() {
+        let config = JwtConfig::new(
+            Algorithm::HS256,
+            KeySource::Secret("secret".to_string()),
+            Duration::minutes(5),
+            Duration::minutes(5),
+        );
+        let claims = Claims::default()
+            .subject("alice@example.com".to_string())
+            .sid("sid-1".to_string());
+        let token = config.generate_session_access_token(claims).unwrap();
+
+        let decoded = config.validate_session_access_token(&token).unwrap();
+
+        assert_eq!(decoded.typ.as_deref(), Some("bearer"));
+        assert_eq!(decoded.sid.as_deref(), Some("sid-1"));
+    }
+
+    #[test]
+    fn oauth_access_validation_enforces_audience_when_requested() {
+        let config = JwtConfig::new(
+            Algorithm::HS256,
+            KeySource::Secret("secret".to_string()),
+            Duration::minutes(5),
+            Duration::minutes(5),
+        );
+        let mut claims = Claims::default().subject("user-1".to_string());
+        claims.azp = Some("client-1".to_string());
+        claims.aud = Some("gateway".to_string());
+        let token = config.generate_oauth_access_token(claims).unwrap();
+
+        assert!(
+            config
+                .validate_oauth_access_token(&token, Some("gateway"))
+                .is_ok()
+        );
+        assert!(matches!(
+            config.validate_oauth_access_token(&token, Some("admin")),
+            Err(JwtValidationError::AudienceMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn oidc_id_token_validation_enforces_audience_and_nonce() {
+        let config = JwtConfig::new(
+            Algorithm::HS256,
+            KeySource::Secret("secret".to_string()),
+            Duration::minutes(5),
+            Duration::minutes(5),
+        );
+        let mut claims = Claims::default()
+            .subject("user-1".to_string())
+            .aud("client-1".to_string());
+        claims.nonce = Some("nonce-1".to_string());
+        let token = config.generate_oidc_id_token(claims).unwrap();
+
+        assert!(
+            config
+                .validate_oidc_id_token(&token, "client-1", Some("nonce-1"))
+                .is_ok()
+        );
+        assert!(matches!(
+            config.validate_oidc_id_token(&token, "client-1", Some("bad")),
+            Err(JwtValidationError::NonceMismatch { .. })
+        ));
     }
 }
