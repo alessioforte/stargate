@@ -1,408 +1,374 @@
 # ACE (Access Control Engine) for Stargate
 
-A powerful, flexible policy-based access control engine that parses policy definitions and evaluates them against runtime context.
+A flexible policy-based access control engine that parses textual policy definitions and evaluates them against runtime context. Supports rich value types (strings, numbers, booleans, dates, times, datetimes with timezones, arrays), substring/membership checks, and JSON-context interop.
 
 ## Features
 
-- **Simple Policy Syntax**: Define policies in plain text files or inline strings
-- **Flexible Conditions**: Support for complex boolean expressions with AND/OR logic
-- **Multiple Value Types**: String, boolean, and numeric values
-- **Detailed Evaluation**: Get detailed results about which policies matched and applied
-- **High Performance**: Efficient parsing and evaluation suitable for production use
-- **Extensible**: Easy to extend with custom operators and value types
+- **Plain-text policy syntax** — load from files, strings, or build programmatically
+- **Boolean conditions** — `AND`, `OR`, `NOT`, with parentheses
+- **Comparison + membership operators** — `==`, `!=`, `>`, `<`, `>=`, `<=`, `CONTAINS`
+- **Rich value types** — strings, integers, floats, booleans, dates, times, datetimes (with timezone), arrays
+- **Timezone-aware time/datetime comparisons** — compare values across offsets, including `Z` (UTC) shorthand
+- **Resource actions** — fine-grained `READ`/`WRITE`/`DELETE`/`CREATE`/`UPDATE`/`EXECUTE`/`ADMIN`/`*` qualifiers
+- **Detailed evaluation results** — see which policies matched, which applied, and allow/deny counts
+- **Indexed lookup** — `(subject, resource)` lookup is O(1); only candidate policies are evaluated
+- **`serde_json::Value` interop** — drop JSON values into the context with automatic datetime detection
+- **`ContextBuilder`** — fluent helper for common context fields
+- **Multi-source loading** — load from many policy strings at once
+- **Comment support** — lines starting with `#` are ignored in policy files
 
 ## Policy Syntax
 
-Policies are defined using the following syntax:
-
 ```text
-ALLOW|DENY subject FOR "resource" [WHEN condition];
+ALLOW|DENY <subject> FOR "<resource>[:ACTION]" [WHEN <condition>];
 ```
 
-Where:
-- `ALLOW|DENY` - The action to take
-- `subject` - The entity requesting access (e.g., "user", "api_key", "service")
-- `resource` - The resource being accessed (quoted string)
-- `condition` - Optional boolean expression using AND/OR logic
+- `ALLOW`/`DENY` — decision the policy expresses
+- `subject` — entity requesting access (e.g. `user`, `api_key`, `service`)
+- `resource` — quoted resource identifier; optional `:ACTION` suffix scopes the policy to one action
+- `condition` — optional boolean expression
 
-### Supported Operators
+Lines starting with `#` and blank lines are skipped.
 
-**Comparison Operators:**
-- `==` - Equals
-- `!=` - Not equals
-- `>` - Greater than
-- `<` - Less than
-- `>=` - Greater than or equal
-- `<=` - Less than or equal
+### Operators
 
-**Logical Operators:**
-- `AND` - Logical and (higher precedence)
-- `OR` - Logical or (lower precedence)
-- `NOT` - Logical not (highest precedence)
+**Comparison:**
 
-### Supported Value Types
+| Op   | Meaning                  |
+|------|--------------------------|
+| `==` | Equal                    |
+| `!=` | Not equal                |
+| `>`  | Greater than             |
+| `<`  | Less than                |
+| `>=` | Greater than or equal    |
+| `<=` | Less than or equal       |
 
-- **Strings**: `"admin"`, `"read"`, `"write"`
-- **Booleans**: `true`, `false`
-- **Integers**: `1`, `42`, `-10`
-- **Floats**: `3.14`, `95.5`, `-2.7`
+**Membership / substring:**
+
+| Op         | Meaning                                                  |
+|------------|----------------------------------------------------------|
+| `CONTAINS` | Array contains element, or string contains substring     |
+
+**Logical** (precedence highest → lowest): `NOT`, `AND`, `OR`. Parentheses supported for grouping.
+
+### Value Types
+
+| Type      | Examples                                                       |
+|-----------|----------------------------------------------------------------|
+| String    | `"admin"`, `'read'` (single or double quotes)                  |
+| Boolean   | `true`, `false`                                                |
+| Integer   | `42`, `-10`                                                    |
+| Float     | `3.14`, `-2.7`                                                 |
+| Date      | `2026-01-01` (unquoted ISO-8601, or quoted)                    |
+| Time      | `"09:00"`, `"17:30:00"` (quoted `HH:MM[:SS]`)                  |
+| DateTime  | `"2026-01-01T09:00:00+02:00"`, `"09:00+02:00"`, `"17:00Z"`     |
+| Array     | Built only via context (e.g. `Value::Array(vec![...])`)        |
+
+Quoted strings are auto-parsed as `DateTime` → `Date` → `Time` → `String` (first match wins). String context values compare correctly against date/time/datetime literals via on-the-fly coercion.
 
 ### Resource Actions
 
-Resources can specify specific actions using the syntax `"resource:ACTION"`:
+A policy targets a specific action via `"resource:ACTION"`:
 
-- `READ` - Read access
-- `WRITE` - Write access
-- `DELETE` - Delete access
-- `CREATE` - Create access
-- `UPDATE` - Update access
-- `EXECUTE` - Execute access
-- `ADMIN` - Administrative access
-- `*` or `ANY` - Any action
+`READ`, `WRITE`, `DELETE`, `CREATE`, `UPDATE`, `EXECUTE`, `ADMIN`, `*` (or `ANY`).
 
-## Examples
+Matching rules at evaluation time:
+- Policy **without** an action → matches any request (with or without an action).
+- Policy with `ANY`/`*` → matches any action.
+- Policy with a specific action → matches only that action; does **not** match an action-less request.
 
-### Basic Usage
-
-```rust
-use ace::{PolicyEngine, context_with, Value};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut engine = PolicyEngine::new();
-
-    let policies = r#"
-        ALLOW user FOR "dashboard" WHEN user.role == "admin";
-        ALLOW user FOR "reports" WHEN user.role == "admin" OR user.role == "analyst";
-        DENY user FOR "admin_panel" WHEN user.suspended == true;
-    "#;
-
-    // Parse the policies
-    engine.parse_file(policies)?;
-
-    // Create context for evaluation
-    let context = context_with(vec![
-        ("user.role", Value::String("admin".to_string())),
-        ("user.suspended", Value::Boolean(false)),
-    ]);
-
-    // Evaluate access
-    let allowed = engine.evaluate("user", "dashboard", &context);
-    println!("Access allowed: {}", allowed); // true
-
-    Ok(())
-}
-```
-
-### Complex Conditions
-
-```text
-ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.mfa_enabled == true;
-
-ALLOW user FOR "secure_area" WHEN NOT user.suspended == true;
-DENY user FOR "restricted" WHEN NOT (user.clearance == "secret" AND user.location == "office");
-
-ALLOW user FOR "adult_content" WHEN user.age >= 18;
-ALLOW user FOR "premium_features" WHEN user.score > 95.0 AND user.subscription == "premium";
-
-ALLOW user FOR "database:READ" WHEN user.role == "analyst";
-ALLOW user FOR "database:WRITE" WHEN user.role == "admin" AND user.mfa_enabled == true;
-DENY user FOR "database:DELETE" WHEN user.probation == true;
-
-ALLOW user FOR "after_hours_access" WHEN time.of_day == "night" AND user.on_call == true;
-DENY user FOR "office_resources" WHEN location != "office" AND NOT user.vpn_connected == true;
-```
-
-### Working with API Keys
+## Quick Start
 
 ```rust
 use ace::{PolicyEngine, context_with, Value};
 
 let mut engine = PolicyEngine::new();
 
-let api_policies = r#"
-    ALLOW api_key FOR "public_api" WHEN api_key.valid == true;
-    ALLOW api_key FOR "admin_api" WHEN api_key.valid == true AND api_key.scope == "admin";
-    DENY api_key FOR "rate_limited" WHEN api_key.rate_limited == true;
+let policies = r#"
+    # Comments and blank lines are ignored
+    ALLOW user FOR "dashboard" WHEN user.role == "admin";
+    ALLOW user FOR "reports"   WHEN user.role == "admin" OR user.role == "analyst";
+    DENY  user FOR "dashboard" WHEN user.suspended == true;
 "#;
+engine.parse_file(policies)?;
 
-engine.parse_file(api_policies)?;
-
-let api_context = context_with(vec![
-    ("api_key.valid", Value::Boolean(true)),
-    ("api_key.scope", Value::String("admin".to_string())),
-    ("api_key.rate_limited", Value::Boolean(false)),
+let ctx = context_with(vec![
+    ("user.role",      Value::String("admin".into())),
+    ("user.suspended", Value::Boolean(false)),
 ]);
 
-let allowed = engine.evaluate("api_key", "admin_api", &api_context);
-println!("API access allowed: {}", allowed); // true
-
-// Evaluate with specific resource action
-let write_allowed = engine.evaluate_with_action(
-    "user",
-    "database",
-    &ResourceAction::Write,
-    &context
-);
+assert!(engine.evaluate("user", "dashboard", &ctx));
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## Advanced Features
+## Conditions
+
+```text
+ALLOW user FOR "sensitive_data" WHEN user.role == "admin" AND user.mfa_enabled == true;
+ALLOW user FOR "secure_area"    WHEN NOT user.suspended == true;
+DENY  user FOR "restricted"     WHEN NOT (user.clearance == "secret" AND location == "office");
+
+ALLOW user FOR "adult_content"     WHEN user.age >= 18;
+ALLOW user FOR "premium_features"  WHEN user.score > 95.0 AND user.subscription == "premium";
+
+ALLOW user FOR "database:READ"   WHEN user.role == "analyst";
+ALLOW user FOR "database:WRITE"  WHEN user.role == "admin" AND user.mfa_enabled == true;
+DENY  user FOR "database:DELETE" WHEN user.probation == true;
+```
+
+### CONTAINS — arrays and substrings
+
+```text
+ALLOW user FOR "admin_panel"      WHEN user.roles  CONTAINS "admin";
+DENY  user FOR "feature1"         WHEN user.tags   CONTAINS "banned";
+ALLOW user FOR "internal"         WHEN user.email  CONTAINS "@company.com";
+ALLOW user FOR "verified_feature" WHEN NOT user.tags CONTAINS "unverified";
+```
+
+```rust
+use ace::{context_with, Value};
+
+let ctx = context_with(vec![(
+    "user.roles",
+    Value::Array(vec![
+        Value::String("editor".into()),
+        Value::String("admin".into()),
+    ]),
+)]);
+```
+
+### Dates, times, and timezones
+
+```text
+# Date literal (unquoted ISO date)
+ALLOW user FOR "feature1" WHEN time.date >= 2026-01-01;
+
+# Time-of-day with timezone offset
+DENY  user FOR "after_hours" WHEN env.time < "09:00+02:00" OR env.time > "17:00+02:00";
+
+# Full datetime
+ALLOW user FOR "campaign" WHEN time.datetime >= "2026-01-01T00:00:00Z";
+```
+
+Timezone-aware comparisons normalize across offsets, so `"09:00+02:00"` compares equal to `"07:00+00:00"`. The `Z` suffix is accepted as `+00:00`.
+
+String context values are coerced when compared against typed literals — `("time.date", Value::String("2026-02-15".into()))` compares correctly against `Value::Date(...)`.
+
+## API Cheatsheet
+
+```rust
+use ace::{PolicyEngine, ResourceAction, Value, context, context_with};
+
+let mut engine = PolicyEngine::new();
+
+// Loading
+engine.parse_file(text)?;                          // skips blanks/comments/invalid lines
+engine.load_from_sources(vec![src1, src2])?;       // multiple sources
+let policy = engine.parse_policy(line)?;           // parse a single line (no insert)
+engine.add_policy(policy);                          // insert programmatically
+engine.clear_policies();                            // wipe all
+let dump: Vec<String> = engine.export_policies();   // canonical text form
+
+// Evaluation
+engine.evaluate("user", "dashboard", &ctx);
+engine.evaluate_with_action("user", "database", &ResourceAction::Read, &ctx);
+let det = engine.evaluate_with_details("user", "dashboard", &ctx);
+let det = engine.evaluate_with_details_and_action("user", "database", &ResourceAction::Read, &ctx);
+
+// Inspection
+let all     = engine.get_policies();
+let matched = engine.get_matching_policies("user", "dashboard");
+let matched = engine.get_matching_policies_with_action("user", "database", &ResourceAction::Read);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ### Detailed Evaluation Results
 
-Get detailed information about policy evaluation:
-
 ```rust
-let result = engine.evaluate_with_details("user", "resource", &context);
+let result = engine.evaluate_with_details("user", "resource", &ctx);
 
-println!("Decision: {}", if result.is_allowed() { "ALLOW" } else { "DENY" });
-println!("Matched policies: {:?}", result.matched_policies);
-println!("Applied policies: {:?}", result.applied_policies);
-println!("Allow count: {}", result.allow_count);
-println!("Deny count: {}", result.deny_count);
+result.is_allowed();           // bool — final decision
+result.is_denied();
+result.has_explicit_decision();// at least one policy applied
+result.matched_policies;       // indices of subject/resource/action matches
+result.applied_policies;       // subset whose condition evaluated true
+result.allow_count;
+result.deny_count;
 ```
 
-### Policy Inspection
-
-Find policies that match specific criteria:
-
-```rust
-let matching_policies = engine.get_matching_policies("user", "dashboard");
-for policy in matching_policies {
-    println!("Policy: {}", policy);
-}
-```
-
-### Programmatic Policy Creation
-
-Create policies programmatically using the builder pattern:
+### Programmatic Policy Construction
 
 ```rust
 use ace::{Policy, PolicyAction, Condition, Expression, Operator, Value};
 
-let policy = Policy::new(
-    PolicyAction::Allow,
-    "user".to_string(),
-    "admin_panel".to_string(),
-)
-.with_condition(Condition::And(
-    Box::new(Condition::Expression(Expression {
-        left: "user.role".to_string(),
-        operator: Operator::Equal,
-        right: Value::String("admin".to_string()),
-    })),
-    Box::new(Condition::Expression(Expression {
-        left: "user.mfa_enabled".to_string(),
-        operator: Operator::Equal,
-        right: Value::Boolean(true),
-    })),
-));
-
-engine.add_policy(policy);
+let policy = Policy::new(PolicyAction::Allow, "user".into(), "admin_panel".into())
+    .with_condition(Condition::And(
+        Box::new(Condition::Expression(Expression {
+            left: "user.role".into(),
+            operator: Operator::Equal,
+            right: Value::String("admin".into()),
+        })),
+        Box::new(Condition::Expression(Expression {
+            left: "user.mfa_enabled".into(),
+            operator: Operator::Equal,
+            right: Value::Boolean(true),
+        })),
+    ));
 ```
 
-### Rich Context Building
-
-Use the `ContextBuilder` for complex context scenarios:
+### ContextBuilder
 
 ```rust
 use ace::{ContextBuilder, Value};
 
-let context = ContextBuilder::new()
+let ctx = ContextBuilder::new()
     .user_role("admin")
     .user_department("security")
     .location("office")
     .time_of_day("business_hours")
+    .day_of_week("tuesday")
+    .date("2026-01-15")                  // -> Value::Date or DateTime if offset present
+    .time("09:30+02:00")                 // -> Value::DateTime; "09:30" -> Value::Time
+    .datetime("2026-01-15T09:30:00Z")    // -> Value::DateTime
+    .ip_address("203.0.113.4")
     .device_type("desktop")
     .security_level(4)
     .add("user.mfa_enabled", Value::Boolean(true))
-    .add("user.clearance", Value::String("top_secret".to_string()))
+    .add_array("user.permissions", vec![
+        Value::String("read".into()),
+        Value::String("write".into()),
+    ])
     .build();
-
-let allowed = engine.evaluate("user", "classified_data", &context);
 ```
 
-### Multiple Policy Sources
+### JSON Interop
 
-Load policies from multiple sources:
+`Value` implements `From<serde_json::Value>` and `From<&serde_json::Value>`. The borrowed conversion additionally tries to parse string scalars as `DateTime`, `Date`, or `Time` before falling back to `String`. Useful when feeding HTTP/JSON request payloads into the context:
 
 ```rust
-let base_policies = "ALLOW user FOR \"login\" WHEN user.active == true;";
-let admin_policies = "ALLOW user FOR \"admin\" WHEN user.role == \"admin\";";
+use ace::Value;
+use serde_json::json;
 
-engine.load_from_sources(vec![base_policies, admin_policies])?;
+let body = json!({
+    "user": { "role": "admin", "joined_at": "2026-01-15T09:30:00Z" },
+    "tags": ["beta", "vip"]
+});
+
+let role: Value   = (&body["user"]["role"]).into();        // Value::String
+let joined: Value = (&body["user"]["joined_at"]).into();   // Value::DateTime
+let tags: Value   = (&body["tags"]).into();                // Value::Array(...)
 ```
 
 ## Policy Resolution
 
-The engine follows these rules for policy resolution:
+1. **Deny wins**: any matching `DENY` whose condition evaluates true → access denied.
+2. **Explicit allow required**: at least one matching `ALLOW` whose condition is true must exist.
+3. **Default deny**: no matches, or no condition true → denied.
+4. **Order independent**: deny-wins makes order irrelevant.
+5. **Missing context key**: any expression referencing an undefined key evaluates to `false`.
 
-1. **Explicit Deny Wins**: If any DENY policy matches and its condition is true, access is denied
-2. **Explicit Allow Required**: Access is only granted if at least one ALLOW policy matches and its condition is true
-3. **Default Deny**: If no policies match or all matching policies have false conditions, access is denied
-4. **Order Independence**: Policy order doesn't matter due to the explicit deny-wins rule
+## Performance
 
-## Performance Characteristics
-
-- **Parsing**: O(n) where n is the number of policy lines
-- **Evaluation**: O(p) where p is the number of policies for the subject/resource pair
-- **Memory**: Policies are stored in an efficient AST structure
-- **Scalability**: Tested with thousands of policies with sub-millisecond evaluation times
+- **Parsing**: O(n) over input lines.
+- **Lookup**: `(subject, resource)` candidates indexed in a `HashMap` → O(1) lookup.
+- **Evaluation**: O(c) over candidate policies (typically a handful), not the full policy set.
+- **Memory**: AST stored once; lookup index stores `usize` offsets into the policy vector.
 
 ## Use Cases
 
-### Web Application Authorization
+### Web App Authorization
 
 ```text
-ALLOW user FOR "dashboard:READ" WHEN user.role == "admin" OR user.role == "manager";
-ALLOW user FOR "dashboard:WRITE" WHEN user.role == "admin";
-
-ALLOW user FOR "adult_content" WHEN user.age >= 18;
-DENY user FOR "teen_content" WHEN user.age > 17;
-
-ALLOW user FOR "beta_features" WHEN user.beta_tester == true AND NOT user.banned == true;
-
+ALLOW user FOR "dashboard:READ"   WHEN user.role == "admin" OR user.role == "manager";
+ALLOW user FOR "dashboard:WRITE"  WHEN user.role == "admin";
+ALLOW user FOR "beta_features"    WHEN user.beta_tester == true AND NOT user.banned == true;
 ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND user.subscription == "premium";
 ```
 
 ### API Access Control
 
 ```text
-ALLOW api_key FOR "users:READ" WHEN api_key.valid == true AND api_key.scope == "read";
-ALLOW api_key FOR "users:WRITE" WHEN api_key.valid == true AND api_key.scope == "write";
+ALLOW api_key FOR "users:READ"   WHEN api_key.valid == true AND api_key.scope == "read";
+ALLOW api_key FOR "users:WRITE"  WHEN api_key.valid == true AND api_key.scope == "write";
 ALLOW api_key FOR "users:DELETE" WHEN api_key.valid == true AND api_key.scope == "admin";
-
-DENY api_key FOR "high_volume_api" WHEN api_key.requests_per_minute > 100;
-
+DENY  api_key FOR "high_volume"  WHEN api_key.requests_per_minute > 100;
 ALLOW service FOR "internal_api" WHEN service.verified == true AND security.level >= 3;
 ```
 
-### Compliance and Security
+### Compliance / Security
 
 ```text
-ALLOW user FOR "financial_data:READ" WHEN user.sox_certified == true AND NOT user.foreign_national == true;
-ALLOW user FOR "financial_data:WRITE" WHEN user.sox_certified == true AND user.clearance_level >= 3;
-
-ALLOW user FOR "patient_data:READ" WHEN user.hipaa_certified == true AND user.department == "healthcare";
-DENY user FOR "patient_data:*" WHEN user.background_check != "completed";
-
-DENY user FOR "restricted_content" WHEN request.country == "blocked" OR request.ip_suspicious == true;
-ALLOW user FOR "after_hours_access" WHEN time.of_day == "night" AND (user.on_call == true OR user.role == "admin");
-
-ALLOW user FOR "classified:READ" WHEN security.level >= 3 AND user.mfa_enabled == true AND NOT user.suspended == true;
+ALLOW user FOR "financial_data:READ"  WHEN user.sox_certified == true AND NOT user.foreign_national == true;
+ALLOW user FOR "patient_data:READ"    WHEN user.hipaa_certified == true AND user.department == "healthcare";
+DENY  user FOR "patient_data:*"       WHEN user.background_check != "completed";
+DENY  user FOR "restricted_content"   WHEN request.country == "blocked" OR request.ip_suspicious == true;
+ALLOW user FOR "after_hours_access"   WHEN env.time >= "20:00+00:00" AND (user.on_call == true OR user.role == "admin");
+ALLOW user FOR "classified:READ"      WHEN security.level >= 3 AND user.mfa_enabled == true AND NOT user.suspended == true;
 ```
 
-## Running Examples
+### Membership / Tag Checks
 
-The crate includes comprehensive examples:
+```text
+ALLOW user FOR "internal"         WHEN user.email CONTAINS "@company.com";
+ALLOW user FOR "admin_panel"      WHEN user.roles CONTAINS "admin";
+ALLOW user FOR "verified_feature" WHEN NOT user.tags CONTAINS "unverified";
+```
+
+## Examples
 
 ```bash
-# Basic usage example
-cargo run --example basic_usage
-
-# Advanced scenarios with complex conditions
-cargo run --example advanced_usage
-
-# Extended features: operators, actions, contexts
-cargo run --example extended_features
+cargo run --example basic_usage         # core API walkthrough
+cargo run --example advanced_usage      # complex conditions
+cargo run --example extended_features   # operators, actions, contexts
+cargo run --example practical_usage     # end-to-end scenarios
 ```
 
-## Testing
+A sample policy file is at `examples/policies.txt`.
 
-Run the test suite:
+## Testing
 
 ```bash
 cargo test
 ```
 
-The test suite includes:
-- Parser tests for all syntax variations
-- Evaluator tests for complex conditions
-- Integration tests for real-world scenarios
-- Performance benchmarks
+Coverage includes parser variants, evaluator semantics, timezone-aware comparisons, array/string `CONTAINS`, indexed lookup, JSON coercion, and detailed-result aggregation.
 
 ## Error Handling
 
-The engine provides detailed error information for invalid policies:
-
 ```rust
-match engine.parse_file(invalid_policies) {
-    Ok(_) => println!("Policies loaded successfully"),
-    Err(e) => println!("Parse error: {}", e),
+match engine.parse_file(input) {
+    Ok(_)  => println!("loaded"),
+    Err(e) => eprintln!("parse error: {e}"),
 }
 ```
 
-Common parse errors include:
-- `InvalidSyntax`: Malformed policy structure
-- `UnexpectedToken`: Invalid keywords or operators
-- `MissingToken`: Missing required elements like "FOR" or "WHEN"
-- `InvalidValue`: Unsupported value types or formats
+`ParseError` variants:
 
-## Contributing
+- `InvalidSyntax` — malformed structure
+- `UnexpectedToken` — bad keyword/operator
+- `MissingToken` — expected `FOR`/`WHEN`
+- `InvalidValue` — unparseable literal
 
-We welcome contributions! Please see our contribution guidelines for:
-- Code style and conventions
-- Testing requirements
-- Documentation standards
-- Performance considerations
+Note: `parse_file` skips lines that fail to parse rather than aborting the load — use `parse_policy(line)` directly if you need strict parsing of individual lines.
 
-## License
+## Common Context Variables
 
-This project is licensed under the same terms as the parent Stargate project.
+These are conventions, not requirements — any key works.
+
+**User:** `user.role`, `user.department`, `user.age`, `user.active`, `user.suspended`, `user.mfa_enabled`, `user.score`, `user.clearance_level`, `user.experience_months`, `user.roles` (array), `user.tags` (array), `user.email`
+
+**Time:** `time.of_day`, `time.day_of_week`, `time.date`, `time.time`, `time.datetime`, `env.time`
+
+**Location / Request:** `location`, `request.country`, `request.ip`, `request.ip_suspicious`
+
+**Device:** `device.type`, `device.secure`, `device.biometric_enabled`, `device.registered`
+
+**Security / API:** `security.level`, `api_key.valid`, `api_key.scope`, `api_key.rate_limited`
 
 ## Integration with Stargate
 
-The ACE engine is designed to integrate seamlessly with the Stargate ecosystem:
+The ACE engine powers the `access_control` policy kind in the v2 gateway router pipeline (`docs/config-v2alpha1.md`) and is also used for admin/IAM access decisions. Policy files are hot-reloadable via the gateway's config watcher.
 
-- **Database Access Control**: Control access to tables, columns, and operations
-- **API Gateway**: Secure REST and GraphQL endpoints
-- **Service Mesh**: Inter-service communication policies
-- **Admin Interface**: Role-based administrative access
+## License
 
-For more information about Stargate, see the main project documentation.
-
-## Extended Syntax Examples
-
-### Complete Policy Examples
-
-```text
-ALLOW user FOR "alcohol_purchase" WHEN user.age >= 21 AND user.id_verified == true;
-
-ALLOW user FOR "classified:READ" WHEN user.clearance == "secret" AND security.level >= 3 AND NOT user.foreign_national == true;
-
-ALLOW user FOR "mobile_banking:WRITE" WHEN device.type == "mobile" AND device.biometric_enabled == true AND NOT (time.of_day == "night" AND location != "home");
-
-ALLOW user FOR "database:READ" WHEN user.role == "analyst" OR user.role == "admin";
-ALLOW user FOR "database:WRITE" WHEN user.role == "admin" AND NOT user.probation == true;
-DENY user FOR "database:DELETE" WHEN user.experience_months < 12 OR user.approval_required == true;
-
-ALLOW user FOR "premium_features" WHEN user.score >= 95.5 AND (user.subscription == "premium" OR user.subscription == "enterprise");
-
-DENY user FOR "eu_data:*" WHEN request.country != "EU" AND NOT user.gdpr_authorized == true;
-ALLOW user FOR "us_only:*" WHEN request.country == "US" AND user.citizenship == "US";
-```
-
-### Context Variables
-
-Common context variables used in policies:
-
-**User Context:**
-- `user.role`, `user.department`, `user.age`
-- `user.active`, `user.suspended`, `user.mfa_enabled`
-- `user.score`, `user.clearance_level`, `user.experience_months`
-
-**Time Context:**
-- `time.of_day` ("morning", "day", "evening", "night")
-- `time.day_of_week` ("monday", "tuesday", etc.)
-- `time.business_hours` (boolean)
-
-**Location Context:**
-- `location` ("office", "home", "remote")
-- `request.country`, `request.ip`, `request.ip_suspicious`
-
-**Device Context:**
-- `device.type` ("desktop", "mobile", "tablet")
-- `device.secure`, `device.biometric_enabled`, `device.registered`
-
-**Security Context:**
-- `security.level` (numeric: 1-5)
-- `api_key.valid`, `api_key.scope`, `api_key.rate_limited`
+Same terms as the parent Stargate project.
