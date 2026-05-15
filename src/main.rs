@@ -48,7 +48,7 @@ pub async fn run() -> std::io::Result<()> {
         .expect("Invalid listen address");
     let tls_enabled = tls::enabled()?;
     let runtime_profile = profile::validate_runtime_profile()?;
-    let shutdown_timeout_secs = act::server_shutdown_timeout_secs();
+    let shutdown_timeout_secs = fun::server_shutdown_timeout_secs();
 
     info!("Version: {}", version);
     info!("Starting server on port {}", port);
@@ -80,7 +80,7 @@ pub async fn run() -> std::io::Result<()> {
         .layer(CompressionLayer::new())
         .layer(NormalizePathLayer::trim_trailing_slash());
 
-    let shutdown = act::shutdown_signal()?;
+    let shutdown = fun::shutdown_signal()?;
 
     info!("Server listening on {}", addr);
 
