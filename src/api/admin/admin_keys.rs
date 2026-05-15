@@ -154,7 +154,7 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         )));
     }
 
-    let secret = pw::generate_api_key();
+    let secret = pw::generate_admin_key();
     let key_hash = pw::hash_api_key(&secret);
 
     let admin_key = crate::db::create_admin_key(

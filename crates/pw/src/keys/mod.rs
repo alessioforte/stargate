@@ -9,6 +9,10 @@ pub fn generate_api_key() -> String {
     generate_api_key_with(meta::KeyType::Secret, meta::KeyEnvironment::Live)
 }
 
+pub fn generate_admin_key() -> String {
+    generate_api_key_with(meta::KeyType::Admin, meta::KeyEnvironment::Live)
+}
+
 pub fn generate_api_key_with(key_type: meta::KeyType, env: meta::KeyEnvironment) -> String {
     let key: String = rand::rng()
         .sample_iter(&Alphanumeric)
