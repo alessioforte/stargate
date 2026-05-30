@@ -25,6 +25,7 @@ members = [
     "crates/lb",
     "crates/lim",
     "crates/oidc",
+    "crates/otp",
     "crates/pw",
     "crates/smtp",
     "crates/store",
@@ -75,6 +76,7 @@ lb = { path = "crates/lb" }
 mime = "0.3.17"
 idp = { path = "crates/idp" }
 oidc = { path = "crates/oidc" }
+otp = { path = "crates/otp" }
 pw = { path = "crates/pw" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"

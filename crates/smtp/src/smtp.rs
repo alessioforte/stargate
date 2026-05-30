@@ -71,6 +71,8 @@ pub struct Smtp {
     token: String,
     template: Template,
     name: Option<String>,
+    subject: Option<String>,
+    body: Option<String>,
 }
 
 impl Default for Smtp {
@@ -87,6 +89,8 @@ impl Smtp {
             token: "".to_string(),
             template: Template::SignupRequest,
             name: None,
+            subject: None,
+            body: None,
         }
     }
 
@@ -110,6 +114,16 @@ impl Smtp {
         self
     }
 
+    pub fn subject(&mut self, subject: impl Into<String>) -> &mut Self {
+        self.subject = Some(subject.into());
+        self
+    }
+
+    pub fn html_body(&mut self, body: impl Into<String>) -> &mut Self {
+        self.body = Some(body.into());
+        self
+    }
+
     fn recipient_mailbox(&self) -> Result<Mailbox, SmtpError> {
         let address = self
             .email
@@ -130,6 +144,10 @@ impl Smtp {
     }
 
     fn render_body(&self) -> Result<String, SmtpError> {
+        if let Some(body) = &self.body {
+            return Ok(body.clone());
+        }
+
         let file_path = format!(".stargate/transactional/{}.html", self.template.filename());
         let content =
             std::fs::read_to_string(&file_path).map_err(|source| SmtpError::TemplateRead {
@@ -166,7 +184,10 @@ impl Smtp {
             &std::env::var("SMTP_FROM")
                 .unwrap_or_else(|_| "NoBody <nobody@domain.tld>".to_string()),
         )?;
-        let subject = self.template.subject();
+        let subject = self
+            .subject
+            .as_deref()
+            .unwrap_or_else(|| self.template.subject());
         let header = ContentType::TEXT_HTML;
         let body = self.render_body()?;
 
@@ -220,6 +241,18 @@ mod tests {
         let result = Smtp::new().send();
 
         assert!(matches!(result, Err(SmtpError::MissingMessage)));
+    }
+
+    #[test]
+    fn build_accepts_custom_body_without_template_file() {
+        let mut smtp = Smtp::new();
+        let result = smtp
+            .to("alice@example.com".to_string())
+            .subject("Verification code")
+            .html_body("<p>123456</p>")
+            .build();
+
+        assert!(result.is_ok());
     }
 
     #[test]

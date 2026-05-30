@@ -1,8 +1,10 @@
 pub mod credentials;
 pub mod login;
 pub mod logout;
+pub mod otp;
 pub mod profile;
 pub mod refresh_token;
+mod session;
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -33,6 +35,20 @@ pub fn router() -> axum::Router {
     let sensitive = axum::Router::new()
         .route("/account/login", post(login::post_login))
         .route("/account/logout", delete(logout::delete_logout))
+        .route(
+            "/account/login/otp/email",
+            post(otp::post_login_email_otp).put(otp::put_login_email_otp),
+        )
+        .route(
+            "/account/login/mfa/challenges/{challenge_id}",
+            put(otp::put_login_mfa_challenge),
+        )
+        .route("/account/mfa/methods", get(otp::get_mfa_methods))
+        .route("/account/mfa/challenges", post(otp::post_mfa_challenge))
+        .route(
+            "/account/mfa/challenges/{challenge_id}",
+            put(otp::put_mfa_challenge),
+        )
         .route(
             "/account/refresh-token",
             put(refresh_token::put_refresh_token),

@@ -1,19 +1,15 @@
 use super::{AuthResponse, UserCredentials};
 use crate::act::login_guard;
+use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
+use crate::api::account::session::issue_user_session;
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc;
 use crate::etc::ext::RequestExt;
-use crate::etc::jwt::jwt_config;
 use crate::etc::reqctx::take_audit_context_from;
-use crate::fun::build_jwt_cookie;
-use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use db::ent::CredentialType;
-use http::header::SET_COOKIE;
 use pw::Hash;
-use store::Store;
 
 #[utoipa::path(
     post,
@@ -24,6 +20,7 @@ use store::Store;
     request_body = UserCredentials,
     responses(
         (status = 200, description = "OK", body = AuthResponse),
+        (status = 202, description = "MFA Required", body = LoginMfaRequiredResponse),
         (status = 429, description = "Too Many Requests", body = ErrorResponse),
         (status = 401, description = "Unauthorized - Invalid Credentials", body = ErrorResponse),
         (status = 503, description = "Service Unavailable", body = ErrorResponse),
@@ -103,59 +100,12 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
     // drop audit_ctx after enrichment.
     let _ = audit_ctx;
 
-    let subject = etc::sub::Subject::from(user.clone());
-
-    let given_name = user.given_name.clone().unwrap_or_default();
-    let family_name = user.family_name.clone().unwrap_or_default();
-    let name = format_name(&given_name, &family_name);
-
-    let sid = ulid::Ulid::new().to_string();
     let auth_time = chrono::Utc::now().timestamp() as usize;
-    let mut claims = jwt::Claims::default()
-        .subject(user.email.to_owned())
-        .sub_id(user.id.to_owned())
-        .name(name)
-        .email(user.email.to_owned())
-        .email_verified(true)
-        .sid(sid.clone());
-    claims.auth_time = Some(auth_time);
-
-    let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
-        .await
-        .map_err(ErrorResponse::internal)?;
-    if is_super_admin {
-        claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
+    if let Some(response) = maybe_start_login_mfa(&user, &client_ip, auth_time).await? {
+        return Ok(response);
     }
 
-    let (access_token, refresh_token) =
-        crate::fun::generate_tokens(claims).map_err(ErrorResponse::internal)?;
-
-    let store = etc::store::use_store();
-    let refresh_exp = jwt_config().refresh_exp;
-    let access_exp = jwt_config().access_exp;
-    let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
-    let cttl: i64 = access_exp.as_seconds_f64() as i64;
-
-    store
-        .set(&sid, &subject, Some(sttl))
-        .await
-        .map_err(ErrorResponse::internal)?;
-
-    let cookie = build_jwt_cookie(&access_token, cttl);
-    let body = AuthResponse {
-        access_token,
-        refresh_token,
-        token_type: "Bearer".to_string(),
-    };
-
-    let mut resp = Json(body).into_response();
-    resp.headers_mut().insert(
-        SET_COOKIE,
-        cookie
-            .parse()
-            .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
-    );
-    Ok(resp)
+    issue_user_session(user, auth_time).await
 }
 
 fn login_guard_unavailable(error: store::StoreError) -> ErrorResponse {
