@@ -98,14 +98,12 @@ base64 = "0.22.1"
 sha2 = "0.10.9"
 url = "2.5.8"
 ulid = "1.2.1"
+lim = { path = "crates/lim" }
 lru = "0.17"
 maxminddb = { version = "0.27.3", features = ["simdutf8"] }
 moka = { version = "0.12.15", features = ["sync"] }
 notify = "8.2.0"
 clap = { version = "4.6.1", features = ["derive"] }
-
-[dev-dependencies]
-lim = { path = "crates/lim", features = ["memory"] }
 
 [features]
 default = ["edge"]
@@ -113,6 +111,6 @@ edge = ["sqlite", "memory"]
 cluster = ["postgres", "redis"]
 postgres = ["db/postgres"]
 sqlite = ["db/sqlite"]
-memory = ["store/memory", "gate/memory", "oidc/memory"]
-redis = ["store/redis", "gate/redis"]
+memory = ["store/memory", "gate/memory", "oidc/memory", "lim/memory"]
+redis = ["store/redis", "gate/redis", "lim/redis"]
 memory-compression = ["store/compression"]

@@ -181,7 +181,7 @@ impl Gate {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::Gate;
     use crate::cfg::RuntimeConfig;

@@ -154,11 +154,19 @@ fn auth_request(req: &Request<Body>) -> Request<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_request, service};
+    use super::auth_request;
     use axum::body::Body;
+    use http::Request;
+
+    #[cfg(feature = "memory")]
+    use super::service;
+    #[cfg(feature = "memory")]
     use gate::Gate;
-    use http::{Request, StatusCode, header::CONTENT_TYPE};
+    #[cfg(feature = "memory")]
+    use http::{StatusCode, header::CONTENT_TYPE};
+    #[cfg(feature = "memory")]
     use http_body_util::BodyExt;
+    #[cfg(feature = "memory")]
     use std::sync::Arc;
 
     #[test]
@@ -177,6 +185,7 @@ mod tests {
         assert_eq!(*auth_req.body(), ());
     }
 
+    #[cfg(feature = "memory")]
     #[tokio::test]
     async fn service_wraps_missing_route_error_as_json_response() {
         let gate = Arc::new(Gate::new(Arc::new(lim::State::new())));
