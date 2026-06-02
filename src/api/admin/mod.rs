@@ -47,11 +47,35 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
                     {
                         match crate::db::is_super_admin_user_id(user_id).await {
                             Ok(true) => {
-                                ctx = ctx.with_actor(
-                                    db::ent::ActorType::Admin,
-                                    Some(user_id.to_string()),
-                                );
-                                grants.insert(SUPER_ADMIN.to_string());
+                                let step_up_satisfied = if crate::act::otp::admin_step_up_required()
+                                {
+                                    match crate::act::otp::has_valid_mfa_verification(
+                                        &sid,
+                                        user_id,
+                                        crate::act::otp::ADMIN_STEP_UP_PURPOSE,
+                                    )
+                                    .await
+                                    {
+                                        Ok(satisfied) => satisfied,
+                                        Err(err) => {
+                                            tracing::error!(
+                                                "Failed to check admin MFA step-up state: {}",
+                                                err
+                                            );
+                                            false
+                                        }
+                                    }
+                                } else {
+                                    true
+                                };
+
+                                if step_up_satisfied {
+                                    ctx = ctx.with_actor(
+                                        db::ent::ActorType::Admin,
+                                        Some(user_id.to_string()),
+                                    );
+                                    grants.insert(SUPER_ADMIN.to_string());
+                                }
                             }
                             Ok(false) => {}
                             Err(err) => {

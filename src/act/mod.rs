@@ -2,6 +2,7 @@ mod change_password;
 mod email_verification;
 pub mod login_guard;
 pub mod oauth_state;
+pub mod otp;
 mod signup_request;
 pub mod token_revocation;
 

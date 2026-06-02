@@ -323,8 +323,16 @@ pub fn issue_message_otp(
         return Err(OtpError::InvalidRecipient);
     }
 
+    if recipient.chars().any(char::is_control) {
+        return Err(OtpError::InvalidRecipient);
+    }
+
     let purpose = purpose.into();
     if purpose.trim().is_empty() {
+        return Err(OtpError::InvalidPurpose);
+    }
+
+    if purpose.chars().any(char::is_control) {
         return Err(OtpError::InvalidPurpose);
     }
 
@@ -483,6 +491,31 @@ mod tests {
             record.verify(&issued.code, PEPPER, 1_700_000_030),
             MessageOtpVerification::Expired
         );
+    }
+
+    #[test]
+    fn rejects_control_characters_in_recipient_or_purpose() {
+        assert!(matches!(
+            issue_email_otp(
+                "alice@example.com\0",
+                "login",
+                PEPPER,
+                1_700_000_000,
+                MessageOtpConfig::default()
+            ),
+            Err(OtpError::InvalidRecipient)
+        ));
+
+        assert!(matches!(
+            issue_email_otp(
+                "alice@example.com",
+                "log\nin",
+                PEPPER,
+                1_700_000_000,
+                MessageOtpConfig::default()
+            ),
+            Err(OtpError::InvalidPurpose)
+        ));
     }
 
     #[test]
