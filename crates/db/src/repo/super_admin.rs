@@ -25,16 +25,14 @@ impl SuperAdminRepository {
         user_id: &str,
     ) -> Result<SuperAdmin> {
         let super_admin = SuperAdmin::new(user_id.to_string());
-        let row = sqlx::query_as::<_, SuperAdmin>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, SuperAdmin>(sqlx::AssertSqlSafe(format!(
+            "
             INSERT INTO {super_admins} (user_id, active)
             VALUES ($1, $2)
             RETURNING *
         ",
-                super_admins = SUPER_ADMIN
-            )),
-        )
+            super_admins = SUPER_ADMIN
+        )))
         .bind(&super_admin.user_id)
         .bind(super_admin.active)
         .fetch_one(&mut **tx)
@@ -47,15 +45,13 @@ impl SuperAdminRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row = sqlx::query_as::<_, SuperAdmin>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, SuperAdmin>(sqlx::AssertSqlSafe(format!(
+            "
             SELECT * FROM {super_admins}
             WHERE user_id = $1 AND active = TRUE
         ",
-                super_admins = SUPER_ADMIN
-            )),
-        )
+            super_admins = SUPER_ADMIN
+        )))
         .bind(user_id)
         .fetch_optional(ex)
         .await?;
@@ -67,14 +63,12 @@ impl SuperAdminRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row: (i64,) = sqlx::query_as(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "
             SELECT COUNT(*) FROM {super_admins} WHERE active = TRUE
         ",
-                super_admins = SUPER_ADMIN
-            )),
-        )
+            super_admins = SUPER_ADMIN
+        )))
         .fetch_one(ex)
         .await?;
 

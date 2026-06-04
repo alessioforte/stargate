@@ -17,9 +17,8 @@ impl OAuthConsentRepository {
         tx: &mut crate::backend::Tx<'_>,
         consent: OAuthConsent,
     ) -> Result<OAuthConsent> {
-        let row = sqlx::query_as::<_, OAuthConsent>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, OAuthConsent>(sqlx::AssertSqlSafe(format!(
+            "
             INSERT INTO {tbl} (
                 id,
                 client_id,
@@ -44,9 +43,8 @@ impl OAuthConsentRepository {
                 updated_at = excluded.updated_at
             RETURNING *
         ",
-                tbl = OAUTH_CONSENT
-            )),
-        )
+            tbl = OAUTH_CONSENT
+        )))
         .bind(&consent.id)
         .bind(&consent.client_id)
         .bind(&consent.user_id)
@@ -74,18 +72,16 @@ impl OAuthConsentRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row = sqlx::query_as::<_, OAuthConsent>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, OAuthConsent>(sqlx::AssertSqlSafe(format!(
+            "
             SELECT * FROM {tbl}
             WHERE user_id = $1
               AND client_id = $2
               AND revoked_at IS NULL
               AND (expires_at IS NULL OR expires_at > $3)
         ",
-                tbl = OAUTH_CONSENT
-            )),
-        )
+            tbl = OAUTH_CONSENT
+        )))
         .bind(user_id)
         .bind(client_id)
         .bind(now)
@@ -102,16 +98,14 @@ impl OAuthConsentRepository {
         client_id: &str,
     ) -> Result<()> {
         let now = Utc::now();
-        sqlx::query(
-            sqlx::AssertSqlSafe(format!(
-                "
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "
             UPDATE {tbl}
             SET revoked_at = $3, updated_at = $3
             WHERE user_id = $1 AND client_id = $2 AND revoked_at IS NULL
         ",
-                tbl = OAUTH_CONSENT
-            )),
-        )
+            tbl = OAUTH_CONSENT
+        )))
         .bind(user_id)
         .bind(client_id)
         .bind(now)

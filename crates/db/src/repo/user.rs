@@ -70,14 +70,12 @@ impl UserRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row = sqlx::query_as::<_, User>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+            "
             SELECT * FROM {users} WHERE nickname = $1 OR email = $1 OR phone_number = $1
         ",
-                users = USER
-            )),
-        )
+            users = USER
+        )))
         .bind(username)
         .fetch_optional(ex)
         .await?;
@@ -115,12 +113,10 @@ impl UserRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let rows = sqlx::query_as::<_, User>(
-            sqlx::AssertSqlSafe(format!(
-                "SELECT * FROM {users} ORDER BY id LIMIT $1 OFFSET $2",
-                users = USER
-            )),
-        )
+        let rows = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {users} ORDER BY id LIMIT $1 OFFSET $2",
+            users = USER
+        )))
         .bind(limit)
         .bind(offset)
         .fetch_all(ex)
@@ -133,10 +129,12 @@ impl UserRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row: (i64,) =
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {users}", users = USER)))
-                .fetch_one(ex)
-                .await?;
+        let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM {users}",
+            users = USER
+        )))
+        .fetch_one(ex)
+        .await?;
 
         Ok(row.0)
     }
@@ -194,9 +192,10 @@ impl UserRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row = sqlx::query_as::<_, User>(
-            sqlx::AssertSqlSafe(format!("SELECT * FROM {users} WHERE id = $1", users = USER)),
-        )
+        let row = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {users} WHERE id = $1",
+            users = USER
+        )))
         .bind(id)
         .fetch_optional(ex)
         .await?;
@@ -205,10 +204,13 @@ impl UserRepository {
     }
 
     pub async fn delete(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
-        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {users} WHERE id = $1", users = USER)))
-            .bind(id)
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {users} WHERE id = $1",
+            users = USER
+        )))
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
 
         Ok(())
     }

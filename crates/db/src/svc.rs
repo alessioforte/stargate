@@ -56,7 +56,10 @@ impl Service {
 
         // Execute the entire DDL as a single batch. This correctly handles
         // PL/pgSQL DO $$ ... END $$; blocks that contain semicolons.
-        if let Err(e) = sqlx::raw_sql(sqlx::AssertSqlSafe(ddl)).execute(&self.pool).await {
+        if let Err(e) = sqlx::raw_sql(sqlx::AssertSqlSafe(ddl))
+            .execute(&self.pool)
+            .await
+        {
             eprintln!("Failed to execute schema from '{}': {}", file, e);
         }
     }

@@ -17,9 +17,8 @@ impl OAuthClientRepository {
         tx: &mut crate::backend::Tx<'_>,
         client: OAuthClient,
     ) -> Result<OAuthClient> {
-        let row = sqlx::query_as::<_, OAuthClient>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "
             INSERT INTO {tbl} (
                 client_id,
                 client_secret_hash,
@@ -41,9 +40,8 @@ impl OAuthClientRepository {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *
         ",
-                tbl = OAUTH_CLIENT
-            )),
-        )
+            tbl = OAUTH_CLIENT
+        )))
         .bind(&client.client_id)
         .bind(&client.client_secret_hash)
         .bind(&client.name)
@@ -74,12 +72,10 @@ impl OAuthClientRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row = sqlx::query_as::<_, OAuthClient>(
-            sqlx::AssertSqlSafe(format!(
-                "SELECT * FROM {tbl} WHERE client_id = $1",
-                tbl = OAUTH_CLIENT
-            )),
-        )
+        let row = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {tbl} WHERE client_id = $1",
+            tbl = OAUTH_CLIENT
+        )))
         .bind(client_id)
         .fetch_optional(ex)
         .await?;
@@ -91,12 +87,10 @@ impl OAuthClientRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let rows = sqlx::query_as::<_, OAuthClient>(
-            sqlx::AssertSqlSafe(format!(
-                "SELECT * FROM {tbl} ORDER BY created_at DESC, client_id DESC LIMIT $1 OFFSET $2",
-                tbl = OAUTH_CLIENT
-            )),
-        )
+        let rows = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {tbl} ORDER BY created_at DESC, client_id DESC LIMIT $1 OFFSET $2",
+            tbl = OAUTH_CLIENT
+        )))
         .bind(limit)
         .bind(offset)
         .fetch_all(ex)
@@ -109,10 +103,12 @@ impl OAuthClientRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let row: (i64,) =
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {tbl}", tbl = OAUTH_CLIENT)))
-                .fetch_one(ex)
-                .await?;
+        let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM {tbl}",
+            tbl = OAUTH_CLIENT
+        )))
+        .fetch_one(ex)
+        .await?;
 
         Ok(row.0)
     }
@@ -128,17 +124,15 @@ impl OAuthClientRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let pattern = format!("%{}%", query);
-        let rows = sqlx::query_as::<_, OAuthClient>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let rows = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "
             SELECT * FROM {tbl}
             WHERE client_id {like} $1 OR name {like} $1 OR description {like} $1
             ORDER BY created_at DESC, client_id DESC LIMIT $2 OFFSET $3
         ",
-                tbl = OAUTH_CLIENT,
-                like = crate::backend::LIKE
-            )),
-        )
+            tbl = OAUTH_CLIENT,
+            like = crate::backend::LIKE
+        )))
         .bind(&pattern)
         .bind(limit)
         .bind(offset)
@@ -153,16 +147,14 @@ impl OAuthClientRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let pattern = format!("%{}%", query);
-        let row: (i64,) = sqlx::query_as(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "
             SELECT COUNT(*) FROM {tbl}
             WHERE client_id {like} $1 OR name {like} $1 OR description {like} $1
         ",
-                tbl = OAUTH_CLIENT,
-                like = crate::backend::LIKE
-            )),
-        )
+            tbl = OAUTH_CLIENT,
+            like = crate::backend::LIKE
+        )))
         .bind(&pattern)
         .fetch_one(ex)
         .await?;
@@ -176,9 +168,8 @@ impl OAuthClientRepository {
         client: OAuthClient,
     ) -> Result<OAuthClient> {
         let updated_at = Utc::now();
-        let row = sqlx::query_as::<_, OAuthClient>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "
             UPDATE {tbl}
             SET name = $2,
                 description = $3,
@@ -196,9 +187,8 @@ impl OAuthClientRepository {
             WHERE client_id = $1
             RETURNING *
         ",
-                tbl = OAUTH_CLIENT
-            )),
-        )
+            tbl = OAUTH_CLIENT
+        )))
         .bind(&client.client_id)
         .bind(&client.name)
         .bind(&client.description)
@@ -226,17 +216,15 @@ impl OAuthClientRepository {
         client_secret_hash: Option<&str>,
     ) -> Result<OAuthClient> {
         let updated_at: DateTime<Utc> = Utc::now();
-        let row = sqlx::query_as::<_, OAuthClient>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "
             UPDATE {tbl}
             SET client_secret_hash = $2, updated_at = $3
             WHERE client_id = $1
             RETURNING *
         ",
-                tbl = OAUTH_CLIENT
-            )),
-        )
+            tbl = OAUTH_CLIENT
+        )))
         .bind(client_id)
         .bind(client_secret_hash)
         .bind(updated_at)
@@ -253,17 +241,15 @@ impl OAuthClientRepository {
         enabled: bool,
     ) -> Result<OAuthClient> {
         let updated_at = Utc::now();
-        let row = sqlx::query_as::<_, OAuthClient>(
-            sqlx::AssertSqlSafe(format!(
-                "
+        let row = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "
             UPDATE {tbl}
             SET enabled = $2, updated_at = $3
             WHERE client_id = $1
             RETURNING *
         ",
-                tbl = OAUTH_CLIENT
-            )),
-        )
+            tbl = OAUTH_CLIENT
+        )))
         .bind(client_id)
         .bind(enabled)
         .bind(updated_at)
@@ -278,10 +264,13 @@ impl OAuthClientRepository {
         tx: &mut crate::backend::Tx<'_>,
         client_id: &str,
     ) -> Result<()> {
-        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {tbl} WHERE client_id = $1", tbl = OAUTH_CLIENT)))
-            .bind(client_id)
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {tbl} WHERE client_id = $1",
+            tbl = OAUTH_CLIENT
+        )))
+        .bind(client_id)
+        .execute(&mut **tx)
+        .await?;
 
         Ok(())
     }

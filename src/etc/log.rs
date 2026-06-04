@@ -1,4 +1,4 @@
-use crate::etc::{ext::RequestExt, reqctx::RequestContext};
+use crate::etc::{env::bool_or, ext::RequestExt, reqctx::RequestContext};
 use chrono::Utc;
 use tracing::info;
 use tracing_subscriber::{
@@ -9,23 +9,12 @@ use tracing_subscriber::{
 };
 use ulid::Ulid;
 
-fn parse_bool_env(name: &str, default: bool) -> bool {
-    match std::env::var(name) {
-        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => true,
-            "0" | "false" | "no" | "off" => false,
-            _ => default,
-        },
-        Err(_) => default,
-    }
-}
-
 pub fn init() -> Vec<tracing_appender::non_blocking::WorkerGuard> {
     let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| ".stargate/logs".to_string());
     let env_filter = EnvFilter::from_default_env();
-    let mut file_enabled = parse_bool_env("LOG_FILE_ENABLED", true);
-    let mut console_enabled = parse_bool_env("LOG_CONSOLE_ENABLED", cfg!(debug_assertions));
-    let pretty_console = parse_bool_env("LOG_PRETTY_CONSOLE", cfg!(debug_assertions));
+    let mut file_enabled = bool_or("LOG_FILE_ENABLED", true);
+    let mut console_enabled = bool_or("LOG_CONSOLE_ENABLED", cfg!(debug_assertions));
+    let pretty_console = bool_or("LOG_PRETTY_CONSOLE", cfg!(debug_assertions));
     let mut guards = Vec::new();
 
     if !file_enabled && !console_enabled {
