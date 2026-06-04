@@ -21,15 +21,14 @@ impl Default for UserRepository {
 impl UserRepository {
     pub async fn create(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {users} (id, email, given_name, family_name, nickname, picture, phone_number, attrs)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         ",
                 users = USER
-            )
-            .as_str(),
+            )),
         )
         .bind(&user.id)
         .bind(&user.email)
@@ -50,7 +49,7 @@ impl UserRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {users}
             WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
@@ -58,8 +57,7 @@ impl UserRepository {
         ",
                 users = USER,
                 like = crate::backend::LIKE
-            )
-            .as_str(),
+            )),
         )
         .bind(format!("%{}%", query))
         .fetch_all(ex)
@@ -73,13 +71,12 @@ impl UserRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {users} WHERE nickname = $1 OR email = $1 OR phone_number = $1
         ",
                 users = USER
-            )
-            .as_str(),
+            )),
         )
         .bind(username)
         .fetch_optional(ex)
@@ -90,7 +87,7 @@ impl UserRepository {
 
     pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
         let row = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {users}
             SET email = $2, given_name = $3, family_name = $4, nickname = $5, picture = $6, phone_number = $7, attrs = $8
@@ -98,8 +95,7 @@ impl UserRepository {
             RETURNING *
         ",
                 users = USER
-            )
-            .as_str(),
+            )),
         )
         .bind(&user.id)
         .bind(&user.email)
@@ -120,11 +116,10 @@ impl UserRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT * FROM {users} ORDER BY id LIMIT $1 OFFSET $2",
                 users = USER
-            )
-            .as_str(),
+            )),
         )
         .bind(limit)
         .bind(offset)
@@ -139,7 +134,7 @@ impl UserRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) =
-            sqlx::query_as(format!("SELECT COUNT(*) FROM {users}", users = USER).as_str())
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {users}", users = USER)))
                 .fetch_one(ex)
                 .await?;
 
@@ -158,14 +153,13 @@ impl UserRepository {
     {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT * FROM {users}
                  WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
                  ORDER BY id LIMIT $2 OFFSET $3",
                 users = USER,
                 like = crate::backend::LIKE
-            )
-            .as_str(),
+            )),
         )
         .bind(&pattern)
         .bind(limit)
@@ -182,13 +176,12 @@ impl UserRepository {
     {
         let pattern = format!("%{}%", query);
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*) FROM {users}
                  WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1",
                 users = USER,
                 like = crate::backend::LIKE
-            )
-            .as_str(),
+            )),
         )
         .bind(&pattern)
         .fetch_one(ex)
@@ -202,7 +195,7 @@ impl UserRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, User>(
-            format!("SELECT * FROM {users} WHERE id = $1", users = USER).as_str(),
+            sqlx::AssertSqlSafe(format!("SELECT * FROM {users} WHERE id = $1", users = USER)),
         )
         .bind(id)
         .fetch_optional(ex)
@@ -212,7 +205,7 @@ impl UserRepository {
     }
 
     pub async fn delete(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
-        sqlx::query(format!("DELETE FROM {users} WHERE id = $1", users = USER).as_str())
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {users} WHERE id = $1", users = USER)))
             .bind(id)
             .execute(&mut **tx)
             .await?;

@@ -23,15 +23,14 @@ impl Default for AuditRepository {
 impl AuditRepository {
     pub async fn insert(&self, tx: &mut crate::backend::Tx<'_>, log: &Audit) -> Result<Audit> {
         let row = sqlx::query_as::<_, Audit>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {audits} (id, timestamp, actor_type, actor_id, action, resource, resource_id, request_id, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
         ",
                 audits = AUDIT
-            )
-            .as_str(),
+            )),
         )
         .bind(&log.id)
         .bind(log.timestamp)

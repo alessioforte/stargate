@@ -29,15 +29,14 @@ impl CredentialRepository {
         let credential = Credential::new(user_id.to_string(), credential_type, value.to_string());
 
         let row = sqlx::query_as::<_, Credential>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {credentials} (id, user_id, type, value)
             VALUES ($1, $2, $3, $4)
             RETURNING *
         ",
                 credentials = CREDENTIAL
-            )
-            .as_str(),
+            )),
         )
         .bind(&credential.id)
         .bind(&credential.user_id)
@@ -59,13 +58,12 @@ impl CredentialRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, Credential>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {credentials} WHERE user_id = $1 AND type = $2
         ",
                 credentials = CREDENTIAL
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .bind(credential_type)
@@ -82,7 +80,7 @@ impl CredentialRepository {
         new_password: &str,
     ) -> Result<Credential> {
         let row = sqlx::query_as::<_, Credential>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {credentials}
             SET value = $1
@@ -90,8 +88,7 @@ impl CredentialRepository {
             RETURNING *
         ",
                 credentials = CREDENTIAL
-            )
-            .as_str(),
+            )),
         )
         .bind(new_password)
         .bind(user_id)
@@ -108,11 +105,10 @@ impl CredentialRepository {
         user_id: &str,
     ) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "DELETE FROM {credentials} WHERE user_id = $1",
                 credentials = CREDENTIAL
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .execute(&mut **tx)

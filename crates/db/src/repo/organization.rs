@@ -30,15 +30,14 @@ impl OrganizationRepository {
         let org = Organization::new(name.to_string(), description.map(|d| d.to_string()));
 
         let row = sqlx::query_as::<_, Organization>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {tbl} (id, name, description, attrs)
             VALUES ($1, $2, $3, $4)
             RETURNING *
         ",
                 tbl = ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(&org.id)
         .bind(&org.name)
@@ -55,7 +54,7 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, Organization>(
-            format!("SELECT * FROM {tbl} WHERE id = $1", tbl = ORGANIZATION).as_str(),
+            sqlx::AssertSqlSafe(format!("SELECT * FROM {tbl} WHERE id = $1", tbl = ORGANIZATION)),
         )
         .bind(id)
         .fetch_optional(ex)
@@ -69,11 +68,10 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, Organization>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT * FROM {tbl} ORDER BY id DESC LIMIT $1 OFFSET $2",
                 tbl = ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(limit)
         .bind(offset)
@@ -88,7 +86,7 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) =
-            sqlx::query_as(format!("SELECT COUNT(*) FROM {tbl}", tbl = ORGANIZATION).as_str())
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {tbl}", tbl = ORGANIZATION)))
                 .fetch_one(ex)
                 .await?;
 
@@ -107,7 +105,7 @@ impl OrganizationRepository {
     {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query_as::<_, Organization>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {tbl}
             WHERE name {like} $1 OR description {like} $1
@@ -115,8 +113,7 @@ impl OrganizationRepository {
         ",
                 tbl = ORGANIZATION,
                 like = crate::backend::LIKE
-            )
-            .as_str(),
+            )),
         )
         .bind(&pattern)
         .bind(limit)
@@ -133,15 +130,14 @@ impl OrganizationRepository {
     {
         let pattern = format!("%{}%", query);
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT COUNT(*) FROM {tbl}
             WHERE name {like} $1 OR description {like} $1
         ",
                 tbl = ORGANIZATION,
                 like = crate::backend::LIKE
-            )
-            .as_str(),
+            )),
         )
         .bind(&pattern)
         .fetch_one(ex)
@@ -159,14 +155,13 @@ impl OrganizationRepository {
         attrs: Option<&serde_json::Value>,
     ) -> Result<Organization> {
         let row = sqlx::query_as::<_, Organization>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {tbl} SET name = $2, description = $3, attrs = $4 WHERE id = $1
             RETURNING *
         ",
                 tbl = ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .bind(name)
@@ -179,7 +174,7 @@ impl OrganizationRepository {
     }
 
     pub async fn delete(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
-        sqlx::query(format!("DELETE FROM {tbl} WHERE id = $1", tbl = ORGANIZATION).as_str())
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {tbl} WHERE id = $1", tbl = ORGANIZATION)))
             .bind(id)
             .execute(&mut **tx)
             .await?;
@@ -194,11 +189,10 @@ impl OrganizationRepository {
         org_id: &str,
     ) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "INSERT INTO {tbl} (user_id, org_id) VALUES ($1, $2)",
                 tbl = USER_ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .bind(org_id)
@@ -215,11 +209,10 @@ impl OrganizationRepository {
         org_id: &str,
     ) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "DELETE FROM {tbl} WHERE user_id = $1 AND org_id = $2",
                 tbl = USER_ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .bind(org_id)
@@ -234,7 +227,7 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT u.* FROM {users} u
             INNER JOIN {tbl} uo ON u.id = uo.user_id
@@ -243,8 +236,7 @@ impl OrganizationRepository {
         ",
                 users = USER,
                 tbl = USER_ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(org_id)
         .fetch_all(ex)
@@ -264,15 +256,14 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, User>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT u.* FROM {users} u
                 INNER JOIN {tbl} uo ON u.id = uo.user_id
                 WHERE uo.org_id = $1
                 ORDER BY u.id DESC LIMIT $2 OFFSET $3",
                 users = USER,
                 tbl = USER_ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(org_id)
         .bind(limit)
@@ -288,14 +279,13 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*) FROM {users} u
                 INNER JOIN {tbl} uo ON u.id = uo.user_id
                 WHERE uo.org_id = $1",
                 users = USER,
                 tbl = USER_ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(org_id)
         .fetch_one(ex)
@@ -309,7 +299,7 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, Organization>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT o.* FROM {tbl_org} o
             INNER JOIN {tbl_uo} uo ON o.id = uo.org_id
@@ -318,8 +308,7 @@ impl OrganizationRepository {
         ",
                 tbl_org = ORGANIZATION,
                 tbl_uo = USER_ORGANIZATION
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .fetch_all(ex)

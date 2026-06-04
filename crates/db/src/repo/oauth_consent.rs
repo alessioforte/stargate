@@ -18,7 +18,7 @@ impl OAuthConsentRepository {
         consent: OAuthConsent,
     ) -> Result<OAuthConsent> {
         let row = sqlx::query_as::<_, OAuthConsent>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {tbl} (
                 id,
@@ -45,8 +45,7 @@ impl OAuthConsentRepository {
             RETURNING *
         ",
                 tbl = OAUTH_CONSENT
-            )
-            .as_str(),
+            )),
         )
         .bind(&consent.id)
         .bind(&consent.client_id)
@@ -76,7 +75,7 @@ impl OAuthConsentRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, OAuthConsent>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {tbl}
             WHERE user_id = $1
@@ -85,8 +84,7 @@ impl OAuthConsentRepository {
               AND (expires_at IS NULL OR expires_at > $3)
         ",
                 tbl = OAUTH_CONSENT
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .bind(client_id)
@@ -105,15 +103,14 @@ impl OAuthConsentRepository {
     ) -> Result<()> {
         let now = Utc::now();
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {tbl}
             SET revoked_at = $3, updated_at = $3
             WHERE user_id = $1 AND client_id = $2 AND revoked_at IS NULL
         ",
                 tbl = OAUTH_CONSENT
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .bind(client_id)

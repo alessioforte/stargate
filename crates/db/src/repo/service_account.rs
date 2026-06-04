@@ -33,15 +33,14 @@ impl ServiceAccountRepository {
         );
 
         let row = sqlx::query_as::<_, ServiceAccount>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {tbl} (id, name, description, org_id)
             VALUES ($1, $2, $3, $4)
             RETURNING *
         ",
                 tbl = SERVICE_ACCOUNT
-            )
-            .as_str(),
+            )),
         )
         .bind(&sa.id)
         .bind(&sa.name)
@@ -58,7 +57,7 @@ impl ServiceAccountRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, ServiceAccount>(
-            format!("SELECT * FROM {tbl} WHERE id = $1", tbl = SERVICE_ACCOUNT).as_str(),
+            sqlx::AssertSqlSafe(format!("SELECT * FROM {tbl} WHERE id = $1", tbl = SERVICE_ACCOUNT)),
         )
         .bind(id)
         .fetch_optional(ex)
@@ -77,11 +76,10 @@ impl ServiceAccountRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, ServiceAccount>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT * FROM {tbl} ORDER BY id DESC LIMIT $1 OFFSET $2",
                 tbl = SERVICE_ACCOUNT
-            )
-            .as_str(),
+            )),
         )
         .bind(limit)
         .bind(offset)
@@ -96,7 +94,7 @@ impl ServiceAccountRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) =
-            sqlx::query_as(format!("SELECT COUNT(*) FROM {tbl}", tbl = SERVICE_ACCOUNT).as_str())
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {tbl}", tbl = SERVICE_ACCOUNT)))
                 .fetch_one(ex)
                 .await?;
 
@@ -115,7 +113,7 @@ impl ServiceAccountRepository {
     {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query_as::<_, ServiceAccount>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {tbl}
             WHERE name {like} $1 OR description {like} $1
@@ -123,8 +121,7 @@ impl ServiceAccountRepository {
         ",
                 tbl = SERVICE_ACCOUNT,
                 like = crate::backend::LIKE
-            )
-            .as_str(),
+            )),
         )
         .bind(&pattern)
         .bind(limit)
@@ -141,15 +138,14 @@ impl ServiceAccountRepository {
     {
         let pattern = format!("%{}%", query);
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT COUNT(*) FROM {tbl}
             WHERE name {like} $1 OR description {like} $1
         ",
                 tbl = SERVICE_ACCOUNT,
                 like = crate::backend::LIKE
-            )
-            .as_str(),
+            )),
         )
         .bind(&pattern)
         .fetch_one(ex)
@@ -167,14 +163,13 @@ impl ServiceAccountRepository {
         org_id: Option<&str>,
     ) -> Result<ServiceAccount> {
         let row = sqlx::query_as::<_, ServiceAccount>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {tbl} SET name = $2, description = $3, org_id = $4 WHERE id = $1
             RETURNING *
         ",
                 tbl = SERVICE_ACCOUNT
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .bind(name)
@@ -187,7 +182,7 @@ impl ServiceAccountRepository {
     }
 
     pub async fn delete(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
-        sqlx::query(format!("DELETE FROM {tbl} WHERE id = $1", tbl = SERVICE_ACCOUNT).as_str())
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {tbl} WHERE id = $1", tbl = SERVICE_ACCOUNT)))
             .bind(id)
             .execute(&mut **tx)
             .await?;

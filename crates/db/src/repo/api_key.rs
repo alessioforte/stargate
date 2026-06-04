@@ -34,15 +34,14 @@ impl ApiKeyRepository {
             attrs.unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
         );
         let row = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {api_keys} (id, key_hash, label, revoked, attrs)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(&api_key.id)
         .bind(&api_key.key_hash)
@@ -62,11 +61,10 @@ impl ApiKeyRepository {
         user_id: &str,
     ) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "INSERT INTO {tbl} (api_key_id, user_id) VALUES ($1, $2)",
                 tbl = USER_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(api_key_id)
         .bind(user_id)
@@ -83,11 +81,10 @@ impl ApiKeyRepository {
         service_account_id: &str,
     ) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "INSERT INTO {tbl} (api_key_id, service_account_id) VALUES ($1, $2)",
                 tbl = SERVICE_ACCOUNT_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(api_key_id)
         .bind(service_account_id)
@@ -102,7 +99,7 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT ak.* FROM {api_keys} ak
             INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id
@@ -111,8 +108,7 @@ impl ApiKeyRepository {
         ",
                 api_keys = API_KEY,
                 user_api_keys = USER_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(user_id)
         .fetch_all(ex)
@@ -131,14 +127,13 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT ak.* FROM {api_keys} ak
                 INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id
                 ORDER BY ak.id DESC LIMIT $1 OFFSET $2",
                 api_keys = API_KEY,
                 user_api_keys = USER_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(limit)
         .bind(offset)
@@ -153,13 +148,12 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*) FROM {api_keys} ak
                 INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id",
                 api_keys = API_KEY,
                 user_api_keys = USER_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .fetch_one(ex)
         .await?;
@@ -176,7 +170,7 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT ak.* FROM {api_keys} ak
             INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id
@@ -185,8 +179,7 @@ impl ApiKeyRepository {
         ",
                 api_keys = API_KEY,
                 sa_api_keys = SERVICE_ACCOUNT_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(service_account_id)
         .fetch_all(ex)
@@ -205,14 +198,13 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT ak.* FROM {api_keys} ak
                 INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id
                 ORDER BY ak.id DESC LIMIT $1 OFFSET $2",
                 api_keys = API_KEY,
                 sa_api_keys = SERVICE_ACCOUNT_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(limit)
         .bind(offset)
@@ -227,13 +219,12 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*) FROM {api_keys} ak
                 INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id",
                 api_keys = API_KEY,
                 sa_api_keys = SERVICE_ACCOUNT_API_KEY
-            )
-            .as_str(),
+            )),
         )
         .fetch_one(ex)
         .await?;
@@ -246,13 +237,12 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {api_keys} WHERE key_hash = $1
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(key_hash)
         .fetch_optional(ex)
@@ -263,13 +253,12 @@ impl ApiKeyRepository {
 
     pub async fn revoke_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {api_keys} SET revoked = TRUE WHERE id = $1
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .execute(&mut **tx)
@@ -280,13 +269,12 @@ impl ApiKeyRepository {
 
     pub async fn delete_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             DELETE FROM {api_keys} WHERE id = $1
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .execute(&mut **tx)
@@ -300,13 +288,12 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {api_keys} WHERE id = $1
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .fetch_optional(ex)
@@ -320,13 +307,12 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {api_keys} ORDER BY id DESC LIMIT $1 OFFSET $2
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(limit)
         .bind(offset)
@@ -341,13 +327,12 @@ impl ApiKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT COUNT(*) FROM {api_keys}
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .fetch_one(ex)
         .await?;
@@ -357,7 +342,7 @@ impl ApiKeyRepository {
 
     pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, api_key: ApiKey) -> Result<ApiKey> {
         let row = sqlx::query_as::<_, ApiKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {api_keys}
             SET label = $2, attrs = $3
@@ -365,8 +350,7 @@ impl ApiKeyRepository {
             RETURNING *
         ",
                 api_keys = API_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(&api_key.id)
         .bind(&api_key.label)

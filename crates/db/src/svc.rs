@@ -56,7 +56,7 @@ impl Service {
 
         // Execute the entire DDL as a single batch. This correctly handles
         // PL/pgSQL DO $$ ... END $$; blocks that contain semicolons.
-        if let Err(e) = sqlx::raw_sql(&ddl).execute(&self.pool).await {
+        if let Err(e) = sqlx::raw_sql(sqlx::AssertSqlSafe(ddl)).execute(&self.pool).await {
             eprintln!("Failed to execute schema from '{}': {}", file, e);
         }
     }
@@ -97,7 +97,7 @@ pub async fn ensure_database(user: &str, password: &str, host: &str, database: &
         // CREATE DATABASE cannot use bind parameters, but `database` comes
         // from an env var set by the operator, not from user input.
         let stmt = format!("CREATE DATABASE \"{}\"", database);
-        match sqlx::query(&stmt).execute(&pool).await {
+        match sqlx::query(sqlx::AssertSqlSafe(stmt)).execute(&pool).await {
             Ok(_) => eprintln!("Created database '{}'", database),
             Err(e) => eprintln!("Failed to create database '{}': {}", database, e),
         }

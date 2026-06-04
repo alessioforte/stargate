@@ -28,15 +28,14 @@ impl AdminKeyRepository {
     ) -> Result<AdminKey> {
         let admin_key = AdminKey::new(key_hash.to_string(), label, permissions);
         let row = sqlx::query_as::<_, AdminKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             INSERT INTO {admin_keys} (id, key_hash, label, permissions, revoked)
             VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(&admin_key.id)
         .bind(&admin_key.key_hash)
@@ -54,13 +53,12 @@ impl AdminKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, AdminKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {admin_keys} WHERE key_hash = $1
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(key_hash)
         .fetch_optional(ex)
@@ -74,13 +72,12 @@ impl AdminKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, AdminKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {admin_keys} WHERE id = $1
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .fetch_optional(ex)
@@ -94,13 +91,12 @@ impl AdminKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, AdminKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {admin_keys} ORDER BY id DESC LIMIT $1 OFFSET $2
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(limit)
         .bind(offset)
@@ -115,13 +111,12 @@ impl AdminKeyRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let row: (i64,) = sqlx::query_as(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             SELECT COUNT(*) FROM {admin_keys}
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .fetch_one(ex)
         .await?;
@@ -135,7 +130,7 @@ impl AdminKeyRepository {
         admin_key: AdminKey,
     ) -> Result<AdminKey> {
         let row = sqlx::query_as::<_, AdminKey>(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {admin_keys}
             SET label = $2, permissions = $3
@@ -143,8 +138,7 @@ impl AdminKeyRepository {
             RETURNING *
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(&admin_key.id)
         .bind(&admin_key.label)
@@ -157,13 +151,12 @@ impl AdminKeyRepository {
 
     pub async fn revoke_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {admin_keys} SET revoked = TRUE WHERE id = $1
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .execute(&mut **tx)
@@ -174,13 +167,12 @@ impl AdminKeyRepository {
 
     pub async fn delete_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(
-            format!(
+            sqlx::AssertSqlSafe(format!(
                 "
             DELETE FROM {admin_keys} WHERE id = $1
         ",
                 admin_keys = ADMIN_KEY
-            )
-            .as_str(),
+            )),
         )
         .bind(id)
         .execute(&mut **tx)
