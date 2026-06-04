@@ -14,7 +14,7 @@ The gateway is under active development and now uses the explicit `stargate/v2al
 stargate/
 ├── src/               # Main binary
 │   ├── main.rs        # Entry: init logging/DB/services, Axum router, Hyper server (plain or TLS)
-│   ├── act/           # Action handlers (login guard, oauth state, signup, email verify, change password) + shutdown signal
+│   ├── act/           # Stateful app flows (login guard, OTP/MFA, oauth state, signup, email verify, change password) + shutdown signal
 │   ├── api/           # Axum routers + handlers + gateway fallback service
 │   ├── aud/           # Audit service - buffered async event bus
 │   ├── cli/           # Admin CLI (bootstrap super-admin)
@@ -31,6 +31,7 @@ stargate/
 │   ├── lim/           # Rate limiting + quota
 │   ├── idp/           # External identity provider clients (Google, GitHub)
 │   ├── oidc/          # Pure OAuth/OIDC provider helpers (PKCE, codes, refresh, claims, metadata)
+│   ├── otp/           # Pure HOTP/TOTP + email/SMS OTP primitives
 │   ├── pw/            # Password hashing (argon2)
 │   ├── smtp/          # Email delivery (lettre)
 │   ├── store/         # State store (DashMap / Redis)
@@ -250,6 +251,68 @@ Client notes:
 
 Full usage guide: `docs/oauth-oidc-provider-guide.md`.
 
+## OTP, Passwordless Login, and MFA
+
+Stargate includes a pure OTP crate plus account-level email OTP and MFA flows.
+
+Source layout:
+- `crates/otp`: dependency-light OTP primitives. Implements HOTP (RFC 4226), TOTP (RFC 6238), Base32, authenticator-app provisioning URIs, and short-lived message OTP records for email/SMS.
+- `src/act/otp`: stateful OTP/MFA application services. Owns policy evaluation, authenticated-user extraction, OTP challenge persistence, verification, delivery, request throttling, and service-level flows.
+- `src/api/account/otp`: thin Axum bindings and OpenAPI annotations for account OTP/MFA endpoints.
+- `src/etc/env.rs`, `src/etc/input.rs`, `src/etc/time.rs`: small shared helpers used by OTP and available for other modules.
+
+Implemented account OTP endpoints:
+- `POST /account/login/otp/email` - start passwordless email OTP login. Response is generic for unknown users.
+- `PUT /account/login/otp/email` - verify passwordless email OTP and issue a normal session when MFA policy allows passwordless login.
+- `PUT /account/login/mfa/challenges/{challenge_id}` - verify the pending MFA challenge created by password login and issue a normal session.
+- `GET /account/mfa/methods` - list effective MFA policy/methods for the authenticated user.
+- `POST /account/mfa/challenges` - create an authenticated MFA challenge, currently email only.
+- `PUT /account/mfa/challenges/{challenge_id}` - verify an authenticated MFA challenge and store a short-lived step-up marker.
+
+Login behavior:
+- Normal password login still verifies username/password first.
+- If effective MFA policy requires MFA, `POST /account/login` returns `202` with `mfaRequired`, `challengeId`, method, expiry, TTL, and max-attempt metadata instead of issuing tokens.
+- The client then calls `PUT /account/login/mfa/challenges/{challenge_id}` with `{ "code": "123456" }` to receive the normal access/refresh token response.
+- Passwordless email OTP is disabled for users whose effective MFA policy requires MFA, because email OTP alone would otherwise become a single-factor downgrade.
+
+MFA policy:
+- Global mode comes from `MFA_MODE`: `off`, `optional`, or `required`.
+- In `optional`, users opt in with `users.attrs.mfa.enabled = true`. Super-admins also require MFA when `MFA_REQUIRED_FOR_SUPER_ADMIN=true`.
+- User attrs can restrict/prefer methods:
+
+```json
+{
+  "mfa": {
+    "enabled": true,
+    "methods": ["email"],
+    "preferredMethod": "email"
+  }
+}
+```
+
+Admin step-up:
+- `MFA_ADMIN_STEP_UP_REQUIRED=true` makes super-admin user sessions require a valid step-up marker with purpose `admin` before admin grants are added.
+- Admin API keys are not affected by user-session MFA step-up.
+- Step-up flow: `POST /account/mfa/challenges` with `{ "method": "email", "purpose": "admin" }`, then `PUT /account/mfa/challenges/{challenge_id}`.
+- Step-up marker TTL is controlled by `MFA_STEP_UP_TTL_SECS`.
+
+OTP state:
+- Passwordless email challenge: `account:login:otp:email:{challenge_id}`
+- Pending login MFA challenge: `account:mfa:pending-login:{challenge_id}`
+- Authenticated MFA challenge: `account:mfa:challenge:{user_id}:{challenge_id}`
+- Step-up marker: `account:mfa:verified:{sid}:{purpose}`
+- OTP request throttling counters live under `account:otp:request:*`.
+
+Delivery notes:
+- Email OTP uses `smtp::Smtp` with custom subject/body support.
+- Blocking SMTP send calls are isolated with `tokio::task::spawn_blocking`.
+- Passwordless request delivery is backgrounded to reduce account-enumeration timing differences.
+
+Currently implemented methods:
+- Email OTP for passwordless login, login MFA, and authenticated step-up MFA.
+- HOTP/TOTP primitives exist in `crates/otp`, but authenticator-app enrollment/verification APIs are not yet wired into account MFA.
+- SMS OTP primitives exist in `crates/otp`, but SMS delivery/account APIs are not yet wired.
+
 ## Database Schema (ddl/)
 
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `api_keys`, `admin_keys`, `audits`, `service_accounts`, `oauth_clients`, `oauth_consents`, `user_organizations`, `user_api_keys`, `service_account_api_keys`
@@ -285,6 +348,17 @@ IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
 | `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
 | `GATEWAY_REPLAY_BODY_LIMIT` | 2MiB | Max buffered body for mirror/status-failover replay |
 | `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | Request drain timeout during shutdown |
+| `EMAIL_OTP_PEPPER` | - | Server-side HMAC pepper for email/message OTP records |
+| `EMAIL_OTP_LENGTH` | 6 | Email OTP code length |
+| `EMAIL_OTP_TTL_SECS` | 300 | Email OTP challenge TTL |
+| `EMAIL_OTP_MAX_ATTEMPTS` | 5 | Max invalid verification attempts per OTP challenge |
+| `MFA_MODE` | optional | MFA mode: `off`, `optional`, or `required` |
+| `MFA_METHODS` | email | Enabled MFA methods; only `email` is wired today |
+| `MFA_DEFAULT_METHOD` | email | Default MFA method when user attrs do not specify one |
+| `MFA_EMAIL_ENABLED` | true | Enables email MFA challenges |
+| `MFA_REQUIRED_FOR_SUPER_ADMIN` | true | Requires MFA for super-admin users when `MFA_MODE=optional` |
+| `MFA_ADMIN_STEP_UP_REQUIRED` | false | Requires an authenticated `admin` MFA step-up marker for super-admin user-session admin grants |
+| `MFA_STEP_UP_TTL_SECS` | 300 | TTL for authenticated MFA step-up markers |
 
 Full list: `.env.example`
 
@@ -323,6 +397,7 @@ Flags: `--password <val>`, `--password-stdin`, `--generate-password`
 - `GET /docs` - Swagger UI
 - `/.well-known/*` - OAuth/OIDC metadata and JWKS
 - `/account/*` - login, logout, profile, account refresh tokens, credentials
+- `/account/login/otp/email`, `/account/login/mfa/challenges/*`, `/account/mfa/*` - passwordless email OTP and MFA
 - `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`, `/oauth/introspect`, `/oauth/revoke` - OAuth/OIDC provider endpoints
 - `/oauth/state`, `/oauth/github`, `/oauth/google` - Google/GitHub consumer login endpoints
 - `/signup/*` - registration + email verification
@@ -365,3 +440,5 @@ SIGTERM/SIGINT -> drain requests (25s default timeout) -> flush audit buffer -> 
 - TLS server uses a custom hyper-util connection loop with per-connection graceful shutdown and drain deadline.
 - OAuth/OIDC browser consent UI is not implemented; third-party clients without stored consent receive `consent_required`.
 - OAuth/OIDC non-redirect errors still use Stargate's generic error envelope rather than full RFC-shaped error bodies.
+- OTP/MFA API modules are intentionally thin Axum/OpenAPI bindings; workflow changes should usually go in `src/act/otp`.
+- Email OTP is currently the only wired account MFA method. TOTP/HOTP and SMS primitives exist in `crates/otp` for future account integrations.
