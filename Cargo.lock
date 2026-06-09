@@ -2097,6 +2097,7 @@ dependencies = [
  "ahash",
  "async-trait",
  "chrono",
+ "criterion",
  "dashmap",
  "rand 0.10.1",
  "reqwest",

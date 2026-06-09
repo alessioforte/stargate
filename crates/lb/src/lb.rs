@@ -70,13 +70,15 @@ pub trait Strategy: Send + Sync {
 pub struct BaseLoadBalancer<S: Strategy> {
     strategy: S,
     upstreams: Vec<Upstream>,
-    index: HashMap<String, usize>,
+    // ahash keyed by base_url: mark_alive/mark_dead hit this per request once
+    // live proxy results are wired in, so the lookup stays off the critical path.
+    index: HashMap<String, usize, ahash::RandomState>,
     client: Arc<Client>,
 }
 
 impl<S: Strategy + 'static> BaseLoadBalancer<S> {
     pub fn new(strategy: S, upstreams: Vec<Upstream>) -> Arc<Self> {
-        let index = upstreams
+        let index: HashMap<String, usize, ahash::RandomState> = upstreams
             .iter()
             .enumerate()
             .map(|(i, u)| (u.base_url.clone(), i))

@@ -17,16 +17,43 @@ impl Default for Random {
 
 impl Strategy for Random {
     fn select<'a>(&self, upstreams: &'a [Upstream], _ctx: &RequestContext) -> Option<&'a Upstream> {
-        let available_count = upstreams.iter().filter(|u| u.is_available()).count();
-        if available_count == 0 {
+        if upstreams.is_empty() {
             return None;
         }
-        let mut rng = rand::rng();
-        let target = rng.random_range(0..available_count);
-        upstreams.iter().filter(|u| u.is_available()).nth(target)
+        let start = rand::rng().random_range(0..upstreams.len());
+        super::first_available(upstreams, start)
     }
 
     fn name(&self) -> &'static str {
         "random"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::strategies::testutil::{ctx, down, up};
+
+    #[test]
+    fn empty_returns_none() {
+        let s = Random::new();
+        assert!(s.select(&[], &ctx("1.1.1.1")).is_none());
+    }
+
+    #[test]
+    fn all_down_returns_none() {
+        let s = Random::new();
+        let ups = [down("a"), down("b")];
+        assert!(s.select(&ups, &ctx("1.1.1.1")).is_none());
+    }
+
+    #[test]
+    fn only_returns_available() {
+        let s = Random::new();
+        let ups = [down("a"), up("b"), down("c")];
+        let c = ctx("1.1.1.1");
+        for _ in 0..100 {
+            assert_eq!(s.select(&ups, &c).unwrap().base_url, "b");
+        }
     }
 }

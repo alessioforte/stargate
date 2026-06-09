@@ -221,6 +221,40 @@ http:
       upstream: api-v1
 ```
 
+### Upstream Health
+
+Each upstream target is fronted by a circuit breaker. Two independent signals
+drive it:
+
+- **Active liveness probe** — periodic request to `liveness_probe.path`.
+- **Passive feedback** — outcomes of live proxied traffic. Transport errors and
+  `502`/`503`/`504` responses count as failures; any other received response
+  counts as a success. Mirror (shadow) traffic never affects the breaker.
+
+After `circuit_breaker.fail_threshold` consecutive failures the target is
+removed from selection for `circuit_breaker.cooldown`, then a single probe
+request is admitted to test recovery before traffic is restored.
+
+```yaml
+http:
+  upstreams:
+    api-v1:
+      targets:
+        - url: http://api-v1-a:8080
+        - url: http://api-v1-b:8080
+      load_balancer:
+        strategy: round_robin
+        liveness_probe:
+          path: /health
+          interval: 5s          # default 5s
+        circuit_breaker:
+          fail_threshold: 3      # default 3 consecutive failures
+          cooldown: 30s          # default 30s before a recovery probe
+```
+
+Both `liveness_probe` and `circuit_breaker` are optional; omitting
+`circuit_breaker` uses the defaults shown above.
+
 Weighted traffic split:
 
 ```yaml
