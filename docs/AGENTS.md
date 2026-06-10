@@ -153,7 +153,7 @@ Implemented:
 - Replay body cap via `GATEWAY_REPLAY_BODY_LIMIT` (default `2MiB`).
 
 Partially implemented:
-- Circuit breaker core exists in `crates/lb`, and load-balancing strategies skip unavailable upstreams. Live gateway proxy failures/statuses are not yet fully wired into breaker state, and breaker thresholds/cooldowns are not config-exposed.
+- Circuit breaker is wired to both active liveness probes and live proxy traffic: transport errors and `502`/`503`/`504` responses trip it, mirror traffic does not. Per-upstream `fail_threshold`/`cooldown` are config-exposed via `load_balancer.circuit_breaker`. Breaker state is per-process (not shared across cluster nodes), and tripping on arbitrary response statuses is not configurable.
 - HTTP/2 client support is enabled in the shared hyper client, but per-upstream protocol policy is not fully enforced.
 - Upstream `transport.connect_timeout` exists. Read/idle/request timeout config is not complete.
 

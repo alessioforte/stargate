@@ -106,7 +106,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 "No healthy upstream available".to_string(),
             ))
         })?;
-        execute_selected_with_request(selected, req, &state).await?
+        execute_selected_with_request(selected, req, &state, balancers.as_ref()).await?
     } else if plan.requires_replay() {
         let limit = replay_body_limit();
         if !plan.needs_status_failover_replay() && content_length_exceeds(req.headers(), limit) {
@@ -119,11 +119,11 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                     "No healthy upstream available".to_string(),
                 ))
             })?;
-            execute_selected_with_request(selected, req, &state).await?
+            execute_selected_with_request(selected, req, &state, balancers.as_ref()).await?
         } else {
             let replay = buffer_request(req, limit).await?;
             spawn_mirrors(plan.mirrors.clone(), replay.clone(), state.clone());
-            execute_plan_from_replay(&plan, &replay, &state).await?
+            execute_plan_from_replay(&plan, &replay, &state, Some(balancers.as_ref())).await?
         }
     } else {
         let selected = plan.attempts.first().ok_or_else(|| {
@@ -131,7 +131,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 "No healthy upstream available".to_string(),
             ))
         })?;
-        execute_selected_with_request(selected, req, &state).await?
+        execute_selected_with_request(selected, req, &state, balancers.as_ref()).await?
     };
 
     apply_response_header_mutations(response.headers_mut(), &state.response_headers);
