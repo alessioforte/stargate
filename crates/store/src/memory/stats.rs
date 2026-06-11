@@ -31,45 +31,39 @@ pub struct OperationStats {
     pub expired_entries_cleaned: u64,
 }
 
-#[derive(Debug)]
-pub struct AtomicOperationStats {
-    pub gets: AtomicU64,
-    pub sets: AtomicU64,
-    pub deletes: AtomicU64,
-    pub exists_checks: AtomicU64,
-    pub hash_gets: AtomicU64,
-    pub hash_sets: AtomicU64,
-    pub hash_deletes: AtomicU64,
-    pub hash_exists_checks: AtomicU64,
-    pub hash_getalls: AtomicU64,
-    pub hash_keys_calls: AtomicU64,
-    pub hash_vals_calls: AtomicU64,
-    pub hash_len_calls: AtomicU64,
-    pub cache_hits: AtomicU64,
-    pub cache_misses: AtomicU64,
-    pub expired_entries_cleaned: AtomicU64,
+/// An `AtomicU64` aligned to its own cache line to avoid false sharing
+/// between hot counters incremented concurrently from many threads.
+///
+/// Derefs to [`AtomicU64`], so call sites use the atomic API directly.
+#[derive(Debug, Default)]
+#[repr(align(64))]
+pub struct PaddedAtomicU64(AtomicU64);
+
+impl std::ops::Deref for PaddedAtomicU64 {
+    type Target = AtomicU64;
+
+    fn deref(&self) -> &AtomicU64 {
+        &self.0
+    }
 }
 
-impl Default for AtomicOperationStats {
-    fn default() -> Self {
-        Self {
-            gets: AtomicU64::new(0),
-            sets: AtomicU64::new(0),
-            deletes: AtomicU64::new(0),
-            exists_checks: AtomicU64::new(0),
-            hash_gets: AtomicU64::new(0),
-            hash_sets: AtomicU64::new(0),
-            hash_deletes: AtomicU64::new(0),
-            hash_exists_checks: AtomicU64::new(0),
-            hash_getalls: AtomicU64::new(0),
-            hash_keys_calls: AtomicU64::new(0),
-            hash_vals_calls: AtomicU64::new(0),
-            hash_len_calls: AtomicU64::new(0),
-            cache_hits: AtomicU64::new(0),
-            cache_misses: AtomicU64::new(0),
-            expired_entries_cleaned: AtomicU64::new(0),
-        }
-    }
+#[derive(Debug, Default)]
+pub struct AtomicOperationStats {
+    pub gets: PaddedAtomicU64,
+    pub sets: PaddedAtomicU64,
+    pub deletes: PaddedAtomicU64,
+    pub exists_checks: PaddedAtomicU64,
+    pub hash_gets: PaddedAtomicU64,
+    pub hash_sets: PaddedAtomicU64,
+    pub hash_deletes: PaddedAtomicU64,
+    pub hash_exists_checks: PaddedAtomicU64,
+    pub hash_getalls: PaddedAtomicU64,
+    pub hash_keys_calls: PaddedAtomicU64,
+    pub hash_vals_calls: PaddedAtomicU64,
+    pub hash_len_calls: PaddedAtomicU64,
+    pub cache_hits: PaddedAtomicU64,
+    pub cache_misses: PaddedAtomicU64,
+    pub expired_entries_cleaned: PaddedAtomicU64,
 }
 
 impl AtomicOperationStats {

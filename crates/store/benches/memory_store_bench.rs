@@ -156,8 +156,7 @@ fn bench_batch_ops(c: &mut Criterion) {
 
     group.bench_function("batch_set_128", |b| {
         b.to_async(&rt).iter(|| async {
-            let out = store.batch_set(&operations).await.unwrap();
-            criterion::black_box(out);
+            store.batch_set(&operations).await.unwrap();
         });
     });
 

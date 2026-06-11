@@ -89,9 +89,9 @@ pub trait Store: Send + Sync {
     async fn hvals<T: DeserializeValue>(&self, key: &str) -> StoreResult<Vec<T>>;
     async fn hlen(&self, key: &str) -> StoreResult<usize>;
 
-    // Optimistic concurrency
-    async fn compare_and_swap<T>(&self, key: &str, expected: &T, new: &T, ttl: Option<u64>) -> StoreResult<bool>
-    where T: SerializeValue + DeserializeValue + PartialEq;
+    // Optimistic concurrency — compares the *serialized* representation of
+    // `expected`, so types must serialize deterministically (avoid HashMap fields)
+    async fn compare_and_swap<T: SerializeValue>(&self, key: &str, expected: &T, new: &T, ttl: Option<u64>) -> StoreResult<bool>;
 }
 ```
 
@@ -114,7 +114,7 @@ pub trait AtomicStore: Sized {
 
 ## MemoryStore
 
-Lock-free in-process store backed by `DashMap`. Designed for the **edge** deployment profile where a single binary handles all state.
+In-process store backed by `DashMap` (sharded `RwLock`s, no global lock). Designed for the **edge** deployment profile where a single binary handles all state.
 
 ### Construction
 
@@ -152,16 +152,23 @@ TTL is stored as an absolute `DateTime<Utc>` alongside each value (and per hash 
 store.run_cleaner(60); // base interval in seconds
 ```
 
-### MemoryStore-only operations
+### Extra operations (not part of the `Store` trait)
 
-These are not part of the `Store` trait — call them directly on `MemoryStore`:
+Call these directly on `MemoryStore`. `RedisStore` provides the same four
+batch operations (single MGET / pipelined round trips) with identical
+semantics; `measure_and_set*` and the cleanup/observability helpers are
+memory-only.
 
 ```rust
-// Batch operations (amortise DashMap overhead)
-store.batch_get::<T>(&["key1", "key2"]).await?;
-store.batch_set(&[("key1", &val, Some(300))]).await?;
-store.batch_delete(&["key1", "key2"]).await?;
-store.batch_exists(&["key1", "key2"]).await?;
+// Batch operations (amortise DashMap overhead / Redis round trips).
+// Each fails fast on the first invalid key or unreadable value.
+store.batch_get::<T>(&["key1", "key2"]).await?;   // Vec<Option<T>>
+store.batch_set(&[("key1", &val, Some(300))]).await?; // ()
+store.batch_delete(&["key1", "key2"]).await?;     // Vec<bool>
+store.batch_exists(&["key1", "key2"]).await?;     // Vec<bool>
+
+// Restore a snapshot into an already-initialized store (replaces contents, resets stats)
+store.absorb(&restored_store);
 
 // Atomic read-modify-write on a serializable value
 // measure_fn receives current value (or default), returns (result_bool, new_value)
@@ -193,7 +200,7 @@ store.reset_stats();
 
 ### Persistence
 
-`MemoryStore` can snapshot to disk and restore on startup. All writes use an atomic temp-file + rename pattern.
+`MemoryStore` can snapshot to disk and restore on startup. All writes use an atomic temp-file + rename pattern with fsync; snapshot files are created owner-only (0600) and created directories owner-only (0700) on Unix. Timestamped backups are pruned automatically — only the 5 most recent per file are kept. Values that cannot be represented in the snapshot format are skipped and logged at WARN level instead of being silently corrupted.
 
 ```rust
 // Binary (MessagePack) — compact, preserves all metadata
@@ -224,20 +231,25 @@ let bk   = MemoryStore::backup_file("data/store.bin").await?; // Option<backup_p
 
 Redis-backed implementation using a lock-free round-robin connection pool. Each slot is a `redis::aio::ConnectionManager` with its own TCP socket, enabling true parallel I/O.
 
+Requires Redis >= 7.4 when `hset` is used with a TTL (per-field expiry via `HEXPIRE`); all other operations work on older versions.
+
 ### Construction
 
 ```rust
 use store::{RedisStore, RedisPoolConfig};
 
-// Default pool: 4 connections, no compression
+// Default pool: 4 connections, no compression,
+// 5s response timeout, 5s connection timeout
 let store = RedisStore::new("redis://localhost:6379").await?;
 
-// Custom pool size
-let store = RedisStore::with_config(
-    "redis://localhost:6379",
-    RedisPoolConfig::new(8),
-).await?;
+// Custom pool size and timeouts
+let config = RedisPoolConfig::new(8)
+    .with_response_timeout(Some(std::time::Duration::from_secs(2)))
+    .with_connection_timeout(Some(std::time::Duration::from_secs(2)));
+let store = RedisStore::with_config("redis://localhost:6379", config).await?;
 ```
+
+Timed-out commands fail with `StoreError::Timeout` instead of hanging callers when the server is unresponsive.
 
 ### Compression (optional, `compression` feature)
 
@@ -249,7 +261,7 @@ let store = RedisStore::new("redis://localhost:6379")
     .with_compression(CompressionConfig::new(Compression::Lz4).with_min_size(512));
 ```
 
-Values below `min_size` bytes are stored uncompressed even with LZ4 enabled. A one-byte prefix (`0x00` / `0x01`) distinguishes compressed from uncompressed payloads — both readers and writers must use the same compression config for a given key namespace.
+Values below `min_size` bytes are stored uncompressed even with LZ4 enabled. A one-byte prefix (`0x00` / `0x01`) distinguishes compressed from uncompressed payloads — both readers and writers must use the same compression config for a given key namespace. Values with an unknown prefix fail loudly with `DeserializationFailed` (no silent legacy fallback): data written without compression must be migrated before enabling it.
 
 ### Lua scripts
 
@@ -261,8 +273,9 @@ Atomic operations that Redis does not provide natively are implemented as Lua sc
 | `CAS_I64_SCRIPT`| GET → compare integer → SET (with optional EX)      |
 | `INCR_SCRIPT`  | INCRBY + optional EXPIRE (used when TTL is supplied) |
 | `DECR_SCRIPT`  | DECRBY + optional EXPIRE (used when TTL is supplied) |
+| `HSET_WITH_TTL_SCRIPT` | HSET + HEXPIRE (used when `hset` TTL is supplied; Redis >= 7.4) |
 
-`incr_i64` / `decr_i64` use native `INCRBY` / `DECRBY` when no TTL is needed (avoids Lua overhead).
+`incr_i64` / `decr_i64` use native `INCRBY` / `DECRBY` when no TTL is needed (avoids Lua overhead). `hset` without TTL uses plain `HSET`. In both backends `hset` returns `true` only when the field was newly created.
 
 ### Raw connection access
 
@@ -281,13 +294,11 @@ pub enum StoreError {
     SerializationFailed(String),
     DeserializationFailed(String),
     RedisFailed(String),        // Redis-specific failures
-    NotFound(String),
     InvalidInput(String),       // Empty key, zero TTL, …
     BackendUnavailable(String),
-    Timeout(String),
+    Timeout(String),            // Response/connection timeout
     IoError(String),
     TypeMismatch(String),       // Wrong value type for the key
-    Unknown(String),
 }
 ```
 

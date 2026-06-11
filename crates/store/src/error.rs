@@ -20,9 +20,6 @@ pub enum StoreError {
     /// Redis-specific operation failed
     RedisFailed(String),
 
-    /// Key or field not found
-    NotFound(String),
-
     /// Invalid input provided (e.g., empty key, invalid TTL)
     InvalidInput(String),
 
@@ -35,9 +32,6 @@ pub enum StoreError {
     /// Generic I/O error occurred
     IoError(String),
 
-    /// Unknown error occurred
-    Unknown(String),
-
     /// Type mismatch error
     TypeMismatch(String),
 }
@@ -49,12 +43,10 @@ impl fmt::Display for StoreError {
             StoreError::SerializationFailed(msg) => write!(f, "Serialization failed: {}", msg),
             StoreError::DeserializationFailed(msg) => write!(f, "Deserialization failed: {}", msg),
             StoreError::RedisFailed(msg) => write!(f, "Redis operation failed: {}", msg),
-            StoreError::NotFound(resource) => write!(f, "Not found: {}", resource),
             StoreError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
             StoreError::BackendUnavailable(msg) => write!(f, "Backend unavailable: {}", msg),
             StoreError::Timeout(msg) => write!(f, "Operation timed out: {}", msg),
             StoreError::IoError(msg) => write!(f, "I/O error: {}", msg),
-            StoreError::Unknown(msg) => write!(f, "Unknown error: {}", msg),
             StoreError::TypeMismatch(msg) => write!(f, "Type mismatch error: {}", msg),
         }
     }
@@ -65,6 +57,9 @@ impl std::error::Error for StoreError {}
 #[cfg(feature = "redis")]
 impl From<redis::RedisError> for StoreError {
     fn from(error: redis::RedisError) -> Self {
+        if error.is_timeout() {
+            return StoreError::Timeout(format!("Redis operation timed out: {}", error));
+        }
         match error.kind() {
             redis::ErrorKind::InvalidClientConfig => {
                 StoreError::ConnectionFailed(format!("Invalid Redis configuration: {}", error))
@@ -135,8 +130,8 @@ mod tests {
         let error = StoreError::ConnectionFailed("test connection".to_string());
         assert_eq!(error.to_string(), "Connection failed: test connection");
 
-        let error = StoreError::NotFound("key123".to_string());
-        assert_eq!(error.to_string(), "Not found: key123");
+        let error = StoreError::Timeout("op".to_string());
+        assert_eq!(error.to_string(), "Operation timed out: op");
     }
 
     #[cfg(feature = "redis")]

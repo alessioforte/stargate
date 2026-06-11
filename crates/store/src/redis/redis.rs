@@ -1,12 +1,13 @@
-use super::scripts::{CAS_I64_SCRIPT, CAS_SCRIPT, DECR_SCRIPT, INCR_SCRIPT};
+use super::scripts::{CAS_I64_SCRIPT, CAS_SCRIPT, DECR_SCRIPT, HSET_WITH_TTL_SCRIPT, INCR_SCRIPT};
 use crate::error::{StoreError, StoreResult};
 use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
-use redis::aio::ConnectionManager;
-use redis::{AsyncCommands, HashFieldExpirationOptions, SetExpiry};
+use redis::AsyncCommands;
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 pub use redis::Script as RedisScript;
 
@@ -120,10 +121,15 @@ impl CompressionConfig {
                                 e
                             ))
                         }),
-                    _ => {
-                        // Legacy data written without prefix — treat as uncompressed
-                        Ok(data.to_vec())
-                    }
+                    // No silent legacy fallback: MessagePack payloads can
+                    // legitimately start with any byte (e.g. 0x00/0x01 for the
+                    // integers 0/1), so guessing would corrupt reads. Data
+                    // written without compression enabled must be migrated or
+                    // read with a matching configuration.
+                    prefix => Err(StoreError::DeserializationFailed(format!(
+                        "Unknown compression prefix 0x{:02x}; value was likely written with a different compression configuration",
+                        prefix
+                    ))),
                 }
             }
         }
@@ -149,22 +155,55 @@ pub struct RedisPoolConfig {
     ///
     /// Defaults to `4`.
     pub pool_size: usize,
+
+    /// Maximum time to wait for a command response before failing the
+    /// operation. `None` disables the timeout (a hung Redis server will hang
+    /// callers indefinitely — not recommended).
+    ///
+    /// Defaults to 5 seconds.
+    pub response_timeout: Option<Duration>,
+
+    /// Maximum time to wait when (re)establishing a TCP connection to the
+    /// Redis server. `None` disables the timeout.
+    ///
+    /// Defaults to 5 seconds.
+    pub connection_timeout: Option<Duration>,
 }
 
 impl Default for RedisPoolConfig {
     fn default() -> Self {
-        Self { pool_size: 4 }
+        Self {
+            pool_size: 4,
+            response_timeout: Some(Duration::from_secs(5)),
+            connection_timeout: Some(Duration::from_secs(5)),
+        }
     }
 }
 
 impl RedisPoolConfig {
-    /// Create a new pool configuration with the given pool size.
+    /// Create a new pool configuration with the given pool size and default
+    /// timeouts (5s response, 5s connection).
     ///
     /// # Panics
     ///
     /// Will not panic here, but a pool size of 0 will be rejected at pool creation time.
     pub fn new(pool_size: usize) -> Self {
-        Self { pool_size }
+        Self {
+            pool_size,
+            ..Default::default()
+        }
+    }
+
+    /// Set the per-command response timeout (`None` disables it).
+    pub fn with_response_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.response_timeout = timeout;
+        self
+    }
+
+    /// Set the connection-establishment timeout (`None` disables it).
+    pub fn with_connection_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.connection_timeout = timeout;
+        self
     }
 }
 
@@ -190,24 +229,31 @@ struct RedisPool {
 }
 
 impl RedisPool {
-    /// Create a new pool with `pool_size` connections to the given Redis client.
-    async fn new(client: &redis::Client, pool_size: usize) -> StoreResult<Self> {
+    /// Create a new pool with `config.pool_size` connections to the given Redis client.
+    async fn new(client: &redis::Client, config: &RedisPoolConfig) -> StoreResult<Self> {
+        let pool_size = config.pool_size;
         if pool_size == 0 {
             return Err(StoreError::InvalidInput(
                 "Pool size must be at least 1".to_string(),
             ));
         }
 
+        let manager_config = ConnectionManagerConfig::new()
+            .set_response_timeout(config.response_timeout)
+            .set_connection_timeout(config.connection_timeout);
+
         let mut connections = Vec::with_capacity(pool_size);
         for i in 0..pool_size {
-            let conn = ConnectionManager::new(client.clone()).await.map_err(|e| {
-                StoreError::ConnectionFailed(format!(
-                    "Failed to create Redis connection {} of {}: {}",
-                    i + 1,
-                    pool_size,
-                    e
-                ))
-            })?;
+            let conn = ConnectionManager::new_with_config(client.clone(), manager_config.clone())
+                .await
+                .map_err(|e| {
+                    StoreError::ConnectionFailed(format!(
+                        "Failed to create Redis connection {} of {}: {}",
+                        i + 1,
+                        pool_size,
+                        e
+                    ))
+                })?;
             connections.push(conn);
         }
 
@@ -296,7 +342,7 @@ impl RedisStore {
             StoreError::ConnectionFailed(format!("Failed to create Redis client: {}", e))
         })?;
 
-        let pool = RedisPool::new(&client, config.pool_size).await?;
+        let pool = RedisPool::new(&client, &config).await?;
 
         tracing::info!(
             "Redis store created with pool of {} connection(s) for {}",
@@ -422,10 +468,8 @@ impl Store for RedisStore {
     ) -> StoreResult<()> {
         self.validate_key(key)?;
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let mut con = self.pool.get();
@@ -482,34 +526,43 @@ impl Store for RedisStore {
         self.validate_key(key)?;
         self.validate_field(field)?;
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let mut con = self.pool.get();
 
         let serialized_value = self.serialize(value)?;
 
-        let hash_field_expiration_options = if let Some(ttl) = ttl {
-            HashFieldExpirationOptions::default().set_expiration(SetExpiry::EX(ttl))
+        // Fast path: plain HSET when no TTL is needed. Works on any Redis
+        // version and clears any existing field TTL, matching MemoryStore.
+        let added: i32 = if let Some(ttl) = ttl {
+            // HSET + HEXPIRE atomically via Lua (HEXPIRE requires Redis >= 7.4).
+            HSET_WITH_TTL_SCRIPT
+                .key(key)
+                .arg(field)
+                .arg(serialized_value)
+                .arg(ttl)
+                .invoke_async(&mut con)
+                .await
+                .map_err(|e| {
+                    StoreError::RedisFailed(format!(
+                        "Failed to set hash field '{}' in key '{}' with TTL {}: {}",
+                        field, key, ttl, e
+                    ))
+                })?
         } else {
-            HashFieldExpirationOptions::default()
-        };
-
-        let fields_values = vec![(field, &serialized_value)];
-        let result: i32 = con
-            .hset_ex(key, &hash_field_expiration_options, &fields_values)
-            .await
-            .map_err(|e| {
+            con.hset(key, field, serialized_value).await.map_err(|e| {
                 StoreError::RedisFailed(format!(
                     "Failed to set hash field '{}' in key '{}': {}",
                     field, key, e
                 ))
-            })?;
+            })?
+        };
 
-        Ok(result == 1)
+        // HSET returns 1 when the field was newly created, 0 on overwrite —
+        // same contract as MemoryStore::hset.
+        Ok(added == 1)
     }
 
     async fn hget<T: DeserializeValue>(&self, key: &str, field: &str) -> StoreResult<Option<T>> {
@@ -647,7 +700,7 @@ impl Store for RedisStore {
         Ok(len)
     }
 
-    async fn compare_and_swap<T: SerializeValue + DeserializeValue + PartialEq>(
+    async fn compare_and_swap<T: SerializeValue>(
         &self,
         key: &str,
         expected: &T,
@@ -656,10 +709,8 @@ impl Store for RedisStore {
     ) -> StoreResult<bool> {
         self.validate_key(key)?;
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let mut con = self.pool.get();
@@ -688,6 +739,129 @@ impl Store for RedisStore {
 }
 
 // =============================================================================
+// Batch operations
+// =============================================================================
+
+impl RedisStore {
+    /// Batch get in a single MGET round trip - RedisStore specific.
+    ///
+    /// Fails on the first invalid key or unreadable value.
+    pub async fn batch_get<T: DeserializeValue>(
+        &self,
+        keys: &[&str],
+    ) -> StoreResult<Vec<Option<T>>> {
+        for key in keys {
+            self.validate_key(key)?;
+        }
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut con = self.pool.get();
+
+        let values: Vec<Option<Vec<u8>>> = con
+            .mget(keys)
+            .await
+            .map_err(|e| StoreError::RedisFailed(format!("Failed to mget keys: {}", e)))?;
+
+        let mut results = Vec::with_capacity(values.len());
+        for (key, value) in keys.iter().zip(values) {
+            match value {
+                Some(v) => {
+                    let deserialized = self.deserialize(&v).map_err(|e| {
+                        StoreError::DeserializationFailed(format!(
+                            "Failed to deserialize key '{}': {}",
+                            key, e
+                        ))
+                    })?;
+                    results.push(Some(deserialized));
+                }
+                None => results.push(None),
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Batch set in a single pipelined round trip - RedisStore specific.
+    ///
+    /// Fails on the first invalid key, zero TTL, or unserializable value.
+    pub async fn batch_set<T: SerializeValue>(
+        &self,
+        operations: &[(&str, &T, Option<u64>)],
+    ) -> StoreResult<()> {
+        let mut pipe = redis::pipe();
+        for &(key, value, ttl) in operations {
+            self.validate_key(key)?;
+            if ttl == Some(0) {
+                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+            }
+            let serialized = self.serialize(value)?;
+            match ttl {
+                Some(ttl) => pipe.set_ex(key, serialized, ttl).ignore(),
+                None => pipe.set(key, serialized).ignore(),
+            };
+        }
+        if operations.is_empty() {
+            return Ok(());
+        }
+
+        let mut con = self.pool.get();
+        pipe.query_async::<()>(&mut con)
+            .await
+            .map_err(|e| StoreError::RedisFailed(format!("Failed to set keys: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Batch delete in a single pipelined round trip - RedisStore specific.
+    /// Returns whether each key existed.
+    pub async fn batch_delete(&self, keys: &[&str]) -> StoreResult<Vec<bool>> {
+        for key in keys {
+            self.validate_key(key)?;
+        }
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut pipe = redis::pipe();
+        for key in keys {
+            pipe.del(*key);
+        }
+
+        let mut con = self.pool.get();
+        let deleted: Vec<i32> = pipe
+            .query_async(&mut con)
+            .await
+            .map_err(|e| StoreError::RedisFailed(format!("Failed to delete keys: {}", e)))?;
+
+        Ok(deleted.into_iter().map(|n| n > 0).collect())
+    }
+
+    /// Batch exists in a single pipelined round trip - RedisStore specific.
+    pub async fn batch_exists(&self, keys: &[&str]) -> StoreResult<Vec<bool>> {
+        for key in keys {
+            self.validate_key(key)?;
+        }
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut pipe = redis::pipe();
+        for key in keys {
+            pipe.exists(*key);
+        }
+
+        let mut con = self.pool.get();
+        let exists: Vec<bool> = pipe.query_async(&mut con).await.map_err(|e| {
+            StoreError::RedisFailed(format!("Failed to check existence of keys: {}", e))
+        })?;
+
+        Ok(exists)
+    }
+}
+
+// =============================================================================
 // AtomicStore trait implementation
 // =============================================================================
 
@@ -709,10 +883,8 @@ impl AtomicStore for RedisStore {
     async fn set_i64(&self, key: &str, value: i64, ttl: Option<u64>) -> StoreResult<()> {
         self.validate_key(key)?;
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let mut con = self.pool.get();
@@ -736,10 +908,8 @@ impl AtomicStore for RedisStore {
     async fn incr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
         self.validate_key(key)?;
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let mut con = self.pool.get();
@@ -777,10 +947,8 @@ impl AtomicStore for RedisStore {
     async fn decr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
         self.validate_key(key)?;
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let mut con = self.pool.get();
@@ -824,10 +992,8 @@ impl AtomicStore for RedisStore {
     ) -> StoreResult<bool> {
         self.validate_key(key)?;
 
-        if let Some(ttl_val) = ttl {
-            if ttl_val == 0 {
-                return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-            }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
         let mut con = self.pool.get();

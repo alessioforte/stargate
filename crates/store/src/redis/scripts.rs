@@ -42,6 +42,21 @@ pub static DECR_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
     )
 });
 
+/// HSET + per-field HEXPIRE in one atomic step.
+///
+/// Returns the HSET result (1 = field was newly created, 0 = overwritten),
+/// matching the `Store::hset` contract. HEXPIRE requires Redis >= 7.4; the
+/// no-TTL path uses plain HSET and never reaches this script.
+pub static HSET_WITH_TTL_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
+    redis::Script::new(
+        r#"
+        local added = redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+        redis.call("HEXPIRE", KEYS[1], tonumber(ARGV[3]), "FIELDS", 1, ARGV[1])
+        return added
+        "#,
+    )
+});
+
 pub static CAS_I64_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
     redis::Script::new(
         r#"

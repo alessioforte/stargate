@@ -28,30 +28,60 @@ struct SerializableStoreData {
     stats: OperationStats,
 }
 
+/// How many timestamped backups to keep per snapshot file.
+const BACKUP_RETENTION: usize = 5;
+
 impl MemoryStore {
     /// Helper function to deserialize stored MessagePack bytes into a serde_json::Value
     /// for persistence/export formats.
-    fn parse_stored_value(value: &[u8]) -> serde_json::Value {
-        rmp_serde::from_slice(value).unwrap_or(serde_json::Value::Null)
+    fn parse_stored_value(value: &[u8]) -> StoreResult<serde_json::Value> {
+        rmp_serde::from_slice(value).map_err(|e| {
+            StoreError::SerializationFailed(format!(
+                "Stored value is not representable as JSON: {}",
+                e
+            ))
+        })
     }
 
-    /// Converts the current store data to a serializable format
+    /// Converts the current store data to a serializable format.
+    ///
+    /// Values that cannot be represented as JSON are skipped and logged at
+    /// WARN level (instead of being silently corrupted to null), so the rest
+    /// of the snapshot is still written.
     fn to_serializable(&self) -> SerializableStoreData {
         let mut serializable_data = HashMap::new();
 
         for entry in self.data.iter() {
             let key = entry.key().clone();
             let value = match entry.value() {
-                StoreValue::Simple(val, exp) => {
-                    let json_val = Self::parse_stored_value(val);
-                    SerializableStoreValue::Simple(json_val, *exp)
-                }
+                StoreValue::Simple(val, exp) => match Self::parse_stored_value(val) {
+                    Ok(json_val) => SerializableStoreValue::Simple(json_val, *exp),
+                    Err(error) => {
+                        tracing::warn!(
+                            key = %key,
+                            %error,
+                            "Skipping value not representable in snapshot"
+                        );
+                        continue;
+                    }
+                },
                 StoreValue::Hash(hash_map, exp) => {
                     let mut hash_data = HashMap::new();
                     for hash_entry in hash_map.iter() {
                         let (val, field_exp) = hash_entry.value();
-                        let json_val = Self::parse_stored_value(val);
-                        hash_data.insert(hash_entry.key().clone(), (json_val, *field_exp));
+                        match Self::parse_stored_value(val) {
+                            Ok(json_val) => {
+                                hash_data.insert(hash_entry.key().clone(), (json_val, *field_exp));
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    field = %hash_entry.key(),
+                                    %error,
+                                    "Skipping hash field not representable in snapshot"
+                                );
+                            }
+                        }
                     }
                     SerializableStoreValue::Hash(hash_data, *exp)
                 }
@@ -75,15 +105,33 @@ impl MemoryStore {
 
         for (key, value) in data.data {
             let store_value = match value {
-                SerializableStoreValue::Simple(val, exp) => {
-                    let data = rmp_serde::to_vec(&val).unwrap_or_default().into();
-                    StoreValue::Simple(data, exp)
-                }
+                SerializableStoreValue::Simple(val, exp) => match rmp_serde::to_vec(&val) {
+                    Ok(bytes) => StoreValue::Simple(bytes.into(), exp),
+                    Err(error) => {
+                        tracing::warn!(
+                            key = %key,
+                            %error,
+                            "Skipping snapshot value that failed to re-serialize"
+                        );
+                        continue;
+                    }
+                },
                 SerializableStoreValue::Hash(hash_data, exp) => {
                     let dash_map = DashMap::new();
                     for (field, (val, field_exp)) in hash_data {
-                        let data = rmp_serde::to_vec(&val).unwrap_or_default().into();
-                        dash_map.insert(field, (data, field_exp));
+                        match rmp_serde::to_vec(&val) {
+                            Ok(bytes) => {
+                                dash_map.insert(field, (bytes.into(), field_exp));
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    field = %field,
+                                    %error,
+                                    "Skipping snapshot hash field that failed to re-serialize"
+                                );
+                            }
+                        }
                     }
                     StoreValue::Hash(dash_map, exp)
                 }
@@ -100,7 +148,10 @@ impl MemoryStore {
         store
     }
 
-    /// Ensures the parent directory for a file path exists, creating it if necessary
+    /// Ensures the parent directory for a file path exists, creating it if necessary.
+    ///
+    /// Directories created here are restricted to the owner (0700 on Unix):
+    /// snapshots contain live session/auth state.
     async fn ensure_file_path_exists<P: AsRef<Path>>(path: P) -> StoreResult<()> {
         let path = path.as_ref();
 
@@ -116,12 +167,22 @@ impl MemoryStore {
             fs::create_dir_all(parent).await.map_err(|e| {
                 StoreError::InvalidInput(format!("Failed to create parent directories: {}", e))
             })?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).await;
+            }
         }
 
         Ok(())
     }
 
     /// Performs an atomic write by writing to a temporary file and then renaming it.
+    ///
+    /// The file is created owner-only (0600 on Unix) since snapshots contain
+    /// live session/auth state, and is fsynced before the rename so a crash
+    /// cannot leave a successfully renamed but empty snapshot behind.
     async fn atomic_write<P: AsRef<Path>, B: AsRef<[u8]>>(path: P, content: B) -> StoreResult<()> {
         let path = path.as_ref();
         let temp_path = path.with_extension(format!(
@@ -129,10 +190,34 @@ impl MemoryStore {
             path.extension().and_then(|s| s.to_str()).unwrap_or("bin")
         ));
 
-        // Write to temporary file first
-        fs::write(&temp_path, content.as_ref()).await.map_err(|e| {
+        // Write to temporary file first, owner-readable only.
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+
+        let mut file = options.open(&temp_path).await.map_err(|e| {
+            StoreError::InvalidInput(format!("Failed to create temporary file: {}", e))
+        })?;
+
+        // The mode above only applies on creation; tighten a pre-existing temp
+        // file left over from an interrupted earlier write as well.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = file
+                .set_permissions(std::fs::Permissions::from_mode(0o600))
+                .await;
+        }
+
+        use tokio::io::AsyncWriteExt;
+        file.write_all(content.as_ref()).await.map_err(|e| {
             StoreError::InvalidInput(format!("Failed to write to temporary file: {}", e))
         })?;
+        file.sync_all().await.map_err(|e| {
+            StoreError::InvalidInput(format!("Failed to sync temporary file: {}", e))
+        })?;
+        drop(file);
 
         // Atomically rename temp file to target file
         fs::rename(&temp_path, path).await.map_err(|e| {
@@ -140,6 +225,19 @@ impl MemoryStore {
             let _ = std::fs::remove_file(&temp_path);
             StoreError::InvalidInput(format!("Failed to rename temporary file: {}", e))
         })?;
+
+        // Best-effort directory fsync so the rename itself is durable.
+        #[cfg(unix)]
+        if let Some(parent) = path.parent() {
+            let dir = if parent.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                parent
+            };
+            if let Ok(dir_file) = std::fs::File::open(dir) {
+                let _ = dir_file.sync_all();
+            }
+        }
 
         Ok(())
     }
@@ -163,7 +261,10 @@ impl MemoryStore {
         }
     }
 
-    /// Creates a backup of an existing file before overwriting it
+    /// Creates a backup of an existing file before overwriting it.
+    ///
+    /// Backups contain live session/auth state, so old ones are pruned: only
+    /// the [`BACKUP_RETENTION`] most recent backups for a given file are kept.
     pub async fn backup_file<P: AsRef<Path>>(path: P) -> StoreResult<Option<String>> {
         let path = path.as_ref();
 
@@ -181,7 +282,56 @@ impl MemoryStore {
             .await
             .map_err(|e| StoreError::InvalidInput(format!("Failed to create backup: {}", e)))?;
 
+        Self::prune_old_backups(path, BACKUP_RETENTION).await;
+
         Ok(Some(backup_path.to_string_lossy().to_string()))
+    }
+
+    /// Best-effort removal of old backups for `path`, keeping the `keep` most
+    /// recent ones. Backup file names embed a sortable `%Y%m%d_%H%M%S`
+    /// timestamp, so lexicographic order is chronological order.
+    async fn prune_old_backups(path: &Path, keep: usize) {
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(stem) => stem,
+            None => return,
+        };
+        // Must match the naming scheme used in `backup_file` above.
+        let prefix = format!(
+            "{}.{}.backup.",
+            stem,
+            path.extension().and_then(|s| s.to_str()).unwrap_or("json")
+        );
+
+        let dir = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
+
+        let mut backups = Vec::new();
+        let Ok(mut entries) = fs::read_dir(dir).await else {
+            return;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                backups.push(entry.path());
+            }
+        }
+
+        if backups.len() <= keep {
+            return;
+        }
+
+        backups.sort();
+        let excess = backups.len() - keep;
+        for old_backup in backups.into_iter().take(excess) {
+            if let Err(error) = fs::remove_file(&old_backup).await {
+                tracing::warn!(
+                    path = %old_backup.display(),
+                    %error,
+                    "Failed to prune old store backup"
+                );
+            }
+        }
     }
 
     /// Saves the store data to a compact binary file using MessagePack.
@@ -339,8 +489,18 @@ impl MemoryStore {
                 StoreValue::Simple(val, exp) => {
                     // Only include non-expired simple values
                     if !self.is_expired(exp) {
-                        let json_val = Self::parse_stored_value(val);
-                        export_data.insert(key, json_val);
+                        match Self::parse_stored_value(val) {
+                            Ok(json_val) => {
+                                export_data.insert(key, json_val);
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    %error,
+                                    "Skipping value not representable in JSON export"
+                                );
+                            }
+                        }
                     }
                 }
                 StoreValue::Hash(hash_map, exp) => {
@@ -350,8 +510,19 @@ impl MemoryStore {
                         for hash_entry in hash_map.iter() {
                             let (field_val, field_exp) = hash_entry.value();
                             if !self.is_expired(field_exp) {
-                                let json_val = Self::parse_stored_value(field_val);
-                                hash_export.insert(hash_entry.key().clone(), json_val);
+                                match Self::parse_stored_value(field_val) {
+                                    Ok(json_val) => {
+                                        hash_export.insert(hash_entry.key().clone(), json_val);
+                                    }
+                                    Err(error) => {
+                                        tracing::warn!(
+                                            key = %key,
+                                            field = %hash_entry.key(),
+                                            %error,
+                                            "Skipping hash field not representable in JSON export"
+                                        );
+                                    }
+                                }
                             }
                         }
                         if !hash_export.is_empty() {
@@ -518,6 +689,84 @@ mod tests {
         // JSON objects and arrays should be parsed as strings since they're stored as JSON strings
         assert!(parsed["json_obj"].is_string());
         assert!(parsed["json_array"].is_string());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_permissions_and_backup_retention() -> StoreResult<()> {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "test_retention_{}",
+            chrono::Utc::now().timestamp_micros()
+        ));
+        let file_path = temp_dir.join("store.bin");
+
+        let store = MemoryStore::new();
+        store.set("k", &"v", None).await?;
+        store.save_to_binary(&file_path).await?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let file_mode = std::fs::metadata(&file_path)?.permissions().mode() & 0o777;
+            assert_eq!(file_mode, 0o600, "snapshot must be owner-only");
+            let dir_mode = std::fs::metadata(&temp_dir)?.permissions().mode() & 0o777;
+            assert_eq!(dir_mode, 0o700, "snapshot dir must be owner-only");
+        }
+
+        // Fabricate more old backups than the retention limit allows.
+        for i in 0..8 {
+            let old = temp_dir.join(format!("store.bin.backup.2020010{}_000000", i));
+            tokio::fs::write(&old, b"old").await?;
+        }
+
+        let newest = MemoryStore::backup_file(&file_path).await?.unwrap();
+
+        let mut backup_count = 0;
+        let mut entries = tokio::fs::read_dir(&temp_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("store.bin.backup.")
+            {
+                backup_count += 1;
+            }
+        }
+        assert_eq!(backup_count, BACKUP_RETENTION);
+        // The newest (real) backup must survive pruning.
+        assert!(std::path::Path::new(&newest).exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_skips_unrepresentable_values() -> StoreResult<()> {
+        let temp_dir = std::env::temp_dir();
+        let binary_path = temp_dir.join(format!(
+            "test_snapshot_skip_{}.bin",
+            chrono::Utc::now().timestamp_micros()
+        ));
+
+        let store = MemoryStore::new();
+        // Integer-keyed maps are valid MessagePack but cannot be represented
+        // as serde_json::Value (JSON object keys must be strings).
+        let mut int_keyed: HashMap<u32, String> = HashMap::new();
+        int_keyed.insert(7, "x".to_string());
+        store.set("bad", &int_keyed, None).await?;
+        store.set("good", &"value", None).await?;
+
+        store.save_to_binary(&binary_path).await?;
+        let restored = MemoryStore::load_from_binary(&binary_path).await?;
+
+        // Representable data survives the round trip.
+        let good: Option<String> = restored.get("good").await?;
+        assert_eq!(good, Some("value".to_string()));
+
+        // The unrepresentable value is skipped entirely rather than restored
+        // as a corrupted null.
+        let bad: Option<HashMap<u32, String>> = restored.get("bad").await?;
+        assert_eq!(bad, None);
 
         Ok(())
     }

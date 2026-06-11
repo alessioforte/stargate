@@ -36,6 +36,10 @@ pub trait Store: Send + Sync {
     // Hash operations
 
     /// Set a field in a hash.
+    ///
+    /// Returns `true` when the field was newly created and `false` when an
+    /// existing field was overwritten. Setting a field replaces any previous
+    /// per-field TTL (cleared when `ttl` is `None`).
     async fn hset<T: SerializeValue>(
         &self,
         key: &str,
@@ -65,8 +69,13 @@ pub trait Store: Send + Sync {
     /// Get the length of a hash.
     async fn hlen(&self, key: &str) -> StoreResult<usize>;
 
-    /// Compare and swap value
-    async fn compare_and_swap<T: SerializeValue + DeserializeValue + PartialEq>(
+    /// Compare and swap value.
+    ///
+    /// The comparison is performed on the **serialized representation** of
+    /// `expected`, not via `PartialEq`. Types whose serialization is not
+    /// deterministic (e.g. containing a `HashMap`) may fail to match
+    /// logically equal values.
+    async fn compare_and_swap<T: SerializeValue>(
         &self,
         key: &str,
         expected: &T,
@@ -75,6 +84,14 @@ pub trait Store: Send + Sync {
     ) -> StoreResult<bool>;
 }
 
+/// Atomic integer operations.
+///
+/// Keys used with `AtomicStore` form a separate logical namespace from
+/// [`Store`] keys: integers are stored in a backend-native representation,
+/// not MessagePack. Reading an `AtomicStore` key through [`Store::get`] (or
+/// vice versa) is unsupported — depending on the backend it fails with
+/// `TypeMismatch` or decodes a wrong value. Keep the namespaces disjoint
+/// (e.g. by key prefix).
 #[async_trait]
 pub trait AtomicStore: Sized {
     // Atomic integer operations

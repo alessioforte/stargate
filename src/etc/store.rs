@@ -51,12 +51,10 @@ mod memory {
     /// # What it does
     ///
     /// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`] (`.stargate/memory.bin`).
-    /// 2. Clears the already-initialised global [`STORE`] (which is empty at this point since
-    ///    the `Lazy` constructor does not populate any data).
-    /// 3. Copies every entry from the restored store into the global store via a DashMap
-    ///    iterator. No locking is needed: the store is not yet shared with other tasks.
-    /// 4. Resets operational stats to zero so metrics reflect the current process lifetime,
-    ///    not the previous one.
+    /// 2. Replaces the contents of the already-initialised global [`STORE`] (empty at this
+    ///    point since the `Lazy` constructor does not populate any data) via
+    ///    `MemoryStore::absorb`, which also resets operational stats to zero so metrics
+    ///    reflect the current process lifetime, not the previous one.
     ///
     /// # Failure handling
     ///
@@ -70,13 +68,7 @@ mod memory {
 
         match MemoryStore::load_from_binary(MEMORY_BACKUP_PATH).await {
             Ok(restored_store) => {
-                STORE.data.clear();
-                for entry in restored_store.data.iter() {
-                    STORE
-                        .data
-                        .insert(entry.key().clone(), entry.value().clone());
-                }
-                STORE.reset_stats();
+                STORE.absorb(&restored_store);
                 tracing::info!(
                     path = MEMORY_BACKUP_PATH,
                     keys = STORE.get_total_keys(),
@@ -219,9 +211,9 @@ mod redis {
                     .unwrap_or(4);
 
                 let config = RedisPoolConfig::new(pool_size);
-                #[cfg(feature = "memory-compression")]
+                #[cfg(feature = "redis-compression")]
                 let com = Compression::Lz4;
-                #[cfg(not(feature = "memory-compression"))]
+                #[cfg(not(feature = "redis-compression"))]
                 let com = Compression::None;
                 let com_config = CompressionConfig::new(com);
                 let store = RedisStore::with_config(&url, config)
