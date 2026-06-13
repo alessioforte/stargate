@@ -6,7 +6,7 @@ use anyhow::Result;
 use serde_json::Value as JsonValue;
 
 #[async_trait::async_trait]
-pub trait Transaction {
+pub trait DbStore {
     // ── Users ───────────────────────────────────────────────────────────────
     async fn create_user(
         &self,

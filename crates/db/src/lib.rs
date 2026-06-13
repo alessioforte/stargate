@@ -13,6 +13,11 @@ mod backend;
     all(feature = "sqlite", not(feature = "postgres")),
     all(feature = "postgres", not(feature = "sqlite")),
 ))]
+mod db;
+#[cfg(any(
+    all(feature = "sqlite", not(feature = "postgres")),
+    all(feature = "postgres", not(feature = "sqlite")),
+))]
 pub mod ent;
 #[cfg(any(
     all(feature = "sqlite", not(feature = "postgres")),
@@ -23,14 +28,9 @@ pub mod repo;
     all(feature = "sqlite", not(feature = "postgres")),
     all(feature = "postgres", not(feature = "sqlite")),
 ))]
-pub mod svc;
+pub mod service;
 #[cfg(any(
     all(feature = "sqlite", not(feature = "postgres")),
     all(feature = "postgres", not(feature = "sqlite")),
 ))]
-mod tx;
-#[cfg(any(
-    all(feature = "sqlite", not(feature = "postgres")),
-    all(feature = "postgres", not(feature = "sqlite")),
-))]
-pub use tx::Transaction;
+pub use db::DbStore;

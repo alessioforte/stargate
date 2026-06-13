@@ -4,7 +4,7 @@ pub use svc::*;
 
 #[cfg(feature = "postgres")]
 mod postgres {
-    use db::svc;
+    use db::service;
     use once_cell::sync::OnceCell;
     use tracing::info;
 
@@ -44,11 +44,11 @@ mod postgres {
 
 #[cfg(feature = "sqlite")]
 mod sqlite {
-    use db::svc;
+    use db::service;
     use once_cell::sync::OnceCell;
     use tracing::info;
 
-    static DB: OnceCell<svc::Service> = OnceCell::new();
+    static DB: OnceCell<service::Service> = OnceCell::new();
 
     pub async fn init() -> anyhow::Result<()> {
         if !std::path::Path::new(".stargate/sqlite.db").exists() {
@@ -58,7 +58,7 @@ mod sqlite {
             info!("SQLite database file created successfully");
         }
 
-        let service = svc::init("sqlite://.stargate/sqlite.db").await?;
+        let service = service::init("sqlite://.stargate/sqlite.db").await?;
 
         info!("SQLite service initialized successfully");
         DB.set(service)
@@ -66,7 +66,7 @@ mod sqlite {
         Ok(())
     }
 
-    pub fn service() -> svc::Service {
+    pub fn service() -> service::Service {
         DB.get()
             .expect("DB service not initialized — init() must be called first")
             .clone()

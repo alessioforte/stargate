@@ -2,7 +2,7 @@ use super::service;
 
 use anyhow::Result;
 use db::{
-    Transaction,
+    DbStore,
     ent::{
         AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient, OAuthConsent,
         Organization, Profile, ServiceAccount, SuperAdmin, User,

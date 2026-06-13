@@ -4,6 +4,7 @@ use super::repo::{
     ServiceAccountRepository, SuperAdminRepository, UserRepository,
 };
 use crate::backend::Pool;
+use crate::db::DbStore;
 use crate::ent::{
     ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient,
     OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
@@ -11,7 +12,6 @@ use crate::ent::{
 use crate::repo::{
     ADMIN_KEY, API_KEY, CREDENTIAL, OAUTH_CLIENT, ORGANIZATION, SERVICE_ACCOUNT, SUPER_ADMIN, USER,
 };
-use crate::tx::Transaction;
 use anyhow::Result;
 use serde_json::Value as JsonValue;
 
@@ -194,7 +194,7 @@ pub async fn init(conn: &str) -> Result<Service> {
 }
 
 #[async_trait::async_trait]
-impl Transaction for Service {
+impl DbStore for Service {
     // ── Users ───────────────────────────────────────────────────────────────
 
     async fn create_user(
@@ -978,8 +978,8 @@ impl Transaction for Service {
 #[cfg(all(test, feature = "postgres"))]
 mod tests {
     use super::*;
+    use crate::db::DbStore;
     use crate::ent::{ActionType, AuditContext, CredentialType, Profile};
-    use crate::tx::Transaction;
 
     async fn test_service() -> Service {
         dotenvy::dotenv().ok();
