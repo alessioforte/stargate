@@ -164,18 +164,30 @@ Missing:
 - GraphQL-aware routing and query-complexity limits.
 - SSE-specific proxy handling as a first-class gateway feature.
 
-### Audit Service (`src/aud/mod.rs`)
+### Audit (transactional outbox)
 
-Singleton via `once_cell`. Async channel -> worker task:
-- Buffers events in memory (`AUDIT_BUFFER_SIZE`, default 1024)
-- Flushes every 5s or on threshold
-- Retry with exponential backoff
-- Graceful shutdown drains buffer before exit
+Audit events are inserted into the `audits` table in the **same transaction** as
+the mutation they record: `crates/db` `Service` mutators take an `AuditContext`
+and write the audit row before commit, so it commits iff the mutation does. No
+in-process buffer or event bus; nothing is dropped on crash.
+
+- **Edge**: the insert is terminal — rows persist and are queryable, no relay.
+- **Cluster**: one background relay per process (`src/aud/relay.rs`) ships
+  unpublished rows to Redis Streams:
+  - Claims a batch with `... WHERE published_at IS NULL ORDER BY seq LIMIT n FOR
+    UPDATE SKIP LOCKED` in an open tx (nodes drain concurrently, no double-claim).
+  - `XADD`s the batch to `AUDIT_STREAM` (pipelined, `MAXLEN ~` trim), then sets
+    `published_at` and commits. Publish-before-commit ⇒ **at-least-once**;
+    consumers dedupe on audit `id`. Redis/DB errors roll back and back off.
+
+`Service::record_audit(ctx, action)` writes a one-off audit (e.g. login/logout)
+in its own tx. Postgres `audits` gains `seq` (identity claim cursor) and
+`published_at` + a partial index on unpublished rows; sqlite schema unchanged.
 
 ### Singletons / Runtime State
 
 - Database pool (`DB`)
-- Audit service
+- Audit relay (cluster only)
 - JWT config
 - GeoIP database
 - Gateway runtime config and compiled HTTP graph
@@ -340,7 +352,11 @@ IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
 | `REDIS_URL` | - | Redis (cluster) |
 | `RUST_LOG` | - | Log filter |
 | `LOG_DIR` | - | Log file dir |
-| `AUDIT_BUFFER_SIZE` | 1024 | Audit event buffer |
+| `AUDIT_RELAY_ENABLED` | true | Run the audit outbox relay (cluster) |
+| `AUDIT_RELAY_BATCH` | 256 | Rows claimed per relay batch |
+| `AUDIT_RELAY_INTERVAL_MS` | 1000 | Idle poll interval when caught up |
+| `AUDIT_STREAM` | audit:events | Redis stream for audit events |
+| `AUDIT_STREAM_MAXLEN` | 100000 | Approx stream cap (`MAXLEN ~`; 0 = unbounded) |
 | `TLS_ENABLED` | false | HTTPS |
 | `TRUSTED_PROXIES` | - | IP/CIDR for client IP |
 | `CORS_ORIGINS` | - | Allowed origins |
@@ -426,7 +442,7 @@ HTTP codes currently used include: 400, 401, 403, 404, 409, 413, 429, 500, 502, 
 
 ## Graceful Shutdown
 
-SIGTERM/SIGINT -> drain requests (25s default timeout) -> flush audit buffer -> close DB -> save in-memory state.
+SIGTERM/SIGINT -> drain requests (25s default timeout) -> stop audit relay -> close DB -> save in-memory state.
 
 ## Current Notes
 

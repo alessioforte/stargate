@@ -111,6 +111,11 @@ CREATE TABLE IF NOT EXISTS "admin_keys" (
     "revoked" BOOLEAN NOT NULL DEFAULT FALSE
 );
 
+-- The audits table doubles as the transactional outbox: each row is inserted in
+-- the same SQL transaction as the mutation it records. `seq` is a monotonic claim
+-- cursor for the relay; `published_at` is NULL until a relay node ships the row to
+-- the message broker (Redis Streams) in cluster deployments. Edge deployments never
+-- run a relay, so `published_at` simply stays NULL and is ignored.
 CREATE TABLE IF NOT EXISTS "audits" (
     "id" TEXT PRIMARY KEY,
     "timestamp" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -120,8 +125,36 @@ CREATE TABLE IF NOT EXISTS "audits" (
     "resource" VARCHAR(100) NOT NULL,
     "resource_id" TEXT,
     "request_id" TEXT,
-    "metadata" JSONB NOT NULL DEFAULT '{}'::jsonb
+    "metadata" JSONB NOT NULL DEFAULT '{}'::jsonb,
+    "seq" BIGINT GENERATED ALWAYS AS IDENTITY,
+    "published_at" TIMESTAMPTZ
 );
+
+-- Outbox columns for deployments whose `audits` table predates the outbox model.
+-- Both blocks are guarded on column existence so they run exactly once, at the boot
+-- where the column is first added. In particular the `published_at` backfill MUST NOT
+-- run unconditionally: marking pre-existing history as already-published is correct,
+-- but doing it on every boot would mark relay-pending rows as published and drop them
+-- from the stream. Adding `seq` rewrites the table to assign identity values to
+-- existing rows — a one-time cost proportional to the current audit history size.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'audits' AND column_name = 'seq'
+    ) THEN
+        ALTER TABLE "audits" ADD COLUMN "seq" BIGINT GENERATED ALWAYS AS IDENTITY;
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'audits' AND column_name = 'published_at'
+    ) THEN
+        ALTER TABLE "audits" ADD COLUMN "published_at" TIMESTAMPTZ;
+        UPDATE "audits" SET "published_at" = NOW();
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "user_organizations" (
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
@@ -157,3 +190,8 @@ CREATE INDEX IF NOT EXISTS "idx_user_organizations_org_id" ON "user_organization
 CREATE INDEX IF NOT EXISTS "idx_audits_timestamp" ON "audits" ("timestamp");
 CREATE INDEX IF NOT EXISTS "idx_audits_actor" ON "audits" ("actor_type", "actor_id");
 CREATE INDEX IF NOT EXISTS "idx_audits_resource" ON "audits" ("resource", "resource_id");
+
+-- Outbox claim index: keeps the relay's "next unpublished rows, ordered by seq" scan
+-- cheap. Partial on published_at IS NULL so it only holds the unpublished backlog,
+-- shrinking to near-empty once the relay keeps up.
+CREATE INDEX IF NOT EXISTS "idx_audits_unpublished" ON "audits" ("seq") WHERE "published_at" IS NULL;

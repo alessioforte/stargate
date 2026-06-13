@@ -18,4 +18,6 @@ pub use redis::RedisScript;
 #[cfg(feature = "redis")]
 pub use redis::RedisStore;
 #[cfg(feature = "redis")]
+pub use redis::StreamEntry;
+#[cfg(feature = "redis")]
 pub use redis::{Compression, CompressionConfig};

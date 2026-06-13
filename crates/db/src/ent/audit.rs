@@ -37,6 +37,20 @@ pub struct Audit {
     pub metadata: serde_json::Value,
 }
 
+/// A claimed outbox row: the audit payload plus its monotonic `seq` cursor.
+///
+/// Only the cluster relay reads these (Postgres-backed deployments), so the type
+/// is gated behind the `postgres` feature. `#[sqlx(flatten)]` pulls the audit
+/// columns out of the same row that yields `seq`; the `published_at` column is
+/// present in the result set but unused here, and `FromRow` ignores it.
+#[cfg(feature = "postgres")]
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub struct OutboxAudit {
+    pub seq: i64,
+    #[sqlx(flatten)]
+    pub audit: Audit,
+}
+
 #[derive(Debug, Clone)]
 pub struct AuditContext {
     pub actor_type: ActorType,

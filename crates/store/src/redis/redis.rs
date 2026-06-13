@@ -286,6 +286,27 @@ impl RedisPool {
 }
 
 // =============================================================================
+// Streams
+// =============================================================================
+
+/// A single entry to append to a Redis stream via [`RedisStore::xadd_batch`].
+///
+/// `fields` are written verbatim as the entry's field/value pairs; the stream
+/// entry ID is server-assigned (`*`). Values are stored as-is, with no
+/// MessagePack encoding or compression, so external consumers can read the
+/// stream without knowledge of Stargate's internal value format.
+#[derive(Debug, Clone)]
+pub struct StreamEntry {
+    pub fields: Vec<(String, String)>,
+}
+
+impl StreamEntry {
+    pub fn new(fields: Vec<(String, String)>) -> Self {
+        Self { fields }
+    }
+}
+
+// =============================================================================
 // RedisStore
 // =============================================================================
 
@@ -423,6 +444,54 @@ impl RedisStore {
         rmp_serde::from_slice(&decompressed).map_err(|e| {
             StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
         })
+    }
+
+    /// Append a batch of entries to a Redis stream in a single pipelined round
+    /// trip (one `XADD` per entry).
+    ///
+    /// When `approx_maxlen` is `Some(n)` the stream is approximately capped to
+    /// its most recent ~`n` entries via `MAXLEN ~`, which lets Redis trim whole
+    /// macro-nodes for near-zero cost; `None` leaves the stream untrimmed.
+    ///
+    /// Returned stream IDs are discarded (each command is pipelined with
+    /// `.ignore()`), so the whole batch resolves to `()` on success. The call is
+    /// atomic only at the network level: either the pipeline round trip succeeds
+    /// and every entry is appended, or it errors and the caller should retry.
+    pub async fn xadd_batch(
+        &self,
+        stream: &str,
+        approx_maxlen: Option<usize>,
+        entries: &[StreamEntry],
+    ) -> StoreResult<()> {
+        self.validate_key(stream)?;
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut pipe = redis::pipe();
+        for entry in entries {
+            if entry.fields.is_empty() {
+                return Err(StoreError::InvalidInput(
+                    "Stream entry must have at least one field".to_string(),
+                ));
+            }
+            let mut cmd = redis::cmd("XADD");
+            cmd.arg(stream);
+            if let Some(maxlen) = approx_maxlen {
+                cmd.arg("MAXLEN").arg("~").arg(maxlen);
+            }
+            cmd.arg("*");
+            for (field, value) in &entry.fields {
+                cmd.arg(field).arg(value);
+            }
+            pipe.add_command(cmd).ignore();
+        }
+
+        let mut con = self.pool.get();
+        pipe.query_async::<()>(&mut con).await.map_err(|e| {
+            StoreError::RedisFailed(format!("Failed to XADD to stream '{}': {}", stream, e))
+        })?;
+        Ok(())
     }
 }
 

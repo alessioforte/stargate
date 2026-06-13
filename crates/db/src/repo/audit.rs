@@ -80,6 +80,55 @@ impl AuditRepository {
     }
 }
 
+#[cfg(feature = "postgres")]
+impl AuditRepository {
+    /// Claim a batch of unpublished outbox rows for the relay, ordered by `seq`.
+    ///
+    /// `FOR UPDATE SKIP LOCKED` makes the claim cooperative: rows locked by
+    /// another relay's open transaction are skipped, so multiple relay nodes can
+    /// drain the backlog concurrently without ever claiming the same row. The
+    /// caller must keep `tx` open until the rows are shipped, then commit it.
+    pub async fn claim_unpublished(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        limit: i64,
+    ) -> Result<Vec<crate::ent::OutboxAudit>> {
+        let rows = sqlx::query_as::<_, crate::ent::OutboxAudit>(
+            "
+            SELECT id, timestamp, actor_type, actor_id, action, resource, resource_id, request_id, metadata, seq
+            FROM audits
+            WHERE published_at IS NULL
+            ORDER BY seq
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+            ",
+        )
+        .bind(limit)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(rows)
+    }
+
+    /// Mark the given outbox rows as published. No-op for an empty slice.
+    pub async fn mark_published(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        seqs: &[i64],
+    ) -> Result<()> {
+        if seqs.is_empty() {
+            return Ok(());
+        }
+
+        sqlx::query("UPDATE audits SET published_at = NOW() WHERE seq = ANY($1)")
+            .bind(seqs)
+            .execute(&mut **tx)
+            .await?;
+
+        Ok(())
+    }
+}
+
 fn bulk_insert_chunk_size() -> usize {
     (crate::backend::MAX_BIND_PARAMETERS / AUDIT_INSERT_COLUMNS).max(1)
 }

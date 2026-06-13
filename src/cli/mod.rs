@@ -1,4 +1,3 @@
-use crate::aud;
 use crate::db;
 use clap::{Args, Parser, Subcommand};
 use std::io::{self, Read};
@@ -111,7 +110,6 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
                     )));
                 }
 
-                aud::init();
                 let result = crate::fun::bootstrap_super_admin(
                     args.email,
                     password,
@@ -119,7 +117,6 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
                     args.nickname,
                 )
                 .await;
-                aud::shutdown().await;
 
                 match result {
                     Ok(()) => {

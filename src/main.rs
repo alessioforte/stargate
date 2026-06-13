@@ -39,8 +39,6 @@ pub async fn run() -> std::io::Result<()> {
         return cli::run_cli_command(command).await;
     }
 
-    aud::init();
-
     let version = env!("CARGO_PKG_VERSION");
     let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
     let addr: SocketAddr = format!("0.0.0.0:{}", port)
@@ -68,6 +66,8 @@ pub async fn run() -> std::io::Result<()> {
         std::process::exit(1);
     }
 
+    aud::spawn();
+
     let gate = gate::init();
 
     let app = api::router()
@@ -91,8 +91,8 @@ pub async fn run() -> std::io::Result<()> {
     };
 
     info!("Server stopped, running shutdown hooks...");
-    store::save().await;
     aud::shutdown().await;
+    store::save().await;
     info!("Shutdown complete");
 
     result

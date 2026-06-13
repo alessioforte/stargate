@@ -1,21 +1,12 @@
 use super::service;
-use crate::aud::audit;
 
 use anyhow::Result;
 use db::{
     Transaction,
     ent::{
-        ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient,
-        OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
+        AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient, OAuthConsent,
+        Organization, Profile, ServiceAccount, SuperAdmin, User,
     },
-    repo::ADMIN_KEY,
-    repo::API_KEY,
-    repo::CREDENTIAL,
-    repo::OAUTH_CLIENT,
-    repo::ORGANIZATION,
-    repo::SERVICE_ACCOUNT,
-    repo::SUPER_ADMIN,
-    repo::USER,
 };
 
 // ── Users ───────────────────────────────────────────────────────────────────
@@ -26,23 +17,10 @@ pub async fn create_user(
     value: &str,
     ctx: AuditContext,
 ) -> Result<User> {
-    let svc = service();
-    match svc.create_user(profile, credential_type, value).await {
-        Ok(user) => {
-            let metadata = serde_json::to_value(&user).unwrap_or_default();
-            let resource = USER.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(user.id.clone())
-                .with_metadata(metadata);
-            audit::creation!(ctx);
-            Ok(user)
-        }
-        Err(e) => {
-            tracing::error!("Error creating user: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .create_user(profile, credential_type, value, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error creating user: {:?}", e))
 }
 
 pub async fn create_super_admin_user(
@@ -51,32 +29,10 @@ pub async fn create_super_admin_user(
     value: &str,
     ctx: AuditContext,
 ) -> Result<User> {
-    let svc = service();
-    match svc
-        .create_super_admin_user(profile, credential_type, value)
+    service()
+        .create_super_admin_user(profile, credential_type, value, ctx)
         .await
-    {
-        Ok(user) => {
-            let user_metadata = serde_json::to_value(&user).unwrap_or_default();
-            let user_ctx = ctx
-                .clone()
-                .with_resource(USER.to_string())
-                .with_resource_id(user.id.clone())
-                .with_metadata(user_metadata);
-            audit::creation!(user_ctx);
-
-            let super_admin_ctx = ctx
-                .with_resource(SUPER_ADMIN.to_string())
-                .with_resource_id(user.id.clone());
-            audit::creation!(super_admin_ctx);
-
-            Ok(user)
-        }
-        Err(e) => {
-            tracing::error!("Error creating super admin user: {:?}", e);
-            Err(e)
-        }
-    }
+        .inspect_err(|e| tracing::error!("Error creating super admin user: {:?}", e))
 }
 
 pub async fn get_user_by_username(username: &str) -> Result<Option<User>> {
@@ -124,39 +80,17 @@ pub async fn count_search_users(query: &str) -> Result<i64> {
 }
 
 pub async fn update_user(user: User, ctx: AuditContext) -> Result<User> {
-    let svc = service();
-    match svc.update_user(user).await {
-        Ok(updated_user) => {
-            let metadata = serde_json::to_value(&updated_user).unwrap_or_default();
-            let resource = USER.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(updated_user.id.clone())
-                .with_metadata(metadata);
-            audit::modification!(ctx);
-            Ok(updated_user)
-        }
-        Err(e) => {
-            tracing::error!("Error updating user: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .update_user(user, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error updating user: {:?}", e))
 }
 
 pub async fn delete_user(id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.delete_user(id).await {
-        Ok(()) => {
-            let resource = USER.to_string();
-            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
-            audit::deletion!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error deleting user: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .delete_user(id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error deleting user: {:?}", e))
 }
 
 pub async fn change_password(
@@ -164,21 +98,10 @@ pub async fn change_password(
     new_password: &str,
     ctx: AuditContext,
 ) -> Result<Credential> {
-    let svc = service();
-    match svc.change_password(user_id, new_password).await {
-        Ok(credential) => {
-            let resource = CREDENTIAL.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(user_id.to_string());
-            audit::modification!(ctx);
-            Ok(credential)
-        }
-        Err(e) => {
-            tracing::error!("Error changing password: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .change_password(user_id, new_password, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error changing password: {:?}", e))
 }
 
 pub async fn get_credential(
@@ -192,22 +115,10 @@ pub async fn get_credential(
 // ── OAuth Clients ──────────────────────────────────────────────────────────
 
 pub async fn create_oauth_client(client: OAuthClient, ctx: AuditContext) -> Result<OAuthClient> {
-    let svc = service();
-    match svc.create_oauth_client(client).await {
-        Ok(client) => {
-            let metadata = serde_json::to_value(&client).unwrap_or_default();
-            let ctx = ctx
-                .with_resource(OAUTH_CLIENT.to_string())
-                .with_resource_id(client.client_id.clone())
-                .with_metadata(metadata);
-            audit::creation!(ctx);
-            Ok(client)
-        }
-        Err(e) => {
-            tracing::error!("Error creating OAuth client: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .create_oauth_client(client, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error creating OAuth client: {:?}", e))
 }
 
 pub async fn get_oauth_client_by_client_id(client_id: &str) -> Result<Option<OAuthClient>> {
@@ -240,22 +151,10 @@ pub async fn count_search_oauth_clients(query: &str) -> Result<i64> {
 }
 
 pub async fn update_oauth_client(client: OAuthClient, ctx: AuditContext) -> Result<OAuthClient> {
-    let svc = service();
-    match svc.update_oauth_client(client).await {
-        Ok(updated) => {
-            let metadata = serde_json::to_value(&updated).unwrap_or_default();
-            let ctx = ctx
-                .with_resource(OAUTH_CLIENT.to_string())
-                .with_resource_id(updated.client_id.clone())
-                .with_metadata(metadata);
-            audit::modification!(ctx);
-            Ok(updated)
-        }
-        Err(e) => {
-            tracing::error!("Error updating OAuth client: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .update_oauth_client(client, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error updating OAuth client: {:?}", e))
 }
 
 pub async fn update_oauth_client_secret_hash(
@@ -263,23 +162,10 @@ pub async fn update_oauth_client_secret_hash(
     client_secret_hash: Option<&str>,
     ctx: AuditContext,
 ) -> Result<OAuthClient> {
-    let svc = service();
-    match svc
-        .update_oauth_client_secret_hash(client_id, client_secret_hash)
+    service()
+        .update_oauth_client_secret_hash(client_id, client_secret_hash, ctx)
         .await
-    {
-        Ok(updated) => {
-            let ctx = ctx
-                .with_resource(OAUTH_CLIENT.to_string())
-                .with_resource_id(updated.client_id.clone());
-            audit::modification!(ctx);
-            Ok(updated)
-        }
-        Err(e) => {
-            tracing::error!("Error rotating OAuth client secret: {:?}", e);
-            Err(e)
-        }
-    }
+        .inspect_err(|e| tracing::error!("Error rotating OAuth client secret: {:?}", e))
 }
 
 pub async fn set_oauth_client_enabled(
@@ -287,39 +173,17 @@ pub async fn set_oauth_client_enabled(
     enabled: bool,
     ctx: AuditContext,
 ) -> Result<OAuthClient> {
-    let svc = service();
-    match svc.set_oauth_client_enabled(client_id, enabled).await {
-        Ok(updated) => {
-            let metadata = serde_json::json!({ "enabled": enabled });
-            let ctx = ctx
-                .with_resource(OAUTH_CLIENT.to_string())
-                .with_resource_id(updated.client_id.clone())
-                .with_metadata(metadata);
-            audit::modification!(ctx);
-            Ok(updated)
-        }
-        Err(e) => {
-            tracing::error!("Error setting OAuth client enabled state: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .set_oauth_client_enabled(client_id, enabled, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error setting OAuth client enabled state: {:?}", e))
 }
 
 pub async fn delete_oauth_client(client_id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.delete_oauth_client(client_id).await {
-        Ok(()) => {
-            let ctx = ctx
-                .with_resource(OAUTH_CLIENT.to_string())
-                .with_resource_id(client_id.to_string());
-            audit::deletion!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error deleting OAuth client: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .delete_oauth_client(client_id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error deleting OAuth client: {:?}", e))
 }
 
 pub async fn get_active_oauth_consent(
@@ -339,24 +203,10 @@ pub async fn create_user_api_key(
     attrs: Option<serde_json::Value>,
     ctx: AuditContext,
 ) -> Result<ApiKey> {
-    let svc = service();
-    match svc
-        .create_user_api_key(user_id, key_hash, label, attrs)
+    service()
+        .create_user_api_key(user_id, key_hash, label, attrs, ctx)
         .await
-    {
-        Ok(api_key) => {
-            let resource = API_KEY.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(api_key.id.to_string());
-            audit::creation!(ctx);
-            Ok(api_key)
-        }
-        Err(e) => {
-            tracing::error!("Error creating user API key: {:?}", e);
-            Err(e)
-        }
-    }
+        .inspect_err(|e| tracing::error!("Error creating user API key: {:?}", e))
 }
 
 pub async fn create_service_account_api_key(
@@ -366,24 +216,10 @@ pub async fn create_service_account_api_key(
     attrs: Option<serde_json::Value>,
     ctx: AuditContext,
 ) -> Result<ApiKey> {
-    let svc = service();
-    match svc
-        .create_service_account_api_key(service_account_id, key_hash, label, attrs)
+    service()
+        .create_service_account_api_key(service_account_id, key_hash, label, attrs, ctx)
         .await
-    {
-        Ok(api_key) => {
-            let resource = API_KEY.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(api_key.id.to_string());
-            audit::creation!(ctx);
-            Ok(api_key)
-        }
-        Err(e) => {
-            tracing::error!("Error creating service account API key: {:?}", e);
-            Err(e)
-        }
-    }
+        .inspect_err(|e| tracing::error!("Error creating service account API key: {:?}", e))
 }
 
 pub async fn get_api_key_by_hash(key_hash: &str) -> Result<Option<ApiKey>> {
@@ -438,53 +274,24 @@ pub async fn count_api_keys() -> Result<i64> {
 }
 
 pub async fn update_api_key(api_key: ApiKey, ctx: AuditContext) -> Result<ApiKey> {
-    let svc = service();
-    match svc.update_api_key(api_key).await {
-        Ok(updated) => {
-            let resource = API_KEY.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(updated.id.clone());
-            audit::modification!(ctx);
-            Ok(updated)
-        }
-        Err(e) => {
-            tracing::error!("Error updating API key: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .update_api_key(api_key, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error updating API key: {:?}", e))
 }
 
 pub async fn revoke_api_key(id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.revoke_api_key(id).await {
-        Ok(()) => {
-            let resource = API_KEY.to_string();
-            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
-            audit::modification!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error revoking API key: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .revoke_api_key(id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error revoking API key: {:?}", e))
 }
 
 pub async fn delete_api_key(id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.delete_api_key(id).await {
-        Ok(()) => {
-            let resource = API_KEY.to_string();
-            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
-            audit::deletion!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error deleting API key: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .delete_api_key(id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error deleting API key: {:?}", e))
 }
 
 // ── Admin Keys ──────────────────────────────────────────────────────────────
@@ -495,21 +302,10 @@ pub async fn create_admin_key(
     permissions: Vec<String>,
     ctx: AuditContext,
 ) -> Result<AdminKey> {
-    let svc = service();
-    match svc.create_admin_key(key_hash, label, permissions).await {
-        Ok(admin_key) => {
-            let resource = ADMIN_KEY.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(admin_key.id.to_string());
-            audit::creation!(ctx);
-            Ok(admin_key)
-        }
-        Err(e) => {
-            tracing::error!("Error creating admin key: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .create_admin_key(key_hash, label, permissions, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error creating admin key: {:?}", e))
 }
 
 pub async fn get_admin_key_by_hash(key_hash: &str) -> Result<Option<AdminKey>> {
@@ -533,53 +329,24 @@ pub async fn count_admin_keys() -> Result<i64> {
 }
 
 pub async fn update_admin_key(admin_key: AdminKey, ctx: AuditContext) -> Result<AdminKey> {
-    let svc = service();
-    match svc.update_admin_key(admin_key).await {
-        Ok(updated) => {
-            let resource = ADMIN_KEY.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(updated.id.clone());
-            audit::modification!(ctx);
-            Ok(updated)
-        }
-        Err(e) => {
-            tracing::error!("Error updating admin key: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .update_admin_key(admin_key, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error updating admin key: {:?}", e))
 }
 
 pub async fn revoke_admin_key(id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.revoke_admin_key(id).await {
-        Ok(()) => {
-            let resource = ADMIN_KEY.to_string();
-            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
-            audit::modification!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error revoking admin key: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .revoke_admin_key(id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error revoking admin key: {:?}", e))
 }
 
 pub async fn delete_admin_key(id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.delete_admin_key(id).await {
-        Ok(()) => {
-            let resource = ADMIN_KEY.to_string();
-            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
-            audit::deletion!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error deleting admin key: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .delete_admin_key(id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error deleting admin key: {:?}", e))
 }
 
 // ── Service Accounts ────────────────────────────────────────────────────────
@@ -590,23 +357,10 @@ pub async fn create_service_account(
     org_id: Option<&str>,
     ctx: AuditContext,
 ) -> Result<ServiceAccount> {
-    let svc = service();
-    match svc.create_service_account(name, description, org_id).await {
-        Ok(sa) => {
-            let metadata = serde_json::to_value(&sa).unwrap_or_default();
-            let resource = SERVICE_ACCOUNT.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(sa.id.to_string())
-                .with_metadata(metadata);
-            audit::creation!(ctx);
-            Ok(sa)
-        }
-        Err(e) => {
-            tracing::error!("Error creating service account: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .create_service_account(name, description, org_id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error creating service account: {:?}", e))
 }
 
 pub async fn get_service_account_by_id(id: &str) -> Result<Option<ServiceAccount>> {
@@ -644,42 +398,17 @@ pub async fn update_service_account(
     description: Option<&str>,
     ctx: AuditContext,
 ) -> Result<ServiceAccount> {
-    let svc = service();
-    match svc
-        .update_service_account(id, name, description, None)
+    service()
+        .update_service_account(id, name, description, None, ctx)
         .await
-    {
-        Ok(sa) => {
-            let metadata = serde_json::to_value(&sa).unwrap_or_default();
-            let resource = SERVICE_ACCOUNT.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(sa.id.clone())
-                .with_metadata(metadata);
-            audit::modification!(ctx);
-            Ok(sa)
-        }
-        Err(e) => {
-            tracing::error!("Error updating service account: {:?}", e);
-            Err(e)
-        }
-    }
+        .inspect_err(|e| tracing::error!("Error updating service account: {:?}", e))
 }
 
 pub async fn delete_service_account(id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.delete_service_account(id).await {
-        Ok(()) => {
-            let resource = SERVICE_ACCOUNT.to_string();
-            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
-            audit::deletion!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error deleting service account: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .delete_service_account(id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error deleting service account: {:?}", e))
 }
 
 // ── Organizations ───────────────────────────────────────────────────────────
@@ -690,23 +419,10 @@ pub async fn create_organization(
     attrs: Option<&serde_json::Value>,
     ctx: AuditContext,
 ) -> Result<Organization> {
-    let svc = service();
-    match svc.create_organization(name, description, attrs).await {
-        Ok(org) => {
-            let metadata = serde_json::to_value(&org).unwrap_or_default();
-            let resource = ORGANIZATION.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(org.id.to_string())
-                .with_metadata(metadata);
-            audit::creation!(ctx);
-            Ok(org)
-        }
-        Err(e) => {
-            tracing::error!("Error creating organization: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .create_organization(name, description, attrs, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error creating organization: {:?}", e))
 }
 
 pub async fn get_organization_by_id(id: &str) -> Result<Option<Organization>> {
@@ -745,39 +461,17 @@ pub async fn update_organization(
     attrs: Option<&serde_json::Value>,
     ctx: AuditContext,
 ) -> Result<Organization> {
-    let svc = service();
-    match svc.update_organization(id, name, description, attrs).await {
-        Ok(org) => {
-            let metadata = serde_json::to_value(&org).unwrap_or_default();
-            let resource = ORGANIZATION.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(org.id.clone())
-                .with_metadata(metadata);
-            audit::modification!(ctx);
-            Ok(org)
-        }
-        Err(e) => {
-            tracing::error!("Error updating organization: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .update_organization(id, name, description, attrs, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error updating organization: {:?}", e))
 }
 
 pub async fn delete_organization(id: &str, ctx: AuditContext) -> Result<()> {
-    let svc = service();
-    match svc.delete_organization(id).await {
-        Ok(()) => {
-            let resource = ORGANIZATION.to_string();
-            let ctx = ctx.with_resource(resource).with_resource_id(id.to_string());
-            audit::deletion!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error deleting organization: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .delete_organization(id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error deleting organization: {:?}", e))
 }
 
 pub async fn add_user_to_organization(
@@ -785,21 +479,10 @@ pub async fn add_user_to_organization(
     org_id: &str,
     ctx: AuditContext,
 ) -> Result<()> {
-    let svc = service();
-    match svc.add_user_to_organization(user_id, org_id).await {
-        Ok(()) => {
-            let resource = ORGANIZATION.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(org_id.to_string());
-            audit::modification!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error adding user to organization: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .add_user_to_organization(user_id, org_id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error adding user to organization: {:?}", e))
 }
 
 pub async fn remove_user_from_organization(
@@ -807,21 +490,10 @@ pub async fn remove_user_from_organization(
     org_id: &str,
     ctx: AuditContext,
 ) -> Result<()> {
-    let svc = service();
-    match svc.remove_user_from_organization(user_id, org_id).await {
-        Ok(()) => {
-            let resource = ORGANIZATION.to_string();
-            let ctx = ctx
-                .with_resource(resource)
-                .with_resource_id(org_id.to_string());
-            audit::modification!(ctx);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Error removing user from organization: {:?}", e);
-            Err(e)
-        }
-    }
+    service()
+        .remove_user_from_organization(user_id, org_id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error removing user from organization: {:?}", e))
 }
 
 pub async fn get_organization_users_paginated(

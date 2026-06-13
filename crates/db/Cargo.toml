@@ -18,3 +18,7 @@ ulid = "1.2.1"
 [features]
 postgres = ["sqlx/postgres"]
 sqlite = ["sqlx/sqlite"]
+
+[dev-dependencies]
+dotenvy = "0.15"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
