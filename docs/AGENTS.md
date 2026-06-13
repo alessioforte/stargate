@@ -36,7 +36,7 @@ stargate/
 │   ├── smtp/          # Email delivery (lettre)
 │   ├── store/         # State store (DashMap / Redis)
 │   └── tools/         # Shared utilities
-├── ddl/               # SQL schemas: postgres.sql, sqlite.sql
+├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
 ├── docs/              # Config docs, including config-v2alpha1.md
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks
@@ -325,7 +325,7 @@ Currently implemented methods:
 - HOTP/TOTP primitives exist in `crates/otp`, but authenticator-app enrollment/verification APIs are not yet wired into account MFA.
 - SMS OTP primitives exist in `crates/otp`, but SMS delivery/account APIs are not yet wired.
 
-## Database Schema (ddl/)
+## Database Schema (migrations/)
 
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `api_keys`, `admin_keys`, `audits`, `service_accounts`, `oauth_clients`, `oauth_consents`, `user_organizations`, `user_api_keys`, `service_account_api_keys`
 

@@ -14,7 +14,12 @@ use crate::repo::{
 use crate::tx::Transaction;
 use anyhow::Result;
 use serde_json::Value as JsonValue;
-use std::fs;
+
+#[cfg(feature = "postgres")]
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/postgres");
+
+#[cfg(feature = "sqlite")]
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/sqlite");
 
 #[derive(Clone)]
 pub struct Service {
@@ -48,23 +53,9 @@ impl Service {
         }
     }
 
-    pub async fn init_schema(&self, file: &str) {
-        let ddl = match fs::read_to_string(file) {
-            Ok(content) => content,
-            Err(e) => {
-                eprintln!("Failed to read schema file '{}': {}", file, e);
-                return;
-            }
-        };
-
-        // Execute the entire DDL as a single batch. This correctly handles
-        // PL/pgSQL DO $$ ... END $$; blocks that contain semicolons.
-        if let Err(e) = sqlx::raw_sql(sqlx::AssertSqlSafe(ddl))
-            .execute(&self.pool)
-            .await
-        {
-            eprintln!("Failed to execute schema from '{}': {}", file, e);
-        }
+    pub async fn migrate(&self) -> Result<()> {
+        MIGRATOR.run(&self.pool).await?;
+        Ok(())
     }
 
     /// Lightweight connectivity check — executes `SELECT 1`.
@@ -197,11 +188,7 @@ pub async fn init(conn: &str) -> Result<Service> {
 
     let service = Service::new(pool);
 
-    #[cfg(feature = "postgres")]
-    service.init_schema("ddl/postgres.sql").await;
-
-    #[cfg(feature = "sqlite")]
-    service.init_schema("ddl/sqlite.sql").await;
+    service.migrate().await?;
 
     Ok(service)
 }
@@ -1078,7 +1065,10 @@ mod tests {
         .expect("super_admin create should succeed");
 
         let count = count_by_request_id(&svc, &req_id).await;
-        assert_eq!(count, 2, "create_super_admin_user must write exactly 2 audit rows");
+        assert_eq!(
+            count, 2,
+            "create_super_admin_user must write exactly 2 audit rows"
+        );
     }
 
     // ── Relay claim / publish / mark cycle ───────────────────────────────────
@@ -1118,16 +1108,23 @@ mod tests {
         );
 
         // Mark all claimed rows as published.
-        claim.commit_published().await.expect("commit_published failed");
+        claim
+            .commit_published()
+            .await
+            .expect("commit_published failed");
 
         // A fresh claim must not return the same row (published_at IS NOW set).
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*)::bigint FROM audits WHERE request_id = $1 AND published_at IS NULL")
-                .bind(&req_id)
-                .fetch_one(&svc.pool)
-                .await
-                .unwrap_or(0);
-        assert_eq!(count, 0, "after commit_published the row must not be in the unpublished set");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM audits WHERE request_id = $1 AND published_at IS NULL",
+        )
+        .bind(&req_id)
+        .fetch_one(&svc.pool)
+        .await
+        .unwrap_or(0);
+        assert_eq!(
+            count, 0,
+            "after commit_published the row must not be in the unpublished set"
+        );
     }
 
     /// Two concurrent open claims must not overlap — `FOR UPDATE SKIP LOCKED`
@@ -1151,14 +1148,18 @@ mod tests {
         }
 
         // Open claim1 (limit 2) — keeps its transaction open.
-        let claim1 = svc.claim_unpublished_audits(2).await.expect("claim1 failed");
+        let claim1 = svc
+            .claim_unpublished_audits(2)
+            .await
+            .expect("claim1 failed");
         // Open claim2 (limit 2) — must skip rows locked by claim1.
-        let claim2 = svc.claim_unpublished_audits(2).await.expect("claim2 failed");
+        let claim2 = svc
+            .claim_unpublished_audits(2)
+            .await
+            .expect("claim2 failed");
 
-        let seqs1: std::collections::HashSet<i64> =
-            claim1.rows().iter().map(|r| r.seq).collect();
-        let seqs2: std::collections::HashSet<i64> =
-            claim2.rows().iter().map(|r| r.seq).collect();
+        let seqs1: std::collections::HashSet<i64> = claim1.rows().iter().map(|r| r.seq).collect();
+        let seqs2: std::collections::HashSet<i64> = claim2.rows().iter().map(|r| r.seq).collect();
 
         let overlap: Vec<_> = seqs1.intersection(&seqs2).collect();
         assert!(
