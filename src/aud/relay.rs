@@ -9,7 +9,7 @@
 //! dedupe on the audit `id`.
 
 use db::ent::OutboxAudit;
-use db::svc::Service;
+use db::service::Service;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use std::time::Duration;

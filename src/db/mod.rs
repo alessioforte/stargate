@@ -4,11 +4,11 @@ pub use svc::*;
 
 #[cfg(feature = "postgres")]
 mod postgres {
-    use db::service;
+    use db::service::{self, Service};
     use once_cell::sync::OnceCell;
     use tracing::info;
 
-    static DB: OnceCell<svc::Service> = OnceCell::new();
+    static DB: OnceCell<Service> = OnceCell::new();
 
     pub async fn init() -> anyhow::Result<()> {
         let password = std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "root".to_string());
@@ -17,10 +17,10 @@ mod postgres {
         let database =
             std::env::var("POSTGRES_DATABASE").unwrap_or_else(|_| "stargate".to_string());
 
-        svc::ensure_database(&user, &password, &host, &database).await;
+        service::ensure_database(&user, &password, &host, &database).await;
 
         let db_url = format!("postgres://{}:{}@{}/{}", user, password, host, database);
-        let service = svc::init(&db_url).await?;
+        let service = service::init(&db_url).await?;
 
         info!("PostgreSQL service initialized successfully");
         DB.set(service)
@@ -28,7 +28,7 @@ mod postgres {
         Ok(())
     }
 
-    pub fn service() -> svc::Service {
+    pub fn service() -> Service {
         DB.get()
             .expect("DB service not initialized — init() must be called first")
             .clone()
