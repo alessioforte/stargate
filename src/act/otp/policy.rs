@@ -26,6 +26,7 @@ pub(crate) async fn mfa_policy_for_user(user: &db::ent::User) -> Result<MfaPolic
     let mode = mfa_mode()?;
     let mut methods = configured_mfa_methods();
     let user_methods = user_mfa_methods(&user.attrs);
+
     if !user_methods.is_empty() {
         methods.retain(|method| user_methods.contains(method));
     }

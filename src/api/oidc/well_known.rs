@@ -24,6 +24,7 @@ fn jwks_cache_control() -> String {
 #[utoipa::path(
     get,
     path = "/.well-known/jwks.json",
+    tags = ["Well Known"],
     responses(
         (status = 200, description = "OK", body = Jwks)
     )
@@ -48,6 +49,7 @@ pub async fn get_jwks() -> Result<impl IntoResponse, ErrorResponse> {
 #[utoipa::path(
     get,
     path = "/.well-known/oauth-authorization-server",
+    tags = ["Well Known"],
     responses(
         (status = 200, description = "OK", body = OAuthAuthorizationServerMetadata)
     )
@@ -64,6 +66,7 @@ pub async fn get_oauth_metadata() -> Result<Json<OAuthAuthorizationServerMetadat
 #[utoipa::path(
     get,
     path = "/.well-known/openid-configuration",
+    tags = ["Well Known"],
     responses(
         (status = 200, description = "OK", body = OpenIdConfiguration)
     )

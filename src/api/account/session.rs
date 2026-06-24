@@ -19,6 +19,7 @@ pub(crate) async fn issue_user_session(
     let name = format_name(&given_name, &family_name);
 
     let sid = ulid::Ulid::new().to_string();
+
     let mut claims = jwt::Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
@@ -26,11 +27,13 @@ pub(crate) async fn issue_user_session(
         .email(user.email.to_owned())
         .email_verified(true)
         .sid(sid.clone());
+
     claims.auth_time = Some(auth_time);
 
     let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
         .await
         .map_err(ErrorResponse::internal)?;
+
     if is_super_admin {
         claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
     }
@@ -57,6 +60,7 @@ pub(crate) async fn issue_user_session(
     };
 
     let mut resp = Json(body).into_response();
+
     resp.headers_mut().insert(
         SET_COOKIE,
         cookie

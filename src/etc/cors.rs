@@ -23,7 +23,11 @@ pub fn hyper_configure() -> tower_http::cors::CorsLayer {
             .split(',')
             .filter_map(|o| o.trim().parse().ok())
             .collect();
-        layer.allow_origin(origins)
+        if origins.is_empty() {
+            layer
+        } else {
+            layer.allow_origin(origins).allow_credentials(true)
+        }
     } else {
         layer
     }

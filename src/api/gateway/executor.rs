@@ -212,7 +212,9 @@ mod tests {
     }
 
     fn transport_error() -> Result<Response, ErrorResponse> {
-        Err(ErrorResponse::from(HttpError::BadGateway("boom".to_string())))
+        Err(ErrorResponse::from(HttpError::BadGateway(
+            "boom".to_string(),
+        )))
     }
 
     fn available(balancers: &HashMap<String, DynLoadBalancer>, service: &str) -> bool {
@@ -223,7 +225,10 @@ mod tests {
     fn transport_error_then_success_toggles_availability() {
         let balancers = single_upstream("svc", "http://up", 1);
         record_upstream_health(&balancers, "svc", "http://up", &transport_error());
-        assert!(!available(&balancers, "svc"), "transport error should eject");
+        assert!(
+            !available(&balancers, "svc"),
+            "transport error should eject"
+        );
         record_upstream_health(&balancers, "svc", "http://up", &response(200));
         assert!(available(&balancers, "svc"), "success should restore");
     }

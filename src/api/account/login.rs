@@ -49,6 +49,7 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
     let allowed = login_guard::check_login_allowed(&throttle)
         .await
         .map_err(login_guard_unavailable)?;
+
     if !allowed {
         let mut err = ErrorResponse::from(HttpError::TooManyRequests(
             "too many failed login attempts, try again later".to_string(),
@@ -101,6 +102,7 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
     let _ = audit_ctx;
 
     let auth_time = chrono::Utc::now().timestamp() as usize;
+
     if let Some(response) = maybe_start_login_mfa(&user, &client_ip, auth_time).await? {
         return Ok(response);
     }
