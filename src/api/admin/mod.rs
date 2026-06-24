@@ -30,6 +30,65 @@ impl Grants {
     }
 }
 
+async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
+    if !crate::act::otp::admin_step_up_required() {
+        return true;
+    }
+
+    if sid.is_empty() {
+        return false;
+    }
+
+    match crate::act::otp::has_valid_mfa_verification(
+        sid,
+        user_id,
+        crate::act::otp::ADMIN_STEP_UP_PURPOSE,
+    )
+    .await
+    {
+        Ok(satisfied) => satisfied,
+        Err(err) => {
+            tracing::error!("Failed to check admin MFA step-up state: {}", err);
+            false
+        }
+    }
+}
+
+async fn grant_super_admin_if_allowed(
+    grants: &mut HashSet<String>,
+    user_id: &str,
+    sid: Option<&str>,
+) -> bool {
+    match crate::db::is_super_admin_user_id(user_id).await {
+        Ok(true) => {
+            if super_admin_step_up_satisfied(sid.unwrap_or_default(), user_id).await {
+                grants.insert(SUPER_ADMIN.to_string());
+                true
+            } else {
+                false
+            }
+        }
+        Ok(false) => false,
+        Err(err) => {
+            tracing::error!("Failed to resolve super admin grants: {}", err);
+            false
+        }
+    }
+}
+
+async fn oauth_client_is_trusted_admin_client(client_id: &str) -> bool {
+    let client = match crate::db::get_oauth_client_by_client_id(client_id).await {
+        Ok(Some(client)) => client,
+        Ok(None) => return false,
+        Err(err) => {
+            tracing::error!("Failed to resolve OAuth client for admin grants: {}", err);
+            return false;
+        }
+    };
+
+    client.enabled && oidc::consent::client_is_first_party(&client.attrs)
+}
+
 pub async fn extract_grants(mut req: Request, next: Next) -> Response {
     let mut ctx = take_audit_context_from(req.extensions_mut());
     let mut grants: HashSet<String> = HashSet::new();
@@ -44,44 +103,26 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
                     let session = store.get::<Subject>(&sid).await.unwrap_or(None);
                     if session.is_some()
                         && let Some(user_id) = claims.sub_id.as_deref()
+                        && grant_super_admin_if_allowed(&mut grants, user_id, Some(&sid)).await
                     {
-                        match crate::db::is_super_admin_user_id(user_id).await {
-                            Ok(true) => {
-                                let step_up_satisfied = if crate::act::otp::admin_step_up_required()
-                                {
-                                    match crate::act::otp::has_valid_mfa_verification(
-                                        &sid,
-                                        user_id,
-                                        crate::act::otp::ADMIN_STEP_UP_PURPOSE,
-                                    )
-                                    .await
-                                    {
-                                        Ok(satisfied) => satisfied,
-                                        Err(err) => {
-                                            tracing::error!(
-                                                "Failed to check admin MFA step-up state: {}",
-                                                err
-                                            );
-                                            false
-                                        }
-                                    }
-                                } else {
-                                    true
-                                };
-
-                                if step_up_satisfied {
-                                    ctx = ctx.with_actor(
-                                        db::ent::ActorType::Admin,
-                                        Some(user_id.to_string()),
-                                    );
-                                    grants.insert(SUPER_ADMIN.to_string());
-                                }
-                            }
-                            Ok(false) => {}
-                            Err(err) => {
-                                tracing::error!("Failed to resolve super admin grants: {}", err);
-                            }
-                        }
+                        ctx = ctx.with_actor(db::ent::ActorType::Admin, Some(user_id.to_string()));
+                    }
+                }
+                Ok(true) => {}
+                Err(err) => {
+                    tracing::error!("Failed to check token revocation state: {}", err);
+                }
+            }
+        } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None) {
+            match crate::act::token_revocation::is_revoked(&claims).await {
+                Ok(false) => {
+                    let client_id = claims.azp.as_deref().unwrap_or_default();
+                    if oauth_client_is_trusted_admin_client(client_id).await
+                        && let Some(user_id) = claims.sub_id.as_deref()
+                        && grant_super_admin_if_allowed(&mut grants, user_id, claims.sid.as_deref())
+                            .await
+                    {
+                        ctx = ctx.with_actor(db::ent::ActorType::Admin, Some(user_id.to_string()));
                     }
                 }
                 Ok(true) => {}
