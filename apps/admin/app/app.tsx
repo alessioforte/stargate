@@ -3,7 +3,7 @@ import AuthCallbackPage from "./routes/auth-callback";
 import ErrorPage from "./routes/error";
 import Layout from "./routes/layout";
 import AdminHomePage from "./routes/home";
-import UsersPage from "./routes/users";
+import UsersPage from "./routes/users/users";
 import GatewayPage from "./routes/gateway";
 import APIKeysPage from "./routes/api-keys";
 import AdminKeysPage from "./routes/admin-keys";

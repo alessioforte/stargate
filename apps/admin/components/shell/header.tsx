@@ -9,7 +9,7 @@ const Header = () => {
     <header className={styles.header}>
       <div className={styles.header_inner}>
         <Flex align="center">
-          <div className={styles.logo}></div>
+          <div className={styles.logo}>✨</div>
           <h3>Stargate</h3>
         </Flex>
         <UserMenu />

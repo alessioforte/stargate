@@ -1,6 +1,7 @@
 import en from "./locales/en.json";
 import it from "./locales/it.json";
 import useStore from "@/store";
+import Settings from "@/store/settings";
 
 const messages = {
   en,
@@ -51,4 +52,14 @@ export function useTranslations() {
 
   return (key: string, values?: TranslationValues) =>
     translate(language, key, values);
+}
+
+export function getTranslation(key: string, values?: TranslationValues) {
+  const language: string = Settings.get("language") ?? "en";
+
+  return translate(language, key, values);
+}
+
+export function getLanguages() {
+  return Object.keys(messages) as Locale[];
 }

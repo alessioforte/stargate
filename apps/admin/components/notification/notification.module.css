@@ -1,0 +1,16 @@
+.error {
+  border-color: var(--mantine-color-red-6) !important;
+  margin-top: 16px;
+}
+.success {
+  border-color: var(--mantine-color-teal-6) !important;
+  margin-top: 16px;
+}
+.info {
+  border-color: var(--mantine-color-cyan-6) !important;
+  margin-top: 16px;
+}
+.warning {
+  border-color: var(--mantine-color-yellow-6) !important;
+  margin-top: 16px;
+}

@@ -1,3 +1,9 @@
 {
-  "admin": "Admin"
+  "admin": "Admin",
+  "users": "Utenti",
+  "user": "Utente",
+  "newUser": "Nuovo Utente",
+  "givenName": "Nome",
+  "familyName": "Cognome",
+  "attributes": "Attributi"
 }

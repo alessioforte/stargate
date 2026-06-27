@@ -1,3 +1,13 @@
+import { StoreItem } from "./item";
+import type {
+  List,
+  User,
+  CreateUserRequest,
+  UpdateUserRequest,
+  Query,
+  JsonValue,
+} from "@/services/types";
+
 export interface AppMessage {
   type: "info" | "success" | "warning" | "error";
   text: string;
@@ -27,6 +37,8 @@ export interface State {
   loading: boolean;
   theme: "light" | "dark" | "system";
   language: string;
+
+  users: StoreItem<List<User>>;
 }
 
 export interface Actions {
@@ -36,4 +48,9 @@ export interface Actions {
   signIn: (returnPath: string) => Promise<void>;
   setTheme: (theme: "light" | "dark" | "system") => void;
   setLanguage: (lang: "en" | "it") => void;
+
+  getUsers: (query?: Query) => Promise<void>;
+  createUser: (user: CreateUserRequest) => Promise<void>;
+  updateUser: (id: string, user: UpdateUserRequest) => Promise<void>;
+  updateUserAttrs: (id: string, attrs: JsonValue) => Promise<void>;
 }

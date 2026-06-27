@@ -1,0 +1,25 @@
+.table thead {
+  z-index: 1;
+}
+
+.table th {
+  font-size: 12px;
+  background-color: light-dark(
+    var(--mantine-color-gray-3),
+    var(--mantine-color-dark-8)
+  );
+}
+
+.table tr {
+  font-size: 12px;
+  background-color: light-dark(
+    var(--mantine-color-gray-0),
+    var(--mantine-color-dark-6)
+  );
+}
+
+.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+}

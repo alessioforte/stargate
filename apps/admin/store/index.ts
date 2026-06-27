@@ -9,8 +9,20 @@ import {
 } from "@/lib/oauth";
 import services from "@/services";
 import { getTokenExpiry } from "@/services/jwt";
-import type { AdminHealth } from "@/services/types";
+import type {
+  AdminHealth,
+  List,
+  User,
+  Query,
+  JsonValue,
+  CreateUserRequest,
+  UpdateUserRequest,
+} from "@/services/types";
+import Service from "@/services";
+import { showNotification } from "@/components";
 import type { Actions, AdminStatus, State } from "./types";
+import { StoreItem } from "./item";
+import Settings from "./settings";
 
 const initialState: State = {
   adminError: null,
@@ -19,8 +31,10 @@ const initialState: State = {
   adminStatus: null,
   message: null,
   loading: false,
-  theme: "system",
-  language: "en",
+  theme: Settings.get("theme", "system"),
+  language: Settings.get("language", "en"),
+
+  users: new StoreItem<List<User>>(null),
 };
 
 function tokenIsValid(accessToken: string | undefined): accessToken is string {
@@ -49,9 +63,11 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-export const store: StateCreator<State & Actions> = (set) => ({
+export const store: StateCreator<State & Actions> = (set, get) => ({
   ...initialState,
+
   clearAdminError: () => set({ adminError: null }),
+
   ensureAdminSession: async (returnPath) => {
     set({
       adminError: null,
@@ -115,6 +131,7 @@ export const store: StateCreator<State & Actions> = (set) => ({
       return { status: "error", message };
     }
   },
+
   logout: async (returnPath) => {
     set({
       adminError: null,
@@ -124,6 +141,7 @@ export const store: StateCreator<State & Actions> = (set) => ({
     });
     await logoutAndRedirect(returnPath);
   },
+
   signIn: async (returnPath) => {
     set({
       adminError: null,
@@ -133,8 +151,106 @@ export const store: StateCreator<State & Actions> = (set) => ({
     });
     await redirectToHostedLogin(returnPath);
   },
-  setTheme: (theme: "light" | "dark" | "system") => set({ theme }),
-  setLanguage: (lang: "en" | "it") => set({ language: lang }),
+
+  setTheme: (theme: "light" | "dark" | "system") => {
+    set({ theme });
+    Settings.set("theme", theme);
+  },
+
+  setLanguage: (lang: "en" | "it") => {
+    set({ language: lang });
+    Settings.set("language", lang);
+  },
+
+  getUsers: async (query?: Query) => {
+    const users = get().users;
+    set({ users: users.setLoading() });
+    const { data, error, message } = await Service.admin.getUsers(query);
+    if (error) {
+      set({ users: users.setError(message) });
+      return;
+    }
+    set({ users: users.setSuccess(data) });
+  },
+
+  createUser: async (user: CreateUserRequest) => {
+    const users = get().users;
+    set({ users: users.setLoading() });
+
+    const { error, message } = await Service.admin.createUser(user);
+
+    if (error) {
+      set({ users: users.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to create user",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "User created successfully",
+    });
+    get().getUsers();
+  },
+
+  updateUser: async (id: string, user: UpdateUserRequest) => {
+    const users = get().users;
+    set({ users: users.setLoading() });
+
+    const { error, message } = await Service.admin.updateUser(id, user);
+
+    if (error) {
+      set({ users: users.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update user",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "User updated successfully",
+    });
+
+    get().getUsers();
+  },
+
+  updateUserAttrs: async (id: string, attrs: JsonValue) => {
+    const users = get().users;
+    set({ users: users.setLoading() });
+
+    const { error, message } = await Service.admin.updateUserAttrs(id, {
+      attrs,
+    });
+
+    if (error) {
+      set({ users: users.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update user attrs",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "User attrs updated successfully",
+    });
+
+    get().getUsers();
+  },
 });
 
 export default create(devtools(store));

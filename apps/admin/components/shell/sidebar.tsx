@@ -26,11 +26,11 @@ const Sidebar: React.FC<Props> = ({ items }) => {
                 <ActionIcon
                   size="xl"
                   variant="transparent"
-                  className={styles.sidebar_item}
-                  c={
-                    item.path === window.location.pathname
-                      ? "yellow"
-                      : undefined
+                  className={
+                    styles.sidebar_item +
+                    (item.path === window.location.pathname
+                      ? ` ${styles.sidebar_item_active}`
+                      : "")
                   }
                 >
                   {item.icon}
