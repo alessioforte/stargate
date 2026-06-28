@@ -10,12 +10,31 @@ import {
 import services from "@/services";
 import { getTokenExpiry } from "@/services/jwt";
 import type {
+  AdminKey,
   AdminHealth,
+  ApiKey,
+  ApiKeyQuery,
+  CreateAdminKeyRequest,
+  CreateAdminKeyResponse,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
+  CreateOAuthClientRequest,
+  CreateOAuthClientResponse,
   List,
+  OAuthClient,
+  Organization,
+  ServiceAccount,
   User,
   Query,
   JsonValue,
+  CreateOrganizationRequest,
+  CreateServiceAccountRequest,
   CreateUserRequest,
+  UpdateAdminKeyPermissionsRequest,
+  RotateOAuthClientSecretResponse,
+  UpdateOAuthClientRequest,
+  UpdateOrganizationRequest,
+  UpdateServiceAccountRequest,
   UpdateUserRequest,
 } from "@/services/types";
 import Service from "@/services";
@@ -34,6 +53,11 @@ const initialState: State = {
   theme: Settings.get("theme", "system"),
   language: Settings.get("language", "en"),
 
+  adminKeys: new StoreItem<List<AdminKey>>(null),
+  apiKeys: new StoreItem<List<ApiKey>>(null),
+  oauthClients: new StoreItem<List<OAuthClient>>(null),
+  organizations: new StoreItem<List<Organization>>(null),
+  serviceAccounts: new StoreItem<List<ServiceAccount>>(null),
   users: new StoreItem<List<User>>(null),
 };
 
@@ -162,6 +186,569 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     Settings.set("language", lang);
   },
 
+  getAdminKeys: async (query?: Query) => {
+    const adminKeys = get().adminKeys;
+    set({ adminKeys: adminKeys.setLoading() });
+    const { data, error, message } = await Service.admin.getAdminKeys(query);
+    if (error) {
+      set({ adminKeys: adminKeys.setError(message) });
+      return;
+    }
+    set({ adminKeys: adminKeys.setSuccess(data) });
+  },
+
+  createAdminKey: async (
+    adminKey: CreateAdminKeyRequest,
+  ): Promise<CreateAdminKeyResponse | null> => {
+    const adminKeys = get().adminKeys;
+    set({ adminKeys: adminKeys.setLoading() });
+
+    const { data, error, message } =
+      await Service.admin.createAdminKey(adminKey);
+
+    if (error) {
+      set({ adminKeys: adminKeys.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to create admin key",
+      });
+      return null;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Admin key created successfully",
+    });
+    get().getAdminKeys();
+    return data;
+  },
+
+  updateAdminKeyPermissions: async (
+    id: string,
+    adminKey: UpdateAdminKeyPermissionsRequest,
+  ) => {
+    const adminKeys = get().adminKeys;
+    set({ adminKeys: adminKeys.setLoading() });
+
+    const { error, message } = await Service.admin.updateAdminKeyPermissions(
+      id,
+      adminKey,
+    );
+
+    if (error) {
+      set({ adminKeys: adminKeys.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update admin key permissions",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Admin key permissions updated successfully",
+    });
+
+    get().getAdminKeys();
+  },
+
+  revokeAdminKey: async (id: string) => {
+    const adminKeys = get().adminKeys;
+    set({ adminKeys: adminKeys.setLoading() });
+
+    const { error, message } = await Service.admin.revokeAdminKey(id);
+
+    if (error) {
+      set({ adminKeys: adminKeys.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to revoke admin key",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Admin key revoked successfully",
+    });
+
+    get().getAdminKeys();
+  },
+
+  getApiKeys: async (query?: ApiKeyQuery) => {
+    const apiKeys = get().apiKeys;
+    set({ apiKeys: apiKeys.setLoading() });
+    const { data, error, message } = await Service.admin.getApiKeys(query);
+    if (error) {
+      set({ apiKeys: apiKeys.setError(message) });
+      return;
+    }
+    set({ apiKeys: apiKeys.setSuccess(data) });
+  },
+
+  createApiKey: async (
+    apiKey: CreateApiKeyRequest,
+  ): Promise<CreateApiKeyResponse | null> => {
+    const apiKeys = get().apiKeys;
+    set({ apiKeys: apiKeys.setLoading() });
+
+    const { data, error, message } = await Service.admin.createApiKey(apiKey);
+
+    if (error) {
+      set({ apiKeys: apiKeys.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to create API key",
+      });
+      return null;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "API key created successfully",
+    });
+    get().getApiKeys();
+    return data;
+  },
+
+  updateApiKeyAttrs: async (id: string, attrs: JsonValue) => {
+    const apiKeys = get().apiKeys;
+    set({ apiKeys: apiKeys.setLoading() });
+
+    const { error, message } = await Service.admin.updateApiKeyAttrs(id, {
+      attrs,
+    });
+
+    if (error) {
+      set({ apiKeys: apiKeys.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update API key attrs",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "API key attrs updated successfully",
+    });
+
+    get().getApiKeys();
+  },
+
+  revokeApiKey: async (id: string) => {
+    const apiKeys = get().apiKeys;
+    set({ apiKeys: apiKeys.setLoading() });
+
+    const { error, message } = await Service.admin.revokeApiKey(id);
+
+    if (error) {
+      set({ apiKeys: apiKeys.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to revoke API key",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "API key revoked successfully",
+    });
+
+    get().getApiKeys();
+  },
+
+  deleteApiKey: async (id: string) => {
+    const apiKeys = get().apiKeys;
+    set({ apiKeys: apiKeys.setLoading() });
+
+    const { error, message } = await Service.admin.deleteApiKey(id);
+
+    if (error) {
+      set({ apiKeys: apiKeys.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to delete API key",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "API key deleted successfully",
+    });
+
+    get().getApiKeys();
+  },
+
+  getOAuthClients: async (query?: Query) => {
+    const oauthClients = get().oauthClients;
+    set({ oauthClients: oauthClients.setLoading() });
+    const { data, error, message } = await Service.admin.getOAuthClients(query);
+    if (error) {
+      set({ oauthClients: oauthClients.setError(message) });
+      return;
+    }
+    set({ oauthClients: oauthClients.setSuccess(data) });
+  },
+
+  createOAuthClient: async (
+    oauthClient: CreateOAuthClientRequest,
+  ): Promise<CreateOAuthClientResponse | null> => {
+    const oauthClients = get().oauthClients;
+    set({ oauthClients: oauthClients.setLoading() });
+
+    const { data, error, message } =
+      await Service.admin.createOAuthClient(oauthClient);
+
+    if (error) {
+      set({ oauthClients: oauthClients.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to create OAuth client",
+      });
+      return null;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "OAuth client created successfully",
+    });
+    get().getOAuthClients();
+    return data;
+  },
+
+  updateOAuthClient: async (
+    clientId: string,
+    oauthClient: UpdateOAuthClientRequest,
+  ) => {
+    const oauthClients = get().oauthClients;
+    set({ oauthClients: oauthClients.setLoading() });
+
+    const { error, message } = await Service.admin.updateOAuthClient(
+      clientId,
+      oauthClient,
+    );
+
+    if (error) {
+      set({ oauthClients: oauthClients.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update OAuth client",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "OAuth client updated successfully",
+    });
+
+    get().getOAuthClients();
+  },
+
+  enableOAuthClient: async (clientId: string) => {
+    const oauthClients = get().oauthClients;
+    set({ oauthClients: oauthClients.setLoading() });
+
+    const { error, message } = await Service.admin.enableOAuthClient(clientId);
+
+    if (error) {
+      set({ oauthClients: oauthClients.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to enable OAuth client",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "OAuth client enabled successfully",
+    });
+
+    get().getOAuthClients();
+  },
+
+  disableOAuthClient: async (clientId: string) => {
+    const oauthClients = get().oauthClients;
+    set({ oauthClients: oauthClients.setLoading() });
+
+    const { error, message } = await Service.admin.disableOAuthClient(clientId);
+
+    if (error) {
+      set({ oauthClients: oauthClients.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to disable OAuth client",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "OAuth client disabled successfully",
+    });
+
+    get().getOAuthClients();
+  },
+
+  deleteOAuthClient: async (clientId: string) => {
+    const oauthClients = get().oauthClients;
+    set({ oauthClients: oauthClients.setLoading() });
+
+    const { error, message } = await Service.admin.deleteOAuthClient(clientId);
+
+    if (error) {
+      set({ oauthClients: oauthClients.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to delete OAuth client",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "OAuth client deleted successfully",
+    });
+
+    get().getOAuthClients();
+  },
+
+  rotateOAuthClientSecret: async (
+    clientId: string,
+  ): Promise<RotateOAuthClientSecretResponse | null> => {
+    const oauthClients = get().oauthClients;
+    set({ oauthClients: oauthClients.setLoading() });
+
+    const { data, error, message } =
+      await Service.admin.rotateOAuthClientSecret(clientId);
+
+    if (error) {
+      set({ oauthClients: oauthClients.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to rotate OAuth client secret",
+      });
+      return null;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "OAuth client secret rotated successfully",
+    });
+
+    get().getOAuthClients();
+    return data;
+  },
+
+  getOrganizations: async (query?: Query) => {
+    const organizations = get().organizations;
+    set({ organizations: organizations.setLoading() });
+    const { data, error, message } =
+      await Service.admin.getOrganizations(query);
+    if (error) {
+      set({ organizations: organizations.setError(message) });
+      return;
+    }
+    set({ organizations: organizations.setSuccess(data) });
+  },
+
+  createOrganization: async (organization: CreateOrganizationRequest) => {
+    const organizations = get().organizations;
+    set({ organizations: organizations.setLoading() });
+
+    const { error, message } =
+      await Service.admin.createOrganization(organization);
+
+    if (error) {
+      set({ organizations: organizations.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to create organization",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Organization created successfully",
+    });
+    get().getOrganizations();
+  },
+
+  updateOrganization: async (
+    id: string,
+    organization: UpdateOrganizationRequest,
+  ) => {
+    const organizations = get().organizations;
+    set({ organizations: organizations.setLoading() });
+
+    const { error, message } = await Service.admin.updateOrganization(
+      id,
+      organization,
+    );
+
+    if (error) {
+      set({ organizations: organizations.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update organization",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Organization updated successfully",
+    });
+
+    get().getOrganizations();
+  },
+
+  getServiceAccounts: async (query?: Query) => {
+    const serviceAccounts = get().serviceAccounts;
+    set({ serviceAccounts: serviceAccounts.setLoading() });
+    const { data, error, message } =
+      await Service.admin.getServiceAccounts(query);
+    if (error) {
+      set({ serviceAccounts: serviceAccounts.setError(message) });
+      return;
+    }
+    set({ serviceAccounts: serviceAccounts.setSuccess(data) });
+  },
+
+  createServiceAccount: async (serviceAccount: CreateServiceAccountRequest) => {
+    const serviceAccounts = get().serviceAccounts;
+    set({ serviceAccounts: serviceAccounts.setLoading() });
+
+    const { error, message } =
+      await Service.admin.createServiceAccount(serviceAccount);
+
+    if (error) {
+      set({ serviceAccounts: serviceAccounts.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to create service account",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Service account created successfully",
+    });
+    get().getServiceAccounts();
+  },
+
+  updateServiceAccount: async (
+    id: string,
+    serviceAccount: UpdateServiceAccountRequest,
+  ) => {
+    const serviceAccounts = get().serviceAccounts;
+    set({ serviceAccounts: serviceAccounts.setLoading() });
+
+    const { error, message } = await Service.admin.updateServiceAccount(
+      id,
+      serviceAccount,
+    );
+
+    if (error) {
+      set({ serviceAccounts: serviceAccounts.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update service account",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Service account updated successfully",
+    });
+
+    get().getServiceAccounts();
+  },
+
+  deleteServiceAccount: async (id: string) => {
+    const serviceAccounts = get().serviceAccounts;
+    set({ serviceAccounts: serviceAccounts.setLoading() });
+
+    const { error, message } = await Service.admin.deleteServiceAccount(id);
+
+    if (error) {
+      set({ serviceAccounts: serviceAccounts.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to delete service account",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Service account deleted successfully",
+    });
+
+    get().getServiceAccounts();
+  },
+
   getUsers: async (query?: Query) => {
     const users = get().users;
     set({ users: users.setLoading() });
@@ -219,6 +806,32 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       type: "success",
       title: "Success",
       message: "User updated successfully",
+    });
+
+    get().getUsers();
+  },
+
+  deleteUser: async (id: string) => {
+    const users = get().users;
+    set({ users: users.setLoading() });
+
+    const { error, message } = await Service.admin.deleteUser(id);
+
+    if (error) {
+      set({ users: users.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to delete user",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "User deleted successfully",
     });
 
     get().getUsers();

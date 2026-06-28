@@ -122,26 +122,28 @@ const Table = <T, V>({
           highlightOnHover
           withColumnBorders
         >
-          <MantineTable.Thead className={stickyHeader ? classes.sticky : ""}>
-            {React.Children.toArray(
-              table.getHeaderGroups().map((headerGroup) => (
-                <MantineTable.Tr key={headerGroup.id}>
-                  {React.Children.toArray(
-                    headerGroup.headers.map(
-                      ({ isPlaceholder, column, getContext }) =>
-                        isPlaceholder ? null : (
-                          <MantineTable.Th key={column.id}>
-                            {flexRender(column.columnDef.header, {
-                              ...getContext(),
-                            })}
-                          </MantineTable.Th>
-                        ),
-                    ),
-                  )}
-                </MantineTable.Tr>
-              )),
-            )}
-          </MantineTable.Thead>
+          {!empty && (
+            <MantineTable.Thead className={stickyHeader ? classes.sticky : ""}>
+              {React.Children.toArray(
+                table.getHeaderGroups().map((headerGroup) => (
+                  <MantineTable.Tr key={headerGroup.id}>
+                    {React.Children.toArray(
+                      headerGroup.headers.map(
+                        ({ isPlaceholder, column, getContext }) =>
+                          isPlaceholder ? null : (
+                            <MantineTable.Th key={column.id}>
+                              {flexRender(column.columnDef.header, {
+                                ...getContext(),
+                              })}
+                            </MantineTable.Th>
+                          ),
+                      ),
+                    )}
+                  </MantineTable.Tr>
+                )),
+              )}
+            </MantineTable.Thead>
+          )}
 
           {!empty && (
             <MantineTable.Tbody>

@@ -6,6 +6,8 @@
 }
 
 .shell {
+  height: 100vh;
+  overflow: hidden;
   background-color: light-dark(
     var(--mantine-color-gray-3),
     var(--mantine-color-dark-6)

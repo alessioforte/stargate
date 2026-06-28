@@ -11,7 +11,7 @@ html,
 body,
 #root {
   min-height: 100%;
-  font-family: "Geist Mono", "IBM Plex Sans Arabic", monospace;
+  /*font-family: "Geist Mono", "IBM Plex Sans Arabic", monospace;*/
 }
 
 body {

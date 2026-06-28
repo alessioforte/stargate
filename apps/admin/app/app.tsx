@@ -4,12 +4,12 @@ import ErrorPage from "./routes/error";
 import Layout from "./routes/layout";
 import AdminHomePage from "./routes/home";
 import UsersPage from "./routes/users/users";
-import GatewayPage from "./routes/gateway";
-import APIKeysPage from "./routes/api-keys";
-import AdminKeysPage from "./routes/admin-keys";
-import OAuthClientsPage from "./routes/oauth-clients";
-import OrganizationsPage from "./routes/organizations";
-import ServiceAccountsPage from "./routes/service-accounts";
+import GatewayPage from "./routes/gateway/gateway";
+import APIKeysPage from "./routes/api-keys/api-keys";
+import AdminKeysPage from "./routes/admin-keys/admin-keys";
+import OAuthClientsPage from "./routes/oauth-clients/oauth-clients";
+import OrganizationsPage from "./routes/organizations/organizations";
+import ServiceAccountsPage from "./routes/service-accounts/service-accounts";
 
 const router = createBrowserRouter([
   {

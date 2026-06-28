@@ -44,16 +44,30 @@ export interface ConfigurationsQuery {
 
 export type Configuration = JsonValue;
 
+export const AdminKeyPermission = {
+  Users: "users",
+  Organizations: "organizations",
+  ApiKeys: "api_keys",
+  OAuthClients: "oauth_clients",
+  ServiceAccounts: "service_accounts",
+  Configurations: "configurations",
+} as const;
+
+export type AdminKeyPermission =
+  (typeof AdminKeyPermission)[keyof typeof AdminKeyPermission];
+
+export type AdminKeyStoredPermission = AdminKeyPermission | "super_admin";
+
 export interface AdminKey {
   id: string;
   label?: string | null;
-  permissions: string[];
+  permissions: AdminKeyStoredPermission[];
   revoked: boolean;
 }
 
 export interface CreateAdminKeyRequest {
   label?: string | null;
-  permissions: string[];
+  permissions: AdminKeyPermission[];
 }
 
 export interface CreateAdminKeyResponse extends AdminKey {
@@ -61,7 +75,7 @@ export interface CreateAdminKeyResponse extends AdminKey {
 }
 
 export interface UpdateAdminKeyPermissionsRequest {
-  permissions: string[];
+  permissions: AdminKeyPermission[];
 }
 
 export type ApiKeyOwnerType = "user" | "service_account";
@@ -94,6 +108,31 @@ export interface ApiKeyAttrsRequest {
   attrs: JsonValue;
 }
 
+export const OAuthGrantType = {
+  AuthorizationCode: "authorization_code",
+  ClientCredentials: "client_credentials",
+  RefreshToken: "refresh_token",
+} as const;
+
+export type OAuthGrantType =
+  (typeof OAuthGrantType)[keyof typeof OAuthGrantType];
+
+export const OAuthResponseType = {
+  Code: "code",
+} as const;
+
+export type OAuthResponseType =
+  (typeof OAuthResponseType)[keyof typeof OAuthResponseType];
+
+export const OAuthTokenEndpointAuthMethod = {
+  None: "none",
+  ClientSecretBasic: "client_secret_basic",
+  ClientSecretPost: "client_secret_post",
+} as const;
+
+export type OAuthTokenEndpointAuthMethod =
+  (typeof OAuthTokenEndpointAuthMethod)[keyof typeof OAuthTokenEndpointAuthMethod];
+
 export interface OAuthClient {
   attrs: JsonValue;
   audiences: string[];
@@ -101,14 +140,14 @@ export interface OAuthClient {
   createdAt: string;
   description?: string | null;
   enabled: boolean;
-  grantTypes: string[];
+  grantTypes: OAuthGrantType[];
   name: string;
   orgId?: string | null;
   redirectUris: string[];
-  responseTypes: string[];
+  responseTypes: OAuthResponseType[];
   scopes: string[];
   serviceAccountId?: string | null;
-  tokenEndpointAuthMethod: string;
+  tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;
   updatedAt: string;
 }
 
@@ -117,14 +156,14 @@ export interface CreateOAuthClientRequest {
   audiences?: string[] | null;
   clientId?: string | null;
   description?: string | null;
-  grantTypes: string[];
+  grantTypes: OAuthGrantType[];
   name: string;
   orgId?: string | null;
   redirectUris?: string[] | null;
-  responseTypes?: string[] | null;
+  responseTypes?: OAuthResponseType[] | null;
   scopes?: string[] | null;
   serviceAccountId?: string | null;
-  tokenEndpointAuthMethod?: string | null;
+  tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod | null;
 }
 
 export interface CreateOAuthClientResponse extends OAuthClient {
@@ -135,28 +174,28 @@ export interface UpdateOAuthClientRequest {
   attrs?: JsonValue;
   audiences?: string[];
   description?: string | null;
-  grantTypes: string[];
+  grantTypes: OAuthGrantType[];
   name: string;
   orgId?: string | null;
   redirectUris?: string[];
-  responseTypes?: string[];
+  responseTypes?: OAuthResponseType[];
   scopes?: string[];
   serviceAccountId?: string | null;
-  tokenEndpointAuthMethod: string;
+  tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;
 }
 
 export interface PatchOAuthClientRequest {
   attrs?: JsonValue;
   audiences?: string[] | null;
   description?: string | null;
-  grantTypes?: string[] | null;
+  grantTypes?: OAuthGrantType[] | null;
   name?: string | null;
   orgId?: string | null;
   redirectUris?: string[] | null;
-  responseTypes?: string[] | null;
+  responseTypes?: OAuthResponseType[] | null;
   scopes?: string[] | null;
   serviceAccountId?: string | null;
-  tokenEndpointAuthMethod?: string | null;
+  tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod | null;
 }
 
 export interface RotateOAuthClientSecretResponse extends OAuthClient {

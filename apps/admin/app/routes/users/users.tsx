@@ -10,8 +10,14 @@ import EditUser from "./edit-user";
 import { columns } from "./columns";
 
 const UsersPage = () => {
-  const { users, getUsers, createUser, updateUser, updateUserAttrs } =
-    useStore();
+  const {
+    users,
+    getUsers,
+    createUser,
+    updateUser,
+    deleteUser,
+    updateUserAttrs,
+  } = useStore();
   const t = useTranslations();
 
   const [opened, { open, close }] = useDisclosure(false);
@@ -30,11 +36,11 @@ const UsersPage = () => {
       <Table
         columns={columns}
         data={users?.data?.data ?? []}
+        empty={users?.data?.data?.length === 0}
         loading={users?.isLoading() ?? false}
         meta={{
           open,
-          close,
-          setSelectedUser,
+          setSelectedItem: setSelectedUser,
         }}
       />
       <EditUser
@@ -45,6 +51,7 @@ const UsersPage = () => {
           close();
         }}
         onSave={updateUser}
+        onDelete={deleteUser}
         onAttrsSave={updateUserAttrs}
       />
     </Box>

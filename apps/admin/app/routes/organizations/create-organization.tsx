@@ -4,7 +4,7 @@ import {
   Button,
   Divider,
   TextInput,
-  PasswordInput,
+  Textarea,
   Stack,
   Flex,
   Group,
@@ -15,43 +15,33 @@ import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
 import { FaPlus } from "react-icons/fa6";
 import { useTranslations } from "@/i18n";
-import type { CreateUserRequest } from "@/services/types";
+import type { CreateOrganizationRequest } from "@/services/types";
 import { CodeBox, EntityDrawer } from "@/components";
 
 interface FormValues {
-  nickname: string;
-  email: string;
-  givenName: string;
-  familyName: string;
-  password: string;
+  name: string;
+  description: string;
   attrs: string;
 }
 
 interface Props {
-  onSave: (user: CreateUserRequest) => void;
+  onSave: (organization: CreateOrganizationRequest) => void;
 }
 
 const emptyFormValues: FormValues = {
-  nickname: "",
-  email: "",
-  givenName: "",
-  familyName: "",
-  password: "",
+  name: "",
+  description: "",
   attrs: "{}",
 };
 
-const CreateUser: React.FC<Props> = ({ onSave }) => {
+const CreateOrganization: React.FC<Props> = ({ onSave }) => {
   const t = useTranslations();
   const [opened, { open, close }] = useDisclosure(false);
 
   const form = useForm<FormValues>({
     initialValues: emptyFormValues,
     validate: {
-      nickname: (value) => (value ? undefined : "Nickname is required"),
-      email: (value) => (value ? undefined : "Email is required"),
-      givenName: (value) => (value ? undefined : "Given name is required"),
-      familyName: (value) => (value ? undefined : "Family name is required"),
-      password: (value) => (value ? undefined : "Password is required"),
+      name: (value) => (value ? undefined : "Name is required"),
       attrs: (value) => {
         try {
           JSON.parse(value);
@@ -64,12 +54,9 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
   });
 
   const handleSubmit = (values: FormValues) => {
-    const payload: CreateUserRequest = {
-      nickname: values.nickname.trim(),
-      email: values.email.trim(),
-      givenName: values.givenName.trim() || null,
-      familyName: values.familyName.trim() || null,
-      password: values.password.trim(),
+    const payload: CreateOrganizationRequest = {
+      name: values.name.trim(),
+      description: values.description.trim() || null,
       attrs: JSON.parse(values.attrs) ?? {},
     };
 
@@ -85,7 +72,7 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
 
   return (
     <>
-      <Tooltip label={t("newUser")} position="left" offset={10}>
+      <Tooltip label={t("newOrganization")} position="left" offset={10}>
         <ActionIcon
           onClick={() => {
             open();
@@ -95,7 +82,11 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
         </ActionIcon>
       </Tooltip>
 
-      <EntityDrawer opened={opened} onClose={handleCancel} title={t("user")}>
+      <EntityDrawer
+        opened={opened}
+        onClose={handleCancel}
+        title={t("organization")}
+      >
         <form style={{ flex: 1 }} onSubmit={form.onSubmit(handleSubmit)}>
           <Flex
             direction="column"
@@ -112,42 +103,29 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
               <Stack p="sm">
                 <TextInput
                   variant="filled"
-                  label={t("nickname")}
-                  {...form.getInputProps("nickname")}
+                  label={t("name")}
+                  {...form.getInputProps("name")}
                 />
-                <TextInput
+                <Textarea
+                  autosize
+                  minRows={3}
                   variant="filled"
-                  label={t("email")}
-                  {...form.getInputProps("email")}
-                />
-                <TextInput
-                  variant="filled"
-                  label={t("givenName")}
-                  {...form.getInputProps("givenName")}
-                />
-                <TextInput
-                  variant="filled"
-                  label={t("familyName")}
-                  {...form.getInputProps("familyName")}
-                />
-                <PasswordInput
-                  variant="filled"
-                  label={t("password")}
-                  {...form.getInputProps("password")}
+                  label={t("description")}
+                  {...form.getInputProps("description")}
                 />
               </Stack>
             </Flex>
 
             <Divider my="md" />
 
-            <Group p="sm" gap="xs">
+            <Group gap="xs">
               <Text size="sm" fw={700}>
                 {t("attributes")}
               </Text>
               {form.errors.attrs && <Text c="red">{form.errors.attrs}</Text>}
             </Group>
 
-            <Box style={{ flex: 1, height: "100%" }}>
+            <Box style={{ flex: 1 }}>
               <CodeBox
                 value={form.values.attrs}
                 onChange={(value) => form.setFieldValue("attrs", value)}
@@ -160,4 +138,4 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
   );
 };
 
-export default CreateUser;
+export default CreateOrganization;

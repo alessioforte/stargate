@@ -1,3 +1,4 @@
+import { ScrollArea } from "@mantine/core";
 import styles from "./shell.module.css";
 import Header from "./header";
 import Sidebar from "./sidebar";
@@ -18,7 +19,9 @@ const Shell: React.FC<Props> = ({ children, sidebarItems = [] }) => {
       <Header />
       <div className={styles.body}>
         <Sidebar items={sidebarItems} />
-        <main className={styles.main}>{children}</main>
+        <main className={styles.main}>
+          <ScrollArea h="100%">{children}</ScrollArea>
+        </main>
       </div>
       <Footer />
     </div>

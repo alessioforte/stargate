@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
-import { Center, Text } from "@mantine/core";
+import { Center, Stack, Text } from "@mantine/core";
 import { RiHomeLine } from "react-icons/ri";
 import { HiOutlineUsers } from "react-icons/hi2";
 import { GoOrganization } from "react-icons/go";
@@ -9,7 +9,7 @@ import { AiOutlineApi } from "react-icons/ai";
 import { GoShieldLock } from "react-icons/go";
 import { AiOutlineAppstoreAdd } from "react-icons/ai";
 import { GrGateway } from "react-icons/gr";
-import { Shell } from "@/components";
+import { Shell, Loader } from "@/components";
 import useStore from "@/store";
 
 function currentReturnPath(pathname: string, query: string) {
@@ -57,6 +57,7 @@ const Layout = () => {
   const returnPath = currentReturnPath(location.pathname, location.search);
   const adminSessionStatus = useStore((state) => state.adminSessionStatus);
   const ensureAdminSession = useStore((state) => state.ensureAdminSession);
+  const loading = useStore((state) => state.loading);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,18 +78,22 @@ const Layout = () => {
   if (adminSessionStatus !== "ready") {
     return (
       <Center mih="100vh">
-        <Text c="dimmed">
-          {adminSessionStatus === "redirecting"
-            ? "Redirecting to sign in"
-            : "Checking session"}
-        </Text>
+        <Stack>
+          <Loader />
+          <Text c="dimmed">
+            {adminSessionStatus === "redirecting"
+              ? "Redirecting to sign in"
+              : "Checking session"}
+          </Text>
+        </Stack>
       </Center>
     );
   }
 
   return (
     <Shell sidebarItems={sidebarItems}>
-      <Outlet />
+      {loading && <Loader />}
+      {!loading && <Outlet />}
     </Shell>
   );
 };

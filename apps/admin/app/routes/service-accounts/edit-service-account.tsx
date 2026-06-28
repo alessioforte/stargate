@@ -1,104 +1,101 @@
 import { useState } from "react";
 import {
   ActionIcon,
-  Badge,
   Button,
-  Divider,
   Flex,
   Group,
   Modal,
+  Select,
   Stack,
   Text,
+  Textarea,
   TextInput,
   Tooltip,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
-import { useTranslations } from "@/i18n";
 import { AiOutlineDelete } from "react-icons/ai";
-import type { UpdateUserRequest, User, JsonValue } from "@/services/types";
-import {
-  EditActionControls,
-  EntityDrawer,
-  JsonAttributesForm,
-} from "@/components";
+import { useTranslations } from "@/i18n";
+import type {
+  Organization,
+  ServiceAccount,
+  UpdateServiceAccountRequest,
+} from "@/services/types";
+import { EditActionControls, EntityDrawer } from "@/components";
+import { organizationOptions } from "./organization-options";
 
 interface FormValues {
   id: string;
-  nickname: string;
-  email: string;
-  givenName: string;
-  familyName: string;
+  name: string;
+  description: string;
+  orgId: string;
 }
 
 interface Props {
-  user?: User | null;
+  organizations: Organization[];
+  serviceAccount?: ServiceAccount | null;
   opened: boolean;
   onClose: () => void;
-  onSave: (id: string, user: UpdateUserRequest) => void;
   onDelete: (id: string) => void;
-  onAttrsSave: (id: string, attrs: JsonValue) => void;
+  onSave: (id: string, serviceAccount: UpdateServiceAccountRequest) => void;
 }
 
 const emptyFormValues: FormValues = {
   id: "",
-  nickname: "",
-  email: "",
-  givenName: "",
-  familyName: "",
+  name: "",
+  description: "",
+  orgId: "",
 };
 
-function userToFormValues(user?: User | null): FormValues {
-  if (!user) return emptyFormValues;
+function serviceAccountToFormValues(
+  serviceAccount?: ServiceAccount | null,
+): FormValues {
+  if (!serviceAccount) return emptyFormValues;
 
   return {
-    id: user.id,
-    nickname: user.nickname,
-    email: user.email,
-    givenName: user.givenName ?? "",
-    familyName: user.familyName ?? "",
+    id: serviceAccount.id,
+    name: serviceAccount.name,
+    description: serviceAccount.description ?? "",
+    orgId: serviceAccount.orgId ?? "",
   };
 }
 
-function EditUserForm({
-  user,
+function EditServiceAccountForm({
+  organizations,
+  serviceAccount,
   onDeleteClick,
   onSave,
 }: {
-  user?: User | null;
+  organizations: Organization[];
+  serviceAccount?: ServiceAccount | null;
   onDeleteClick: () => void;
-  onSave: (id: string, user: UpdateUserRequest) => void;
+  onSave: (id: string, serviceAccount: UpdateServiceAccountRequest) => void;
 }) {
   const t = useTranslations();
   const [edit, setEdit] = useState(false);
 
   const form = useForm<FormValues>({
-    initialValues: userToFormValues(user),
+    initialValues: serviceAccountToFormValues(serviceAccount),
     validate: {
-      nickname: (value) => (value ? undefined : "Nickname is required"),
-      email: (value) => (value ? undefined : "Email is required"),
-      givenName: (value) => (value ? undefined : "Given name is required"),
-      familyName: (value) => (value ? undefined : "Family name is required"),
+      name: (value) => (value.trim() ? undefined : t("nameRequired")),
     },
   });
 
   const handleSubmit = (values: FormValues) => {
-    if (!user) return;
+    if (!serviceAccount) return;
 
-    const payload: UpdateUserRequest = {
-      nickname: values.nickname.trim(),
-      email: values.email.trim(),
-      givenName: values.givenName.trim() || null,
-      familyName: values.familyName.trim() || null,
+    const payload: UpdateServiceAccountRequest = {
+      name: values.name.trim(),
+      description: values.description.trim() || null,
     };
 
-    onSave(user.id, payload);
+    onSave(serviceAccount.id, payload);
   };
 
   return (
     <form onSubmit={form.onSubmit(handleSubmit)}>
       <Group mt="sm" px="sm" justify="space-between" gap="xs" align="center">
-        <Tooltip label={t("deleteUser")} position="right">
+        <Tooltip label={t("deleteServiceAccount")}>
           <ActionIcon
             type="button"
             color="red"
@@ -118,31 +115,38 @@ function EditUserForm({
           onEdit={() => setEdit(true)}
         />
       </Group>
+
       <Flex direction="column" justify="space-between">
         <Stack p="sm">
           <TextInput
-            readOnly={!edit}
+            readOnly
             variant="filled"
-            label={t("nickname")}
-            {...form.getInputProps("nickname")}
+            label={t("id")}
+            {...form.getInputProps("id")}
           />
           <TextInput
             readOnly={!edit}
             variant="filled"
-            label={t("email")}
-            {...form.getInputProps("email")}
+            label={t("name")}
+            {...form.getInputProps("name")}
           />
-          <TextInput
+          <Textarea
             readOnly={!edit}
+            autosize
+            minRows={3}
             variant="filled"
-            label={t("givenName")}
-            {...form.getInputProps("givenName")}
+            label={t("description")}
+            {...form.getInputProps("description")}
           />
-          <TextInput
-            readOnly={!edit}
+          <Select
+            disabled
+            searchable
             variant="filled"
-            label={t("familyName")}
-            {...form.getInputProps("familyName")}
+            label={t("organization")}
+            placeholder={t("selectOrganization")}
+            data={organizationOptions(organizations, form.values.orgId)}
+            value={form.values.orgId || null}
+            onChange={() => undefined}
           />
         </Stack>
       </Flex>
@@ -150,24 +154,24 @@ function EditUserForm({
   );
 }
 
-const EditUser: React.FC<Props> = ({
-  user,
+const EditServiceAccount: React.FC<Props> = ({
+  organizations,
+  serviceAccount,
   onClose,
-  onSave,
   onDelete,
-  onAttrsSave,
+  onSave,
   opened,
 }) => {
   const t = useTranslations();
-  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ServiceAccount | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteModalOpened, deleteModal] = useDisclosure(false);
   const deleteConfirmed = deleteConfirmation === "delete";
 
   const handleOpenDeleteModal = () => {
-    if (!user) return;
+    if (!serviceAccount) return;
 
-    setDeleteTarget(user);
+    setDeleteTarget(serviceAccount);
     setDeleteConfirmation("");
     onClose();
     deleteModal.open();
@@ -188,29 +192,22 @@ const EditUser: React.FC<Props> = ({
 
   return (
     <>
-      <EntityDrawer opened={opened} onClose={onClose} title={t("user")}>
-        {user && (
-          <>
-            <EditUserForm
-              key={user.id}
-              user={user}
-              onDeleteClick={handleOpenDeleteModal}
-              onSave={(id, user) => {
-                onSave(id, user);
-                onClose();
-              }}
-            />
-
-            <Divider my="md" />
-
-            <JsonAttributesForm
-              attrs={JSON.stringify(user?.attrs ?? {}, null, 2)}
-              onSave={(attrs) => {
-                onAttrsSave(user.id, attrs);
-                onClose();
-              }}
-            />
-          </>
+      <EntityDrawer
+        opened={opened}
+        onClose={onClose}
+        title={t("serviceAccount")}
+      >
+        {serviceAccount && (
+          <EditServiceAccountForm
+            key={serviceAccount.id}
+            organizations={organizations}
+            serviceAccount={serviceAccount}
+            onDeleteClick={handleOpenDeleteModal}
+            onSave={(id, serviceAccount) => {
+              onSave(id, serviceAccount);
+              onClose();
+            }}
+          />
         )}
       </EntityDrawer>
 
@@ -221,12 +218,7 @@ const EditUser: React.FC<Props> = ({
         title={t("dangerousZone")}
       >
         <Stack>
-          <Group my="md" justify="center">
-            <Badge color="red" size="lg" variant="light">
-              {deleteTarget?.email}
-            </Badge>
-          </Group>
-          <Text size="sm">{t("confirmDeleteUser")}</Text>
+          <Text size="sm">{t("confirmDeleteServiceAccount")}</Text>
           <TextInput
             data-autofocus
             variant="filled"
@@ -251,7 +243,7 @@ const EditUser: React.FC<Props> = ({
               disabled={!deleteConfirmed}
               onClick={handleConfirmDelete}
             >
-              {t("deleteUser")}
+              {t("deleteServiceAccount")}
             </Button>
           </Group>
         </Stack>
@@ -260,4 +252,4 @@ const EditUser: React.FC<Props> = ({
   );
 };
 
-export default EditUser;
+export default EditServiceAccount;
