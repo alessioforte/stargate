@@ -54,13 +54,59 @@ pub struct PaginatedResponse<T> {
 pub struct CreateAdminKeyRequest {
     #[serde(default)]
     pub label: Option<String>,
-    pub permissions: Vec<String>,
+    pub permissions: Vec<AdminKeyPermission>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAdminKeyPermissionsRequest {
-    pub permissions: Vec<String>,
+    pub permissions: Vec<AdminKeyPermission>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, utoipa::ToSchema)]
+pub enum AdminKeyPermission {
+    #[serde(rename = "users")]
+    Users,
+    #[serde(rename = "organizations")]
+    Organizations,
+    #[serde(rename = "api_keys")]
+    ApiKeys,
+    #[serde(rename = "oauth_clients")]
+    OAuthClients,
+    #[serde(rename = "service_accounts")]
+    ServiceAccounts,
+    #[serde(rename = "configurations")]
+    Configurations,
+}
+
+impl AdminKeyPermission {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Users => "users",
+            Self::Organizations => "organizations",
+            Self::ApiKeys => "api_keys",
+            Self::OAuthClients => "oauth_clients",
+            Self::ServiceAccounts => "service_accounts",
+            Self::Configurations => "configurations",
+        }
+    }
+}
+
+fn admin_key_permissions_to_strings(permissions: &[AdminKeyPermission]) -> Vec<String> {
+    permissions
+        .iter()
+        .map(|permission| permission.as_str().to_string())
+        .collect()
+}
+
+fn validate_admin_key_permissions(permissions: &[AdminKeyPermission]) -> Result<(), ErrorResponse> {
+    if permissions.is_empty() {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "Permissions list cannot be empty".to_string(),
+        )));
+    }
+
+    Ok(())
 }
 
 #[utoipa::path(
@@ -148,23 +194,15 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
     let ctx = take_audit_context_from(req.extensions_mut());
     let payload: CreateAdminKeyRequest = extract_json(req).await?;
 
-    if payload.permissions.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Permissions list cannot be empty".to_string(),
-        )));
-    }
+    validate_admin_key_permissions(&payload.permissions)?;
+    let permissions = admin_key_permissions_to_strings(&payload.permissions);
 
     let secret = pw::generate_admin_key();
     let key_hash = pw::hash_api_key(&secret);
 
-    let admin_key = crate::db::create_admin_key(
-        &key_hash,
-        payload.label.clone(),
-        payload.permissions.clone(),
-        ctx,
-    )
-    .await
-    .map_err(ErrorResponse::internal)?;
+    let admin_key = crate::db::create_admin_key(&key_hash, payload.label.clone(), permissions, ctx)
+        .await
+        .map_err(ErrorResponse::internal)?;
 
     let response = CreateAdminKeyResponse {
         id: admin_key.id,
@@ -199,11 +237,8 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
     let id: String = extract_path(&mut req).await?;
     let payload: UpdateAdminKeyPermissionsRequest = extract_json(req).await?;
 
-    if payload.permissions.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Permissions list cannot be empty".to_string(),
-        )));
-    }
+    validate_admin_key_permissions(&payload.permissions)?;
+    let permissions = admin_key_permissions_to_strings(&payload.permissions);
 
     let mut existing = crate::db::get_admin_key_by_id(&id)
         .await
@@ -221,7 +256,7 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
         )));
     }
 
-    existing.set_permissions(payload.permissions.clone());
+    existing.set_permissions(permissions);
 
     let updated = crate::db::update_admin_key(existing, ctx)
         .await
@@ -315,4 +350,46 @@ pub async fn delete_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         "admin_key_deleted",
     ))
     .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AdminKeyPermission, CreateAdminKeyRequest, admin_key_permissions_to_strings,
+        validate_admin_key_permissions,
+    };
+
+    #[test]
+    fn validates_admin_key_resource_permissions() {
+        let permissions = vec![AdminKeyPermission::Users, AdminKeyPermission::Organizations];
+
+        assert!(validate_admin_key_permissions(&permissions).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_admin_key_permissions() {
+        assert!(validate_admin_key_permissions(&[]).is_err());
+    }
+
+    #[test]
+    fn serializes_admin_key_permissions_to_grant_strings() {
+        let permissions = vec![
+            AdminKeyPermission::ApiKeys,
+            AdminKeyPermission::ServiceAccounts,
+        ];
+
+        assert_eq!(
+            admin_key_permissions_to_strings(&permissions),
+            vec!["api_keys".to_string(), "service_accounts".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_super_admin_admin_key_permission() {
+        let payload = serde_json::json!({
+            "permissions": ["users", "super_admin"]
+        });
+
+        assert!(serde_json::from_value::<CreateAdminKeyRequest>(payload).is_err());
+    }
 }

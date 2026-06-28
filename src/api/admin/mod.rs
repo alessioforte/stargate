@@ -30,6 +30,14 @@ impl Grants {
     }
 }
 
+fn admin_key_grants<'a>(permissions: impl IntoIterator<Item = &'a String>) -> HashSet<String> {
+    permissions
+        .into_iter()
+        .filter(|permission| permission.as_str() != SUPER_ADMIN)
+        .cloned()
+        .collect()
+}
+
 async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
     if !crate::act::otp::admin_step_up_required() {
         return true;
@@ -141,7 +149,7 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
             && !key.revoked
         {
             ctx = ctx.with_actor(db::ent::ActorType::AdminKey, Some(key.id));
-            grants = key.permissions.iter().map(|p| p.to_string()).collect();
+            grants = admin_key_grants(key.permissions.iter());
         }
     }
 
@@ -198,6 +206,25 @@ macro_rules! require_grants {
             ));
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SUPER_ADMIN, admin_key_grants};
+
+    #[test]
+    fn admin_key_grants_do_not_include_super_admin() {
+        let permissions = [
+            "users".to_string(),
+            SUPER_ADMIN.to_string(),
+            "organizations".to_string(),
+        ];
+        let grants = admin_key_grants(permissions.iter());
+
+        assert!(grants.contains("users"));
+        assert!(grants.contains("organizations"));
+        assert!(!grants.contains(SUPER_ADMIN));
+    }
 }
 
 pub fn router() -> axum::Router {
