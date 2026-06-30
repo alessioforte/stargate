@@ -5,6 +5,7 @@ export { default as Table } from "./table/table";
 export { createDetailsColumn } from "./table/details-column";
 export { default as Icon } from "./icon/icon";
 export { default as CodeBox } from "./code-box/code-box";
+export { default as useConfirmModal } from "./confirm-modal/use-confirm-modal";
 export { default as EditActionControls } from "./edit-action-controls/edit-action-controls";
 export { default as EntityDrawer } from "./entity-drawer/entity-drawer";
 export { default as JsonAttributesForm } from "./json-attributes-form/json-attributes-form";

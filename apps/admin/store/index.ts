@@ -14,6 +14,7 @@ import type {
   AdminHealth,
   ApiKey,
   ApiKeyQuery,
+  Configuration,
   CreateAdminKeyRequest,
   CreateAdminKeyResponse,
   CreateApiKeyRequest,
@@ -55,6 +56,7 @@ const initialState: State = {
 
   adminKeys: new StoreItem<List<AdminKey>>(null),
   apiKeys: new StoreItem<List<ApiKey>>(null),
+  configuration: new StoreItem<Configuration>(null),
   oauthClients: new StoreItem<List<OAuthClient>>(null),
   organizations: new StoreItem<List<Organization>>(null),
   serviceAccounts: new StoreItem<List<ServiceAccount>>(null),
@@ -401,6 +403,45 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     });
 
     get().getApiKeys();
+  },
+
+  getConfigurations: async () => {
+    const configuration = get().configuration;
+    set({ configuration: configuration.setLoading() });
+    const { data, error, message } = await Service.admin.getConfigurations();
+    if (error) {
+      set({ configuration: configuration.setError(message) });
+      return;
+    }
+    set({ configuration: configuration.setSuccess(data) });
+  },
+
+  updateConfigurations: async (configuration: Configuration) => {
+    const configurationItem = get().configuration;
+    set({ configuration: configurationItem.setLoading() });
+
+    const { error, message } =
+      await Service.admin.updateConfigurations(configuration);
+
+    if (error) {
+      set({ configuration: configurationItem.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to update gateway configuration",
+      });
+      return false;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Gateway configuration updated successfully",
+    });
+
+    set({ configuration: configurationItem.setSuccess(configuration) });
+    return true;
   },
 
   getOAuthClients: async (query?: Query) => {

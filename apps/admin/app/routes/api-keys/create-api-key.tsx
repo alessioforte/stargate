@@ -187,12 +187,11 @@ const CreateApiKey: React.FC<Props> = ({ serviceAccounts, users, onSave }) => {
               </Text>
               {form.errors.attrs && <Text c="red">{form.errors.attrs}</Text>}
             </Group>
-            <Box h={220}>
-              <CodeBox
-                value={form.values.attrs}
-                onChange={(value) => form.setFieldValue("attrs", value)}
-              />
-            </Box>
+
+            <CodeBox
+              value={form.values.attrs}
+              onChange={(value) => form.setFieldValue("attrs", value)}
+            />
           </Stack>
         </form>
       </EntityDrawer>

@@ -3,6 +3,7 @@ import type {
   AdminKey,
   ApiKey,
   ApiKeyQuery,
+  Configuration,
   CreateAdminKeyRequest,
   CreateAdminKeyResponse,
   CreateApiKeyRequest,
@@ -59,6 +60,7 @@ export interface State {
 
   adminKeys: StoreItem<List<AdminKey>>;
   apiKeys: StoreItem<List<ApiKey>>;
+  configuration: StoreItem<Configuration>;
   oauthClients: StoreItem<List<OAuthClient>>;
   organizations: StoreItem<List<Organization>>;
   serviceAccounts: StoreItem<List<ServiceAccount>>;
@@ -90,6 +92,9 @@ export interface Actions {
   updateApiKeyAttrs: (id: string, attrs: JsonValue) => Promise<void>;
   revokeApiKey: (id: string) => Promise<void>;
   deleteApiKey: (id: string) => Promise<void>;
+
+  getConfigurations: () => Promise<void>;
+  updateConfigurations: (configuration: Configuration) => Promise<boolean>;
 
   getOAuthClients: (query?: Query) => Promise<void>;
   createOAuthClient: (

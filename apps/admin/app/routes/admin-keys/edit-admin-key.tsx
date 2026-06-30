@@ -15,7 +15,11 @@ import type {
   AdminKeyPermission,
   UpdateAdminKeyPermissionsRequest,
 } from "@/services/types";
-import { EditActionControls, EntityDrawer } from "@/components";
+import {
+  EditActionControls,
+  EntityDrawer,
+  useConfirmModal,
+} from "@/components";
 import AdminKeyPermissionsInput from "./permissions-input";
 import { isAdminKeyPermission } from "./permissions";
 
@@ -127,44 +131,54 @@ const EditAdminKey: React.FC<Props> = ({
   opened,
 }) => {
   const t = useTranslations();
+  const { confirm, confirmModal } = useConfirmModal();
 
   return (
-    <EntityDrawer opened={opened} onClose={onClose} title={t("adminKey")}>
-      {adminKey && (
-        <>
-          <Group px="sm" pt="sm" justify="space-between">
-            <Badge color={adminKey.revoked ? "red" : "teal"}>
-              {adminKey.revoked ? t("revoked") : t("active")}
-            </Badge>
-            {!adminKey.revoked && (
-              <Button
-                type="button"
-                color="red"
-                size="compact-sm"
-                onClick={() => {
-                  if (!window.confirm(t("confirmRevokeAdminKey"))) return;
-                  onRevoke(adminKey.id);
-                  onClose();
-                }}
-              >
-                {t("revoke")}
-              </Button>
-            )}
-          </Group>
+    <>
+      {confirmModal}
+      <EntityDrawer opened={opened} onClose={onClose} title={t("adminKey")}>
+        {adminKey && (
+          <>
+            <Group px="sm" pt="sm" justify="space-between">
+              <Badge color={adminKey.revoked ? "red" : "teal"}>
+                {adminKey.revoked ? t("revoked") : t("active")}
+              </Badge>
+              {!adminKey.revoked && (
+                <Button
+                  type="button"
+                  color="red"
+                  size="compact-sm"
+                  onClick={async () => {
+                    const confirmed = await confirm({
+                      color: "red",
+                      confirmLabel: t("revoke"),
+                      message: t("confirmRevokeAdminKey"),
+                      title: t("revoke"),
+                    });
+                    if (!confirmed) return;
+                    onRevoke(adminKey.id);
+                    onClose();
+                  }}
+                >
+                  {t("revoke")}
+                </Button>
+              )}
+            </Group>
 
-          <Divider my="sm" />
+            <Divider my="sm" />
 
-          <EditAdminKeyForm
-            key={adminKey.id}
-            adminKey={adminKey}
-            onSave={(id, adminKey) => {
-              onSave(id, adminKey);
-              onClose();
-            }}
-          />
-        </>
-      )}
-    </EntityDrawer>
+            <EditAdminKeyForm
+              key={adminKey.id}
+              adminKey={adminKey}
+              onSave={(id, adminKey) => {
+                onSave(id, adminKey);
+                onClose();
+              }}
+            />
+          </>
+        )}
+      </EntityDrawer>
+    </>
   );
 };
 

@@ -15,7 +15,11 @@ import { useDisclosure } from "@mantine/hooks";
 import { AiOutlineDelete } from "react-icons/ai";
 import { useTranslations } from "@/i18n";
 import type { ApiKey, JsonValue } from "@/services/types";
-import { EntityDrawer, JsonAttributesForm } from "@/components";
+import {
+  EntityDrawer,
+  JsonAttributesForm,
+  useConfirmModal,
+} from "@/components";
 
 interface Props {
   apiKey?: ApiKey | null;
@@ -35,6 +39,7 @@ const EditApiKey: React.FC<Props> = ({
   opened,
 }) => {
   const t = useTranslations();
+  const { confirm, confirmModal } = useConfirmModal();
   const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteModalOpened, deleteModal] = useDisclosure(false);
@@ -87,8 +92,14 @@ const EditApiKey: React.FC<Props> = ({
                     type="button"
                     color="red"
                     size="compact-sm"
-                    onClick={() => {
-                      if (!window.confirm(t("confirmRevokeApiKey"))) return;
+                    onClick={async () => {
+                      const confirmed = await confirm({
+                        color: "red",
+                        confirmLabel: t("revoke"),
+                        message: t("confirmRevokeApiKey"),
+                        title: t("revoke"),
+                      });
+                      if (!confirmed) return;
                       onRevoke(apiKey.id);
                       onClose();
                     }}
@@ -126,6 +137,7 @@ const EditApiKey: React.FC<Props> = ({
           </>
         )}
       </EntityDrawer>
+      {confirmModal}
 
       <Modal
         centered

@@ -51,13 +51,12 @@ const JsonAttributesForm: React.FC<Props> = ({ attrs, onSave }) => {
             onEdit={() => setEdit(true)}
           />
         </Group>
-        <Box style={{ flex: 1, height: "100%" }}>
-          <CodeBox
-            readOnly={!edit}
-            value={form.values.attrs}
-            onChange={(value) => form.setFieldValue("attrs", value)}
-          />
-        </Box>
+
+        <CodeBox
+          readOnly={!edit}
+          value={form.values.attrs}
+          onChange={(value) => form.setFieldValue("attrs", value)}
+        />
       </Flex>
     </form>
   );

@@ -147,12 +147,10 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
               {form.errors.attrs && <Text c="red">{form.errors.attrs}</Text>}
             </Group>
 
-            <Box style={{ flex: 1, height: "100%" }}>
-              <CodeBox
-                value={form.values.attrs}
-                onChange={(value) => form.setFieldValue("attrs", value)}
-              />
-            </Box>
+            <CodeBox
+              value={form.values.attrs}
+              onChange={(value) => form.setFieldValue("attrs", value)}
+            />
           </Flex>
         </form>
       </EntityDrawer>
