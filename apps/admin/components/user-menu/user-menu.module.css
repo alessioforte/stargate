@@ -1,0 +1,82 @@
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid
+    light-dark(var(--mantine-color-gray-3), var(--mantine-color-gray-8));
+  background-color: light-dark(
+    var(--mantine-color-gray-3),
+    var(--mantine-color-dark-6)
+  );
+}
+
+.actionIcon {
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+}
+
+.actionIcon:hover {
+  background: transparent;
+}
+
+.labels {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  margin-right: 20px;
+}
+
+.description {
+  color: var(--mantine-color-primary);
+  font-size: 9px;
+}
+
+.char {
+  color: var(--mantine-color-primary);
+}
+
+.dropdown {
+  min-width: 200px;
+}
+
+.treeRoot {
+  --tree-line-color: light-dark(
+    var(--mantine-color-default-border),
+    var(--mantine-color-gray-3)
+  );
+  --tree-line-width: 1px;
+}
+
+.treeItem {
+  padding: 0;
+  margin-bottom: 0;
+  margin-left: var(--label-offset);
+  border-radius: 4px;
+  max-width: 200px;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  overflow-x: hidden;
+  &:hover,
+  &:active {
+    .treeItemText {
+      color: var(--mantine-color-primary);
+    }
+  }
+}
+
+.treeItemActive {
+  font-weight: 800;
+  .treeItemText {
+    color: var(--mantine-color-primary);
+  }
+}
+
+.treeItemText {
+  padding-left: 5px;
+  display: inline-block;
+  color: light-dark(var(--text-color), var(--mantine-color-dark-0));
+}

@@ -1,0 +1,16 @@
+html {
+  overflow: hidden;
+}
+
+body {
+  background-color: light-dark(
+    var(--mantine-color-gray-2),
+    var(--mantine-color-dark-7)
+  );
+  line-height: 1.5;
+  overscroll-behavior: none;
+}
+
+a {
+  text-decoration: none;
+}
