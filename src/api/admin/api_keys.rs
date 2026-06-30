@@ -22,6 +22,8 @@ pub struct ApiKeySchema {
     pub label: String,
     pub revoked: bool,
     pub attrs: Value,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -31,6 +33,8 @@ pub struct CreateApiKeyResponse {
     label: String,
     attrs: Value,
     revoked: bool,
+    created_at: String,
+    updated_at: String,
     api_key: String,
 }
 
@@ -241,6 +245,8 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         label: api_key.label,
         attrs: api_key.attrs,
         revoked: api_key.revoked,
+        created_at: api_key.created_at.to_rfc3339(),
+        updated_at: api_key.updated_at.to_rfc3339(),
         api_key: secret,
     };
 

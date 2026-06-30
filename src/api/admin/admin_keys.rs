@@ -19,6 +19,8 @@ pub struct AdminKeySchema {
     pub label: Option<String>,
     pub permissions: Vec<String>,
     pub revoked: bool,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -28,6 +30,8 @@ pub struct CreateAdminKeyResponse {
     pub label: Option<String>,
     pub permissions: Vec<String>,
     pub revoked: bool,
+    pub created_at: String,
+    pub updated_at: String,
     pub api_key: String,
 }
 
@@ -209,6 +213,8 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         label: admin_key.label,
         permissions: admin_key.permissions.0,
         revoked: admin_key.revoked,
+        created_at: admin_key.created_at.to_rfc3339(),
+        updated_at: admin_key.updated_at.to_rfc3339(),
         api_key: secret,
     };
 

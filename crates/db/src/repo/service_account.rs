@@ -1,5 +1,6 @@
 use crate::ent::ServiceAccount;
 use anyhow::Result;
+use chrono::Utc;
 
 pub const SERVICE_ACCOUNT: &str = "service_accounts";
 
@@ -34,8 +35,8 @@ impl ServiceAccountRepository {
 
         let row = sqlx::query_as::<_, ServiceAccount>(sqlx::AssertSqlSafe(format!(
             "
-            INSERT INTO {tbl} (id, name, description, org_id)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO {tbl} (id, name, description, org_id, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         ",
             tbl = SERVICE_ACCOUNT
@@ -44,6 +45,8 @@ impl ServiceAccountRepository {
         .bind(&sa.name)
         .bind(&sa.description)
         .bind(&sa.org_id)
+        .bind(sa.created_at)
+        .bind(sa.updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -75,7 +78,7 @@ impl ServiceAccountRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, ServiceAccount>(sqlx::AssertSqlSafe(format!(
-            "SELECT * FROM {tbl} ORDER BY id DESC LIMIT $1 OFFSET $2",
+            "SELECT * FROM {tbl} ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2",
             tbl = SERVICE_ACCOUNT
         )))
         .bind(limit)
@@ -115,7 +118,7 @@ impl ServiceAccountRepository {
             "
             SELECT * FROM {tbl}
             WHERE name {like} $1 OR description {like} $1
-            ORDER BY id DESC LIMIT $2 OFFSET $3
+            ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3
         ",
             tbl = SERVICE_ACCOUNT,
             like = crate::backend::LIKE
@@ -157,9 +160,10 @@ impl ServiceAccountRepository {
         description: Option<&str>,
         org_id: Option<&str>,
     ) -> Result<ServiceAccount> {
+        let updated_at = Utc::now();
         let row = sqlx::query_as::<_, ServiceAccount>(sqlx::AssertSqlSafe(format!(
             "
-            UPDATE {tbl} SET name = $2, description = $3, org_id = $4 WHERE id = $1
+            UPDATE {tbl} SET name = $2, description = $3, org_id = $4, updated_at = $5 WHERE id = $1
             RETURNING *
         ",
             tbl = SERVICE_ACCOUNT
@@ -168,6 +172,7 @@ impl ServiceAccountRepository {
         .bind(name)
         .bind(description)
         .bind(org_id)
+        .bind(updated_at)
         .fetch_one(&mut **tx)
         .await?;
 

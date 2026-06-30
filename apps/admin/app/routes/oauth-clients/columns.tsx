@@ -3,6 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { getTranslation } from "@/i18n";
 import { type OAuthClient } from "@/services/types";
 import { createDetailsColumn } from "@/components";
+import { formatDate } from "@/lib/format-date";
 import {
   getOAuthGrantTypeLabel,
   getOAuthTokenEndpointAuthMethodLabel,
@@ -37,6 +38,16 @@ export const columns: ColumnDef<OAuthClient>[] = [
         ))}
       </Group>
     ),
+  },
+  {
+    accessorKey: "createdAt",
+    header: () => getTranslation("createdAt").toLowerCase(),
+    cell: (props) => formatDate(props.row.original.createdAt),
+  },
+  {
+    accessorKey: "updatedAt",
+    header: () => getTranslation("updatedAt").toLowerCase(),
+    cell: (props) => formatDate(props.row.original.updatedAt),
   },
   {
     accessorKey: "enabled",

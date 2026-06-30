@@ -1,5 +1,6 @@
 use crate::ent::User;
 use anyhow::Result;
+use chrono::Utc;
 
 pub const USER: &str = "users";
 
@@ -23,8 +24,8 @@ impl UserRepository {
         let row = sqlx::query_as::<_, User>(
             sqlx::AssertSqlSafe(format!(
                 "
-            INSERT INTO {users} (id, email, given_name, family_name, nickname, picture, phone_number, attrs)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO {users} (id, email, given_name, family_name, nickname, picture, phone_number, attrs, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
         ",
                 users = USER
@@ -38,6 +39,8 @@ impl UserRepository {
         .bind(&user.picture)
         .bind(&user.phone_number)
         .bind(&user.attrs)
+        .bind(user.created_at)
+        .bind(user.updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -53,7 +56,7 @@ impl UserRepository {
                 "
             SELECT * FROM {users}
             WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
-            ORDER BY id DESC
+            ORDER BY created_at DESC, id DESC
         ",
                 users = USER,
                 like = crate::backend::LIKE
@@ -84,11 +87,12 @@ impl UserRepository {
     }
 
     pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
+        let updated_at = Utc::now();
         let row = sqlx::query_as::<_, User>(
             sqlx::AssertSqlSafe(format!(
                 "
             UPDATE {users}
-            SET email = $2, given_name = $3, family_name = $4, nickname = $5, picture = $6, phone_number = $7, attrs = $8
+            SET email = $2, given_name = $3, family_name = $4, nickname = $5, picture = $6, phone_number = $7, attrs = $8, updated_at = $9
             WHERE id = $1
             RETURNING *
         ",
@@ -103,6 +107,7 @@ impl UserRepository {
         .bind(&user.picture)
         .bind(&user.phone_number)
         .bind(&user.attrs)
+        .bind(updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -114,7 +119,7 @@ impl UserRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
-            "SELECT * FROM {users} ORDER BY id LIMIT $1 OFFSET $2",
+            "SELECT * FROM {users} ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2",
             users = USER
         )))
         .bind(limit)
@@ -154,7 +159,7 @@ impl UserRepository {
             sqlx::AssertSqlSafe(format!(
                 "SELECT * FROM {users}
                  WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
-                 ORDER BY id LIMIT $2 OFFSET $3",
+                 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
                 users = USER,
                 like = crate::backend::LIKE
             )),

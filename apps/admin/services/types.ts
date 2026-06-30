@@ -59,10 +59,12 @@ export type AdminKeyPermission =
 export type AdminKeyStoredPermission = AdminKeyPermission | "super_admin";
 
 export interface AdminKey {
+  createdAt: string;
   id: string;
   label?: string | null;
   permissions: AdminKeyStoredPermission[];
   revoked: boolean;
+  updatedAt: string;
 }
 
 export interface CreateAdminKeyRequest {
@@ -88,9 +90,11 @@ export interface ApiKeyQuery extends PaginationQuery {
 
 export interface ApiKey {
   attrs: JsonValue;
+  createdAt: string;
   id: string;
   label: string;
   revoked: boolean;
+  updatedAt: string;
 }
 
 export interface CreateApiKeyRequest {
@@ -204,9 +208,11 @@ export interface RotateOAuthClientSecretResponse extends OAuthClient {
 
 export interface Organization {
   attrs?: JsonValue | null;
+  createdAt: string;
   description?: string | null;
   id: string;
   name: string;
+  updatedAt: string;
 }
 
 export interface CreateOrganizationRequest {
@@ -222,10 +228,12 @@ export interface UpdateOrganizationRequest {
 }
 
 export interface ServiceAccount {
+  createdAt: string;
   description?: string | null;
   id: string;
   name: string;
   orgId?: string | null;
+  updatedAt: string;
 }
 
 export interface CreateServiceAccountRequest {
@@ -241,6 +249,7 @@ export interface UpdateServiceAccountRequest {
 
 export interface User {
   attrs: JsonValue;
+  createdAt: string;
   email: string;
   familyName?: string | null;
   givenName?: string | null;
@@ -248,6 +257,7 @@ export interface User {
   nickname: string;
   phoneNumber?: string | null;
   picture?: string | null;
+  updatedAt: string;
 }
 
 export interface CreateUserRequest {

@@ -269,5 +269,7 @@
   "selectOrCreateObject": "Select an object or create a new one.",
   "invalidJson": "Invalid JSON",
   "save": "Save",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "createdAt": "Created at",
+  "updatedAt": "Updated at"
 }

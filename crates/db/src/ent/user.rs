@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -12,11 +13,14 @@ pub struct User {
     pub picture: Option<String>,
     pub phone_number: Option<String>,
     pub attrs: Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl User {
     pub fn new(email: String, nickname: String) -> Self {
         let id = ulid::Ulid::new().to_string();
+        let now = Utc::now();
         User {
             id,
             email,
@@ -26,6 +30,8 @@ impl User {
             picture: None,
             phone_number: None,
             attrs: Value::Object(serde_json::Map::new()),
+            created_at: now,
+            updated_at: now,
         }
     }
 

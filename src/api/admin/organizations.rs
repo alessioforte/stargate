@@ -20,6 +20,8 @@ pub struct OrganizationSchema {
     pub name: String,
     pub description: Option<String>,
     pub attrs: Option<serde_json::Value>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]

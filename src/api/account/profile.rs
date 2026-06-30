@@ -20,6 +20,8 @@ pub struct UserSchema {
     pub picture: Option<String>,
     pub phone_number: Option<String>,
     pub attrs: Value,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[utoipa::path(

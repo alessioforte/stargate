@@ -1,5 +1,6 @@
 use crate::ent::AdminKey;
 use anyhow::Result;
+use chrono::Utc;
 
 pub const ADMIN_KEY: &str = "admin_keys";
 
@@ -29,8 +30,8 @@ impl AdminKeyRepository {
         let admin_key = AdminKey::new(key_hash.to_string(), label, permissions);
         let row = sqlx::query_as::<_, AdminKey>(sqlx::AssertSqlSafe(format!(
             "
-            INSERT INTO {admin_keys} (id, key_hash, label, permissions, revoked)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO {admin_keys} (id, key_hash, label, permissions, revoked, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
         ",
             admin_keys = ADMIN_KEY
@@ -40,6 +41,8 @@ impl AdminKeyRepository {
         .bind(&admin_key.label)
         .bind(&admin_key.permissions)
         .bind(admin_key.revoked)
+        .bind(admin_key.created_at)
+        .bind(admin_key.updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -86,7 +89,7 @@ impl AdminKeyRepository {
     {
         let rows = sqlx::query_as::<_, AdminKey>(sqlx::AssertSqlSafe(format!(
             "
-            SELECT * FROM {admin_keys} ORDER BY id DESC LIMIT $1 OFFSET $2
+            SELECT * FROM {admin_keys} ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2
         ",
             admin_keys = ADMIN_KEY
         )))
@@ -119,10 +122,11 @@ impl AdminKeyRepository {
         tx: &mut crate::backend::Tx<'_>,
         admin_key: AdminKey,
     ) -> Result<AdminKey> {
+        let updated_at = Utc::now();
         let row = sqlx::query_as::<_, AdminKey>(sqlx::AssertSqlSafe(format!(
             "
             UPDATE {admin_keys}
-            SET label = $2, permissions = $3
+            SET label = $2, permissions = $3, updated_at = $4
             WHERE id = $1
             RETURNING *
         ",
@@ -131,6 +135,7 @@ impl AdminKeyRepository {
         .bind(&admin_key.id)
         .bind(&admin_key.label)
         .bind(&admin_key.permissions)
+        .bind(updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -138,13 +143,15 @@ impl AdminKeyRepository {
     }
 
     pub async fn revoke_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
+        let updated_at = Utc::now();
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "
-            UPDATE {admin_keys} SET revoked = TRUE WHERE id = $1
+            UPDATE {admin_keys} SET revoked = TRUE, updated_at = $2 WHERE id = $1
         ",
             admin_keys = ADMIN_KEY
         )))
         .bind(id)
+        .bind(updated_at)
         .execute(&mut **tx)
         .await?;
 

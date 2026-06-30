@@ -26,6 +26,8 @@ pub struct UserSchema {
     pub picture: Option<String>,
     pub phone_number: Option<String>,
     pub attrs: Value,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -35,6 +37,8 @@ pub struct OrganizationSchema {
     pub name: String,
     pub description: Option<String>,
     pub attrs: Value,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]

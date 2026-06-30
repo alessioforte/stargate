@@ -1,5 +1,6 @@
 use crate::ent::ApiKey;
 use anyhow::Result;
+use chrono::Utc;
 
 pub const API_KEY: &str = "api_keys";
 pub const USER_API_KEY: &str = "user_api_keys";
@@ -35,8 +36,8 @@ impl ApiKeyRepository {
         );
         let row = sqlx::query_as::<_, ApiKey>(sqlx::AssertSqlSafe(format!(
             "
-            INSERT INTO {api_keys} (id, key_hash, label, revoked, attrs)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO {api_keys} (id, key_hash, label, revoked, attrs, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
         ",
             api_keys = API_KEY
@@ -46,6 +47,8 @@ impl ApiKeyRepository {
         .bind(&api_key.label)
         .bind(api_key.revoked)
         .bind(&api_key.attrs)
+        .bind(api_key.created_at)
+        .bind(api_key.updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -97,7 +100,7 @@ impl ApiKeyRepository {
             SELECT ak.* FROM {api_keys} ak
             INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id
             WHERE uak.user_id = $1
-            ORDER BY ak.id DESC
+            ORDER BY ak.created_at DESC, ak.id DESC
         ",
             api_keys = API_KEY,
             user_api_keys = USER_API_KEY
@@ -121,7 +124,7 @@ impl ApiKeyRepository {
         let rows = sqlx::query_as::<_, ApiKey>(sqlx::AssertSqlSafe(format!(
             "SELECT ak.* FROM {api_keys} ak
                 INNER JOIN {user_api_keys} uak ON ak.id = uak.api_key_id
-                ORDER BY ak.id DESC LIMIT $1 OFFSET $2",
+                ORDER BY ak.created_at DESC, ak.id DESC LIMIT $1 OFFSET $2",
             api_keys = API_KEY,
             user_api_keys = USER_API_KEY
         )))
@@ -162,7 +165,7 @@ impl ApiKeyRepository {
             SELECT ak.* FROM {api_keys} ak
             INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id
             WHERE sak.service_account_id = $1
-            ORDER BY ak.id DESC
+            ORDER BY ak.created_at DESC, ak.id DESC
         ",
             api_keys = API_KEY,
             sa_api_keys = SERVICE_ACCOUNT_API_KEY
@@ -186,7 +189,7 @@ impl ApiKeyRepository {
         let rows = sqlx::query_as::<_, ApiKey>(sqlx::AssertSqlSafe(format!(
             "SELECT ak.* FROM {api_keys} ak
                 INNER JOIN {sa_api_keys} sak ON ak.id = sak.api_key_id
-                ORDER BY ak.id DESC LIMIT $1 OFFSET $2",
+                ORDER BY ak.created_at DESC, ak.id DESC LIMIT $1 OFFSET $2",
             api_keys = API_KEY,
             sa_api_keys = SERVICE_ACCOUNT_API_KEY
         )))
@@ -232,13 +235,15 @@ impl ApiKeyRepository {
     }
 
     pub async fn revoke_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
+        let updated_at = Utc::now();
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "
-            UPDATE {api_keys} SET revoked = TRUE WHERE id = $1
+            UPDATE {api_keys} SET revoked = TRUE, updated_at = $2 WHERE id = $1
         ",
             api_keys = API_KEY
         )))
         .bind(id)
+        .bind(updated_at)
         .execute(&mut **tx)
         .await?;
 
@@ -282,7 +287,7 @@ impl ApiKeyRepository {
     {
         let rows = sqlx::query_as::<_, ApiKey>(sqlx::AssertSqlSafe(format!(
             "
-            SELECT * FROM {api_keys} ORDER BY id DESC LIMIT $1 OFFSET $2
+            SELECT * FROM {api_keys} ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2
         ",
             api_keys = API_KEY
         )))
@@ -311,10 +316,11 @@ impl ApiKeyRepository {
     }
 
     pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, api_key: ApiKey) -> Result<ApiKey> {
+        let updated_at = Utc::now();
         let row = sqlx::query_as::<_, ApiKey>(sqlx::AssertSqlSafe(format!(
             "
             UPDATE {api_keys}
-            SET label = $2, attrs = $3
+            SET label = $2, attrs = $3, updated_at = $4
             WHERE id = $1
             RETURNING *
         ",
@@ -323,6 +329,7 @@ impl ApiKeyRepository {
         .bind(&api_key.id)
         .bind(&api_key.label)
         .bind(&api_key.attrs)
+        .bind(updated_at)
         .fetch_one(&mut **tx)
         .await?;
 

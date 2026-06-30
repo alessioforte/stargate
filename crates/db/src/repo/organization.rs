@@ -1,6 +1,7 @@
 use super::USER;
 use crate::ent::{Organization, User};
 use anyhow::Result;
+use chrono::Utc;
 pub const ORGANIZATION: &str = "organizations";
 pub const USER_ORGANIZATION: &str = "user_organizations";
 
@@ -31,8 +32,8 @@ impl OrganizationRepository {
 
         let row = sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
             "
-            INSERT INTO {tbl} (id, name, description, attrs)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO {tbl} (id, name, description, attrs, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         ",
             tbl = ORGANIZATION
@@ -41,6 +42,8 @@ impl OrganizationRepository {
         .bind(&org.name)
         .bind(&org.description)
         .bind(attrs)
+        .bind(org.created_at)
+        .bind(org.updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -67,7 +70,7 @@ impl OrganizationRepository {
         E: crate::backend::ReadExecutor<'c>,
     {
         let rows = sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
-            "SELECT * FROM {tbl} ORDER BY id DESC LIMIT $1 OFFSET $2",
+            "SELECT * FROM {tbl} ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2",
             tbl = ORGANIZATION
         )))
         .bind(limit)
@@ -107,7 +110,7 @@ impl OrganizationRepository {
             "
             SELECT * FROM {tbl}
             WHERE name {like} $1 OR description {like} $1
-            ORDER BY id DESC LIMIT $2 OFFSET $3
+            ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3
         ",
             tbl = ORGANIZATION,
             like = crate::backend::LIKE
@@ -149,9 +152,10 @@ impl OrganizationRepository {
         description: Option<&str>,
         attrs: Option<&serde_json::Value>,
     ) -> Result<Organization> {
+        let updated_at = Utc::now();
         let row = sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
             "
-            UPDATE {tbl} SET name = $2, description = $3, attrs = $4 WHERE id = $1
+            UPDATE {tbl} SET name = $2, description = $3, attrs = $4, updated_at = $5 WHERE id = $1
             RETURNING *
         ",
             tbl = ORGANIZATION
@@ -160,6 +164,7 @@ impl OrganizationRepository {
         .bind(name)
         .bind(description)
         .bind(attrs)
+        .bind(updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -223,7 +228,7 @@ impl OrganizationRepository {
             SELECT u.* FROM {users} u
             INNER JOIN {tbl} uo ON u.id = uo.user_id
             WHERE uo.org_id = $1
-            ORDER BY u.id
+            ORDER BY u.created_at DESC, u.id DESC
         ",
             users = USER,
             tbl = USER_ORGANIZATION
@@ -249,7 +254,7 @@ impl OrganizationRepository {
             "SELECT u.* FROM {users} u
                 INNER JOIN {tbl} uo ON u.id = uo.user_id
                 WHERE uo.org_id = $1
-                ORDER BY u.id DESC LIMIT $2 OFFSET $3",
+                ORDER BY u.created_at DESC, u.id DESC LIMIT $2 OFFSET $3",
             users = USER,
             tbl = USER_ORGANIZATION
         )))
@@ -289,7 +294,7 @@ impl OrganizationRepository {
             SELECT o.* FROM {tbl_org} o
             INNER JOIN {tbl_uo} uo ON o.id = uo.org_id
             WHERE uo.user_id = $1
-            ORDER BY o.id
+            ORDER BY o.created_at DESC, o.id DESC
         ",
             tbl_org = ORGANIZATION,
             tbl_uo = USER_ORGANIZATION

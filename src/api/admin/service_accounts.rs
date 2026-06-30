@@ -20,6 +20,8 @@ pub struct ServiceAccountSchema {
     pub name: String,
     pub description: Option<String>,
     pub org_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]

@@ -28,14 +28,18 @@ CREATE TABLE IF NOT EXISTS "organizations" (
     "id" TEXT PRIMARY KEY,
     "name" VARCHAR(100) NOT NULL,
     "description" TEXT,
-    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
+    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS "service_accounts" (
     "id" TEXT PRIMARY KEY,
     "name" VARCHAR(100) NOT NULL,
     "description" TEXT,
-    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE CASCADE
+    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE CASCADE,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS "oauth_clients" (
@@ -65,7 +69,9 @@ CREATE TABLE IF NOT EXISTS "users" (
     "nickname" VARCHAR(50) NOT NULL UNIQUE,
     "picture" TEXT,
     "phone_number" VARCHAR(20) UNIQUE,
-    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
+    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS "oauth_consents" (
@@ -92,7 +98,9 @@ CREATE TABLE IF NOT EXISTS "credentials" (
     "id" TEXT PRIMARY KEY,
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
     "type" credential_type NOT NULL,
-    "value" TEXT NOT NULL
+    "value" TEXT NOT NULL,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS "api_keys" (
@@ -100,7 +108,9 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "key_hash" TEXT NOT NULL UNIQUE,
     "label" VARCHAR(100) NOT NULL,
     "revoked" BOOLEAN NOT NULL DEFAULT FALSE,
-    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb
+    "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS "admin_keys" (
@@ -108,7 +118,9 @@ CREATE TABLE IF NOT EXISTS "admin_keys" (
     "key_hash" TEXT NOT NULL UNIQUE,
     "label" VARCHAR(100),
     "permissions" JSONB NOT NULL DEFAULT '[]'::jsonb,
-    "revoked" BOOLEAN NOT NULL DEFAULT FALSE
+    "revoked" BOOLEAN NOT NULL DEFAULT FALSE,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- The audits table doubles as the transactional outbox: each row is inserted in

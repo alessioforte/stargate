@@ -4,6 +4,7 @@ import { type AdminKey } from "@/services/types";
 import { getTranslation } from "@/i18n";
 import { createDetailsColumn } from "@/components";
 import { getAdminKeyPermissionLabel } from "./permissions";
+import { formatDate } from "@/lib/format-date";
 
 export const columns: ColumnDef<AdminKey>[] = [
   {
@@ -25,6 +26,16 @@ export const columns: ColumnDef<AdminKey>[] = [
         ))}
       </Group>
     ),
+  },
+  {
+    accessorKey: "createdAt",
+    header: () => getTranslation("createdAt").toLowerCase(),
+    cell: (props) => formatDate(props.row.original.createdAt),
+  },
+  {
+    accessorKey: "updatedAt",
+    header: () => getTranslation("updatedAt").toLowerCase(),
+    cell: (props) => formatDate(props.row.original.updatedAt),
   },
   {
     accessorKey: "revoked",

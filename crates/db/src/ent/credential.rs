@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
@@ -15,16 +16,21 @@ pub struct Credential {
     #[sqlx(rename = "type")]
     pub credential_type: CredentialType,
     pub value: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl Credential {
     pub fn new(user_id: String, credential_type: CredentialType, value: String) -> Self {
         let id = ulid::Ulid::new().to_string();
+        let now = Utc::now();
         Credential {
             id,
             user_id,
             credential_type,
             value,
+            created_at: now,
+            updated_at: now,
         }
     }
 }

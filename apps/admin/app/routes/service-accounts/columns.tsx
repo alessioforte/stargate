@@ -2,6 +2,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { getTranslation } from "@/i18n";
 import { type ServiceAccount } from "@/services/types";
 import { createDetailsColumn } from "@/components";
+import { formatDate } from "@/lib/format-date";
 
 export const columns: ColumnDef<ServiceAccount>[] = [
   {
@@ -16,8 +17,14 @@ export const columns: ColumnDef<ServiceAccount>[] = [
     header: () => getTranslation("description").toLowerCase(),
   },
   {
-    accessorKey: "orgId",
-    header: () => getTranslation("orgId").toLowerCase(),
+    accessorKey: "createdAt",
+    header: () => getTranslation("createdAt").toLowerCase(),
+    cell: (props) => formatDate(props.row.original.createdAt),
+  },
+  {
+    accessorKey: "updatedAt",
+    header: () => getTranslation("updatedAt").toLowerCase(),
+    cell: (props) => formatDate(props.row.original.updatedAt),
   },
   createDetailsColumn<ServiceAccount>(),
 ];

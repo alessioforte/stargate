@@ -1,5 +1,6 @@
 use crate::ent::{Credential, CredentialType};
 use anyhow::Result;
+use chrono::Utc;
 
 pub const CREDENTIAL: &str = "credentials";
 
@@ -30,8 +31,8 @@ impl CredentialRepository {
 
         let row = sqlx::query_as::<_, Credential>(sqlx::AssertSqlSafe(format!(
             "
-            INSERT INTO {credentials} (id, user_id, type, value)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO {credentials} (id, user_id, type, value, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         ",
             credentials = CREDENTIAL
@@ -40,6 +41,8 @@ impl CredentialRepository {
         .bind(&credential.user_id)
         .bind(&credential.credential_type)
         .bind(&credential.value)
+        .bind(credential.created_at)
+        .bind(credential.updated_at)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -75,10 +78,11 @@ impl CredentialRepository {
         user_id: &str,
         new_password: &str,
     ) -> Result<Credential> {
+        let updated_at = Utc::now();
         let row = sqlx::query_as::<_, Credential>(sqlx::AssertSqlSafe(format!(
             "
             UPDATE {credentials}
-            SET value = $1
+            SET value = $1, updated_at = $4
             WHERE user_id = $2 AND type = $3
             RETURNING *
         ",
@@ -87,6 +91,7 @@ impl CredentialRepository {
         .bind(new_password)
         .bind(user_id)
         .bind(CredentialType::Password)
+        .bind(updated_at)
         .fetch_one(&mut **tx)
         .await?;
 

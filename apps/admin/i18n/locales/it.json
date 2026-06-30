@@ -268,5 +268,7 @@
   "selectOrCreateObject": "Seleziona un oggetto o creane uno nuovo.",
   "invalidJson": "JSON non valido",
   "save": "Salva",
-  "cancel": "Annulla"
+  "cancel": "Annulla",
+  "createdAt": "Creato il",
+  "updatedAt": "Aggiornato il"
 }

@@ -4,14 +4,18 @@ CREATE TABLE IF NOT EXISTS "organizations" (
     "id" TEXT PRIMARY KEY,
     "name" VARCHAR(100) NOT NULL,
     "description" TEXT,
-    "attrs" JSON NOT NULL DEFAULT '{}'
+    "attrs" JSON NOT NULL DEFAULT '{}',
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS "service_accounts" (
     "id" TEXT PRIMARY KEY,
     "name" VARCHAR(100) NOT NULL,
     "description" TEXT,
-    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE CASCADE
+    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE CASCADE,
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS "oauth_clients" (
@@ -41,7 +45,9 @@ CREATE TABLE IF NOT EXISTS "users" (
     "nickname" VARCHAR(50) NOT NULL UNIQUE,
     "picture" TEXT,
     "phone_number" VARCHAR(20) UNIQUE,
-    "attrs" JSON NOT NULL DEFAULT '{}'
+    "attrs" JSON NOT NULL DEFAULT '{}',
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS "oauth_consents" (
@@ -68,7 +74,9 @@ CREATE TABLE IF NOT EXISTS "credentials" (
     "id" TEXT PRIMARY KEY,
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
     "type" VARCHAR(50) NOT NULL,
-    "value" TEXT NOT NULL
+    "value" TEXT NOT NULL,
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS "api_keys" (
@@ -76,7 +84,9 @@ CREATE TABLE IF NOT EXISTS "api_keys" (
     "key_hash" TEXT NOT NULL UNIQUE,
     "label" VARCHAR(100) NOT NULL,
     "revoked" BOOLEAN NOT NULL DEFAULT FALSE,
-    "attrs" JSON NOT NULL DEFAULT '{}'
+    "attrs" JSON NOT NULL DEFAULT '{}',
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS "admin_keys" (
@@ -84,7 +94,9 @@ CREATE TABLE IF NOT EXISTS "admin_keys" (
     "key_hash" TEXT NOT NULL UNIQUE,
     "label" VARCHAR(100),
     "permissions" JSON NOT NULL DEFAULT '[]',
-    "revoked" BOOLEAN NOT NULL DEFAULT FALSE
+    "revoked" BOOLEAN NOT NULL DEFAULT FALSE,
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS "audits" (
