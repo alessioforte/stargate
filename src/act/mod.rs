@@ -1,3 +1,4 @@
+pub mod access_control_rules;
 mod change_password;
 mod email_verification;
 pub mod login_guard;

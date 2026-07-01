@@ -1,3 +1,4 @@
+pub mod access_control_rules;
 pub mod admin_keys;
 pub mod api_keys;
 pub mod configurations;
@@ -229,7 +230,7 @@ mod tests {
 
 pub fn router() -> axum::Router {
     use axum::middleware::from_fn;
-    use axum::routing::{get, put};
+    use axum::routing::{get, post, put};
 
     axum::Router::new()
         .route("/admin/health", get(health::get_admin_health))
@@ -336,6 +337,19 @@ pub fn router() -> axum::Router {
         .route(
             "/admin/configurations",
             get(configurations::get_configurations).put(configurations::update_configurations),
+        )
+        .route(
+            "/admin/access-control/rules",
+            get(access_control_rules::get_access_control_rules)
+                .put(access_control_rules::update_access_control_rules),
+        )
+        .route(
+            "/admin/access-control/rules/validate",
+            post(access_control_rules::validate_access_control_rules),
+        )
+        .route(
+            "/admin/access-control/rules/evaluate",
+            post(access_control_rules::evaluate_access_control_rules),
         )
         .layer(from_fn(extract_grants))
 }

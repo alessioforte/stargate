@@ -44,7 +44,76 @@ export interface ConfigurationsQuery {
 
 export type Configuration = JsonValue;
 
+export type AccessControlEffect = "allow" | "deny";
+export type AccessControlResourceAction =
+  | "READ"
+  | "WRITE"
+  | "DELETE"
+  | "CREATE"
+  | "UPDATE"
+  | "EXECUTE"
+  | "ADMIN"
+  | "*"
+  | "ANY";
+
+export interface AccessControlRule {
+  action?: AccessControlResourceAction | null;
+  condition?: string | null;
+  description?: string | null;
+  effect: AccessControlEffect;
+  id?: string | null;
+  line: number;
+  resource: string;
+  statement: string;
+  subject: string;
+}
+
+export interface PolicyDiagnostic {
+  line: number;
+  message: string;
+  statement: string;
+}
+
+export interface AccessControlRulesResponse {
+  content: string;
+  diagnostics: PolicyDiagnostic[];
+  revision: string;
+  rules: AccessControlRule[];
+  valid: boolean;
+}
+
+export interface UpdateAccessControlRulesRequest {
+  content: string;
+  revision: string;
+}
+
+export interface ValidateAccessControlRulesRequest {
+  content: string;
+}
+
+export interface ValidateAccessControlRulesResponse {
+  diagnostics: PolicyDiagnostic[];
+  rules: AccessControlRule[];
+  valid: boolean;
+}
+
+export interface EvaluateAccessControlRequest {
+  action?: AccessControlResourceAction | null;
+  context?: { [key: string]: JsonValue };
+  resource: string;
+  subject: string;
+}
+
+export interface EvaluateAccessControlResponse {
+  allowCount: number;
+  allowed: boolean;
+  appliedPolicies: number[];
+  denyCount: number;
+  matchedPolicies: number[];
+}
+
 export const AdminKeyPermission = {
+  AccessControl: "access_control",
   Users: "users",
   Organizations: "organizations",
   ApiKeys: "api_keys",

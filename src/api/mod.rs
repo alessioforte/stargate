@@ -88,6 +88,10 @@ use utoipa::OpenApi;
         crate::api::admin::service_accounts::delete_service_account,
         crate::api::admin::configurations::get_configurations,
         crate::api::admin::configurations::update_configurations,
+        crate::api::admin::access_control_rules::get_access_control_rules,
+        crate::api::admin::access_control_rules::update_access_control_rules,
+        crate::api::admin::access_control_rules::validate_access_control_rules,
+        crate::api::admin::access_control_rules::evaluate_access_control_rules,
     ),
     info(
         title = "Stargate APIs ✨",
@@ -304,6 +308,9 @@ mod tests {
         assert!(json["paths"]["/admin/service-accounts"].is_object());
         assert!(json["paths"]["/admin/service-accounts/{id}"].is_object());
         assert!(json["paths"]["/admin/configurations"].is_object());
+        assert!(json["paths"]["/admin/access-control/rules"].is_object());
+        assert!(json["paths"]["/admin/access-control/rules/validate"].is_object());
+        assert!(json["paths"]["/admin/access-control/rules/evaluate"].is_object());
     }
 
     #[tokio::test]
@@ -381,6 +388,12 @@ mod tests {
     #[tokio::test]
     async fn admin_configurations_missing_grant_forbidden() {
         let resp = send("/admin/configurations").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_access_control_rules_missing_grant_forbidden() {
+        let resp = send("/admin/access-control/rules").await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

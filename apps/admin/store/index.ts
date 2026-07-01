@@ -10,6 +10,7 @@ import {
 import services from "@/services";
 import { getTokenExpiry } from "@/services/jwt";
 import type {
+  AccessControlRulesResponse,
   AdminKey,
   AdminHealth,
   ApiKey,
@@ -37,6 +38,11 @@ import type {
   UpdateOrganizationRequest,
   UpdateServiceAccountRequest,
   UpdateUserRequest,
+  UpdateAccessControlRulesRequest,
+  ValidateAccessControlRulesRequest,
+  ValidateAccessControlRulesResponse,
+  EvaluateAccessControlRequest,
+  EvaluateAccessControlResponse,
 } from "@/services/types";
 import Service from "@/services";
 import { showNotification } from "@/components";
@@ -54,6 +60,11 @@ const initialState: State = {
   theme: Settings.get("theme", "system"),
   language: Settings.get("language", "en"),
 
+  accessControlRules: new StoreItem<AccessControlRulesResponse>(null),
+  accessControlValidation: new StoreItem<ValidateAccessControlRulesResponse>(
+    null,
+  ),
+  accessControlEvaluation: new StoreItem<EvaluateAccessControlResponse>(null),
   adminKeys: new StoreItem<List<AdminKey>>(null),
   apiKeys: new StoreItem<List<ApiKey>>(null),
   configuration: new StoreItem<Configuration>(null),
@@ -82,6 +93,16 @@ function mapAdminHealth(health: AdminHealth | null): AdminStatus | null {
     redisStatus: health.redis.status,
     status: health.status,
     version: health.version,
+  };
+}
+
+function accessControlValidationFromRules(
+  response: AccessControlRulesResponse,
+): ValidateAccessControlRulesResponse {
+  return {
+    diagnostics: response.diagnostics,
+    rules: response.rules,
+    valid: response.valid,
   };
 }
 
@@ -442,6 +463,106 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
 
     set({ configuration: configurationItem.setSuccess(configuration) });
     return true;
+  },
+
+  getAccessControlRules: async () => {
+    const accessControlRules = get().accessControlRules;
+    set({ accessControlRules: accessControlRules.setLoading() });
+
+    const { data, error, message } =
+      await Service.admin.getAccessControlRules();
+    if (error) {
+      set({ accessControlRules: accessControlRules.setError(message) });
+      return;
+    }
+
+    set({
+      accessControlRules: accessControlRules.setSuccess(data),
+      accessControlValidation: get().accessControlValidation.setSuccess(
+        data ? accessControlValidationFromRules(data) : null,
+      ),
+    });
+  },
+
+  updateAccessControlRules: async (
+    request: UpdateAccessControlRulesRequest,
+  ) => {
+    const accessControlRules = get().accessControlRules;
+    set({ accessControlRules: accessControlRules.setLoading() });
+
+    const { data, error, message } =
+      await Service.admin.updateAccessControlRules(request);
+
+    if (error) {
+      set({ accessControlRules: accessControlRules.setError(message) });
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to save access control policies",
+      });
+      return null;
+    }
+
+    set({
+      accessControlRules: accessControlRules.setSuccess(data),
+      accessControlValidation: get().accessControlValidation.setSuccess(
+        data ? accessControlValidationFromRules(data) : null,
+      ),
+    });
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: "Access control policies saved successfully",
+    });
+
+    return data;
+  },
+
+  validateAccessControlRules: async (
+    request: ValidateAccessControlRulesRequest,
+  ) => {
+    const accessControlValidation = get().accessControlValidation;
+    set({
+      accessControlValidation: accessControlValidation.setLoading(),
+    });
+
+    const { data, error, message } =
+      await Service.admin.validateAccessControlRules(request);
+
+    if (error) {
+      set({
+        accessControlValidation: accessControlValidation.setError(message),
+      });
+      return null;
+    }
+
+    set({
+      accessControlValidation: accessControlValidation.setSuccess(data),
+    });
+    return data;
+  },
+
+  evaluateAccessControlRules: async (request: EvaluateAccessControlRequest) => {
+    const accessControlEvaluation = get().accessControlEvaluation;
+    set({
+      accessControlEvaluation: accessControlEvaluation.setLoading(),
+    });
+
+    const { data, error, message } =
+      await Service.admin.evaluateAccessControlRules(request);
+
+    if (error) {
+      set({
+        accessControlEvaluation: accessControlEvaluation.setError(message),
+      });
+      return null;
+    }
+
+    set({
+      accessControlEvaluation: accessControlEvaluation.setSuccess(data),
+    });
+    return data;
   },
 
   getOAuthClients: async (query?: Query) => {

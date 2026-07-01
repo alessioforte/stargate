@@ -36,6 +36,10 @@ stargate/
 │   ├── smtp/          # Email delivery (lettre)
 │   ├── store/         # State store (DashMap / Redis)
 │   └── tools/         # Shared utilities
+├── apps/              # TypeScript frontends (see "Frontend (apps/)")
+│   ├── admin/         # Super-admin console (React + Vite + Mantine + Zustand)
+│   ├── auth/          # Hosted login / auth-flow UI (same stack + layering)
+│   └── mail/          # Transactional email templates (react-email)
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
 ├── docs/              # Config docs, including config-v2alpha1.md
 ├── k8s/               # Kubernetes manifests
@@ -205,6 +209,21 @@ Hot reload behavior:
 - If invalid, log the error and keep the previous in-memory config active.
 
 Admin config endpoints validate v2 config before saving.
+
+Admin access-control endpoints manage the ACE rule file (`.stargate/policies`)
+separately from `config.yaml`:
+- `GET /admin/access-control/rules` returns raw content, parsed rules,
+  diagnostics, and a `sha256:*` revision.
+- `PUT /admin/access-control/rules` requires the current revision, validates the
+  whole document strictly, atomically replaces the file, and reloads the live ACE
+  engine immediately.
+- `POST /admin/access-control/rules/validate` validates proposed rule content
+  without saving.
+- `POST /admin/access-control/rules/evaluate` evaluates the current rule file
+  against a supplied subject/resource/action/context.
+
+ACE rule metadata can be stored in comments immediately above a rule, for
+example `# @id reports-read-admin`; the ACE parser ignores these comments.
 
 ### Feature Flags
 
@@ -417,7 +436,7 @@ Flags: `--password <val>`, `--password-stdin`, `--generate-password`
 - `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`, `/oauth/introspect`, `/oauth/revoke` - OAuth/OIDC provider endpoints
 - `/oauth/state`, `/oauth/github`, `/oauth/google` - Google/GitHub consumer login endpoints
 - `/signup/*` - registration + email verification
-- `/admin/*` - users, orgs, API keys, OAuth clients, service accounts, config (super-admin)
+- `/admin/*` - users, orgs, API keys, OAuth clients, service accounts, config, access-control rules (super-admin)
 
 ## Error Response Format
 
@@ -443,6 +462,96 @@ HTTP codes currently used include: 400, 401, 403, 404, 409, 413, 429, 500, 502, 
 ## Graceful Shutdown
 
 SIGTERM/SIGINT -> drain requests (25s default timeout) -> stop audit relay -> close DB -> save in-memory state.
+
+## Frontend (apps/)
+
+`apps/` holds the TypeScript frontends, separate from the Rust binary. Three apps:
+
+- `admin` — super-admin console (users, orgs, API/admin keys, OAuth clients, service accounts, gateway config, access-control policies). This is the reference implementation of the layering below.
+- `auth` — hosted login / auth-flow UI (password login, passwordless email OTP, login MFA, reset/change password). Same stack, same layering (`services/`, `store/`, `app/routes/`, `components/`).
+- `mail` — transactional email templates (`react-email`). A build-time template project, **not** a runtime SPA; it does not follow the layering below.
+
+Stack (admin/auth): React 19, Vite, TypeScript, Mantine v9 (`@mantine/core|form|hooks|notifications`), Zustand v5, react-router v7, axios, `@tanstack/react-table`, react-icons. Path alias `@/*` maps to the app root, so imports read `@/services`, `@/store`, `@/components`, `@/i18n`, `@/lib`. Runtime API base URL comes from `PUBLIC_RUNTIME_API_URL`.
+
+Dev commands (run inside `apps/admin` or `apps/auth`): `npm run dev` (Vite), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run format` (prettier).
+
+### Layered Architecture
+
+The single most important convention is a strict, **one-way** data flow. Each layer may only depend on the layer to its right:
+
+```
+components/          app/routes/ (pages)      store/                services/
+(agnostic UI)   <—   (render + wiring)   <—   (state + actions)  <—  (raw API)
+```
+
+- Only `store/` imports `services/`.
+- Only `app/routes/` (pages) import `store/`.
+- `components/` import **neither** the store nor services — they are driven entirely by props.
+- Types flow the other way: the DTOs in `services/types.ts` are the shared contract imported by every layer.
+
+Keep each concern in exactly one layer. Data-shaping, the loading/error lifecycle, notifications, and "what happens next" live in the store; pages only wire; components only render.
+
+#### 1. `services/` — raw API (no React, no state)
+
+- `http.ts`: the `Http` class over axios. `authRequest<T>()` attaches bearer auth + `X-Org-Context` and does proactive/reactive token refresh via `TokenManager`; `request<T>()` is for unauthenticated calls. Every call returns a uniform envelope `Response<T> = { data, error?, message?, status?, headers? }` — HTTP/error outcomes are captured into the envelope, never thrown.
+- `api.ts`: `AdminApiService` — one thin method per backend endpoint (`getOrganizations`, `createOrganization`, `updateOrganization`, …), each just building an `AxiosRequestConfig` and returning `Response<T>`. No state, no side effects beyond the HTTP call.
+- `index.ts`: a lazy `Service` singleton (via a `Proxy`) that wires `Http` + `TokenManager` + `AdminApiService`, reads runtime config, and owns token storage. Exported as `default services`.
+- `types.ts`: request/response DTOs (the shared contract). `token-manager.ts`, `jwt.ts`: token lifecycle + JWT decode helpers.
+
+Rule: services speak HTTP only. They never import React or the store.
+
+#### 2. `store/` — Zustand: state + actions (the only caller of services)
+
+- `index.ts`: one store, created with `create()` + the `devtools` middleware over a `store: StateCreator<State & Actions>`. `initialState` holds each entity as a `StoreItem`.
+- `types.ts`: the `State` (fields) and `Actions` (method signatures) interfaces — the store contract.
+- `item.ts`: `StoreItem<Data>` wraps every async slice as `{ data, meta, status, message }` with fluent transitions `setLoading()` / `setError(msg)` / `setSuccess(data)` and guards `isLoading()` / `isError()` / `isSuccess()` / `isIdle()`. This is the canonical async-state shape used across the store.
+- `settings.ts`: localStorage-backed prefs (theme, language). `accessor.ts`: dot-path `get`/`set`/`delete` for nested objects.
+
+Actions follow one shape — flip the item to loading, call the service, branch on the envelope; mutations also raise a notification and re-fetch:
+
+```ts
+createOrganization: async (organization) => {
+  const organizations = get().organizations;
+  set({ organizations: organizations.setLoading() });
+
+  const { error, message } = await Service.admin.createOrganization(organization);
+  if (error) {
+    set({ organizations: organizations.setError(message) });
+    showNotification({ type: "error", title: "Error", message });
+    return;
+  }
+
+  showNotification({ type: "success", title: "Success", message: "Organization created successfully" });
+  get().getOrganizations(); // refresh the list
+},
+```
+
+Rule: actions own the loading/error lifecycle, notifications, and session/token orchestration. Components subscribe to state and dispatch actions; they never call services directly.
+
+#### 3. `app/routes/` — React pages (render + action wiring)
+
+- `app.tsx`: the `createBrowserRouter` table; each path renders a page, wrapped by `Layout` (the authed shell).
+- A page (e.g. `organizations/organizations.tsx`): pulls state + actions from `useStore()`, loads on mount with `useEffect(() => getOrganizations(), …)`, holds only local UI state (`useDisclosure` for a drawer, the selected row), and composes agnostic components — passing store actions down as callbacks (`onSave={createOrganization}`). Labels come from `useTranslations()` (`@/i18n`).
+- Co-located, page-specific files: `columns.tsx` (table column defs), `create-*.tsx` / `edit-*.tsx` (drawer forms built with `@mantine/form` that assemble the request DTO and hand it to an action), `options.ts` / `*-utils.ts` (route-local helpers). These are intentionally **not** shared.
+
+Rule: pages are glue. They know the store and the domain DTOs and wire them into components; they don't call services and don't hold canonical data.
+
+#### 4. `components/` — agnostic, reusable UI
+
+- Barrel `components/index.ts` re-exports everything (`Table`, `EntityDrawer`, `Shell`, `MultiDrawer`, `CodeBox`, `Icon`, `Loader`, `JsonAttributesForm`, `showNotification`, `useConfirmModal`, …).
+- Driven purely by props/children, with **no** store, services, or domain-type imports — e.g. `EntityDrawer({ opened, title, onClose, children })`, `Table({ columns, data, loading, meta })`. The same `Table` / `EntityDrawer` serve every entity.
+
+Rule: if a component needs `@/store` or `@/services`, it belongs in `app/routes/`, not here.
+
+### End-to-end example (add a field to Organizations)
+
+1. `services/types.ts` — extend the DTO (`CreateOrganizationRequest`).
+2. `services/api.ts` — no change unless the endpoint/path/verb changes.
+3. `store/types.ts` + `store/index.ts` — adjust the action signature only if new; the existing action already forwards the DTO.
+4. `app/routes/organizations/create-organization.tsx` — add the form field and include it in the built payload.
+5. `components/` — touch only if a new reusable primitive is required.
+
+Following the arrows keeps each concern in exactly one place.
 
 ## Current Notes
 

@@ -1,39 +1,48 @@
 import { Badge, Button, Group, Title } from "@mantine/core";
 import { FiRefreshCw, FiRotateCcw, FiSave } from "react-icons/fi";
+import { LuWandSparkles } from "react-icons/lu";
 import { useTranslations } from "@/i18n";
 
 interface Props {
   dirty: boolean;
   loading: boolean;
+  revision?: string;
   saveDisabled: boolean;
-  schema: string;
+  valid?: boolean;
+  validating: boolean;
   onReload: () => void;
   onReset: () => void;
   onSave: () => void;
+  onValidate: () => void;
 }
 
-const GatewayToolbar: React.FC<Props> = ({
+const AccessControlToolbar: React.FC<Props> = ({
   dirty,
   loading,
+  revision,
   saveDisabled,
-  schema,
+  valid,
+  validating,
   onReload,
   onReset,
   onSave,
+  onValidate,
 }) => {
   const t = useTranslations();
 
   return (
     <Group p="xs" justify="space-between">
       <Group gap="xs">
-        <Title order={4}>{t("gatewayConfiguration")}</Title>
-        {schema && (
-          <Badge color={schema === "stargate/v2alpha1" ? "cyan" : "yellow"}>
-            {schema}
+        <Title order={4}>{t("accessControlPolicies")}</Title>
+        {revision && <Badge color="cyan">{revision.slice(0, 19)}</Badge>}
+        {valid !== undefined && (
+          <Badge color={valid ? "teal" : "red"}>
+            {valid ? t("valid") : t("invalid")}
           </Badge>
         )}
         {dirty && <Badge color="orange">{t("unsavedChanges")}</Badge>}
       </Group>
+
       <Group gap="xs">
         <Button
           type="button"
@@ -60,6 +69,16 @@ const GatewayToolbar: React.FC<Props> = ({
         <Button
           type="button"
           size="compact-sm"
+          color="indigo"
+          leftSection={<LuWandSparkles />}
+          loading={validating}
+          onClick={onValidate}
+        >
+          {t("validateDraft")}
+        </Button>
+        <Button
+          type="button"
+          size="compact-sm"
           color="teal"
           leftSection={<FiSave />}
           disabled={saveDisabled}
@@ -73,4 +92,4 @@ const GatewayToolbar: React.FC<Props> = ({
   );
 };
 
-export default GatewayToolbar;
+export default AccessControlToolbar;

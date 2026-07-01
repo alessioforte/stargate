@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   ActionIcon,
-  Box,
   Button,
   CopyButton,
   Divider,

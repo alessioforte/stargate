@@ -41,6 +41,9 @@ fn get_config_path() -> String {
 
 pub fn get_policies_path() -> String {
     let dir = get_config_dir();
+    if !Path::new(&dir).exists() {
+        std::fs::create_dir(&dir).expect("Unable to create config directory");
+    }
     let filename = "policies";
     let path = format!("{}/{}", dir, filename);
     if !Path::new(&path).exists() {
@@ -208,7 +211,7 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
 
 fn watch_policies_file(file_path: &str, gate: &Gate) {
     let file_path = file_path.to_string();
-    let mut gate = gate.clone();
+    let gate = gate.clone();
     let handle = Handle::current();
     thread::spawn(move || {
         handle.block_on(async {
@@ -232,9 +235,8 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
                         }
                         last_content = current_content;
 
-                        CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                         info!("Policies file changed, reloading...");
-                        gate.update_policy_engine(&file_path).await;
+                        reload_policy_engine_from_path(&gate, &file_path).await;
                     }
                     Err(e) => error!("Watch error: {:?}", e),
                 }
@@ -245,6 +247,16 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
 
 pub fn get_config_version() -> u64 {
     CONFIG_VERSION.load(Ordering::SeqCst)
+}
+
+pub async fn reload_policy_engine(gate: &Gate) {
+    let policies_path = get_policies_path();
+    reload_policy_engine_from_path(gate, &policies_path).await;
+}
+
+async fn reload_policy_engine_from_path(gate: &Gate, policies_path: &str) {
+    CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
+    gate.update_policy_engine(policies_path).await;
 }
 
 type HyperConnector = hyper_rustls::HttpsConnector<HttpConnector>;

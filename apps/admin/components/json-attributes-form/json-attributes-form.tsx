@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Box, Flex, Group, Text } from "@mantine/core";
+import { Flex, Group, Text } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useTranslations } from "@/i18n";
 import type { JsonValue } from "@/services/types";

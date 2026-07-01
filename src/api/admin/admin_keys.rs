@@ -69,6 +69,8 @@ pub struct UpdateAdminKeyPermissionsRequest {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub enum AdminKeyPermission {
+    #[serde(rename = "access_control")]
+    AccessControl,
     #[serde(rename = "users")]
     Users,
     #[serde(rename = "organizations")]
@@ -86,6 +88,7 @@ pub enum AdminKeyPermission {
 impl AdminKeyPermission {
     fn as_str(self) -> &'static str {
         match self {
+            Self::AccessControl => "access_control",
             Self::Users => "users",
             Self::Organizations => "organizations",
             Self::ApiKeys => "api_keys",

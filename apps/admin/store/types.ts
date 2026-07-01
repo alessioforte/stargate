@@ -1,5 +1,6 @@
 import { StoreItem } from "./item";
 import type {
+  AccessControlRulesResponse,
   AdminKey,
   ApiKey,
   ApiKeyQuery,
@@ -26,6 +27,11 @@ import type {
   UpdateUserRequest,
   Query,
   JsonValue,
+  UpdateAccessControlRulesRequest,
+  ValidateAccessControlRulesRequest,
+  ValidateAccessControlRulesResponse,
+  EvaluateAccessControlRequest,
+  EvaluateAccessControlResponse,
 } from "@/services/types";
 
 export interface AppMessage {
@@ -58,6 +64,9 @@ export interface State {
   theme: "light" | "dark" | "system";
   language: string;
 
+  accessControlRules: StoreItem<AccessControlRulesResponse>;
+  accessControlValidation: StoreItem<ValidateAccessControlRulesResponse>;
+  accessControlEvaluation: StoreItem<EvaluateAccessControlResponse>;
   adminKeys: StoreItem<List<AdminKey>>;
   apiKeys: StoreItem<List<ApiKey>>;
   configuration: StoreItem<Configuration>;
@@ -95,6 +104,17 @@ export interface Actions {
 
   getConfigurations: () => Promise<void>;
   updateConfigurations: (configuration: Configuration) => Promise<boolean>;
+
+  getAccessControlRules: () => Promise<void>;
+  updateAccessControlRules: (
+    request: UpdateAccessControlRulesRequest,
+  ) => Promise<AccessControlRulesResponse | null>;
+  validateAccessControlRules: (
+    request: ValidateAccessControlRulesRequest,
+  ) => Promise<ValidateAccessControlRulesResponse | null>;
+  evaluateAccessControlRules: (
+    request: EvaluateAccessControlRequest,
+  ) => Promise<EvaluateAccessControlResponse | null>;
 
   getOAuthClients: (query?: Query) => Promise<void>;
   createOAuthClient: (

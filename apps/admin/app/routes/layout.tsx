@@ -9,6 +9,8 @@ import { AiOutlineApi } from "react-icons/ai";
 import { GoShieldLock } from "react-icons/go";
 import { AiOutlineAppstoreAdd } from "react-icons/ai";
 import { GrGateway } from "react-icons/gr";
+import { BsFillJournalBookmarkFill } from "react-icons/bs";
+import { MdLocalPolice } from "react-icons/md";
 import { Shell, Loader } from "@/components";
 import useStore from "@/store";
 
@@ -48,6 +50,16 @@ const sidebarItems = [
     label: "Gateway Configurations",
     path: "/gateway",
     icon: <GrGateway size={18} />,
+  },
+  {
+    label: "Access Control Policies",
+    path: "/access-control-policies",
+    icon: <MdLocalPolice size={18} />,
+  },
+  {
+    label: "Audits",
+    path: "/audits",
+    icon: <BsFillJournalBookmarkFill size={18} />,
   },
 ];
 

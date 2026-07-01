@@ -90,7 +90,7 @@ impl Gate {
         Ok(())
     }
 
-    pub async fn update_policy_engine(&mut self, policies_path: &str) {
+    pub async fn update_policy_engine(&self, policies_path: &str) {
         let pe = Self::load_policy_engine(policies_path);
         self.policy_engine.store(Arc::new(pe));
         info!("Gate policy engine updated");

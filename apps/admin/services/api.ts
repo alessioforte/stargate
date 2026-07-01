@@ -1,6 +1,7 @@
 import type { AxiosRequestConfig } from "axios";
 import { Http, type Response as HttpResponse } from "./http";
 import type {
+  AccessControlRulesResponse,
   AdminHealth,
   AdminKey,
   ApiKey,
@@ -17,6 +18,8 @@ import type {
   CreateOrganizationRequest,
   CreateServiceAccountRequest,
   CreateUserRequest,
+  EvaluateAccessControlRequest,
+  EvaluateAccessControlResponse,
   List,
   MessageResponse,
   OAuthClient,
@@ -26,6 +29,7 @@ import type {
   Query,
   RotateOAuthClientSecretResponse,
   ServiceAccount,
+  UpdateAccessControlRulesRequest,
   UpdateAdminKeyPermissionsRequest,
   UpdateOAuthClientRequest,
   UpdateOrganizationRequest,
@@ -33,6 +37,8 @@ import type {
   UpdateUserRequest,
   User,
   UserAttrsRequest,
+  ValidateAccessControlRulesRequest,
+  ValidateAccessControlRulesResponse,
 } from "./types";
 
 export default class AdminApiService {
@@ -78,6 +84,37 @@ export default class AdminApiService {
       url: this.url("/configurations"),
       method: "PUT",
       data: configuration,
+    });
+  }
+
+  async getAccessControlRules() {
+    return this.request<AccessControlRulesResponse>({
+      url: this.url("/access-control/rules"),
+      method: "GET",
+    });
+  }
+
+  async updateAccessControlRules(body: UpdateAccessControlRulesRequest) {
+    return this.request<AccessControlRulesResponse>({
+      url: this.url("/access-control/rules"),
+      method: "PUT",
+      data: body,
+    });
+  }
+
+  async validateAccessControlRules(body: ValidateAccessControlRulesRequest) {
+    return this.request<ValidateAccessControlRulesResponse>({
+      url: this.url("/access-control/rules/validate"),
+      method: "POST",
+      data: body,
+    });
+  }
+
+  async evaluateAccessControlRules(body: EvaluateAccessControlRequest) {
+    return this.request<EvaluateAccessControlResponse>({
+      url: this.url("/access-control/rules/evaluate"),
+      method: "POST",
+      data: body,
     });
   }
 

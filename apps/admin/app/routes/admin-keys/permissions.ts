@@ -2,6 +2,7 @@ import { getTranslation } from "@/i18n";
 import { AdminKeyPermission } from "@/services/types";
 
 export const adminKeyPermissionValues: AdminKeyPermission[] = [
+  AdminKeyPermission.AccessControl,
   AdminKeyPermission.Users,
   AdminKeyPermission.Organizations,
   AdminKeyPermission.ApiKeys,
@@ -11,6 +12,7 @@ export const adminKeyPermissionValues: AdminKeyPermission[] = [
 ];
 
 export const permissionTranslationKeys: Record<AdminKeyPermission, string> = {
+  [AdminKeyPermission.AccessControl]: "adminPermissions.accessControl",
   [AdminKeyPermission.Users]: "adminPermissions.users",
   [AdminKeyPermission.Organizations]: "adminPermissions.organizations",
   [AdminKeyPermission.ApiKeys]: "adminPermissions.apiKeys",

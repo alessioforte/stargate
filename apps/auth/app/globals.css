@@ -16,6 +16,10 @@ body,
 
 body {
   margin: 0;
+  background-color: light-dark(
+    var(--mantine-color-gray-2),
+    var(--mantine-color-dark-7)
+  );
 }
 
 button,

@@ -352,6 +352,33 @@ http:
 
 Policy order in the runtime is fixed: auth, access control, rate limit, quota. The list on the router declares which policies apply.
 
+`kind: access_control` points at resources evaluated by the ACE rule file
+(`.stargate/policies`). The gateway config decides where a check applies; the
+ACE file decides which subjects may access that resource.
+
+Example ACE rules:
+
+```text
+# @id reports-read-admin
+# @description Admins can read financial reports
+ALLOW user FOR "financial_reports:READ" WHEN user.role == "admin";
+
+# @id reports-read-analyst
+ALLOW user FOR "financial_reports:READ" WHEN user.role == "analyst";
+```
+
+The admin rule APIs manage this file directly:
+
+- `GET /admin/access-control/rules`
+- `PUT /admin/access-control/rules`
+- `POST /admin/access-control/rules/validate`
+- `POST /admin/access-control/rules/evaluate`
+
+`PUT` requires the current `sha256:*` revision returned by `GET`, validates the
+whole document strictly, writes the file atomically, and reloads the live ACE
+engine immediately. In clustered deployments this is safe only when all nodes
+share the same policy file storage; otherwise the endpoint is node-local.
+
 ## Full Routing Example
 
 ```yaml
