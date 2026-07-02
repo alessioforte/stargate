@@ -219,8 +219,12 @@ pub struct Metrics {
     gateway_mirrors: Counter<u64>,
     gateway_replay_bytes: Histogram<u64>,
     gateway_policy_decisions: Counter<u64>,
+    // The audit relay only runs in cluster deployments (postgres + redis).
+    #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_records: Counter<u64>,
+    #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_duration: Histogram<f64>,
+    #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_errors: Counter<u64>,
     config_reloads: Counter<u64>,
 }
@@ -272,15 +276,18 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
             .u64_counter("stargate.gateway.policy.decisions")
             .with_description("Gateway policy decisions")
             .build(),
+        #[cfg(all(feature = "postgres", feature = "redis"))]
         audit_relay_records: meter
             .u64_counter("stargate.audit.relay.records")
             .with_description("Audit outbox records relayed")
             .build(),
+        #[cfg(all(feature = "postgres", feature = "redis"))]
         audit_relay_duration: meter
             .f64_histogram("stargate.audit.relay.duration")
             .with_description("Audit relay batch duration")
             .with_unit("ms")
             .build(),
+        #[cfg(all(feature = "postgres", feature = "redis"))]
         audit_relay_errors: meter
             .u64_counter("stargate.audit.relay.errors")
             .with_description("Audit relay batch failures")
@@ -372,6 +379,7 @@ pub fn record_gateway_policy(kind: &str, outcome: &str) {
     );
 }
 
+#[cfg(all(feature = "postgres", feature = "redis"))]
 pub fn record_audit_relay_batch(outcome: &str, records: usize, elapsed: Duration) {
     let attrs = [KeyValue::new("stargate.outcome", outcome.to_string())];
     METRICS.audit_relay_records.add(records as u64, &attrs);

@@ -82,21 +82,21 @@ fn demonstrate_original_enhanced(engine: &PolicyEngine) -> Result<(), Box<dyn st
 
     println!("User Access Tests:");
     test_access(
-        &engine,
+        engine,
         "user",
         "feature1",
         &admin_context,
         "Admin → feature1",
     );
     test_access(
-        &engine,
+        engine,
         "user",
         "feature1",
         &editor_context,
         "Editor → feature1",
     );
     test_access(
-        &engine,
+        engine,
         "user",
         "feature1",
         &guest_context,
@@ -104,14 +104,14 @@ fn demonstrate_original_enhanced(engine: &PolicyEngine) -> Result<(), Box<dyn st
     );
 
     test_access(
-        &engine,
+        engine,
         "user",
         "feature2",
         &admin_context,
         "Admin → feature2",
     );
     test_access(
-        &engine,
+        engine,
         "user",
         "feature2",
         &guest_context,
@@ -136,21 +136,21 @@ fn demonstrate_original_enhanced(engine: &PolicyEngine) -> Result<(), Box<dyn st
 
     println!("\nAPI Key Access Tests:");
     test_access(
-        &engine,
+        engine,
         "api_key",
         "feature3",
         &valid_read_api,
         "Valid read API → feature3",
     );
     test_access(
-        &engine,
+        engine,
         "api_key",
         "feature4",
         &wrong_scope_api,
         "Read API → write feature4",
     );
     test_access(
-        &engine,
+        engine,
         "api_key",
         "feature3",
         &invalid_api,

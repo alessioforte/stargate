@@ -55,14 +55,15 @@ impl UserRepository {
             sqlx::AssertSqlSafe(format!(
                 "
             SELECT * FROM {users}
-            WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
+            WHERE email {like} $1 {esc} OR given_name {like} $1 {esc} OR family_name {like} $1 {esc} OR nickname {like} $1 {esc}
             ORDER BY created_at DESC, id DESC
         ",
                 users = USER,
-                like = crate::backend::LIKE
+                like = crate::backend::LIKE,
+                esc = crate::backend::LIKE_ESCAPE
             )),
         )
-        .bind(format!("%{}%", query))
+        .bind(crate::backend::like_contains(query))
         .fetch_all(ex)
         .await?;
 
@@ -154,14 +155,15 @@ impl UserRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let pattern = format!("%{}%", query);
+        let pattern = crate::backend::like_contains(query);
         let rows = sqlx::query_as::<_, User>(
             sqlx::AssertSqlSafe(format!(
                 "SELECT * FROM {users}
-                 WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1
+                 WHERE email {like} $1 {esc} OR given_name {like} $1 {esc} OR family_name {like} $1 {esc} OR nickname {like} $1 {esc}
                  ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
                 users = USER,
-                like = crate::backend::LIKE
+                like = crate::backend::LIKE,
+                esc = crate::backend::LIKE_ESCAPE
             )),
         )
         .bind(&pattern)
@@ -177,13 +179,14 @@ impl UserRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let pattern = format!("%{}%", query);
+        let pattern = crate::backend::like_contains(query);
         let row: (i64,) = sqlx::query_as(
             sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*) FROM {users}
-                 WHERE email {like} $1 OR given_name {like} $1 OR family_name {like} $1 OR nickname {like} $1",
+                 WHERE email {like} $1 {esc} OR given_name {like} $1 {esc} OR family_name {like} $1 {esc} OR nickname {like} $1 {esc}",
                 users = USER,
-                like = crate::backend::LIKE
+                like = crate::backend::LIKE,
+                esc = crate::backend::LIKE_ESCAPE
             )),
         )
         .bind(&pattern)

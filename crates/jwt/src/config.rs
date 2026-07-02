@@ -33,6 +33,11 @@ pub struct JwtConfig {
     key_id: Option<String>,
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
+    /// Expected `iss` claim, enforced on every validation. Captured once at
+    /// construction from the same source (`issuer_from_env`) that token
+    /// generation uses, so self-issued tokens validate and tokens minted for
+    /// a different issuer are rejected.
+    issuer: String,
     pub access_exp: Duration,
     pub refresh_exp: Duration,
 }
@@ -143,6 +148,7 @@ impl JwtConfig {
             key_id,
             encoding_key,
             decoding_key,
+            issuer: crate::claims::issuer_from_env(),
             access_exp,
             refresh_exp,
         }
@@ -201,6 +207,7 @@ impl JwtConfig {
     fn decode_without_audience(&self, token: &str) -> Result<Claims, JwtValidationError> {
         let mut validation = Validation::new(self.algorithm);
         validation.validate_aud = false;
+        validation.set_issuer(&[self.issuer.as_str()]);
         let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
         Ok(token_data.claims)
     }
@@ -211,6 +218,7 @@ impl JwtConfig {
     pub fn validate_token(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
         let mut validation = Validation::new(self.algorithm);
         validation.validate_aud = false;
+        validation.set_issuer(&[self.issuer.as_str()]);
         let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
         Ok(token_data.claims)
     }
@@ -384,6 +392,24 @@ mod tests {
         let decoded = config.validate_token(&token).unwrap();
 
         assert_eq!(decoded.aud.as_deref(), Some("gateway"));
+    }
+
+    #[test]
+    fn rejects_token_with_wrong_issuer() {
+        let config = JwtConfig::new_with_key_id(
+            Algorithm::HS256,
+            KeySource::Secret("secret".to_string()),
+            Duration::minutes(5),
+            Duration::minutes(5),
+            Some("stargate-test".to_string()),
+        );
+
+        let claims = Claims::default()
+            .subject("client-1".to_string())
+            .iss("https://attacker.example".to_string());
+        let token = config.generate_token(&claims).unwrap();
+
+        assert!(config.validate_token(&token).is_err());
     }
 
     #[test]

@@ -28,11 +28,26 @@ pub fn verify(code: &AuthorizationCodeRecord, verifier: &str) -> Result<(), OAut
         return Err(OAuthError::invalid_grant("invalid code_verifier"));
     }
 
-    if s256_challenge(verifier) != code.code_challenge {
+    if !constant_time_eq(
+        s256_challenge(verifier).as_bytes(),
+        code.code_challenge.as_bytes(),
+    ) {
         return Err(OAuthError::invalid_grant("invalid code_verifier"));
     }
 
     Ok(())
+}
+
+/// Compare two byte slices without early-exit on the first differing byte.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 #[cfg(test)]

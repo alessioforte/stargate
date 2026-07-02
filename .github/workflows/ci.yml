@@ -42,12 +42,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.profile }}
+      # Build and test deny rustc warnings (dead_code, unused, etc.) so
+      # regressions of the INFO-1 class fail CI. Clippy's style lints are not
+      # yet clean workspace-wide, so the clippy step stays informational for
+      # now (see the audit doc, Task 4.1 follow-up).
       - name: Build
+        env:
+          RUSTFLAGS: "-D warnings"
         run: cargo build --workspace --no-default-features --features ${{ matrix.profile }}
       - name: Test
+        env:
+          RUSTFLAGS: "-D warnings"
         run: cargo test --workspace --no-default-features --features ${{ matrix.profile }}
-      - name: Clippy
-        # NOTE: not yet gated on warnings — the edge profile still has dead-code
-        # warnings (audit relay telemetry). Add `-- -D warnings` once INFO-1
-        # (Phase 4) is cleaned up.
+      - name: Clippy (informational)
         run: cargo clippy --workspace --all-targets --no-default-features --features ${{ matrix.profile }}

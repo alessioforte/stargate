@@ -123,15 +123,16 @@ impl OAuthClientRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let pattern = format!("%{}%", query);
+        let pattern = crate::backend::like_contains(query);
         let rows = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
             "
             SELECT * FROM {tbl}
-            WHERE client_id {like} $1 OR name {like} $1 OR description {like} $1
+            WHERE client_id {like} $1 {esc} OR name {like} $1 {esc} OR description {like} $1 {esc}
             ORDER BY created_at DESC, client_id DESC LIMIT $2 OFFSET $3
         ",
             tbl = OAUTH_CLIENT,
-            like = crate::backend::LIKE
+            like = crate::backend::LIKE,
+            esc = crate::backend::LIKE_ESCAPE
         )))
         .bind(&pattern)
         .bind(limit)
@@ -146,14 +147,15 @@ impl OAuthClientRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let pattern = format!("%{}%", query);
+        let pattern = crate::backend::like_contains(query);
         let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "
             SELECT COUNT(*) FROM {tbl}
-            WHERE client_id {like} $1 OR name {like} $1 OR description {like} $1
+            WHERE client_id {like} $1 {esc} OR name {like} $1 {esc} OR description {like} $1 {esc}
         ",
             tbl = OAUTH_CLIENT,
-            like = crate::backend::LIKE
+            like = crate::backend::LIKE,
+            esc = crate::backend::LIKE_ESCAPE
         )))
         .bind(&pattern)
         .fetch_one(ex)

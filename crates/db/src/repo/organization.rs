@@ -105,15 +105,16 @@ impl OrganizationRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let pattern = format!("%{}%", query);
+        let pattern = crate::backend::like_contains(query);
         let rows = sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
             "
             SELECT * FROM {tbl}
-            WHERE name {like} $1 OR description {like} $1
+            WHERE name {like} $1 {esc} OR description {like} $1 {esc}
             ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3
         ",
             tbl = ORGANIZATION,
-            like = crate::backend::LIKE
+            like = crate::backend::LIKE,
+            esc = crate::backend::LIKE_ESCAPE
         )))
         .bind(&pattern)
         .bind(limit)
@@ -128,14 +129,15 @@ impl OrganizationRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let pattern = format!("%{}%", query);
+        let pattern = crate::backend::like_contains(query);
         let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "
             SELECT COUNT(*) FROM {tbl}
-            WHERE name {like} $1 OR description {like} $1
+            WHERE name {like} $1 {esc} OR description {like} $1 {esc}
         ",
             tbl = ORGANIZATION,
-            like = crate::backend::LIKE
+            like = crate::backend::LIKE,
+            esc = crate::backend::LIKE_ESCAPE
         )))
         .bind(&pattern)
         .fetch_one(ex)
