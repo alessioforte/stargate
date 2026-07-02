@@ -1,5 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::sub::Subject;
+use crate::etc::{sub::Subject, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::Gate;
 use std::sync::Arc;
@@ -47,6 +47,7 @@ pub async fn apply_limits(
         .check(&limit_name, &key, None)
         .await
         .map_err(|error| {
+            telemetry::record_gateway_policy("rate_limit", "error");
             tracing::error!("Rate limiter error: {}", error);
             ErrorResponse::from(HttpError::InternalServerError(
                 "Rate limiter error".to_string(),
@@ -57,6 +58,7 @@ pub async fn apply_limits(
     let remaining = decision.remaining.to_string();
 
     if !decision.is_allowed() {
+        telemetry::record_gateway_policy("rate_limit", "denied");
         let retry_after = decision
             .retry_after
             .unwrap_or(std::time::Duration::from_secs(60));
@@ -69,6 +71,7 @@ pub async fn apply_limits(
             .insert_header("x-ratelimit-remaining", &remaining);
         return Err(response);
     }
+    telemetry::record_gateway_policy("rate_limit", "allowed");
 
     headers.insert(
         HeaderName::from_static("x-ratelimit-limit"),
@@ -88,6 +91,7 @@ pub async fn apply_limits(
             .check(&quota_name, &quota_key, Some(quota_cost))
             .await
             .map_err(|error| {
+                telemetry::record_gateway_policy("quota", "error");
                 tracing::error!("Quota limiter error: {}", error);
                 ErrorResponse::from(HttpError::InternalServerError(
                     "Quota limiter error".to_string(),
@@ -98,6 +102,7 @@ pub async fn apply_limits(
         let remaining = decision.remaining.to_string();
 
         if !decision.is_allowed() {
+            telemetry::record_gateway_policy("quota", "denied");
             let retry_after = decision
                 .retry_after
                 .unwrap_or(std::time::Duration::from_secs(60));
@@ -111,6 +116,7 @@ pub async fn apply_limits(
                 .insert_header("x-quota-remaining", &remaining);
             return Err(response);
         }
+        telemetry::record_gateway_policy("quota", "allowed");
 
         headers.insert(
             HeaderName::from_static("x-quota-limit"),

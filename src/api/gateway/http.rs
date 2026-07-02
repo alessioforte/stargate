@@ -1,4 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
 use http::header::{
     CONNECTION, HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING,
@@ -24,6 +25,7 @@ pub async fn handler(
     if !preserve_host {
         req.headers_mut().remove(HOST);
     }
+    telemetry::inject_context(req.headers_mut());
 
     let response = client.request(req).await.map_err(|error| {
         tracing::error!("Error forwarding request to backend: {}", error);

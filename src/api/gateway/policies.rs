@@ -1,7 +1,7 @@
 use super::limits::apply_limits;
 use super::types::AuthKind;
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ac::access_control, reqctx, sub::Subject};
+use crate::etc::{ac::access_control, reqctx, sub::Subject, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::body::Body;
 use gate::{
@@ -36,18 +36,22 @@ pub async fn apply_policies(
         match policy {
             PolicyNode::Auth { strategies } => {
                 let Some(kind) = auth_kind else {
+                    telemetry::record_gateway_policy("auth", "denied");
                     return Err(ErrorResponse::from(HttpError::Unauthorized(
                         "Unauthorized".to_string(),
                     )));
                 };
                 if !auth_strategy_allowed(strategies, kind) {
+                    telemetry::record_gateway_policy("auth", "denied");
                     return Err(ErrorResponse::from(HttpError::Unauthorized(
                         "Unauthorized".to_string(),
                     )));
                 }
+                telemetry::record_gateway_policy("auth", "allowed");
             }
             PolicyNode::AccessControl { resource, env } => {
                 let Some(subject) = subject else {
+                    telemetry::record_gateway_policy("access_control", "denied");
                     return Err(ErrorResponse::from(HttpError::Unauthorized(
                         "Unauthorized".to_string(),
                     )));
@@ -59,10 +63,12 @@ pub async fn apply_policies(
                 let allowed = access_control(&pe, subject, &env, resource);
 
                 if !allowed {
+                    telemetry::record_gateway_policy("access_control", "denied");
                     return Err(ErrorResponse::from(HttpError::Forbidden(
                         "Forbidden".to_string(),
                     )));
                 }
+                telemetry::record_gateway_policy("access_control", "allowed");
             }
             PolicyNode::RateLimit { limit } => {
                 if rate_limit_override.replace(limit.clone()).is_some() {

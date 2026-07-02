@@ -371,6 +371,13 @@ IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
 | `REDIS_URL` | - | Redis (cluster) |
 | `RUST_LOG` | - | Log filter |
 | `LOG_DIR` | - | Log file dir |
+| `OTEL_ENABLED` | auto | Enables OTLP traces, metrics, and logs; defaults true when an OTLP endpoint is set |
+| `OTEL_SERVICE_NAME` | stargate | OpenTelemetry service name |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Shared OTLP endpoint for traces, metrics, and logs |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | grpc | OTLP transport protocol (`grpc` or `http/protobuf`) |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | - | Trace-specific OTLP endpoint override |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | - | Metric-specific OTLP endpoint override |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | - | Log-specific OTLP endpoint override |
 | `AUDIT_RELAY_ENABLED` | true | Run the audit outbox relay (cluster) |
 | `AUDIT_RELAY_BATCH` | 256 | Rows claimed per relay batch |
 | `AUDIT_RELAY_INTERVAL_MS` | 1000 | Idle poll interval when caught up |

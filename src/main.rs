@@ -32,11 +32,13 @@ pub async fn run() -> std::io::Result<()> {
 
     dotenv().ok();
     tls::install_crypto_provider();
-    let _guard = log::init();
+    let guard = log::init();
 
     let cli = cli::parse();
     if let Some(command) = cli.command {
-        return cli::run_cli_command(command).await;
+        let result = cli::run_cli_command(command).await;
+        guard.shutdown();
+        return result;
     }
 
     let version = env!("CARGO_PKG_VERSION");
@@ -94,6 +96,7 @@ pub async fn run() -> std::io::Result<()> {
     aud::shutdown().await;
     store::save().await;
     info!("Shutdown complete");
+    guard.shutdown();
 
     result
 }

@@ -1,5 +1,6 @@
-use crate::etc::{env::bool_or, ext::RequestExt, reqctx::RequestContext};
+use crate::etc::{env::bool_or, ext::RequestExt, reqctx::RequestContext, telemetry};
 use chrono::Utc;
+use std::time::Instant;
 use tracing::info;
 use tracing_subscriber::{
     EnvFilter, Registry,
@@ -9,13 +10,25 @@ use tracing_subscriber::{
 };
 use ulid::Ulid;
 
-pub fn init() -> Vec<tracing_appender::non_blocking::WorkerGuard> {
+pub struct LogGuard {
+    _guards: Vec<tracing_appender::non_blocking::WorkerGuard>,
+    telemetry: telemetry::TelemetryGuard,
+}
+
+impl LogGuard {
+    pub fn shutdown(&self) {
+        self.telemetry.shutdown();
+    }
+}
+
+pub fn init() -> LogGuard {
     let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| ".stargate/logs".to_string());
     let env_filter = EnvFilter::from_default_env();
     let mut file_enabled = bool_or("LOG_FILE_ENABLED", true);
     let mut console_enabled = bool_or("LOG_CONSOLE_ENABLED", cfg!(debug_assertions));
     let pretty_console = bool_or("LOG_PRETTY_CONSOLE", cfg!(debug_assertions));
     let mut guards = Vec::new();
+    let telemetry_guard = telemetry::init();
 
     if !file_enabled && !console_enabled {
         console_enabled = true;
@@ -65,10 +78,33 @@ pub fn init() -> Vec<tracing_appender::non_blocking::WorkerGuard> {
         None
     };
 
+    let trace_layer = telemetry_guard.tracer_provider().map(|provider| {
+        use opentelemetry::trace::TracerProvider as _;
+
+        let tracer = provider.tracer("stargate");
+        tracing_opentelemetry::layer().with_tracer(tracer).boxed()
+    });
+
+    let telemetry_log_layer = telemetry_guard.logger_provider().map(|provider| {
+        let filter = EnvFilter::new("trace")
+            .add_directive("hyper=off".parse().unwrap())
+            .add_directive("opentelemetry=off".parse().unwrap())
+            .add_directive("opentelemetry_otlp=off".parse().unwrap())
+            .add_directive("opentelemetry_sdk=off".parse().unwrap())
+            .add_directive("tonic=off".parse().unwrap())
+            .add_directive("h2=off".parse().unwrap())
+            .add_directive("reqwest=off".parse().unwrap());
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(provider)
+            .with_filter(filter)
+            .boxed()
+    });
+
     Registry::default()
         .with(env_filter)
         .with(file_layer)
         .with(console_layer)
+        .with(trace_layer)
+        .with(telemetry_log_layer)
         .init();
 
     info!(
@@ -76,10 +112,14 @@ pub fn init() -> Vec<tracing_appender::non_blocking::WorkerGuard> {
         file_enabled,
         console_enabled,
         pretty_console = console_enabled && pretty_console,
+        otel_enabled = telemetry_guard.enabled(),
         "Logging initialized"
     );
 
-    guards
+    LogGuard {
+        _guards: guards,
+        telemetry: telemetry_guard,
+    }
 }
 
 const SENSITIVE_PARAMS: &[&str] = &["token", "code", "secret", "key", "password", "state"];
@@ -111,6 +151,7 @@ pub async fn trace_middleware(
 
     let request_id = Ulid::new().to_string();
     let now = Utc::now();
+    let started = Instant::now();
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let query = sanitize_query(req.uri().query().unwrap_or(""));
@@ -142,10 +183,29 @@ pub async fn trace_middleware(
         http.peer_ip = %peer_ip,
         http.client_ip = %ip_address,
         http.status_code = tracing::field::Empty,
+        http.response.status_code = tracing::field::Empty,
+        otel.kind = "server",
+        otel.name = %format!("{} {}", method, path),
+        otel.status_code = tracing::field::Empty,
+        stargate.router = tracing::field::Empty,
+        stargate.service = tracing::field::Empty,
+        stargate.auth_kind = tracing::field::Empty,
+        stargate.config_version = tracing::field::Empty,
     );
+
+    telemetry::set_span_parent_from_headers(&span, req.headers());
 
     let mut response = next.run(req).instrument(span.clone()).await;
     span.record("http.status_code", response.status().as_u16());
+    span.record("http.response.status_code", response.status().as_u16());
+    if response.status().is_server_error() {
+        span.record("otel.status_code", "ERROR");
+    }
+    telemetry::record_http_server_request(
+        method.as_str(),
+        response.status().as_u16(),
+        started.elapsed(),
+    );
     response.headers_mut().insert(
         http::header::HeaderName::from_static("x-request-id"),
         request_id.parse().unwrap(),

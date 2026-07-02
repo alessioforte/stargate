@@ -8,14 +8,16 @@
 //! the `published_at` commit re-ships the batch on restart, so consumers must
 //! dedupe on the audit `id`.
 
+use crate::etc::telemetry;
 use db::ent::OutboxAudit;
 use db::service::Service;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use store::{RedisStore, StreamEntry};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
+use tracing::Instrument;
 
 const DEFAULT_BATCH: i64 = 256;
 const DEFAULT_INTERVAL_MS: u64 = 1000;
@@ -98,8 +100,18 @@ async fn run(shutdown: Arc<Notify>) {
             _ = tokio::time::sleep(delay) => {}
         }
 
-        match relay_once(&svc, store, &stream, maxlen, batch).await {
+        let started = Instant::now();
+        let result = relay_once(&svc, store, &stream, maxlen, batch)
+            .instrument(tracing::debug_span!(
+                "audit.relay.batch",
+                stream = %stream,
+                batch,
+            ))
+            .await;
+
+        match result {
             Ok(count) => {
+                telemetry::record_audit_relay_batch("success", count, started.elapsed());
                 backoff = BACKOFF_BASE;
                 delay = if count as i64 >= batch {
                     Duration::ZERO
@@ -108,6 +120,7 @@ async fn run(shutdown: Arc<Notify>) {
                 };
             }
             Err(error) => {
+                telemetry::record_audit_relay_batch("error", 0, started.elapsed());
                 tracing::warn!(
                     %error,
                     backoff_ms = backoff.as_millis() as u64,

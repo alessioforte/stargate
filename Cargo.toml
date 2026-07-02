@@ -94,6 +94,11 @@ anyhow = "1.0.102"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json", "time"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
+opentelemetry = { version = "0.32", default-features = false, features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "metrics", "logs", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "metrics", "logs", "http-proto", "reqwest-client", "grpc-tonic", "tls-ring"] }
+opentelemetry-appender-tracing = "0.32"
+tracing-opentelemetry = "0.33"
 base64 = "0.22.1"
 sha2 = "0.10.9"
 url = "2.5.8"

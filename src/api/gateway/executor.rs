@@ -5,11 +5,12 @@ use super::{
     ws,
 };
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ext::RequestExt, gate::get_client};
+use crate::etc::{ext::RequestExt, gate::get_client, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::{body::Body, response::Response};
 use http_body_util::BodyExt;
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Instant};
+use tracing::Instrument;
 
 /// Upstream status codes treated as upstream-health failures by the circuit
 /// breaker. These are gateway/infrastructure errors (the upstream itself is
@@ -51,14 +52,48 @@ pub(super) async fn execute_selected_with_request(
             status,
             headers,
             body,
-        } => build_direct_response(*status, headers, body.as_ref()),
+        } => {
+            let started = Instant::now();
+            let result = build_direct_response(*status, headers, body.as_ref());
+            record_attempt_metrics(
+                "direct_response",
+                "direct_response",
+                "http",
+                &result,
+                started.elapsed(),
+            );
+            result
+        }
         SelectedService::Upstream {
             service_name,
             upstream_base_url,
         } => {
+            let protocol = req.get_protocol().to_string();
             let uri = upstream_uri(upstream_base_url, state);
-            if req.get_protocol() == "ws" {
-                let result = ws::handler(req, &uri, state.preserve_host).await;
+            let span = tracing::info_span!(
+                "gateway.upstream",
+                otel.kind = "client",
+                stargate.service = %service_name,
+                stargate.target_kind = "upstream",
+                network.protocol.name = %protocol,
+                stargate.upstream_base_url = %upstream_base_url,
+                http.response.status_code = tracing::field::Empty,
+                otel.status_code = tracing::field::Empty,
+            );
+            let started = Instant::now();
+
+            if protocol == "ws" {
+                let result = ws::handler(req, &uri, state.preserve_host)
+                    .instrument(span.clone())
+                    .await;
+                record_attempt_span(&span, &result);
+                record_attempt_metrics(
+                    service_name,
+                    "upstream",
+                    &protocol,
+                    &result,
+                    started.elapsed(),
+                );
                 record_upstream_health(balancers, service_name, upstream_base_url, &result);
                 return result;
             }
@@ -70,8 +105,17 @@ pub(super) async fn execute_selected_with_request(
             })?;
 
             let empty_headers = HeaderMap::new();
-            let result =
-                http::handler(req, &empty_headers, &uri, &client, state.preserve_host).await;
+            let result = http::handler(req, &empty_headers, &uri, &client, state.preserve_host)
+                .instrument(span.clone())
+                .await;
+            record_attempt_span(&span, &result);
+            record_attempt_metrics(
+                service_name,
+                "upstream",
+                &protocol,
+                &result,
+                started.elapsed(),
+            );
             record_upstream_health(balancers, service_name, upstream_base_url, &result);
             result
         }
@@ -89,7 +133,18 @@ async fn execute_selected_from_replay(
             status,
             headers,
             body,
-        } => build_direct_response(*status, headers, body.as_ref()),
+        } => {
+            let started = Instant::now();
+            let result = build_direct_response(*status, headers, body.as_ref());
+            record_attempt_metrics(
+                "direct_response",
+                "direct_response",
+                "http",
+                &result,
+                started.elapsed(),
+            );
+            result
+        }
         SelectedService::Upstream {
             service_name,
             upstream_base_url,
@@ -102,9 +157,23 @@ async fn execute_selected_from_replay(
                 ))
             })?;
 
+            let span = tracing::info_span!(
+                "gateway.upstream",
+                otel.kind = "client",
+                stargate.service = %service_name,
+                stargate.target_kind = "upstream",
+                network.protocol.name = "http",
+                stargate.upstream_base_url = %upstream_base_url,
+                http.response.status_code = tracing::field::Empty,
+                otel.status_code = tracing::field::Empty,
+            );
+            let started = Instant::now();
             let empty_headers = HeaderMap::new();
-            let result =
-                http::handler(req, &empty_headers, &uri, &client, state.preserve_host).await;
+            let result = http::handler(req, &empty_headers, &uri, &client, state.preserve_host)
+                .instrument(span.clone())
+                .await;
+            record_attempt_span(&span, &result);
+            record_attempt_metrics(service_name, "upstream", "http", &result, started.elapsed());
             if let Some(balancers) = balancers {
                 record_upstream_health(balancers, service_name, upstream_base_url, &result);
             }
@@ -121,9 +190,17 @@ pub(super) async fn execute_plan_from_replay(
 ) -> Result<Response, ErrorResponse> {
     let last_idx = plan.attempts.len().saturating_sub(1);
     for (idx, selected) in plan.attempts.iter().enumerate() {
-        let response = execute_selected_from_replay(selected, replay, state, balancers).await?;
+        let response = execute_selected_from_replay(selected, replay, state, balancers)
+            .instrument(tracing::debug_span!(
+                "gateway.replay_attempt",
+                attempt = idx,
+                stargate.service = %selected_service_name(selected),
+                stargate.target_kind = selected_target_kind(selected),
+            ))
+            .await?;
         if idx < last_idx && plan.should_failover_response(response.status()) {
             let status = response.status();
+            telemetry::record_gateway_failover("status", Some(status.as_u16()));
             tracing::warn!(
                 status = status.as_u16(),
                 attempt = idx,
@@ -148,21 +225,30 @@ pub(super) fn spawn_mirrors(
     state: RequestState,
 ) {
     for mirror in mirrors {
+        telemetry::record_gateway_mirror("dispatched");
         let replay = replay.clone();
         let state = state.clone();
-        tokio::spawn(async move {
-            // Mirror traffic is shadow traffic: its outcomes must not feed the
-            // circuit breaker, so pass no balancers.
-            match execute_plan_from_replay(&mirror, &replay, &state, None).await {
-                Ok(response) => {
-                    let status = response.status();
-                    if let Err(error) = response.into_body().collect().await {
-                        tracing::warn!(%status, %error, "Mirror response drain failed");
+        let span = tracing::debug_span!("gateway.mirror");
+        tokio::spawn(
+            async move {
+                // Mirror traffic is shadow traffic: its outcomes must not feed the
+                // circuit breaker, so pass no balancers.
+                match execute_plan_from_replay(&mirror, &replay, &state, None).await {
+                    Ok(response) => {
+                        telemetry::record_gateway_mirror("success");
+                        let status = response.status();
+                        if let Err(error) = response.into_body().collect().await {
+                            tracing::warn!(%status, %error, "Mirror response drain failed");
+                        }
+                    }
+                    Err(error) => {
+                        telemetry::record_gateway_mirror("error");
+                        tracing::warn!(%error, "Mirror request failed");
                     }
                 }
-                Err(error) => tracing::warn!(%error, "Mirror request failed"),
             }
-        });
+            .instrument(span),
+        );
     }
 }
 
@@ -173,6 +259,62 @@ fn upstream_uri(base_url: &str, state: &RequestState) -> String {
         uri.push_str(&state.query);
     }
     uri
+}
+
+fn selected_service_name(selected: &SelectedService) -> &str {
+    match selected {
+        SelectedService::Upstream { service_name, .. } => service_name,
+        SelectedService::DirectResponse { .. } => "direct_response",
+    }
+}
+
+fn selected_target_kind(selected: &SelectedService) -> &str {
+    match selected {
+        SelectedService::Upstream { .. } => "upstream",
+        SelectedService::DirectResponse { .. } => "direct_response",
+    }
+}
+
+fn result_status(result: &Result<Response, ErrorResponse>) -> Option<u16> {
+    match result {
+        Ok(response) => Some(response.status().as_u16()),
+        Err(error) => Some(error.code.as_u16()),
+    }
+}
+
+fn result_outcome(result: &Result<Response, ErrorResponse>) -> &'static str {
+    match result {
+        Ok(_) => "success",
+        Err(_) => "error",
+    }
+}
+
+fn record_attempt_span(span: &tracing::Span, result: &Result<Response, ErrorResponse>) {
+    let Some(status) = result_status(result) else {
+        span.record("otel.status_code", "ERROR");
+        return;
+    };
+    span.record("http.response.status_code", status);
+    if status >= 500 {
+        span.record("otel.status_code", "ERROR");
+    }
+}
+
+fn record_attempt_metrics(
+    service: &str,
+    target_kind: &str,
+    protocol: &str,
+    result: &Result<Response, ErrorResponse>,
+    elapsed: std::time::Duration,
+) {
+    telemetry::record_gateway_upstream_attempt(
+        service,
+        target_kind,
+        protocol,
+        result_status(result),
+        result_outcome(result),
+        elapsed,
+    );
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ mod types;
 mod ws;
 
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ext::RequestExt, guard, reqctx};
+use crate::etc::{ext::RequestExt, guard, reqctx, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue, Request};
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
@@ -25,118 +25,209 @@ use planner::{build_execution_plan, selection_error_response};
 use policies::apply_policies;
 use replay::{buffer_request, content_length_exceeds, replay_body_limit};
 use routing::router_matches;
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, sync::Arc, time::Instant};
+use tracing::Instrument;
 use types::{AuthKind, RequestState, ResponseHeaderMutations};
 
 async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
-    let gate = req
-        .extensions()
-        .get::<Arc<Gate>>()
-        .cloned()
-        .expect("Gate extension must be configured");
+    let started = Instant::now();
+    let mut router_name = "unmatched".to_string();
+    let mut service_name = "unmatched".to_string();
 
-    let auth_req = auth_request(&req);
-    let (sub, auth_kind) = match guard::verify_api_key(&auth_req).await {
-        Some(subject) => (Some(subject), Some(AuthKind::ApiKey)),
-        None => match guard::verify_jwt(&auth_req).await {
-            Some(subject) => (Some(subject), Some(AuthKind::Jwt)),
-            None => (None, None),
-        },
-    };
+    let result: Result<Response, ErrorResponse> = async {
+        let gate = req
+            .extensions()
+            .get::<Arc<Gate>>()
+            .cloned()
+            .expect("Gate extension must be configured");
 
-    let graph = gate.http_graph.load_full();
+        let auth_req = auth_request(&req);
+        let (sub, auth_kind) = async {
+            match guard::verify_api_key(&auth_req).await {
+                Some(subject) => (Some(subject), Some(AuthKind::ApiKey)),
+                None => match guard::verify_jwt(&auth_req).await {
+                    Some(subject) => (Some(subject), Some(AuthKind::Jwt)),
+                    None => (None, None),
+                },
+            }
+        }
+        .instrument(tracing::debug_span!("gateway.authenticate"))
+        .await;
+        tracing::Span::current().record(
+            "stargate.auth_kind",
+            match auth_kind {
+                Some(AuthKind::ApiKey) => "api_key",
+                Some(AuthKind::Jwt) => "jwt",
+                None => "anonymous",
+            },
+        );
 
-    let router = graph
-        .routers
-        .iter()
-        .find(|router| router_matches(router, &req))
-        .ok_or_else(|| ErrorResponse::from(HttpError::NotFound("Route not found".to_string())))?;
+        let graph = gate.http_graph.load_full();
 
-    let mut state = RequestState {
-        path: req.uri().path().to_string(),
-        query: req.uri().query().unwrap_or("").to_string(),
-        preserve_host: false,
-        response_headers: ResponseHeaderMutations::default(),
-    };
+        let router = {
+            let _span = tracing::debug_span!("gateway.route_match").entered();
+            graph
+                .routers
+                .iter()
+                .find(|router| router_matches(router, &req))
+                .ok_or_else(|| {
+                    ErrorResponse::from(HttpError::NotFound("Route not found".to_string()))
+                })?
+        };
+        router_name = router.name.clone();
+        service_name = router.service.clone();
+        tracing::Span::current().record("stargate.router", router_name.as_str());
+        tracing::Span::current().record("stargate.service", service_name.as_str());
+        tracing::Span::current().record(
+            "stargate.config_version",
+            crate::etc::gate::get_config_version(),
+        );
 
-    apply_middlewares(&graph, router, &mut req, &mut state)?;
+        let mut state = RequestState {
+            path: req.uri().path().to_string(),
+            query: req.uri().query().unwrap_or("").to_string(),
+            preserve_host: false,
+            response_headers: ResponseHeaderMutations::default(),
+        };
 
-    let request_id = reqctx::request_id_from(req.extensions());
-    let client_ip = req.get_client_ip();
-    let method = req.method().clone();
+        {
+            let _span = tracing::debug_span!(
+                "gateway.apply_middlewares",
+                stargate.router = %router.name,
+                stargate.service = %router.service,
+            )
+            .entered();
+            apply_middlewares(&graph, router, &mut req, &mut state)?;
+        }
 
-    let mut response_headers = HeaderMap::new();
-    response_headers.insert(
-        HeaderName::from_static("x-request-id"),
-        HeaderValue::from_str(&request_id).unwrap(),
-    );
+        let request_id = reqctx::request_id_from(req.extensions());
+        let client_ip = req.get_client_ip();
+        let method = req.method().clone();
 
-    apply_policies(
-        &graph,
-        router,
-        &gate,
-        &mut req,
-        auth_kind,
-        sub.as_ref(),
-        &client_ip,
-        &mut response_headers,
-    )
-    .await?;
+        let mut response_headers = HeaderMap::new();
+        response_headers.insert(
+            HeaderName::from_static("x-request-id"),
+            HeaderValue::from_str(&request_id).unwrap(),
+        );
 
-    let ctx = lb::RequestContext {
-        client_ip: &client_ip,
-        path: &state.path,
-        method: method.as_str(),
-        key: sub.as_ref().map(|sub| sub.id.as_str()),
-    };
+        apply_policies(
+            &graph,
+            router,
+            &gate,
+            &mut req,
+            auth_kind,
+            sub.as_ref(),
+            &client_ip,
+            &mut response_headers,
+        )
+        .instrument(tracing::debug_span!(
+            "gateway.apply_policies",
+            stargate.router = %router.name,
+            stargate.service = %router.service,
+        ))
+        .await?;
 
-    let balancers = gate.http_balancers.load_full();
-    let plan = build_execution_plan(
-        &graph,
-        balancers.as_ref(),
-        &router.service,
-        &ctx,
-        &request_id,
-    )
-    .map_err(selection_error_response)?;
+        let ctx = lb::RequestContext {
+            client_ip: &client_ip,
+            path: &state.path,
+            method: method.as_str(),
+            key: sub.as_ref().map(|sub| sub.id.as_str()),
+        };
 
-    let mut response = if req.get_protocol() == "ws" {
-        let selected = plan.attempts.first().ok_or_else(|| {
-            ErrorResponse::from(HttpError::ServiceUnavailable(
-                "No healthy upstream available".to_string(),
-            ))
-        })?;
-        execute_selected_with_request(selected, req, &state, balancers.as_ref()).await?
-    } else if plan.requires_replay() {
-        let limit = replay_body_limit();
-        if !plan.needs_status_failover_replay() && content_length_exceeds(req.headers(), limit) {
-            tracing::warn!(
-                limit,
-                "Skipping mirror traffic because request body exceeds replay limit"
-            );
+        let balancers = gate.http_balancers.load_full();
+        let plan = {
+            let _span = tracing::debug_span!(
+                "gateway.build_execution_plan",
+                stargate.router = %router.name,
+                stargate.service = %router.service,
+            )
+            .entered();
+            build_execution_plan(
+                &graph,
+                balancers.as_ref(),
+                &router.service,
+                &ctx,
+                &request_id,
+            )
+            .map_err(selection_error_response)?
+        };
+
+        let mut response = if req.get_protocol() == "ws" {
             let selected = plan.attempts.first().ok_or_else(|| {
                 ErrorResponse::from(HttpError::ServiceUnavailable(
                     "No healthy upstream available".to_string(),
                 ))
             })?;
-            execute_selected_with_request(selected, req, &state, balancers.as_ref()).await?
+            execute_selected_with_request(selected, req, &state, balancers.as_ref())
+                .instrument(tracing::info_span!(
+                    "gateway.execute",
+                    stargate.router = %router.name,
+                    stargate.service = %router.service,
+                ))
+                .await?
+        } else if plan.requires_replay() {
+            let limit = replay_body_limit();
+            if !plan.needs_status_failover_replay() && content_length_exceeds(req.headers(), limit)
+            {
+                tracing::warn!(
+                    limit,
+                    "Skipping mirror traffic because request body exceeds replay limit"
+                );
+                let selected = plan.attempts.first().ok_or_else(|| {
+                    ErrorResponse::from(HttpError::ServiceUnavailable(
+                        "No healthy upstream available".to_string(),
+                    ))
+                })?;
+                execute_selected_with_request(selected, req, &state, balancers.as_ref())
+                    .instrument(tracing::info_span!(
+                        "gateway.execute",
+                        stargate.router = %router.name,
+                        stargate.service = %router.service,
+                    ))
+                    .await?
+            } else {
+                let replay = buffer_request(req, limit).await?;
+                telemetry::record_gateway_replay_bytes(replay.body.len());
+                spawn_mirrors(plan.mirrors.clone(), replay.clone(), state.clone());
+                execute_plan_from_replay(&plan, &replay, &state, Some(balancers.as_ref()))
+                    .instrument(tracing::info_span!(
+                        "gateway.execute",
+                        stargate.router = %router.name,
+                        stargate.service = %router.service,
+                    ))
+                    .await?
+            }
         } else {
-            let replay = buffer_request(req, limit).await?;
-            spawn_mirrors(plan.mirrors.clone(), replay.clone(), state.clone());
-            execute_plan_from_replay(&plan, &replay, &state, Some(balancers.as_ref())).await?
-        }
-    } else {
-        let selected = plan.attempts.first().ok_or_else(|| {
-            ErrorResponse::from(HttpError::ServiceUnavailable(
-                "No healthy upstream available".to_string(),
-            ))
-        })?;
-        execute_selected_with_request(selected, req, &state, balancers.as_ref()).await?
-    };
+            let selected = plan.attempts.first().ok_or_else(|| {
+                ErrorResponse::from(HttpError::ServiceUnavailable(
+                    "No healthy upstream available".to_string(),
+                ))
+            })?;
+            execute_selected_with_request(selected, req, &state, balancers.as_ref())
+                .instrument(tracing::info_span!(
+                    "gateway.execute",
+                    stargate.router = %router.name,
+                    stargate.service = %router.service,
+                ))
+                .await?
+        };
 
-    apply_response_header_mutations(response.headers_mut(), &state.response_headers);
-    apply_gateway_headers(response.headers_mut(), &response_headers);
-    Ok(response)
+        apply_response_header_mutations(response.headers_mut(), &state.response_headers);
+        apply_gateway_headers(response.headers_mut(), &response_headers);
+        Ok(response)
+    }
+    .await;
+
+    let status = match &result {
+        Ok(response) => response.status().as_u16(),
+        Err(error) => error.code.as_u16(),
+    };
+    telemetry::record_gateway_request(&router_name, &service_name, status, started.elapsed());
+    if status >= 500 {
+        tracing::Span::current().record("otel.status_code", "ERROR");
+    }
+
+    result
 }
 
 pub async fn service(req: Request<Body>) -> Result<Response, Infallible> {

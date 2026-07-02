@@ -19,5 +19,6 @@ pub mod reqctx;
 pub mod run;
 pub mod store;
 pub mod sub;
+pub mod telemetry;
 pub mod time;
 pub mod tls;

@@ -1,4 +1,4 @@
-use crate::etc::store::use_store;
+use crate::etc::{store::use_store, telemetry};
 use gate::{
     Gate,
     cfg::{RuntimeConfig, Service},
@@ -193,6 +193,7 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         let config = match RuntimeConfig::from_file(&file_path) {
                             Ok(config) => config,
                             Err(error) => {
+                                telemetry::record_config_reload("gateway_config", "error");
                                 error!(%error, "Configuration file changed but did not validate; keeping previous config");
                                 continue;
                             }
@@ -201,8 +202,12 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                         info!(config_version, "Configuration file changed, reloading...");
                         gate.update_config(&config).await;
+                        telemetry::record_config_reload("gateway_config", "success");
                     }
-                    Err(e) => error!("Watch error: {:?}", e),
+                    Err(e) => {
+                        telemetry::record_config_reload("gateway_config", "error");
+                        error!("Watch error: {:?}", e);
+                    }
                 }
             }
         });
@@ -238,7 +243,10 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
                         info!("Policies file changed, reloading...");
                         reload_policy_engine_from_path(&gate, &file_path).await;
                     }
-                    Err(e) => error!("Watch error: {:?}", e),
+                    Err(e) => {
+                        telemetry::record_config_reload("policies", "error");
+                        error!("Watch error: {:?}", e);
+                    }
                 }
             }
         });
@@ -257,6 +265,7 @@ pub async fn reload_policy_engine(gate: &Gate) {
 async fn reload_policy_engine_from_path(gate: &Gate, policies_path: &str) {
     CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
     gate.update_policy_engine(policies_path).await;
+    telemetry::record_config_reload("policies", "success");
 }
 
 type HyperConnector = hyper_rustls::HttpsConnector<HttpConnector>;

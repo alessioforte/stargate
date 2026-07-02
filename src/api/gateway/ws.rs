@@ -1,4 +1,5 @@
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
 use futures_util::{SinkExt, StreamExt};
 use http::header::{
@@ -68,6 +69,7 @@ fn build_upstream_request(
     })?;
 
     copy_forwarded_headers(request.headers_mut(), incoming_headers, preserve_host);
+    telemetry::inject_context(request.headers_mut());
 
     Ok(request)
 }
