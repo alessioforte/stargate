@@ -9,7 +9,6 @@ use axum::Json;
 use axum::extract::{FromRequest, Request};
 use axum::response::Response;
 use db::ent::CredentialType;
-use pw::Hash;
 
 #[utoipa::path(
     post,
@@ -59,6 +58,14 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
     }
 
     let Some(user) = user else {
+        // Verify against a dummy hash so the unknown-user path takes about as
+        // long as the valid-user path, preventing username enumeration via
+        // response timing.
+        let _ = crate::etc::pw::verify_password(
+            credentials.password.clone(),
+            crate::etc::pw::dummy_hash(),
+        )
+        .await;
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
@@ -72,6 +79,11 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
         .map_err(ErrorResponse::internal)?;
 
     let Some(user_credential) = user_credential else {
+        let _ = crate::etc::pw::verify_password(
+            credentials.password.clone(),
+            crate::etc::pw::dummy_hash(),
+        )
+        .await;
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
@@ -80,7 +92,12 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
         )));
     };
 
-    if Hash::verify(&credentials.password, &user_credential.value).is_err() {
+    let password_ok = crate::etc::pw::verify_password(
+        credentials.password.clone(),
+        user_credential.value.clone(),
+    )
+    .await;
+    if !password_ok {
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;

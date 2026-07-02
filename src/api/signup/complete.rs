@@ -7,7 +7,6 @@ use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use db::ent::{CredentialType, Profile};
-use pw::Hash;
 use pw::{PasswordPolicy, PasswordPolicyValidator};
 use smtp::Smtp;
 use tracing::error;
@@ -87,7 +86,9 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         .phone_number(body.phone_number.clone())
         .picture(None);
 
-    let password = Hash::encode(&body.password).unwrap();
+    let password = crate::etc::pw::hash_password(body.password.clone())
+        .await
+        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 
     let user = crate::db::create_user(profile, CredentialType::Password, &password, ctx)
         .await

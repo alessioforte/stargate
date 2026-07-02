@@ -7,7 +7,6 @@ use crate::etc::reqctx::take_audit_context_from;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
-use pw::Hash;
 use smtp::{Smtp, Template};
 use tracing::error;
 
@@ -61,7 +60,9 @@ pub async fn put_credentials(mut req: Request) -> Result<Json<MessageResponse>, 
             ErrorResponse::from(HttpError::DocumentNotFound("User not found".to_string()))
         })?;
 
-    let password = Hash::encode(&body.password).unwrap();
+    let password = crate::etc::pw::hash_password(body.password.clone())
+        .await
+        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 
     crate::db::change_password(&user.id, &password, ctx)
         .await

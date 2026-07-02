@@ -230,7 +230,9 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         ))));
     }
 
-    let hashed = pw::Hash::encode(&payload.password).map_err(ErrorResponse::internal)?;
+    let hashed = crate::etc::pw::hash_password(payload.password.clone())
+        .await
+        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 
     let nickname = payload
         .nickname

@@ -2,20 +2,24 @@ use http::Request;
 use http::header::{AUTHORIZATION, COOKIE, HeaderMap, USER_AGENT};
 use std::net::{IpAddr, SocketAddr};
 
-/// Parse an IP address from a raw string that may contain a comma-separated
-/// list, square brackets, or a socket address (ip:port).
-pub(crate) fn parse_ip_str(raw: &str) -> Option<IpAddr> {
-    let first = raw.split(',').next()?.trim();
-    let unbracketed = first
+/// Parse a single IP token that may be a bare IP, a bracketed IPv6 address,
+/// or a socket address (`ip:port` / `[ip]:port`).
+pub(crate) fn parse_single_ip(raw: &str) -> Option<IpAddr> {
+    let token = raw.trim();
+    if token.is_empty() {
+        return None;
+    }
+
+    let unbracketed = token
         .strip_prefix('[')
         .and_then(|v| v.strip_suffix(']'))
-        .unwrap_or(first);
+        .unwrap_or(token);
 
     if let Ok(ip) = unbracketed.parse::<IpAddr>() {
         return Some(ip);
     }
 
-    if let Ok(sock) = first.parse::<SocketAddr>() {
+    if let Ok(sock) = token.parse::<SocketAddr>() {
         return Some(sock.ip());
     }
 
@@ -139,14 +143,50 @@ fn peer_addr<B>(req: &Request<B>) -> Option<SocketAddr> {
         .map(|ci| ci.0)
 }
 
+/// Resolve the real client IP from an `X-Forwarded-For` header value,
+/// trusting only configured proxies.
+///
+/// A conforming proxy *appends* the peer it received the connection from to
+/// the right of the list, so the right-most entries are the closest, most
+/// trustworthy hops while the left-most entry is fully client-controlled. We
+/// therefore return the right-most address that is not itself a trusted
+/// proxy, which prevents a client from spoofing its address by prepending a
+/// fake left-most entry. If every entry is a trusted proxy, we fall back to
+/// the left-most parseable address (the outermost known hop).
+fn client_from_forwarded_for(value: &str) -> Option<IpAddr> {
+    select_forwarded_client(value, |ip| crate::etc::proxy::is_trusted_proxy(ip))
+}
+
+fn select_forwarded_client<F>(value: &str, is_trusted: F) -> Option<IpAddr>
+where
+    F: Fn(&IpAddr) -> bool,
+{
+    let mut leftmost = None;
+    let mut rightmost_untrusted = None;
+
+    for token in value.split(',') {
+        let Some(ip) = parse_single_ip(token) else {
+            continue;
+        };
+        if leftmost.is_none() {
+            leftmost = Some(ip);
+        }
+        if !is_trusted(&ip) {
+            rightmost_untrusted = Some(ip);
+        }
+    }
+
+    rightmost_untrusted.or(leftmost)
+}
+
 fn forwarded_ip(headers: &HeaderMap) -> Option<IpAddr> {
     if let Some(xff) = header_str(headers, "x-forwarded-for")
-        && let Some(ip) = parse_ip_str(xff)
+        && let Some(ip) = client_from_forwarded_for(xff)
     {
         return Some(ip);
     }
     if let Some(real) = header_str(headers, "x-real-ip")
-        && let Some(ip) = parse_ip_str(real)
+        && let Some(ip) = parse_single_ip(real)
     {
         return Some(ip);
     }
@@ -348,6 +388,66 @@ mod tests {
         let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 55555);
         r.extensions_mut().insert(ConnectInfo(peer));
         assert_eq!(r.get_client_ip(), "1.2.3.4");
+    }
+
+    #[test]
+    fn parse_single_ip_handles_bare_bracketed_and_socket() {
+        use super::parse_single_ip;
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        assert_eq!(
+            parse_single_ip(" 203.0.113.7 "),
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
+        );
+        assert_eq!(
+            parse_single_ip("203.0.113.7:443"),
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
+        );
+        assert_eq!(
+            parse_single_ip("[2001:db8::1]"),
+            Some(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))
+        );
+        assert_eq!(
+            parse_single_ip("[2001:db8::1]:8443"),
+            Some(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))
+        );
+        assert_eq!(parse_single_ip(""), None);
+        assert_eq!(parse_single_ip("not-an-ip"), None);
+    }
+
+    #[test]
+    fn forwarded_client_ignores_spoofed_leftmost_entry() {
+        use super::select_forwarded_client;
+        use std::net::{IpAddr, Ipv4Addr};
+
+        // 10.0.0.0/8 is the trusted proxy network; the last hop appended by a
+        // conforming proxy is the real client. A client-prepended fake entry
+        // to the left must be ignored.
+        let trusted = |ip: &IpAddr| matches!(ip, IpAddr::V4(v4) if v4.octets()[0] == 10);
+
+        // Spoofed left-most value, real client appended by the proxy.
+        assert_eq!(
+            select_forwarded_client("9.9.9.9, 203.0.113.7, 10.0.0.1", trusted),
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
+        );
+
+        // Single-proxy hop: client's real IP is the only forwarded entry.
+        assert_eq!(
+            select_forwarded_client("203.0.113.7", trusted),
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
+        );
+
+        // Whole chain trusted: fall back to the left-most known hop.
+        assert_eq!(
+            select_forwarded_client("10.0.0.9, 10.0.0.1", trusted),
+            Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)))
+        );
+
+        // Multiple untrusted entries: the right-most untrusted one wins.
+        assert_eq!(
+            select_forwarded_client("1.1.1.1, 203.0.113.7, 10.0.0.1", trusted),
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
+        );
     }
 
     #[test]

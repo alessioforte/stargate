@@ -30,8 +30,9 @@ pub async fn bootstrap_super_admin(
         bail!("user with email '{email}' already exists");
     }
 
-    let hash = pw::Hash::encode(&password)
-        .map_err(|e| anyhow::anyhow!("failed to hash bootstrap password: {e}"))?;
+    let hash = crate::etc::pw::hash_password(password)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("failed to hash bootstrap password"))?;
     let nickname = nickname.unwrap_or_else(|| email.clone());
 
     let profile = Profile::new(email.clone(), nickname).given_name(name);

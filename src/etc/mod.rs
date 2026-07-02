@@ -15,6 +15,7 @@ pub mod msg;
 pub mod origin;
 pub mod profile;
 pub mod proxy;
+pub mod pw;
 pub mod reqctx;
 pub mod run;
 pub mod store;
