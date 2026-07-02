@@ -140,12 +140,11 @@ fn transition_state(
 impl TokenBucket {
     pub fn new(store: Arc<State>, clock: Arc<CachedClock>, config: TokenBucketConfig) -> Self {
         // TTL should be long enough to cover the time to refill from empty
-        // Plus some buffer for safety
-        let ttl = if config.refill_rate > 0 {
-            ((config.capacity / config.refill_rate) + 60).max(60)
-        } else {
-            3600 // 1 hour default if refill_rate is 0
-        };
+        // Plus some buffer for safety. 1 hour default if refill_rate is 0.
+        let ttl = config
+            .capacity
+            .checked_div(config.refill_rate)
+            .map_or(3600, |refill_secs| (refill_secs + 60).max(60));
 
         Self {
             store,
@@ -244,12 +243,12 @@ pub struct TokenBucket {
 #[cfg(feature = "redis")]
 impl TokenBucket {
     pub fn new(store: Arc<State>, _clock: Arc<CachedClock>, config: TokenBucketConfig) -> Self {
-        // TTL should be long enough to cover the time to refill from empty
-        let ttl = if config.refill_rate > 0 {
-            ((config.capacity / config.refill_rate) + 60).max(60)
-        } else {
-            3600
-        };
+        // TTL should be long enough to cover the time to refill from empty.
+        // 1 hour default if refill_rate is 0.
+        let ttl = config
+            .capacity
+            .checked_div(config.refill_rate)
+            .map_or(3600, |refill_secs| (refill_secs + 60).max(60));
 
         Self {
             store,

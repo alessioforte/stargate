@@ -154,7 +154,7 @@ fn peer_addr<B>(req: &Request<B>) -> Option<SocketAddr> {
 /// fake left-most entry. If every entry is a trusted proxy, we fall back to
 /// the left-most parseable address (the outermost known hop).
 fn client_from_forwarded_for(value: &str) -> Option<IpAddr> {
-    select_forwarded_client(value, |ip| crate::etc::proxy::is_trusted_proxy(ip))
+    select_forwarded_client(value, crate::etc::proxy::is_trusted_proxy)
 }
 
 fn select_forwarded_client<F>(value: &str, is_trusted: F) -> Option<IpAddr>

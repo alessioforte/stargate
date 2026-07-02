@@ -209,25 +209,6 @@ macro_rules! require_grants {
     }};
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{SUPER_ADMIN, admin_key_grants};
-
-    #[test]
-    fn admin_key_grants_do_not_include_super_admin() {
-        let permissions = [
-            "users".to_string(),
-            SUPER_ADMIN.to_string(),
-            "organizations".to_string(),
-        ];
-        let grants = admin_key_grants(permissions.iter());
-
-        assert!(grants.contains("users"));
-        assert!(grants.contains("organizations"));
-        assert!(!grants.contains(SUPER_ADMIN));
-    }
-}
-
 pub fn router() -> axum::Router {
     use axum::middleware::from_fn;
     use axum::routing::{get, post, put};
@@ -352,4 +333,23 @@ pub fn router() -> axum::Router {
             post(access_control_rules::evaluate_access_control_rules),
         )
         .layer(from_fn(extract_grants))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SUPER_ADMIN, admin_key_grants};
+
+    #[test]
+    fn admin_key_grants_do_not_include_super_admin() {
+        let permissions = [
+            "users".to_string(),
+            SUPER_ADMIN.to_string(),
+            "organizations".to_string(),
+        ];
+        let grants = admin_key_grants(permissions.iter());
+
+        assert!(grants.contains("users"));
+        assert!(grants.contains("organizations"));
+        assert!(!grants.contains(SUPER_ADMIN));
+    }
 }

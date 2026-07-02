@@ -44,6 +44,7 @@ fn new_secret() -> String {
     pw::generate_api_key()
 }
 
+#[allow(clippy::too_many_arguments)] // distinct values needed to mint a token family
 pub async fn issue<S: Store>(
     store: &S,
     client_id: String,

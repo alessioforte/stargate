@@ -83,6 +83,10 @@ fn github_user_url() -> String {
 }
 
 #[cfg(test)]
+// `env_lock` intentionally serializes process-env access for the whole async
+// test; the guard must stay live across the `.await`s. Each `#[tokio::test]`
+// runs on its own single-threaded runtime, so there is no deadlock risk.
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use std::collections::HashMap;
 

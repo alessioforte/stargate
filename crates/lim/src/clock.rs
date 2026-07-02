@@ -17,10 +17,7 @@ impl CachedClock {
         std::thread::spawn(move || {
             let interval = std::time::Duration::from_millis(10);
             let mut next_tick = std::time::Instant::now() + interval;
-            loop {
-                let Some(clock) = clock_weak.upgrade() else {
-                    break;
-                };
+            while let Some(clock) = clock_weak.upgrade() {
                 let now = std::time::Instant::now();
                 if next_tick > now {
                     std::thread::sleep(next_tick - now);

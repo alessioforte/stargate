@@ -151,7 +151,7 @@ fn hash_json_value(value: &serde_json::Value, hasher: &mut DefaultHasher) {
             5_u8.hash(hasher);
             v.len().hash(hasher);
             let mut entries: Vec<_> = v.iter().collect();
-            entries.sort_unstable_by(|(ka, _), (kb, _)| ka.cmp(kb));
+            entries.sort_unstable_by_key(|(ka, _)| *ka);
             for (k, item) in entries {
                 k.hash(hasher);
                 hash_json_value(item, hasher);

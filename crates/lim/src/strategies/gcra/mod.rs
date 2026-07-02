@@ -130,16 +130,15 @@ impl RateLimit for Gcra {
         let tat = tat as u64;
 
         // Rate limit (requests per second)
-        let limit = if tau > 0 { (1_000_000 / tau).max(1) } else { 1 };
+        let limit = 1_000_000u64.checked_div(tau).unwrap_or(0).max(1);
 
         // Remaining capacity calculation (FIXED)
         let total_capacity = burst + tau; // = tau * max_burst
         let used_capacity = tat.saturating_sub(t0);
-        let remaining = if tau > 0 {
-            total_capacity.saturating_sub(used_capacity) / tau
-        } else {
-            0
-        };
+        let remaining = total_capacity
+            .saturating_sub(used_capacity)
+            .checked_div(tau)
+            .unwrap_or(0);
 
         if allow {
             Ok(RateLimitDecision::allowed(limit, remaining, None))
@@ -222,14 +221,10 @@ impl RateLimit for Gcra {
 
         // Calculate rate limit (requests per second)
         // tau is microseconds per request, so requests per second = 1_000_000 / tau
-        let limit = if tau > 0 { (1_000_000 / tau).max(1) } else { 1 };
+        let limit = 1_000_000u64.checked_div(tau).unwrap_or(0).max(1);
 
         // Convert remaining burst capacity (microseconds) to number of requests
-        let remaining = if tau > 0 && remaining_burst > 0 {
-            remaining_burst / tau
-        } else {
-            0
-        };
+        let remaining = remaining_burst.checked_div(tau).unwrap_or(0);
 
         if allow == 1 {
             Ok(RateLimitDecision::allowed(limit, remaining, None))
@@ -337,7 +332,7 @@ mod tests {
     #[test]
     fn test_quota_clone() {
         let quota1 = Quota::per_second(10);
-        let quota2 = quota1.clone();
+        let quota2 = quota1;
         assert_eq!(quota1, quota2);
     }
 
@@ -398,7 +393,7 @@ mod tests {
         // For tau = 100,000 microseconds (100ms)
         // limit = 1,000,000 / 100,000 = 10 requests per second
         let tau = 100_000u64;
-        let limit = if tau > 0 { (1_000_000 / tau).max(1) } else { 1 };
+        let limit = 1_000_000u64.checked_div(tau).unwrap_or(0).max(1);
         assert_eq!(limit, 10);
     }
 
@@ -407,7 +402,7 @@ mod tests {
         // For tau = 1 microsecond (very fast)
         // limit = 1,000,000 / 1 = 1,000,000 requests per second
         let tau = 1u64;
-        let limit = if tau > 0 { (1_000_000 / tau).max(1) } else { 1 };
+        let limit = 1_000_000u64.checked_div(tau).unwrap_or(0).max(1);
         assert_eq!(limit, 1_000_000);
     }
 
@@ -415,7 +410,7 @@ mod tests {
     fn test_limit_calculation_zero_tau() {
         // For tau = 0 (edge case)
         let tau = 0u64;
-        let limit = if tau > 0 { (1_000_000 / tau).max(1) } else { 1 };
+        let limit = 1_000_000u64.checked_div(tau).unwrap_or(0).max(1);
         assert_eq!(limit, 1);
     }
 
@@ -428,11 +423,10 @@ mod tests {
 
         let total_capacity = burst + tau; // 1,000,000 (10 tokens)
         let used_capacity = tat.saturating_sub(t0); // 100,000 (1 token used)
-        let remaining = if tau > 0 {
-            total_capacity.saturating_sub(used_capacity) / tau
-        } else {
-            0
-        };
+        let remaining = total_capacity
+            .saturating_sub(used_capacity)
+            .checked_div(tau)
+            .unwrap_or(0);
 
         assert_eq!(remaining, 9); // 9 tokens remaining
     }
@@ -446,11 +440,10 @@ mod tests {
 
         let total_capacity = burst + tau;
         let used_capacity = tat.saturating_sub(t0);
-        let remaining = if tau > 0 {
-            total_capacity.saturating_sub(used_capacity) / tau
-        } else {
-            0
-        };
+        let remaining = total_capacity
+            .saturating_sub(used_capacity)
+            .checked_div(tau)
+            .unwrap_or(0);
 
         assert_eq!(remaining, 10); // Full 10 tokens
     }
@@ -464,11 +457,10 @@ mod tests {
 
         let total_capacity = burst + tau;
         let used_capacity = tat.saturating_sub(t0);
-        let remaining = if tau > 0 {
-            total_capacity.saturating_sub(used_capacity) / tau
-        } else {
-            0
-        };
+        let remaining = total_capacity
+            .saturating_sub(used_capacity)
+            .checked_div(tau)
+            .unwrap_or(0);
 
         assert_eq!(remaining, 0); // No tokens remaining
     }
