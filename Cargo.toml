@@ -111,7 +111,11 @@ notify = "8.2.0"
 clap = { version = "4.6.1", features = ["derive"] }
 
 [features]
-default = ["cluster"]
+# No default profile: the `edge` and `cluster` backends are mutually
+# exclusive, so a default would silently combine with an explicitly requested
+# profile and fail to compile. Always build with exactly one profile, e.g.
+# `cargo run --features edge` or `cargo build --release --features cluster`.
+default = []
 edge = ["sqlite", "memory"]
 cluster = ["postgres", "redis"]
 postgres = ["db/postgres"]

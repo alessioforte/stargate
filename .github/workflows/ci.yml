@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  build-test:
+    name: build & test (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # edge = sqlite + memory, cluster = postgres + redis.
+        # The two backends are mutually exclusive, so each profile is built
+        # in isolation with --no-default-features.
+        profile: [edge, cluster]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.profile }}
+      - name: Build
+        run: cargo build --workspace --no-default-features --features ${{ matrix.profile }}
+      - name: Test
+        run: cargo test --workspace --no-default-features --features ${{ matrix.profile }}
+      - name: Clippy
+        # NOTE: not yet gated on warnings — the edge profile still has dead-code
+        # warnings (audit relay telemetry). Add `-- -D warnings` once INFO-1
+        # (Phase 4) is cleaned up.
+        run: cargo clippy --workspace --all-targets --no-default-features --features ${{ matrix.profile }}

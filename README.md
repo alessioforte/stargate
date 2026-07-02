@@ -49,10 +49,14 @@ stargate admin bootstrap
 
 Use the CLI to create the initial super-admin account explicitly. Stargate no longer auto-creates a privileged user during normal startup.
 
+A profile must be selected on every build/run (`edge` and `cluster` are
+mutually exclusive, and there is no default). The examples below use
+`--features edge`; swap in `--features cluster` for cluster deployments.
+
 Pass the password directly:
 
 ```bash
-cargo run -- admin bootstrap \
+cargo run --features edge -- admin bootstrap \
   --email admin@example.com \
   --password 'replace-with-a-strong-password' \
   --name 'Admin User' \
@@ -62,7 +66,7 @@ cargo run -- admin bootstrap \
 Or read the password from stdin so it does not appear in shell history:
 
 ```bash
-printf '%s' 'replace-with-a-strong-password' | cargo run -- admin bootstrap \
+printf '%s' 'replace-with-a-strong-password' | cargo run --features edge -- admin bootstrap \
   --email admin@example.com \
   --password-stdin \
   --name 'Admin User' \
@@ -72,7 +76,7 @@ printf '%s' 'replace-with-a-strong-password' | cargo run -- admin bootstrap \
 Or let Stargate generate a one-time bootstrap password and print it after successful creation:
 
 ```bash
-cargo run -- admin bootstrap \
+cargo run --features edge -- admin bootstrap \
   --email admin@example.com \
   --generate-password \
   --name 'Admin User' \

@@ -1,5 +1,10 @@
 use std::{env, io};
 
+#[cfg(all(feature = "edge", feature = "cluster"))]
+compile_error!(
+    "features `edge` and `cluster` are mutually exclusive; build with exactly one profile, e.g. `--features edge` or `--features cluster`"
+);
+
 #[cfg(all(feature = "sqlite", feature = "postgres"))]
 compile_error!("stargate must be built with exactly one database backend: sqlite or postgres");
 
