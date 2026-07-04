@@ -47,8 +47,6 @@ CREATE TABLE IF NOT EXISTS "oauth_clients" (
     "client_secret_hash" TEXT UNIQUE,
     "name" VARCHAR(100) NOT NULL,
     "description" TEXT,
-    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE SET NULL,
-    "service_account_id" TEXT REFERENCES "service_accounts" ("id") ON DELETE SET NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT TRUE,
     "token_endpoint_auth_method" TEXT NOT NULL,
     "grant_types" JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -186,8 +184,6 @@ CREATE TABLE IF NOT EXISTS "service_account_api_keys" (
 
 -- Indexes on foreign keys
 CREATE INDEX IF NOT EXISTS "idx_service_accounts_org_id" ON "service_accounts" ("org_id");
-CREATE INDEX IF NOT EXISTS "idx_oauth_clients_org_id" ON "oauth_clients" ("org_id");
-CREATE INDEX IF NOT EXISTS "idx_oauth_clients_service_account_id" ON "oauth_clients" ("service_account_id");
 CREATE INDEX IF NOT EXISTS "idx_oauth_clients_enabled" ON "oauth_clients" ("enabled");
 CREATE INDEX IF NOT EXISTS "idx_oauth_consents_user_client" ON "oauth_consents" ("user_id", "client_id");
 CREATE INDEX IF NOT EXISTS "idx_oauth_consents_client_id" ON "oauth_consents" ("client_id");

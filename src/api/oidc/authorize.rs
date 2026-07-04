@@ -419,8 +419,6 @@ mod tests {
             None,
             "OIDC Client".to_string(),
             None,
-            None,
-            None,
             AUTH_METHOD_NONE.to_string(),
             vec![GRANT_AUTHORIZATION_CODE.to_string()],
             vec![RESPONSE_CODE.to_string()],

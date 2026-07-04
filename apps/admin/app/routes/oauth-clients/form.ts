@@ -17,8 +17,6 @@ export interface OAuthClientFormValues {
   clientId: string;
   name: string;
   description: string;
-  orgId: string;
-  serviceAccountId: string;
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethodValue;
   grantTypes: OAuthGrantTypeValue[];
   responseTypes: OAuthResponseTypeValue[];
@@ -32,8 +30,6 @@ export const emptyOAuthClientFormValues: OAuthClientFormValues = {
   clientId: "",
   name: "",
   description: "",
-  orgId: "",
-  serviceAccountId: "",
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod.ClientSecretBasic,
   grantTypes: [],
   responseTypes: [],
@@ -60,8 +56,6 @@ export function oauthClientToFormValues(
     clientId: oauthClient.clientId,
     name: oauthClient.name,
     description: oauthClient.description ?? "",
-    orgId: oauthClient.orgId ?? "",
-    serviceAccountId: oauthClient.serviceAccountId ?? "",
     tokenEndpointAuthMethod: oauthClient.tokenEndpointAuthMethod,
     grantTypes: oauthClient.grantTypes,
     responseTypes: oauthClient.responseTypes,
@@ -143,8 +137,6 @@ export function toCreateOAuthClientRequest(
     clientId: optionalString(values.clientId),
     name: values.name.trim(),
     description: optionalString(values.description),
-    orgId: optionalString(values.orgId),
-    serviceAccountId: optionalString(values.serviceAccountId),
     tokenEndpointAuthMethod: values.tokenEndpointAuthMethod,
     grantTypes: values.grantTypes,
     responseTypes: values.responseTypes,
@@ -162,8 +154,6 @@ export function toUpdateOAuthClientRequest(
   return {
     name: values.name.trim(),
     description: optionalString(values.description),
-    orgId: optionalString(values.orgId),
-    serviceAccountId: optionalString(values.serviceAccountId),
     tokenEndpointAuthMethod: values.tokenEndpointAuthMethod,
     grantTypes: values.grantTypes,
     responseTypes: values.responseTypes,

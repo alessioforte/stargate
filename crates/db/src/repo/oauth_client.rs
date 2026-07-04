@@ -24,8 +24,6 @@ impl OAuthClientRepository {
                 client_secret_hash,
                 name,
                 description,
-                org_id,
-                service_account_id,
                 enabled,
                 token_endpoint_auth_method,
                 grant_types,
@@ -37,7 +35,7 @@ impl OAuthClientRepository {
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *
         ",
             tbl = OAUTH_CLIENT
@@ -46,8 +44,6 @@ impl OAuthClientRepository {
         .bind(&client.client_secret_hash)
         .bind(&client.name)
         .bind(&client.description)
-        .bind(&client.org_id)
-        .bind(&client.service_account_id)
         .bind(client.enabled)
         .bind(&client.token_endpoint_auth_method)
         .bind(&client.grant_types)
@@ -175,17 +171,15 @@ impl OAuthClientRepository {
             UPDATE {tbl}
             SET name = $2,
                 description = $3,
-                org_id = $4,
-                service_account_id = $5,
-                token_endpoint_auth_method = $6,
-                grant_types = $7,
-                response_types = $8,
-                redirect_uris = $9,
-                scopes = $10,
-                audiences = $11,
-                attrs = $12,
-                client_secret_hash = $13,
-                updated_at = $14
+                token_endpoint_auth_method = $4,
+                grant_types = $5,
+                response_types = $6,
+                redirect_uris = $7,
+                scopes = $8,
+                audiences = $9,
+                attrs = $10,
+                client_secret_hash = $11,
+                updated_at = $12
             WHERE client_id = $1
             RETURNING *
         ",
@@ -194,8 +188,6 @@ impl OAuthClientRepository {
         .bind(&client.client_id)
         .bind(&client.name)
         .bind(&client.description)
-        .bind(&client.org_id)
-        .bind(&client.service_account_id)
         .bind(&client.token_endpoint_auth_method)
         .bind(&client.grant_types)
         .bind(&client.response_types)

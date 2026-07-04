@@ -438,8 +438,6 @@ mod tests {
             None,
             "Test Client".to_string(),
             None,
-            None,
-            None,
             AUTH_METHOD_CLIENT_SECRET_BASIC.to_string(),
             vec![GRANT_CLIENT_CREDENTIALS.to_string()],
             Vec::new(),

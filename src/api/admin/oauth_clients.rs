@@ -30,8 +30,6 @@ pub struct OAuthClientSchema {
     pub client_id: String,
     pub name: String,
     pub description: Option<String>,
-    pub org_id: Option<String>,
-    pub service_account_id: Option<String>,
     pub enabled: bool,
     pub token_endpoint_auth_method: String,
     pub grant_types: Vec<String>,
@@ -52,8 +50,6 @@ impl From<OAuthClient> for OAuthClientSchema {
             client_id: client.client_id,
             name: client.name,
             description: client.description,
-            org_id: client.org_id,
-            service_account_id: client.service_account_id,
             enabled: client.enabled,
             token_endpoint_auth_method: client.token_endpoint_auth_method,
             grant_types: client.grant_types.0,
@@ -114,10 +110,6 @@ pub struct CreateOAuthClientRequest {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub org_id: Option<String>,
-    #[serde(default)]
-    pub service_account_id: Option<String>,
-    #[serde(default)]
     pub token_endpoint_auth_method: Option<String>,
     pub grant_types: Vec<String>,
     #[serde(default)]
@@ -138,10 +130,6 @@ pub struct UpdateOAuthClientRequest {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
-    pub org_id: Option<String>,
-    #[serde(default)]
-    pub service_account_id: Option<String>,
     pub token_endpoint_auth_method: String,
     pub grant_types: Vec<String>,
     #[serde(default)]
@@ -164,10 +152,6 @@ pub struct PatchOAuthClientRequest {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub org_id: Option<String>,
-    #[serde(default)]
-    pub service_account_id: Option<String>,
-    #[serde(default)]
     pub token_endpoint_auth_method: Option<String>,
     #[serde(default)]
     pub grant_types: Option<Vec<String>>,
@@ -186,8 +170,6 @@ pub struct PatchOAuthClientRequest {
 struct NormalizedClientInput {
     name: String,
     description: Option<String>,
-    org_id: Option<String>,
-    service_account_id: Option<String>,
     token_endpoint_auth_method: String,
     grant_types: Vec<String>,
     response_types: Vec<String>,
@@ -395,35 +377,6 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
     Ok(())
 }
 
-async fn validate_owner_refs(
-    org_id: Option<&str>,
-    service_account_id: Option<&str>,
-) -> Result<(), ErrorResponse> {
-    if let Some(org_id) = org_id
-        && crate::db::get_organization_by_id(org_id)
-            .await
-            .map_err(ErrorResponse::internal)?
-            .is_none()
-    {
-        return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-            "organization with id '{org_id}' not found"
-        ))));
-    }
-
-    if let Some(service_account_id) = service_account_id
-        && crate::db::get_service_account_by_id(service_account_id)
-            .await
-            .map_err(ErrorResponse::internal)?
-            .is_none()
-    {
-        return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-            "service account with id '{service_account_id}' not found"
-        ))));
-    }
-
-    Ok(())
-}
-
 fn is_confidential(method: &str) -> bool {
     method != AUTH_METHOD_NONE
 }
@@ -434,8 +387,6 @@ fn normalize_create_payload(
     let input = NormalizedClientInput {
         name: normalize_name(payload.name)?,
         description: normalize_optional_string(payload.description),
-        org_id: normalize_optional_string(payload.org_id),
-        service_account_id: normalize_optional_string(payload.service_account_id),
         token_endpoint_auth_method: payload
             .token_endpoint_auth_method
             .map(|value| value.trim().to_string())
@@ -461,8 +412,6 @@ fn normalize_update_payload(
     let input = NormalizedClientInput {
         name: normalize_name(payload.name)?,
         description: normalize_optional_string(payload.description),
-        org_id: normalize_optional_string(payload.org_id),
-        service_account_id: normalize_optional_string(payload.service_account_id),
         token_endpoint_auth_method: payload.token_endpoint_auth_method.trim().to_string(),
         grant_types: normalize_list(payload.grant_types, "grant_types")?,
         response_types: normalize_list(payload.response_types, "response_types")?,
@@ -488,14 +437,6 @@ fn normalize_patch_payload(
             .description
             .map(Some)
             .unwrap_or_else(|| existing.description.clone()),
-        org_id: payload
-            .org_id
-            .map(Some)
-            .unwrap_or_else(|| existing.org_id.clone()),
-        service_account_id: payload
-            .service_account_id
-            .map(Some)
-            .unwrap_or_else(|| existing.service_account_id.clone()),
         token_endpoint_auth_method: payload
             .token_endpoint_auth_method
             .map(|value| value.trim().to_string())
@@ -538,8 +479,6 @@ fn apply_input(
 
     existing.name = input.name;
     existing.description = input.description;
-    existing.org_id = input.org_id;
-    existing.service_account_id = input.service_account_id;
     existing.token_endpoint_auth_method = input.token_endpoint_auth_method;
     existing.grant_types.0 = input.grant_types;
     existing.response_types.0 = input.response_types;
@@ -659,7 +598,6 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     let client_id = payload.client_id.clone().unwrap_or_else(generate_client_id);
     validate_client_id(&client_id)?;
     let input = normalize_create_payload(payload)?;
-    validate_owner_refs(input.org_id.as_deref(), input.service_account_id.as_deref()).await?;
 
     if crate::db::get_oauth_client_by_client_id(&client_id)
         .await
@@ -679,8 +617,6 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
         client_secret_hash,
         input.name,
         input.description,
-        input.org_id,
-        input.service_account_id,
         input.token_endpoint_auth_method,
         input.grant_types,
         input.response_types,
@@ -723,7 +659,6 @@ pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     let client_id: String = extract_path(&mut req).await?;
     let payload: UpdateOAuthClientRequest = extract_json(req).await?;
     let input = normalize_update_payload(payload)?;
-    validate_owner_refs(input.org_id.as_deref(), input.service_account_id.as_deref()).await?;
 
     let mut existing = load_client(&client_id).await?;
     apply_input(&mut existing, input)?;
@@ -759,7 +694,6 @@ pub async fn patch_oauth_client(mut req: Request) -> Result<Response, ErrorRespo
 
     let mut existing = load_client(&client_id).await?;
     let input = normalize_patch_payload(&existing, payload)?;
-    validate_owner_refs(input.org_id.as_deref(), input.service_account_id.as_deref()).await?;
     apply_input(&mut existing, input)?;
 
     let updated = crate::db::update_oauth_client(existing, ctx)

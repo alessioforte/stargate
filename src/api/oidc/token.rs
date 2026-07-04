@@ -126,12 +126,8 @@ fn issue_client_credentials_token(
 ) -> OAuthResult<TokenResponse> {
     let jwt = crate::etc::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
-    let claims = oidc::claims::client_credentials_access_claims(
-        &client.client_id,
-        client.service_account_id.as_deref(),
-        scope.clone(),
-        audience,
-    );
+    let claims =
+        oidc::claims::client_credentials_access_claims(&client.client_id, scope.clone(), audience);
 
     let access_token = jwt
         .generate_oauth_access_token(claims)

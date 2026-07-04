@@ -25,16 +25,13 @@ fn format_name(given_name: &str, family_name: &str) -> String {
 
 pub fn client_credentials_access_claims(
     client_id: &str,
-    service_account_id: Option<&str>,
     scope: Option<String>,
     audience: Option<String>,
 ) -> jwt::Claims {
-    let sub = service_account_id.unwrap_or(client_id).to_string();
-    let mut claims = jwt::Claims::default().subject(sub);
+    let mut claims = jwt::Claims::default().subject(client_id.to_string());
     claims.azp = Some(client_id.to_string());
     claims.scope = scope;
     claims.aud = audience;
-    claims.sub_id = service_account_id.map(str::to_string);
     claims
 }
 

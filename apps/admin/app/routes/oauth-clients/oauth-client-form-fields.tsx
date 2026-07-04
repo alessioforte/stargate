@@ -56,18 +56,6 @@ const OAuthClientFormFields: React.FC<Props> = ({
         label={t("description")}
         {...form.getInputProps("description")}
       />
-      <TextInput
-        readOnly={disabled}
-        variant="filled"
-        label={t("orgId")}
-        {...form.getInputProps("orgId")}
-      />
-      <TextInput
-        readOnly={disabled}
-        variant="filled"
-        label={t("serviceAccountId")}
-        {...form.getInputProps("serviceAccountId")}
-      />
       <Select
         disabled={disabled}
         allowDeselect={false}

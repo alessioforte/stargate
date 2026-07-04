@@ -215,11 +215,9 @@ export interface OAuthClient {
   enabled: boolean;
   grantTypes: OAuthGrantType[];
   name: string;
-  orgId?: string | null;
   redirectUris: string[];
   responseTypes: OAuthResponseType[];
   scopes: string[];
-  serviceAccountId?: string | null;
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;
   updatedAt: string;
 }
@@ -231,11 +229,9 @@ export interface CreateOAuthClientRequest {
   description?: string | null;
   grantTypes: OAuthGrantType[];
   name: string;
-  orgId?: string | null;
   redirectUris?: string[] | null;
   responseTypes?: OAuthResponseType[] | null;
   scopes?: string[] | null;
-  serviceAccountId?: string | null;
   tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod | null;
 }
 
@@ -249,11 +245,9 @@ export interface UpdateOAuthClientRequest {
   description?: string | null;
   grantTypes: OAuthGrantType[];
   name: string;
-  orgId?: string | null;
   redirectUris?: string[];
   responseTypes?: OAuthResponseType[];
   scopes?: string[];
-  serviceAccountId?: string | null;
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;
 }
 
@@ -263,11 +257,9 @@ export interface PatchOAuthClientRequest {
   description?: string | null;
   grantTypes?: OAuthGrantType[] | null;
   name?: string | null;
-  orgId?: string | null;
   redirectUris?: string[] | null;
   responseTypes?: OAuthResponseType[] | null;
   scopes?: string[] | null;
-  serviceAccountId?: string | null;
   tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod | null;
 }
 
