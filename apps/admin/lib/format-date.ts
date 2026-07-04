@@ -1,5 +1,12 @@
-import * as DateFNS from "date-fns";
-import * as locals from "date-fns/locale";
+import { format } from "date-fns";
+import type { Locale } from "date-fns";
+import { enUS, it } from "date-fns/locale";
+
+const locales: Record<string, Locale> = {
+  en: enUS,
+  enUS,
+  it,
+};
 
 export const formatDate = (
   date: Date | string | number,
@@ -8,8 +15,6 @@ export const formatDate = (
 ) => {
   if (!date) return "";
   const d = new Date(date);
-  const locale =
-    (locals as any)[lang === "en" ? "enUS" : (lang ?? "it")] ||
-    (locals as any).enUS;
-  return DateFNS.format(d, mask ?? "dd MMM yyyy HH:mm", { locale });
+  const locale = locales[lang === "en-US" ? "enUS" : (lang ?? "it")] ?? enUS;
+  return format(d, mask ?? "dd MMM yyyy HH:mm", { locale });
 };

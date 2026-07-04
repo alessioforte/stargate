@@ -1,4 +1,5 @@
 import { createBrowserRouter, RouterProvider } from "react-router";
+import { getBasePath } from "@/lib/base-path";
 import AuthCallbackPage from "./routes/auth-callback";
 import ErrorPage from "./routes/error";
 import Layout from "./routes/layout";
@@ -12,66 +13,71 @@ import OrganizationsPage from "./routes/organizations/organizations";
 import ServiceAccountsPage from "./routes/service-accounts/service-accounts";
 import AccessControlPoliciesPage from "./routes/access-control-policies/access-control-policies";
 
-const router = createBrowserRouter([
+const router = createBrowserRouter(
+  [
+    {
+      path: "/auth/callback",
+      element: <AuthCallbackPage />,
+    },
+    {
+      path: "/error",
+      element: <ErrorPage />,
+    },
+    {
+      path: "/",
+      element: <Layout />,
+      children: [
+        {
+          path: "/",
+          element: <AdminHomePage />,
+        },
+        {
+          path: "users",
+          element: <UsersPage />,
+        },
+        {
+          path: "gateway",
+          element: <GatewayPage />,
+        },
+        {
+          path: "api-keys",
+          element: <APIKeysPage />,
+        },
+        {
+          path: "admin-keys",
+          element: <AdminKeysPage />,
+        },
+        {
+          path: "oauth-clients",
+          element: <OAuthClientsPage />,
+        },
+        {
+          path: "organizations",
+          element: <OrganizationsPage />,
+        },
+        {
+          path: "service-accounts",
+          element: <ServiceAccountsPage />,
+        },
+        {
+          path: "access-control-policies",
+          element: <AccessControlPoliciesPage />,
+        },
+        {
+          path: "audits",
+          element: <>audits</>,
+        },
+        {
+          path: "*",
+          element: <AdminHomePage />,
+        },
+      ],
+    },
+  ],
   {
-    path: "/auth/callback",
-    element: <AuthCallbackPage />,
+    basename: getBasePath(),
   },
-  {
-    path: "/error",
-    element: <ErrorPage />,
-  },
-  {
-    path: "/",
-    element: <Layout />,
-    children: [
-      {
-        path: "/",
-        element: <AdminHomePage />,
-      },
-      {
-        path: "users",
-        element: <UsersPage />,
-      },
-      {
-        path: "gateway",
-        element: <GatewayPage />,
-      },
-      {
-        path: "api-keys",
-        element: <APIKeysPage />,
-      },
-      {
-        path: "admin-keys",
-        element: <AdminKeysPage />,
-      },
-      {
-        path: "oauth-clients",
-        element: <OAuthClientsPage />,
-      },
-      {
-        path: "organizations",
-        element: <OrganizationsPage />,
-      },
-      {
-        path: "service-accounts",
-        element: <ServiceAccountsPage />,
-      },
-      {
-        path: "access-control-policies",
-        element: <AccessControlPoliciesPage />,
-      },
-      {
-        path: "audits",
-        element: <>audits</>,
-      },
-      {
-        path: "*",
-        element: <AdminHomePage />,
-      },
-    ],
-  },
-]);
+);
 
 function App() {
   return <RouterProvider router={router} />;

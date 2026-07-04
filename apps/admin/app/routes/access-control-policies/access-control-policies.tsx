@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Box, Group, Paper, Stack, Tabs } from "@mantine/core";
+import { Alert, Badge, Box, Group, Stack, Tabs } from "@mantine/core";
 import { Table, useConfirmModal } from "@/components";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
@@ -180,8 +180,6 @@ const AccessControlPolicies = () => {
             <DocumentEditor
               content={content}
               diagnostics={diagnostics}
-              dirty={dirty}
-              valid={valid}
               onChange={(value) => {
                 setContent(value);
               }}

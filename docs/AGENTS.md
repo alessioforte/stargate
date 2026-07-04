@@ -478,7 +478,7 @@ SIGTERM/SIGINT -> drain requests (25s default timeout) -> stop audit relay -> cl
 - `auth` — hosted login / auth-flow UI (password login, passwordless email OTP, login MFA, reset/change password). Same stack, same layering (`services/`, `store/`, `app/routes/`, `components/`).
 - `mail` — transactional email templates (`react-email`). A build-time template project, **not** a runtime SPA; it does not follow the layering below.
 
-Stack (admin/auth): React 19, Vite, TypeScript, Mantine v9 (`@mantine/core|form|hooks|notifications`), Zustand v5, react-router v7, axios, `@tanstack/react-table`, react-icons. Path alias `@/*` maps to the app root, so imports read `@/services`, `@/store`, `@/components`, `@/i18n`, `@/lib`. Runtime API base URL comes from `PUBLIC_RUNTIME_API_URL`.
+Stack (admin/auth): React 19, Vite, TypeScript, Mantine v9 (`@mantine/core|form|hooks|notifications`), Zustand v5, react-router v7, axios, `@tanstack/react-table`, react-icons. Path alias `@/*` maps to the app root, so imports read `@/services`, `@/store`, `@/components`, `@/i18n`, `@/lib`. Build-time API base URL comes from `VITE_API_URL`.
 
 Dev commands (run inside `apps/admin` or `apps/auth`): `npm run dev` (Vite), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run format` (prettier).
 

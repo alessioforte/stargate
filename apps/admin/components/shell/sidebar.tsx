@@ -1,5 +1,5 @@
 import { ActionIcon, Tooltip } from "@mantine/core";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import styles from "./shell.module.css";
 
 interface Props {
@@ -11,6 +11,8 @@ interface Props {
 }
 
 const Sidebar: React.FC<Props> = ({ items }) => {
+  const location = useLocation();
+
   return (
     <div className={styles.sidebar}>
       <div className={styles.sidebar_inner}>
@@ -28,7 +30,7 @@ const Sidebar: React.FC<Props> = ({ items }) => {
                   variant="transparent"
                   className={
                     styles.sidebar_item +
-                    (item.path === window.location.pathname
+                    (item.path === location.pathname
                       ? ` ${styles.sidebar_item_active}`
                       : "")
                   }

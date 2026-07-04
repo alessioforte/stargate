@@ -15,10 +15,10 @@ The dev server listens on `http://localhost:3011`.
 Required local env:
 
 ```text
-PUBLIC_RUNTIME_API_URL=http://localhost:5050
-PUBLIC_RUNTIME_AUTH_URL=http://localhost:3010
-PUBLIC_RUNTIME_OAUTH_CLIENT_ID=stargate_admin
-PUBLIC_RUNTIME_OAUTH_REDIRECT_URI=http://localhost:3011/auth/callback
+VITE_API_URL=http://localhost:5050
+VITE_AUTH_URL=http://localhost:3010
+VITE_OAUTH_CLIENT_ID=stargate_admin
+VITE_OAUTH_REDIRECT_URI=http://localhost:3011/auth/callback
 ```
 
 The `stargate_admin` OAuth client should be a public browser client:

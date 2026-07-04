@@ -1,3 +1,5 @@
+import { getAdminAppConfig } from "@/lib/env";
+
 export interface OAuthConfig {
   apiUrl: string;
   authUrl: string;
@@ -25,41 +27,6 @@ const OAUTH_REQUEST_KEY = "stargate.admin.oauth.request";
 const AUTH_STORAGE_KEY = "auth";
 const DEFAULT_SCOPE = "openid email profile offline_access";
 
-declare global {
-  interface Window {
-    __RUNTIME_CONFIG__?: Record<string, string>;
-  }
-
-  var __RUNTIME_CONFIG__: Record<string, string> | undefined;
-}
-
-function runtimeValue(key: string): string {
-  const candidates = [key, `VITE_${key}`, key.replace(/^PUBLIC_RUNTIME_/, "")];
-  const windowConfig =
-    typeof window === "undefined" ? undefined : window.__RUNTIME_CONFIG__;
-
-  for (const candidate of candidates) {
-    const value =
-      windowConfig?.[candidate] ??
-      globalThis.__RUNTIME_CONFIG__?.[candidate] ??
-      (import.meta.env as Record<string, string | undefined>)[candidate];
-
-    if (value) {
-      return value.replace(/\/+$/, "");
-    }
-  }
-
-  throw new Error(`Missing runtime config value: ${key}`);
-}
-
-function optionalRuntimeValue(key: string): string | null {
-  try {
-    return runtimeValue(key);
-  } catch {
-    return null;
-  }
-}
-
 function base64UrlEncode(bytes: ArrayBuffer) {
   const binary = String.fromCharCode(...new Uint8Array(bytes));
   return btoa(binary)
@@ -80,15 +47,13 @@ async function sha256(value: string) {
 }
 
 export function getOAuthConfig(): OAuthConfig {
-  const redirectUri =
-    optionalRuntimeValue("PUBLIC_RUNTIME_OAUTH_REDIRECT_URI") ??
-    `${window.location.origin}/auth/callback`;
+  const config = getAdminAppConfig();
 
   return {
-    apiUrl: runtimeValue("PUBLIC_RUNTIME_API_URL"),
-    authUrl: runtimeValue("PUBLIC_RUNTIME_AUTH_URL"),
-    clientId: runtimeValue("PUBLIC_RUNTIME_OAUTH_CLIENT_ID"),
-    redirectUri,
+    apiUrl: config.apiUrl,
+    authUrl: config.authUrl,
+    clientId: config.oauthClientId,
+    redirectUri: config.oauthRedirectUri,
     scope: DEFAULT_SCOPE,
   };
 }
@@ -153,10 +118,15 @@ export async function buildAuthorizeUrl(returnPath: string) {
   return `${config.apiUrl}/oauth/authorize?${params.toString()}`;
 }
 
+function authAppUrl(authUrl: string, path: string) {
+  const base = authUrl.endsWith("/") ? authUrl : `${authUrl}/`;
+  return new URL(path.replace(/^\/+/, ""), base);
+}
+
 export async function redirectToHostedLogin(returnPath: string) {
   const config = getOAuthConfig();
   const authorizeUrl = await buildAuthorizeUrl(returnPath);
-  const loginUrl = new URL("/login", config.authUrl);
+  const loginUrl = authAppUrl(config.authUrl, "/login");
   loginUrl.searchParams.set("return_to", authorizeUrl);
   window.location.assign(loginUrl.toString());
 }

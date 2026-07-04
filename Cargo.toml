@@ -64,7 +64,7 @@ tokio-rustls = { version = "0.26", features = ["ring"] }
 tokio-tungstenite = { version = "0.28", features = ["connect", "rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3.32" }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "normalize-path"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "fs", "trace", "normalize-path"] }
 utoipa-axum = { version = "0.2" }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 db = { path = "crates/db" }

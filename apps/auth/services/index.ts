@@ -1,13 +1,6 @@
 import AuthService from "./api";
 import { Http } from "./http";
-
-declare global {
-  interface Window {
-    __RUNTIME_CONFIG__?: Record<string, string>;
-  }
-
-  var __RUNTIME_CONFIG__: Record<string, string> | undefined;
-}
+import { getAuthAppConfig } from "@/lib/env";
 
 class Service {
   public http: Http;
@@ -21,29 +14,10 @@ class Service {
   }
 }
 
-function getRuntimeEnv(key: string): string {
-  const candidates = [key, `VITE_${key}`, `PUBLIC_RUNTIME_${key}`];
-  const windowConfig =
-    typeof window === "undefined" ? undefined : window.__RUNTIME_CONFIG__;
-
-  for (const candidate of candidates) {
-    const value =
-      windowConfig?.[candidate] ??
-      globalThis.__RUNTIME_CONFIG__?.[candidate] ??
-      (import.meta.env as Record<string, string | undefined>)[candidate];
-
-    if (value) {
-      return value.replace(/\/+$/, "");
-    }
-  }
-
-  throw new Error(`Missing runtime config value: ${key}`);
-}
-
 let service: Service | null = null;
 
 function initialize(): Service {
-  const apiUrl = getRuntimeEnv("API_URL");
+  const apiUrl = getAuthAppConfig().apiUrl;
   return new Service(apiUrl);
 }
 

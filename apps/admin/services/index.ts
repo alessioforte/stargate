@@ -9,13 +9,8 @@ import {
   storeTokens,
   type OAuthTokenResponse,
 } from "@/lib/oauth";
-
-declare global {
-  interface Window {
-    __RUNTIME_CONFIG__?: Record<string, string>;
-  }
-  var __RUNTIME_CONFIG__: Record<string, string> | undefined;
-}
+import { appPath } from "@/lib/base-path";
+import { getAdminAppConfig } from "@/lib/env";
 
 export type AuthResponse = OAuthTokenResponse;
 
@@ -43,7 +38,7 @@ class Service {
       onRefreshFailure: () => {
         this.deleteTokens();
         if (typeof window !== "undefined") {
-          window.location.href = "/";
+          window.location.href = appPath("/");
         }
       },
     });
@@ -91,25 +86,6 @@ class Service {
   }
 }
 
-function getRuntimeEnv(key: string): string {
-  const candidates = [key, `VITE_${key}`, key.replace(/^PUBLIC_RUNTIME_/, "")];
-  const windowConfig =
-    typeof window === "undefined" ? undefined : window.__RUNTIME_CONFIG__;
-
-  for (const candidate of candidates) {
-    const value =
-      windowConfig?.[candidate] ??
-      globalThis.__RUNTIME_CONFIG__?.[candidate] ??
-      (import.meta.env as Record<string, string | undefined>)[candidate];
-
-    if (value) {
-      return value.replace(/\/+$/, "");
-    }
-  }
-
-  throw new Error(`Missing runtime config value: ${key}`);
-}
-
 function getStoredAccessToken() {
   if (typeof window === "undefined") return "";
   return getStoredTokens()?.access_token ?? "";
@@ -119,7 +95,7 @@ let service: Service | null = null;
 
 function initialize(): Service {
   const apiKey = getStoredAccessToken();
-  const apiUrl = getRuntimeEnv("PUBLIC_RUNTIME_API_URL");
+  const apiUrl = getAdminAppConfig().apiUrl;
 
   return new Service(apiKey, apiUrl);
 }

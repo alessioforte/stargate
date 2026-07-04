@@ -1,5 +1,7 @@
 pub mod account;
 pub mod admin;
+pub mod admin_app;
+pub mod auth_app;
 pub mod docs;
 pub mod gateway;
 pub mod health;
@@ -110,6 +112,8 @@ pub fn router() -> axum::Router {
         .merge(oidc::router())
         .merge(social::router())
         .merge(account::router())
+        .merge(auth_app::router())
+        .merge(admin_app::router())
         .merge(admin::router())
 }
 
