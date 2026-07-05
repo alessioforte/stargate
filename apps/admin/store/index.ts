@@ -87,11 +87,13 @@ function tokenIsValid(accessToken: string | undefined): accessToken is string {
 function mapAdminHealth(health: AdminHealth | null): AdminStatus | null {
   if (!health) return null;
 
+  const storeStatus = health.redis?.status ?? (health.store ? "memory" : "unknown");
+
   return {
     apiName: health.name,
-    databaseStatus: health.database.status,
-    redisStatus: health.redis.status,
+    databaseStatus: health.database?.status ?? "unknown",
     status: health.status,
+    storeStatus,
     version: health.version,
   };
 }
@@ -186,7 +188,17 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       adminSessionStatus: "redirecting",
       adminStatus: null,
     });
-    await logoutAndRedirect(returnPath);
+    try {
+      await logoutAndRedirect(returnPath);
+    } catch (error: unknown) {
+      const message = errorMessage(error, "Unable to restart admin auth");
+      set({
+        adminError: message,
+        adminReturnPath: returnPath,
+        adminSessionStatus: "error",
+        adminStatus: null,
+      });
+    }
   },
 
   signIn: async (returnPath) => {
@@ -196,7 +208,17 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       adminSessionStatus: "redirecting",
       adminStatus: null,
     });
-    await redirectToHostedLogin(returnPath);
+    try {
+      await redirectToHostedLogin(returnPath);
+    } catch (error: unknown) {
+      const message = errorMessage(error, "Unable to start admin auth");
+      set({
+        adminError: message,
+        adminReturnPath: returnPath,
+        adminSessionStatus: "error",
+        adminStatus: null,
+      });
+    }
   },
 
   setTheme: (theme: "light" | "dark" | "system") => {

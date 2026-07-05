@@ -23,6 +23,23 @@ export default function AuthCallbackPage() {
     message: "Completing sign in",
   });
 
+  async function restartSignIn() {
+    setState({
+      status: "loading",
+      message: "Redirecting to sign in",
+    });
+
+    try {
+      await redirectToHostedLogin("/");
+    } catch (error: unknown) {
+      setState({
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "Unable to restart sign in.",
+      });
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -104,7 +121,7 @@ export default function AuthCallbackPage() {
           <Alert color="red" title="Authentication error">
             {state.message}
           </Alert>
-          <Button onClick={() => redirectToHostedLogin("/")}>Sign in</Button>
+          <Button onClick={() => void restartSignIn()}>Sign in</Button>
         </Stack>
       </Center>
     );

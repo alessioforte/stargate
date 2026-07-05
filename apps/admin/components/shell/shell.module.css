@@ -74,10 +74,6 @@
   color: light-dark(var(--mantine-color-gray-9), var(--mantine-color-gray-0));
 }
 
-.sidebar_item_active {
-  color: var(--mantine-primary-color-6);
-}
-
 .main {
   flex: 1;
   background-color: light-dark(

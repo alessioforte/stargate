@@ -41,6 +41,13 @@ The `stargate_admin` OAuth client should be a public browser client:
 No client secret is used because this is a browser app. PKCE protects the
 authorization code flow.
 
+When opening the admin app from another device, serve it over HTTPS. Browsers
+expose `crypto.subtle` only in secure contexts, and the PKCE flow needs
+SHA-256. `http://localhost` works for local development, but
+`http://<raspberry-pi-ip>` is not treated as secure. For a device-accessible
+build, point `VITE_API_URL`, `VITE_AUTH_URL`, and `VITE_OAUTH_REDIRECT_URI` at
+the HTTPS Pi hostname, or omit the URL values to use the current origin.
+
 ## Checks
 
 ```bash

@@ -1,5 +1,5 @@
 import React from "react";
-import { useMantineColorScheme } from "@mantine/core";
+import { useComputedColorScheme } from "@mantine/core";
 import CodeMirror from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
@@ -18,18 +18,14 @@ const CodeBox: React.FC<Props> = ({
   onChange,
   language = "json",
 }) => {
-  const theme = useMantineColorScheme();
+  const colorScheme = useComputedColorScheme("light");
   return (
     <CodeMirror
       readOnly={readOnly}
       indentWithTab
       style={{ height: "100%" }}
       value={value}
-      theme={
-        theme.colorScheme === "dark"
-          ? monokaiDimmed
-          : (theme.colorScheme as "dark" | "light")
-      }
+      theme={colorScheme === "dark" ? monokaiDimmed : colorScheme}
       onError={console.log}
       extensions={[language === "json" ? json() : yaml()]}
       onChange={onChange}

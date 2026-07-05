@@ -2,7 +2,7 @@ import { showNotification as show } from "@mantine/notifications";
 import { IoIosClose } from "react-icons/io";
 import { IoCheckmark } from "react-icons/io5";
 import { CiCircleInfo, CiWarning } from "react-icons/ci";
-import classes from "./Notification.module.css";
+import classes from "./notification.module.css";
 
 type NotificationType = "success" | "error" | "info" | "warning";
 

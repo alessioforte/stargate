@@ -26,6 +26,28 @@ export interface OAuthTokenResponse {
 const OAUTH_REQUEST_KEY = "stargate.admin.oauth.request";
 const AUTH_STORAGE_KEY = "auth";
 const DEFAULT_SCOPE = "openid email profile offline_access";
+const WEB_CRYPTO_UNAVAILABLE_MESSAGE =
+  "Stargate Admin sign-in requires Web Crypto SHA-256 for OAuth PKCE. Open the admin UI over HTTPS, or use localhost when working on the same machine.";
+
+function webCryptoUnavailableMessage() {
+  const insecureContext =
+    typeof window.isSecureContext === "boolean" && !window.isSecureContext;
+  const detail = insecureContext
+    ? "The current page is not a secure browser context."
+    : "This browser does not expose crypto.subtle.digest.";
+
+  return `${WEB_CRYPTO_UNAVAILABLE_MESSAGE} ${detail}`;
+}
+
+function getBrowserCrypto() {
+  const browserCrypto = window.crypto;
+
+  if (!browserCrypto?.getRandomValues || !browserCrypto.subtle?.digest) {
+    throw new Error(webCryptoUnavailableMessage());
+  }
+
+  return browserCrypto;
+}
 
 function base64UrlEncode(bytes: ArrayBuffer) {
   const binary = String.fromCharCode(...new Uint8Array(bytes));
@@ -36,14 +58,16 @@ function base64UrlEncode(bytes: ArrayBuffer) {
 }
 
 function randomString(byteLength = 32) {
+  const browserCrypto = getBrowserCrypto();
   const bytes = new Uint8Array(byteLength);
-  window.crypto.getRandomValues(bytes);
+  browserCrypto.getRandomValues(bytes);
   return base64UrlEncode(bytes.buffer);
 }
 
 async function sha256(value: string) {
+  const browserCrypto = getBrowserCrypto();
   const bytes = new TextEncoder().encode(value);
-  return window.crypto.subtle.digest("SHA-256", bytes);
+  return browserCrypto.subtle.digest("SHA-256", bytes);
 }
 
 export function getOAuthConfig(): OAuthConfig {

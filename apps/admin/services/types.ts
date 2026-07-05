@@ -30,11 +30,18 @@ export interface ComponentStatus {
   status: string;
 }
 
+export interface StoreStats {
+  cacheHitRatio: number;
+  estimatedMemoryBytes: number;
+  totalKeys: number;
+}
+
 export interface AdminHealth {
   database: ComponentStatus;
   name: string;
-  redis: ComponentStatus;
+  redis?: ComponentStatus;
   status: string;
+  store?: StoreStats;
   version: string;
 }
 

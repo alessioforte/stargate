@@ -20,7 +20,7 @@ export default function AdminHomePage() {
           Database: {adminStatus?.databaseStatus ?? "unknown"}
         </Text>
         <Text c="dimmed" size="sm">
-          Store: {adminStatus?.redisStatus ?? "unknown"}
+          Store: {adminStatus?.storeStatus ?? "unknown"}
         </Text>
       </Stack>
     </Box>

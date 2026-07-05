@@ -44,8 +44,8 @@ export type AdminSessionStatus = "checking" | "redirecting" | "ready" | "error";
 export interface AdminStatus {
   apiName: string;
   databaseStatus: string;
-  redisStatus: string;
   status: string;
+  storeStatus: string;
   version: string;
 }
 
