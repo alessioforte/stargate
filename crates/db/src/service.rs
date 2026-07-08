@@ -283,6 +283,10 @@ impl DbStore for Service {
         self.user.count(&self.pool).await
     }
 
+    async fn get_super_admin_users(&self) -> Result<Vec<User>> {
+        self.super_admin.get_active_users(&self.pool).await
+    }
+
     async fn get_super_admin_by_user_id(&self, user_id: &str) -> Result<Option<SuperAdmin>> {
         self.super_admin.get_by_user_id(&self.pool, user_id).await
     }

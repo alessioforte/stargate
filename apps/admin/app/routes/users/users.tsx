@@ -12,7 +12,9 @@ import { columns } from "./columns";
 const UsersPage = () => {
   const {
     users,
+    superAdminUsers,
     getUsers,
+    getSuperAdminUsers,
     createUser,
     updateUser,
     deleteUser,
@@ -25,7 +27,8 @@ const UsersPage = () => {
 
   useEffect(() => {
     getUsers();
-  }, [getUsers]);
+    getSuperAdminUsers();
+  }, [getUsers, getSuperAdminUsers]);
 
   return (
     <Box>
@@ -40,6 +43,7 @@ const UsersPage = () => {
         loading={users?.isLoading() ?? false}
         meta={{
           open,
+          superAdminUsers: superAdminUsers?.data ?? [],
           setSelectedItem: setSelectedUser,
         }}
       />

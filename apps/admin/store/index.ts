@@ -72,6 +72,7 @@ const initialState: State = {
   organizations: new StoreItem<List<Organization>>(null),
   serviceAccounts: new StoreItem<List<ServiceAccount>>(null),
   users: new StoreItem<List<User>>(null),
+  superAdminUsers: new StoreItem<List<User>>(null),
 };
 
 function tokenIsValid(accessToken: string | undefined): accessToken is string {
@@ -942,6 +943,17 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       return;
     }
     set({ users: users.setSuccess(data) });
+  },
+
+  getSuperAdminUsers: async () => {
+    const superAdminUsers = get().superAdminUsers;
+    set({ superAdminUsers: superAdminUsers.setLoading() });
+    const { data, error, message } = await Service.admin.getSuperAdminUsers();
+    if (error) {
+      set({ superAdminUsers: superAdminUsers.setError(message) });
+      return;
+    }
+    set({ superAdminUsers: superAdminUsers.setSuccess(data) });
   },
 
   createUser: async (user: CreateUserRequest) => {

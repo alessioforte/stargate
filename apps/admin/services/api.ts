@@ -370,6 +370,13 @@ export default class AdminApiService {
     });
   }
 
+  async getSuperAdminUsers() {
+    return this.request<List<User>>({
+      url: this.url("/users/super-admins"),
+      method: "GET",
+    });
+  }
+
   async createUser(body: CreateUserRequest) {
     return this.request<User>({
       url: this.url("/users"),

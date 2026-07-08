@@ -74,6 +74,7 @@ export interface State {
   organizations: StoreItem<List<Organization>>;
   serviceAccounts: StoreItem<List<ServiceAccount>>;
   users: StoreItem<List<User>>;
+  superAdminUsers: StoreItem<List<User>>;
 }
 
 export interface Actions {
@@ -151,6 +152,7 @@ export interface Actions {
   deleteServiceAccount: (id: string) => Promise<void>;
 
   getUsers: (query?: Query) => Promise<void>;
+  getSuperAdminUsers: (query?: Query) => Promise<void>;
   createUser: (user: CreateUserRequest) => Promise<void>;
   updateUser: (id: string, user: UpdateUserRequest) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;

@@ -174,6 +174,27 @@ pub async fn get_users(req: Request) -> Result<Response, ErrorResponse> {
 
 #[utoipa::path(
     get,
+    path = "/admin/users/super-admins",
+    tags = ["Admin", "Users"],
+    responses(
+        (status = 200, description = "Super admin users retrieved successfully", body = Vec<UserSchema>),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn get_super_admin_users(req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+
+    let users = crate::db::get_super_admin_users()
+        .await
+        .map_err(ErrorResponse::internal)?;
+
+    Ok(Json(users).into_response())
+}
+
+#[utoipa::path(
+    get,
     path = "/admin/users/{id}",
     tags = ["Admin", "Users"],
     params(("id" = String, Path, description = "User ID")),

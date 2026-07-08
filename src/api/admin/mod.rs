@@ -224,6 +224,10 @@ pub fn router() -> axum::Router {
             get(users::get_organization_users),
         )
         .route(
+            "/admin/users/super-admins",
+            get(users::get_super_admin_users),
+        )
+        .route(
             "/admin/users/{id}",
             get(users::get_user)
                 .put(users::update_user)

@@ -55,6 +55,11 @@ pub async fn count_users() -> Result<i64> {
     svc.count_users().await
 }
 
+pub async fn get_super_admin_users() -> Result<Vec<User>> {
+    let svc = service();
+    svc.get_super_admin_users().await
+}
+
 pub async fn get_super_admin_by_user_id(user_id: &str) -> Result<Option<SuperAdmin>> {
     let svc = service();
     svc.get_super_admin_by_user_id(user_id).await

@@ -45,6 +45,7 @@ use utoipa::OpenApi;
         crate::api::account::credentials::reset::put_credentials,
         crate::api::admin::health::get_admin_health,
         crate::api::admin::users::get_users,
+        crate::api::admin::users::get_super_admin_users,
         crate::api::admin::users::get_user,
         crate::api::admin::users::create_user,
         crate::api::admin::users::update_user,
@@ -289,6 +290,7 @@ mod tests {
         assert!(json["paths"]["/account/credentials"].is_object());
         assert!(json["paths"]["/admin/health"].is_object());
         assert!(json["paths"]["/admin/users"].is_object());
+        assert!(json["paths"]["/admin/users/super-admins"].is_object());
         assert!(json["paths"]["/admin/users/{id}"].is_object());
         assert!(json["paths"]["/admin/users/{id}/attrs"].is_object());
         assert!(json["paths"]["/admin/users/{id}/organizations"].is_object());
@@ -332,6 +334,12 @@ mod tests {
     #[tokio::test]
     async fn admin_user_by_id_missing_grant_forbidden() {
         let resp = send("/admin/users/abc").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_super_admin_users_missing_grant_forbidden() {
+        let resp = send("/admin/users/super-admins").await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

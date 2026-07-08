@@ -23,6 +23,7 @@ interface FormValues {
   givenName: string;
   familyName: string;
   password: string;
+  confirmPassword: string;
   attrs: string;
 }
 
@@ -36,6 +37,7 @@ const emptyFormValues: FormValues = {
   givenName: "",
   familyName: "",
   password: "",
+  confirmPassword: "",
   attrs: "{}",
 };
 
@@ -50,7 +52,9 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
       email: (value) => (value ? undefined : "Email is required"),
       givenName: (value) => (value ? undefined : "Given name is required"),
       familyName: (value) => (value ? undefined : "Family name is required"),
-      password: (value) => (value ? undefined : "Password is required"),
+      password: (value) => (value ? undefined : t("passwordRequired")),
+      confirmPassword: (value, values) =>
+        value === values.password ? undefined : t("passwordMismatch"),
       attrs: (value) => {
         try {
           JSON.parse(value);
@@ -133,6 +137,11 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
                   variant="filled"
                   label={t("password")}
                   {...form.getInputProps("password")}
+                />
+                <PasswordInput
+                  variant="filled"
+                  label={t("confirmPassword")}
+                  {...form.getInputProps("confirmPassword")}
                 />
               </Stack>
             </Flex>

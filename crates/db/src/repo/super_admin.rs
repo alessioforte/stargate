@@ -1,4 +1,5 @@
-use crate::ent::SuperAdmin;
+use super::user::USER;
+use crate::ent::{SuperAdmin, User};
 use anyhow::Result;
 
 pub const SUPER_ADMIN: &str = "super_admins";
@@ -57,6 +58,27 @@ impl SuperAdminRepository {
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn get_active_users<'c, E>(&self, ex: E) -> Result<Vec<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let rows = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT u.*
+            FROM {users} u
+            INNER JOIN {super_admins} sa ON sa.user_id = u.id
+            WHERE sa.active = TRUE
+            ORDER BY u.created_at ASC, u.id ASC
+        ",
+            users = USER,
+            super_admins = SUPER_ADMIN
+        )))
+        .fetch_all(ex)
+        .await?;
+
+        Ok(rows)
     }
 
     pub async fn count_active<'c, E>(&self, ex: E) -> Result<i64>
