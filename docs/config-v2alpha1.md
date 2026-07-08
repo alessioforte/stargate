@@ -352,6 +352,28 @@ http:
 
 Policy order in the runtime is fixed: auth, access control, rate limit, quota. The list on the router declares which policies apply.
 
+Gateway requests always run through rate-limit selection. If no router policy
+selects a limit, the gateway uses the named `default` limit. A router
+`rate_limit` policy is the resource-specific override:
+
+```yaml
+http:
+  policies:
+    reports-burst:
+      kind: rate_limit
+      limit: reports
+```
+
+Authenticated users and API keys can also select a rate limit by setting
+`attrs.rate_limit` to a named limit. This overrides the implicit default, and
+also overrides an explicit router policy whose limit is `default`. A non-default
+router policy still wins, so endpoint-specific limits stay enforced.
+
+Quota is selected independently from rate limiting. A router `quota` policy or
+subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
+limit and quota are selected, both checks run. Quota policies can also set a
+per-request `cost`; subject `attrs.quota` uses cost `1`.
+
 `kind: access_control` points at resources evaluated by the ACE rule file
 (`.stargate/policies`). The gateway config decides where a check applies; the
 ACE file decides which subjects may access that resource.

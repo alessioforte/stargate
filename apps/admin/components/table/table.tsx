@@ -30,7 +30,7 @@ const Table = <T, V>({
   data = [],
   pagination,
   meta,
-  verticalSpacing = "xs",
+  verticalSpacing = 7,
   paginationOptions,
   enableRowSelection = false,
   stickyHeader = false,
@@ -120,7 +120,6 @@ const Table = <T, V>({
           verticalSpacing={verticalSpacing}
           stickyHeader={stickyHeader}
           highlightOnHover
-          withColumnBorders
         >
           {!empty && (
             <MantineTable.Thead className={stickyHeader ? classes.sticky : ""}>

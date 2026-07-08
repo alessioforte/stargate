@@ -142,6 +142,16 @@ Supported policy kinds:
 - `rate_limit`
 - `quota`
 
+Gateway rate limiting always falls back to the named `default` limit. A
+non-default router `rate_limit` policy overrides that default for the matched
+resource. Authenticated users/API keys can set `attrs.rate_limit` to a named
+limit; that overrides the implicit default and an explicit `limit: default`, but
+not a non-default resource policy.
+
+Quota is independent from rate limiting. A router `quota` policy or subject
+`attrs.quota` selects a named `quota_tracker` limit. If both rate limit and
+quota are configured for a request, both checks run with separate tracker keys.
+
 Full schema notes and examples: `docs/config-v2alpha1.md`.
 
 ### Traffic Management

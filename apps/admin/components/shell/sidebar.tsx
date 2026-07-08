@@ -64,7 +64,7 @@ const Sidebar: React.FC<Props> = ({ items }) => {
                   size="xl"
                   variant="transparent"
                   aria-current={active ? "page" : undefined}
-                  c={active ? "var(--mantine-primary-color-6)" : "default"}
+                  color={active ? "var(--mantine-primary-color-6)" : "dimmed"}
                 >
                   {item.icon}
                 </ActionIcon>

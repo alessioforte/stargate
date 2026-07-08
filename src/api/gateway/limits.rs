@@ -4,6 +4,15 @@ use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::Gate;
 use std::sync::Arc;
 
+const DEFAULT_RATE_LIMIT: &str = "default";
+
+struct SelectedLimits {
+    subject_key: String,
+    rate_limit_name: String,
+    quota_name: Option<String>,
+    quota_cost: u64,
+}
+
 pub async fn apply_limits(
     gate: &Arc<Gate>,
     subject: Option<&Subject>,
@@ -13,38 +22,21 @@ pub async fn apply_limits(
     quota_override: Option<(String, u64)>,
 ) -> Result<(), ErrorResponse> {
     let limiter = gate.limiter.load();
-    let mut sub_key = client_ip.to_string();
-    let mut limit_name = rate_limit_override
-        .clone()
-        .unwrap_or_else(|| "default".to_string());
-    let mut quota_name = quota_override.as_ref().map(|(name, _)| name.clone());
-    let mut quota_cost = quota_override.as_ref().map(|(_, cost)| *cost).unwrap_or(1);
+    let selected = select_limits(
+        subject,
+        client_ip,
+        rate_limit_override.as_deref(),
+        quota_override
+            .as_ref()
+            .map(|(name, cost)| (name.as_str(), *cost)),
+    );
 
-    if let Some(subject) = subject {
-        if rate_limit_override.is_none()
-            && let Some(rate_limit) = subject
-                .get_attr("rate_limit")
-                .and_then(|value| value.as_str())
-        {
-            limit_name = rate_limit.to_string();
-        }
-
-        if quota_override.is_none()
-            && let Some(quota) = subject.get_attr("quota").and_then(|value| value.as_str())
-        {
-            quota_name = Some(quota.to_string());
-            quota_cost = 1;
-        }
-
-        sub_key = subject.id.clone();
-    }
-
-    let mut key = String::with_capacity(4 + sub_key.len());
+    let mut key = String::with_capacity(4 + selected.subject_key.len());
     key.push_str("lim:");
-    key.push_str(&sub_key);
+    key.push_str(&selected.subject_key);
 
     let decision = limiter
-        .check(&limit_name, &key, None)
+        .check(&selected.rate_limit_name, &key, None)
         .await
         .map_err(|error| {
             telemetry::record_gateway_policy("rate_limit", "error");
@@ -82,13 +74,13 @@ pub async fn apply_limits(
         HeaderValue::from_str(&remaining).unwrap(),
     );
 
-    if let Some(quota_name) = quota_name {
-        let mut quota_key = String::with_capacity(6 + sub_key.len());
+    if let Some(quota_name) = selected.quota_name {
+        let mut quota_key = String::with_capacity(6 + selected.subject_key.len());
         quota_key.push_str("quota:");
-        quota_key.push_str(&sub_key);
+        quota_key.push_str(&selected.subject_key);
 
         let decision = limiter
-            .check(&quota_name, &quota_key, Some(quota_cost))
+            .check(&quota_name, &quota_key, Some(selected.quota_cost))
             .await
             .map_err(|error| {
                 telemetry::record_gateway_policy("quota", "error");
@@ -131,6 +123,46 @@ pub async fn apply_limits(
     Ok(())
 }
 
+fn select_limits(
+    subject: Option<&Subject>,
+    client_ip: &str,
+    rate_limit_override: Option<&str>,
+    quota_override: Option<(&str, u64)>,
+) -> SelectedLimits {
+    let mut rate_limit_name = rate_limit_override
+        .unwrap_or(DEFAULT_RATE_LIMIT)
+        .to_string();
+    let mut quota_name = quota_override.map(|(name, _)| name.to_string());
+    let mut quota_cost = quota_override.map(|(_, cost)| cost).unwrap_or(1);
+    let mut subject_key = client_ip.to_string();
+
+    if let Some(subject) = subject {
+        if rate_limit_name == DEFAULT_RATE_LIMIT
+            && let Some(rate_limit) = subject
+                .get_attr("rate_limit")
+                .and_then(|value| value.as_str())
+        {
+            rate_limit_name = rate_limit.to_string();
+        }
+
+        if quota_name.is_none()
+            && let Some(quota) = subject.get_attr("quota").and_then(|value| value.as_str())
+        {
+            quota_name = Some(quota.to_string());
+            quota_cost = 1;
+        }
+
+        subject_key = subject.id.clone();
+    }
+
+    SelectedLimits {
+        subject_key,
+        rate_limit_name,
+        quota_name,
+        quota_cost,
+    }
+}
+
 fn retry_after_header_value(retry_after: std::time::Duration) -> String {
     let retry_after = match chrono::Duration::from_std(retry_after) {
         Ok(retry_after) => retry_after,
@@ -144,4 +176,85 @@ fn retry_after_header_value(retry_after: std::time::Duration) -> String {
     };
 
     tools::duration_to_string(&retry_after)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::etc::sub::{Subject, SubjectType};
+    use serde_json::json;
+
+    fn subject(attrs: serde_json::Value) -> Subject {
+        Subject {
+            id: "sub_123".to_string(),
+            sub_type: SubjectType::ApiKey,
+            org_id: None,
+            attrs,
+        }
+    }
+
+    #[test]
+    fn selects_default_rate_limit_for_anonymous_requests() {
+        let selected = select_limits(None, "203.0.113.10", None, None);
+
+        assert_eq!(selected.subject_key, "203.0.113.10");
+        assert_eq!(selected.rate_limit_name, "default");
+        assert_eq!(selected.quota_name, None);
+        assert_eq!(selected.quota_cost, 1);
+    }
+
+    #[test]
+    fn subject_attrs_override_implicit_default_rate_limit() {
+        let subject = subject(json!({
+            "rate_limit": "premium",
+            "quota": "monthly-premium"
+        }));
+
+        let selected = select_limits(Some(&subject), "203.0.113.10", None, None);
+
+        assert_eq!(selected.subject_key, "sub_123");
+        assert_eq!(selected.rate_limit_name, "premium");
+        assert_eq!(selected.quota_name, Some("monthly-premium".to_string()));
+        assert_eq!(selected.quota_cost, 1);
+    }
+
+    #[test]
+    fn subject_attrs_override_explicit_default_rate_limit_policy() {
+        let subject = subject(json!({
+            "rate_limit": "premium"
+        }));
+
+        let selected = select_limits(Some(&subject), "203.0.113.10", Some("default"), None);
+
+        assert_eq!(selected.rate_limit_name, "premium");
+    }
+
+    #[test]
+    fn resource_rate_limit_policy_overrides_subject_rate_limit_attr() {
+        let subject = subject(json!({
+            "rate_limit": "premium"
+        }));
+
+        let selected = select_limits(Some(&subject), "203.0.113.10", Some("reports"), None);
+
+        assert_eq!(selected.rate_limit_name, "reports");
+    }
+
+    #[test]
+    fn quota_policy_overrides_subject_quota_attr_and_preserves_cost() {
+        let subject = subject(json!({
+            "quota": "monthly-premium"
+        }));
+
+        let selected = select_limits(
+            Some(&subject),
+            "203.0.113.10",
+            None,
+            Some(("daily-reports", 10)),
+        );
+
+        assert_eq!(selected.rate_limit_name, "default");
+        assert_eq!(selected.quota_name, Some("daily-reports".to_string()));
+        assert_eq!(selected.quota_cost, 10);
+    }
 }

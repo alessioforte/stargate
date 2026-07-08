@@ -45,8 +45,8 @@
   align-items: center;
   justify-content: space-between;
   background-color: light-dark(
-    var(--mantine-color-gray-0),
-    var(--mantine-color-dark-8)
+    var(--mantine-color-white),
+    var(--mantine-color-dark-9)
   );
   height: calc(var(--header-height) - var(--gap));
 }
@@ -57,8 +57,8 @@
 
 .sidebar_inner {
   background-color: light-dark(
-    var(--mantine-color-gray-0),
-    var(--mantine-color-dark-8)
+    var(--mantine-color-white),
+    var(--mantine-color-dark-9)
   );
   width: calc(var(--sidebar-width) - var(--gap));
   border-radius: 0 6px 0 0;
@@ -78,7 +78,7 @@
   flex: 1;
   background-color: light-dark(
     var(--mantine-color-gray-0),
-    var(--mantine-color-dark-8)
+    var(--mantine-color-dark-9)
   );
   border-radius: 6px 0 0 0;
 }

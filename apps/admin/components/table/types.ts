@@ -10,7 +10,7 @@ export interface TableProps<T, V> {
   data: T[];
   meta?: TableMeta<T>;
   containerRef?: React.RefObject<HTMLDivElement>;
-  verticalSpacing?: "xs" | "sm" | "md" | "lg" | "xl";
+  verticalSpacing?: "xs" | "sm" | "md" | "lg" | "xl" | number;
   pagination?: boolean;
   paginationOptions?: TablePaginationOptions;
   enableRowSelection?: boolean;
