@@ -14,6 +14,7 @@ import type {
   AuthActionResult,
   ChallengeActionResult,
   MessageActionResult,
+  SignupLoadResult,
 } from "./types";
 
 const initialState: State = {
@@ -22,9 +23,9 @@ const initialState: State = {
   authStatus: "idle",
   pendingMfa: null,
   pendingPasswordless: null,
+  signup: null,
   tokens: null,
   error: null,
-  theme: "system",
   language: "en",
 };
 
@@ -55,9 +56,15 @@ function messageFailure(message: string): MessageActionResult {
   };
 }
 
+function signupFailure(message: string): SignupLoadResult {
+  return {
+    status: "error",
+    message,
+  };
+}
+
 export const store: StateCreator<State & Actions> = (set) => ({
   ...initialState,
-  setTheme: (theme: "light" | "dark" | "system") => set({ theme }),
   setLanguage: (lang: "en" | "it") => set({ language: lang }),
   clearAuthError: () => set({ error: null, message: null }),
   login: async (credentials) => {
@@ -287,6 +294,69 @@ export const store: StateCreator<State & Actions> = (set) => ({
 
     if (response.error || !response.data) {
       const message = response.message ?? "Password change failed";
+      set({
+        loading: false,
+        error: message,
+        message: { type: "error", text: message },
+      });
+      return messageFailure(message);
+    }
+
+    set({
+      loading: false,
+      error: null,
+      message: { type: "success", text: response.data.message },
+    });
+
+    return {
+      status: "success",
+      message: response.data.message,
+    };
+  },
+  loadSignup: async (token) => {
+    set({
+      loading: true,
+      message: null,
+      error: null,
+      signup: null,
+    });
+
+    const response = await services.auth.getSignup(token);
+
+    if (response.error || !response.data) {
+      const message = response.message ?? "Signup token verification failed";
+      set({
+        loading: false,
+        error: message,
+        message: { type: "error", text: message },
+        signup: null,
+      });
+      return signupFailure(message);
+    }
+
+    set({
+      loading: false,
+      error: null,
+      message: null,
+      signup: response.data,
+    });
+
+    return {
+      status: "success",
+      signup: response.data,
+    };
+  },
+  completeSignup: async (payload) => {
+    set({
+      loading: true,
+      message: null,
+      error: null,
+    });
+
+    const response = await services.auth.completeSignup(payload);
+
+    if (response.error || !response.data) {
+      const message = response.message ?? "Signup failed";
       set({
         loading: false,
         error: message,

@@ -57,7 +57,6 @@ const initialState: State = {
   adminStatus: null,
   message: null,
   loading: false,
-  theme: Settings.get("theme", "system"),
   language: Settings.get("language", "en"),
 
   accessControlRules: new StoreItem<AccessControlRulesResponse>(null),
@@ -88,7 +87,8 @@ function tokenIsValid(accessToken: string | undefined): accessToken is string {
 function mapAdminHealth(health: AdminHealth | null): AdminStatus | null {
   if (!health) return null;
 
-  const storeStatus = health.redis?.status ?? (health.store ? "memory" : "unknown");
+  const storeStatus =
+    health.redis?.status ?? (health.store ? "memory" : "unknown");
 
   return {
     apiName: health.name,
@@ -220,11 +220,6 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         adminStatus: null,
       });
     }
-  },
-
-  setTheme: (theme: "light" | "dark" | "system") => {
-    set({ theme });
-    Settings.set("theme", theme);
   },
 
   setLanguage: (lang: "en" | "it") => {

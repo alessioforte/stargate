@@ -43,6 +43,24 @@ export interface GeneralResponse {
   code: string;
 }
 
+export interface SignupVerificationResponse {
+  email: string;
+  token: string;
+  givenName?: string | null;
+  familyName?: string | null;
+  nickname?: string | null;
+  phoneNumber?: string | null;
+}
+
+export interface SignupCompleteRequest {
+  token: string;
+  givenName: string;
+  familyName: string;
+  nickname: string;
+  password: string;
+  phoneNumber?: string | null;
+}
+
 export interface MFAMethodsResponse {
   methods: OtpMethod[];
   mode: MfaMode;

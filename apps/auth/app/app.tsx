@@ -10,6 +10,7 @@ import LoginPage from "./routes/login";
 import LoginMFAPage from "./routes/login-mfa";
 import PasswordlessLoginPage from "./routes/login-passwordless";
 import ResetPasswordPage from "./routes/reset-password";
+import SignupPage from "./routes/signup";
 import { getAuthBasePath } from "@/lib/base-path";
 import "./globals.css";
 
@@ -43,6 +44,14 @@ const router = createBrowserRouter(
         {
           path: "reset-password",
           element: <ResetPasswordPage />,
+        },
+        {
+          path: "signup",
+          element: <SignupPage />,
+        },
+        {
+          path: "signup/verify-email",
+          element: <SignupPage />,
         },
         {
           path: "change-password",

@@ -6,6 +6,8 @@ import type {
   GeneralResponse,
   MFAMethodsResponse,
   OtpChallengeResponse,
+  SignupCompleteRequest,
+  SignupVerificationResponse,
 } from "./types";
 
 export default class AuthService {
@@ -58,6 +60,24 @@ export default class AuthService {
       method: "PUT",
       url: `${this.baseURL}/account/credentials`,
       data: { password, token },
+    });
+    return response;
+  }
+
+  async getSignup(token: string) {
+    const response = await this.http.request<SignupVerificationResponse>({
+      method: "GET",
+      url: `${this.baseURL}/signup`,
+      params: { token },
+    });
+    return response;
+  }
+
+  async completeSignup(payload: SignupCompleteRequest) {
+    const response = await this.http.request<GeneralResponse>({
+      method: "PUT",
+      url: `${this.baseURL}/signup`,
+      data: payload,
     });
     return response;
   }

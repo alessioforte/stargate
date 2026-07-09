@@ -1,26 +1,22 @@
 import React from "react";
 import { ActionIcon, useMantineColorScheme } from "@mantine/core";
+import { useColorScheme } from "@mantine/hooks";
 import { CiLight, CiDark } from "react-icons/ci";
 
-type ColorScheme = "light" | "dark" | "system";
-
 interface Props {
-  theme: ColorScheme;
   color?: string;
   className?: string;
   size?: string;
-  onClick: (theme: ColorScheme) => void;
 }
 
 const ColorSchemeToggle: React.FC<Props> = ({
-  theme,
   color = "gray",
   className,
   size = "xl",
-  onClick,
 }) => {
-  const { setColorScheme } = useMantineColorScheme();
-
+  const defaultColorScheme = useColorScheme();
+  const { colorScheme, setColorScheme } = useMantineColorScheme();
+  const t = colorScheme === "auto" ? defaultColorScheme : colorScheme;
   return (
     <ActionIcon
       size={size}
@@ -29,12 +25,11 @@ const ColorSchemeToggle: React.FC<Props> = ({
       variant="transparent"
       color={color}
       onClick={() => {
-        const colorScheme = theme === "light" ? "dark" : "light";
-        setColorScheme(colorScheme);
-        onClick(colorScheme);
+        const cs = t === "light" ? "dark" : "light";
+        setColorScheme(cs);
       }}
     >
-      {theme === "dark" ? <CiDark /> : <CiLight />}
+      {t === "dark" ? <CiDark /> : <CiLight />}
     </ActionIcon>
   );
 };

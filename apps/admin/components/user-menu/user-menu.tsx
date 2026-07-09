@@ -9,6 +9,7 @@ import {
   Switch,
   useMantineColorScheme,
 } from "@mantine/core";
+import { useColorScheme } from "@mantine/hooks";
 import { CiLogout, CiLight, CiDark } from "react-icons/ci";
 import { MdOutlineChevronLeft } from "react-icons/md";
 import { useLocation } from "react-router";
@@ -27,13 +28,10 @@ function isSupportedLanguage(value: string): value is "en" | "it" {
 const UserMenu = () => {
   const t = useTranslations();
   const location = useLocation();
+
   const logout = useStore((state) => state.logout);
-  const theme = useStore((state) => state.theme);
-  const setTheme = useStore((state) => state.setTheme);
   const language = useStore((state) => state.language);
   const setLanguage = useStore((state) => state.setLanguage);
-
-  const { setColorScheme } = useMantineColorScheme();
 
   const languages = useMemo(() => getLanguages(), []);
 
@@ -69,18 +67,7 @@ const UserMenu = () => {
         <Menu.Divider />
         <Menu.Item>
           <Group justify="space-between">
-            <Switch
-              size="sm"
-              onChange={(event) => {
-                const colorScheme = event.target.checked ? "dark" : "light";
-                setTheme(colorScheme);
-                setColorScheme(colorScheme);
-              }}
-              styles={{ body: { display: "flex" } }}
-              checked={theme === "dark"}
-              onLabel={<CiDark size={12} />}
-              offLabel={<CiLight size={12} />}
-            />
+            <ColorSchemeSwitch />
             {t("darkMode")}
           </Group>
         </Menu.Item>
@@ -143,3 +130,22 @@ const UserMenu = () => {
 };
 
 export default UserMenu;
+
+const ColorSchemeSwitch = () => {
+  const defaultColorScheme = useColorScheme();
+  const { colorScheme, setColorScheme } = useMantineColorScheme();
+  const theme = colorScheme === "auto" ? defaultColorScheme : colorScheme;
+  return (
+    <Switch
+      size="sm"
+      onChange={(event) => {
+        const colorScheme = event.target.checked ? "dark" : "light";
+        setColorScheme(colorScheme);
+      }}
+      styles={{ body: { display: "flex" } }}
+      checked={theme === "dark"}
+      onLabel={<CiDark size={12} />}
+      offLabel={<CiLight size={12} />}
+    />
+  );
+};

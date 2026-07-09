@@ -61,7 +61,6 @@ export interface State {
   adminStatus: AdminStatus | null;
   message: AppMessage | null;
   loading: boolean;
-  theme: "light" | "dark" | "system";
   language: string;
 
   accessControlRules: StoreItem<AccessControlRulesResponse>;
@@ -82,7 +81,6 @@ export interface Actions {
   ensureAdminSession: (returnPath: string) => Promise<AdminSessionResult>;
   logout: (returnPath: string) => Promise<void>;
   signIn: (returnPath: string) => Promise<void>;
-  setTheme: (theme: "light" | "dark" | "system") => void;
   setLanguage: (lang: "en" | "it") => void;
 
   getAdminKeys: (query?: Query) => Promise<void>;

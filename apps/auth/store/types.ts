@@ -3,6 +3,8 @@ import type {
   LoginRequest,
   LoginResponse,
   OtpChallengeResponse,
+  SignupCompleteRequest,
+  SignupVerificationResponse,
 } from "@/services/types";
 import type { PendingPasswordlessChallenge } from "@/lib/auth-flow";
 
@@ -52,20 +54,29 @@ export type MessageActionResult =
       message: string;
     };
 
+export type SignupLoadResult =
+  | {
+      status: "success";
+      signup: SignupVerificationResponse;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
 export interface State {
   message: AppMessage | null;
   loading: boolean;
   authStatus: AuthStatus;
   pendingMfa: LoginMFAResponse | null;
   pendingPasswordless: PendingPasswordlessChallenge | null;
+  signup: SignupVerificationResponse | null;
   tokens: LoginResponse | null;
   error: string | null;
-  theme: "light" | "dark" | "system";
   language: string;
 }
 
 export interface Actions {
-  setTheme: (theme: "light" | "dark" | "system") => void;
   setLanguage: (lang: "en" | "it") => void;
   login: (credentials: LoginRequest) => Promise<AuthActionResult>;
   verifyMFAChallenge: (
@@ -81,6 +92,10 @@ export interface Actions {
   changePassword: (
     password: string,
     token: string,
+  ) => Promise<MessageActionResult>;
+  loadSignup: (token: string) => Promise<SignupLoadResult>;
+  completeSignup: (
+    payload: SignupCompleteRequest,
   ) => Promise<MessageActionResult>;
   clearAuthError: () => void;
 }

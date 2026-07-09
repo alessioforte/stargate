@@ -4,4 +4,5 @@ export const routes = {
   passwordless: "/login/passwordless",
   resetPassword: "/reset-password",
   changePassword: "/change-password",
+  signup: "/signup",
 } as const;

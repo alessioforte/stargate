@@ -5,6 +5,41 @@
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>admin</title>
+    <style>
+      :root {
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+
+        --mantine-color-body: var(--mantine-color-gray-3) !important;
+      }
+      [data-mantine-color-scheme="dark"] {
+        --mantine-color-body: var(--mantine-color-dark-9) !important;
+      }
+
+      #root {
+        min-height: 100vh;
+        background-color: inherit;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        transition: background-color 0.3s ease;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        line-height: 1.5;
+        overscroll-behavior: none;
+      }
+
+      a {
+        text-decoration: none;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
