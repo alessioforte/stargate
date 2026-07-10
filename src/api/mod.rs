@@ -48,6 +48,7 @@ use utoipa::OpenApi;
         crate::api::admin::users::get_super_admin_users,
         crate::api::admin::users::get_user,
         crate::api::admin::users::create_user,
+        crate::api::admin::users::create_user_invitation,
         crate::api::admin::users::update_user,
         crate::api::admin::users::patch_user,
         crate::api::admin::users::update_user_attrs,
@@ -123,7 +124,7 @@ mod tests {
     use super::router;
     use axum::body::Body;
     use http::{
-        Request, StatusCode,
+        Method, Request, StatusCode,
         header::{CACHE_CONTROL, CONTENT_TYPE},
     };
     use http_body_util::BodyExt;
@@ -290,6 +291,7 @@ mod tests {
         assert!(json["paths"]["/account/credentials"].is_object());
         assert!(json["paths"]["/admin/health"].is_object());
         assert!(json["paths"]["/admin/users"].is_object());
+        assert!(json["paths"]["/admin/users/invitations"].is_object());
         assert!(json["paths"]["/admin/users/super-admins"].is_object());
         assert!(json["paths"]["/admin/users/{id}"].is_object());
         assert!(json["paths"]["/admin/users/{id}/attrs"].is_object());
@@ -328,6 +330,19 @@ mod tests {
     #[tokio::test]
     async fn admin_users_missing_grant_forbidden() {
         let resp = send("/admin/users").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_user_invitations_missing_grant_forbidden() {
+        let resp = send_req(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/admin/users/invitations")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

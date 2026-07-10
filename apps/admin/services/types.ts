@@ -339,6 +339,16 @@ export interface CreateUserRequest {
   picture?: string | null;
 }
 
+export interface CreateUserInvitationRequest {
+  attrs?: JsonValue;
+  email: string;
+  familyName?: string | null;
+  givenName?: string | null;
+  nickname?: string | null;
+  phoneNumber?: string | null;
+  picture?: string | null;
+}
+
 export interface UpdateUserRequest {
   email: string;
   familyName?: string | null;

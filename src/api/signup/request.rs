@@ -1,8 +1,10 @@
 use super::SignupRequestBody;
 use crate::{
     act,
+    act::PendingSignupProfile,
     err::{ErrorResponse, HttpError},
     etc::msg::MessageResponse,
+    fun::signup_url,
 };
 use axum::Json;
 use smtp::{Smtp, Template};
@@ -22,7 +24,18 @@ use smtp::{Smtp, Template};
 pub async fn post_signup(
     Json(body): Json<SignupRequestBody>,
 ) -> Result<Json<MessageResponse>, ErrorResponse> {
-    let user = crate::db::get_user_by_username(&body.email)
+    send_signup_request(PendingSignupProfile::email_only(body.email)).await?;
+
+    Ok(Json(MessageResponse::new(
+        "A signup request has been sent to your email. Please check your inbox.",
+        "signup_request",
+    )))
+}
+
+pub(crate) async fn send_signup_request(
+    profile: PendingSignupProfile,
+) -> Result<(), ErrorResponse> {
+    let user = crate::db::get_user_by_username(&profile.email)
         .await
         .map_err(ErrorResponse::internal)?;
     if user.is_some() {
@@ -31,7 +44,7 @@ pub async fn post_signup(
         )));
     }
 
-    let pending = act::check_email_verification_request(&body.email)
+    let pending = act::check_email_verification_request(&profile.email)
         .await
         .map_err(ErrorResponse::internal)?;
     if pending.is_some() {
@@ -40,29 +53,29 @@ pub async fn post_signup(
         )));
     }
 
-    let sid = act::create_email_verification_request(&body.email)
+    let sid = act::create_email_verification_request(&profile)
         .await
         .map_err(ErrorResponse::internal)?;
 
     let claim = jwt::Claims::default()
         .subject("signup_request".to_string())
-        .sid(sid)
-        .email(body.email.clone());
+        .sid(sid.clone())
+        .email(profile.email.clone());
 
     let token = crate::etc::jwt::jwt_config()
         .generate_token(&claim)
         .map_err(ErrorResponse::internal)?;
 
-    Smtp::new()
+    if let Err(error) = Smtp::new()
         .template(Template::SignupRequest)
-        .to(body.email.clone())
-        .token(token)
+        .to(profile.email)
+        .link(signup_url(&token))
         .build()
         .and_then(|smtp| smtp.send())
-        .map_err(ErrorResponse::internal)?;
+    {
+        let _ = act::delete_email_verification_request(&sid).await;
+        return Err(ErrorResponse::internal(error));
+    }
 
-    Ok(Json(MessageResponse::new(
-        "A signup request has been sent to your email. Please check your inbox.",
-        "signup_request",
-    )))
+    Ok(())
 }

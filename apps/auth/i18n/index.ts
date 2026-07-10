@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import en from "./locales/en.json";
 import it from "./locales/it.json";
 import useStore from "@/store";
@@ -49,6 +50,9 @@ export function translate(
 export function useTranslations() {
   const language = useStore((state) => state.language);
 
-  return (key: string, values?: TranslationValues) =>
-    translate(language, key, values);
+  return useCallback(
+    (key: string, values?: TranslationValues) =>
+      translate(language, key, values),
+    [language],
+  );
 }

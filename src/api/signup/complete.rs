@@ -36,6 +36,12 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         .validate_token(&body.token)
         .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
 
+    if claim.sub != "signup" {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "Invalid token".to_string(),
+        )));
+    }
+
     let sid = claim
         .sub_id
         .clone()
@@ -49,14 +55,14 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         })?;
 
     if let Some(ref claim_email) = claim.email
-        && &signup != claim_email
+        && &signup.email != claim_email
     {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Email does not match".to_string(),
         )));
     }
 
-    if crate::db::get_user_by_username(&signup)
+    if crate::db::get_user_by_username(&signup.email)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -66,7 +72,13 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         )));
     }
 
-    if crate::db::get_user_by_username(&body.nickname)
+    let nickname = if body.nickname.trim().is_empty() {
+        signup.email.clone()
+    } else {
+        body.nickname.trim().to_string()
+    };
+
+    if crate::db::get_user_by_username(&nickname)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -80,11 +92,12 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         .validate(&body.password)
         .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
 
-    let profile = Profile::new(signup, body.nickname.clone())
-        .given_name(Some(body.given_name.clone()))
-        .family_name(Some(body.family_name.clone()))
+    let profile = Profile::new(signup.email.clone(), nickname)
+        .given_name(optional_nonempty(&body.given_name))
+        .family_name(optional_nonempty(&body.family_name))
         .phone_number(body.phone_number.clone())
-        .picture(None);
+        .picture(signup.picture)
+        .attrs(signup.attrs);
 
     let password = crate::etc::pw::hash_password(body.password.clone())
         .await
@@ -95,6 +108,7 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         .map_err(ErrorResponse::internal)?;
 
     let _ = act::delete_signup_request(&sid).await;
+    let _ = act::delete_email_verification_request(&sid).await;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
@@ -112,4 +126,9 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         "User created successfully",
         "signup_completed",
     )))
+}
+
+fn optional_nonempty(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }

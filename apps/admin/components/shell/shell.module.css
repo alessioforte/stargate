@@ -2,6 +2,7 @@
   --header-height: 50px;
   --sidebar-width: 55px;
   --footer-height: 0px;
+  --page-height: calc(100vh - var(--header-height) - var(--footer-height));
   --gap: 4px;
 }
 

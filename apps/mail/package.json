@@ -5,7 +5,7 @@
   "scripts": {
     "build": "email build",
     "dev": "email dev",
-    "export": "email export --outDir=../.stargate/transactional"
+    "export": "email export --outDir=../../.stargate/transactional"
   },
   "dependencies": {
     "@react-email/components": "1.0.1",

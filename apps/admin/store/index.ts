@@ -32,6 +32,7 @@ import type {
   CreateOrganizationRequest,
   CreateServiceAccountRequest,
   CreateUserRequest,
+  CreateUserInvitationRequest,
   UpdateAdminKeyPermissionsRequest,
   RotateOAuthClientSecretResponse,
   UpdateOAuthClientRequest,
@@ -972,6 +973,31 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       type: "success",
       title: "Success",
       message: "User created successfully",
+    });
+    get().getUsers();
+  },
+
+  inviteUser: async (user: CreateUserInvitationRequest) => {
+    const users = get().users;
+    set({ users: users.setLoading() });
+
+    const { error, message } = await Service.admin.inviteUser(user);
+
+    if (error) {
+      set({ users: users.setError(message) });
+
+      showNotification({
+        type: "error",
+        title: "Error",
+        message: message ?? "Failed to send user invitation",
+      });
+      return;
+    }
+
+    showNotification({
+      type: "success",
+      title: "Success",
+      message: message ?? "User invitation sent successfully",
     });
     get().getUsers();
   },

@@ -14,10 +14,12 @@ import {
 } from "@react-email/components";
 
 interface SignupRequestProps {
-  token: string;
+  signupUrl: string;
 }
 
-export const SignupRequest = ({ token = "{{token}}" }: SignupRequestProps) => {
+export const SignupRequest = ({
+  signupUrl = "{{signup_url}}",
+}: SignupRequestProps) => {
   return (
     <Html>
       <Tailwind>
@@ -45,7 +47,7 @@ export const SignupRequest = ({ token = "{{token}}" }: SignupRequestProps) => {
                     <Column className="text-center" colSpan={2}>
                       <Button
                         className="bg-[#007ee6] rounded border border-solid border-black/10 text-white font-bold cursor-pointer inline-block px-[30px] py-3 no-underline"
-                        href={`https://stargate.so/signup/verify-email?token=${token}`}
+                        href={signupUrl}
                       >
                         Verify Your Email
                       </Button>

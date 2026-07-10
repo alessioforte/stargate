@@ -9,12 +9,17 @@ import {
   Group,
   Text,
   Tooltip,
+  SegmentedControl,
 } from "@mantine/core";
+import { useState } from "react";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
 import { FaPlus } from "react-icons/fa6";
 import { useTranslations } from "@/i18n";
-import type { CreateUserRequest } from "@/services/types";
+import type {
+  CreateUserInvitationRequest,
+  CreateUserRequest,
+} from "@/services/types";
 import { CodeBox, EntityDrawer } from "@/components";
 
 interface FormValues {
@@ -24,12 +29,17 @@ interface FormValues {
   familyName: string;
   password: string;
   confirmPassword: string;
+  phoneNumber: string;
+  picture: string;
   attrs: string;
 }
 
 interface Props {
   onSave: (user: CreateUserRequest) => void;
+  onInvite: (user: CreateUserInvitationRequest) => void;
 }
+
+type CreationMode = "password" | "invitation";
 
 const emptyFormValues: FormValues = {
   nickname: "",
@@ -38,23 +48,26 @@ const emptyFormValues: FormValues = {
   familyName: "",
   password: "",
   confirmPassword: "",
+  phoneNumber: "",
+  picture: "",
   attrs: "{}",
 };
 
-const CreateUser: React.FC<Props> = ({ onSave }) => {
+const CreateUser: React.FC<Props> = ({ onSave, onInvite }) => {
   const t = useTranslations();
   const [opened, { open, close }] = useDisclosure(false);
+  const [mode, setMode] = useState<CreationMode>("password");
 
   const form = useForm<FormValues>({
     initialValues: emptyFormValues,
     validate: {
-      nickname: (value) => (value ? undefined : "Nickname is required"),
       email: (value) => (value ? undefined : "Email is required"),
-      givenName: (value) => (value ? undefined : "Given name is required"),
-      familyName: (value) => (value ? undefined : "Family name is required"),
-      password: (value) => (value ? undefined : t("passwordRequired")),
+      password: (value) =>
+        mode === "password" && !value ? t("passwordRequired") : undefined,
       confirmPassword: (value, values) =>
-        value === values.password ? undefined : t("passwordMismatch"),
+        mode === "password" && value !== values.password
+          ? t("passwordMismatch")
+          : undefined,
       attrs: (value) => {
         try {
           JSON.parse(value);
@@ -67,22 +80,30 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
   });
 
   const handleSubmit = (values: FormValues) => {
-    const payload: CreateUserRequest = {
-      nickname: values.nickname.trim(),
+    const profile: CreateUserInvitationRequest = {
+      nickname: values.nickname.trim() || null,
       email: values.email.trim(),
       givenName: values.givenName.trim() || null,
       familyName: values.familyName.trim() || null,
-      password: values.password.trim(),
+      phoneNumber: values.phoneNumber.trim() || null,
+      picture: values.picture.trim() || null,
       attrs: JSON.parse(values.attrs) ?? {},
     };
 
-    onSave(payload);
+    if (mode === "invitation") {
+      onInvite(profile);
+    } else {
+      onSave({ ...profile, password: values.password });
+    }
+
     form.reset();
+    setMode("password");
     close();
   };
 
   const handleCancel = () => {
     form.reset();
+    setMode("password");
     close();
   };
 
@@ -113,6 +134,15 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
 
             <Flex direction="column" justify="space-between">
               <Stack p="sm">
+                <SegmentedControl
+                  radius="md"
+                  value={mode}
+                  onChange={(value) => setMode(value as CreationMode)}
+                  data={[
+                    { label: t("createWithPassword"), value: "password" },
+                    { label: t("sendRegistrationEmail"), value: "invitation" },
+                  ]}
+                />
                 <TextInput
                   variant="filled"
                   label={t("nickname")}
@@ -133,16 +163,30 @@ const CreateUser: React.FC<Props> = ({ onSave }) => {
                   label={t("familyName")}
                   {...form.getInputProps("familyName")}
                 />
-                <PasswordInput
+                <TextInput
                   variant="filled"
-                  label={t("password")}
-                  {...form.getInputProps("password")}
+                  label={t("phoneNumber")}
+                  {...form.getInputProps("phoneNumber")}
                 />
-                <PasswordInput
+                <TextInput
                   variant="filled"
-                  label={t("confirmPassword")}
-                  {...form.getInputProps("confirmPassword")}
+                  label={t("picture")}
+                  {...form.getInputProps("picture")}
                 />
+                {mode === "password" && (
+                  <>
+                    <PasswordInput
+                      variant="filled"
+                      label={t("password")}
+                      {...form.getInputProps("password")}
+                    />
+                    <PasswordInput
+                      variant="filled"
+                      label={t("confirmPassword")}
+                      {...form.getInputProps("confirmPassword")}
+                    />
+                  </>
+                )}
               </Stack>
             </Flex>
 

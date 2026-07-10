@@ -71,6 +71,7 @@ export default function SignupPage() {
 
   const loadSignup = useStore((state) => state.loadSignup);
   const completeSignup = useStore((state) => state.completeSignup);
+  const clearAuthError = useStore((state) => state.clearAuthError);
   const loading = useStore((state) => state.loading);
   const message = useStore((state) => state.message);
 
@@ -86,11 +87,6 @@ export default function SignupPage() {
     initialValues: emptyValues,
     validate: {
       email: (value) => (!value.includes("@") ? t("errors.email") : null),
-      givenName: (value) =>
-        value.trim() ? null : t("errors.givenNameRequired"),
-      familyName: (value) =>
-        value.trim() ? null : t("errors.familyNameRequired"),
-      nickname: (value) => (value.trim() ? null : t("errors.nicknameRequired")),
       password: (value) =>
         value.length > 5 ? null : t("errors.passwordTooShort"),
       confirmPassword: (value, values) =>
@@ -187,6 +183,7 @@ export default function SignupPage() {
         <Button
           component={Link}
           to={hrefWithReturnTo("/login", returnTo)}
+          onClick={clearAuthError}
           fullWidth
         >
           {t("goToLogin")}
@@ -232,7 +229,6 @@ export default function SignupPage() {
             {...form.getInputProps("email")}
           />
           <TextInput
-            withAsterisk
             style={{ minHeight: 90 }}
             variant="filled"
             label={t("firstName")}
@@ -241,7 +237,6 @@ export default function SignupPage() {
             {...form.getInputProps("givenName")}
           />
           <TextInput
-            withAsterisk
             style={{ minHeight: 90 }}
             variant="filled"
             label={t("lastName")}
@@ -250,7 +245,6 @@ export default function SignupPage() {
             {...form.getInputProps("familyName")}
           />
           <TextInput
-            withAsterisk
             style={{ minHeight: 90 }}
             variant="filled"
             label={t("username")}

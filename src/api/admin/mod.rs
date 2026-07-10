@@ -220,6 +220,10 @@ pub fn router() -> axum::Router {
             get(users::get_users).post(users::create_user),
         )
         .route(
+            "/admin/users/invitations",
+            post(users::create_user_invitation),
+        )
+        .route(
             "/admin/users/organizations/{org_id}",
             get(users::get_organization_users),
         )

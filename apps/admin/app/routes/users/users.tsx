@@ -16,6 +16,7 @@ const UsersPage = () => {
     getUsers,
     getSuperAdminUsers,
     createUser,
+    inviteUser,
     updateUser,
     deleteUser,
     updateUserAttrs,
@@ -34,7 +35,7 @@ const UsersPage = () => {
     <Box>
       <Group p="xs" justify="space-between">
         <Title order={4}>{t("users")}</Title>
-        <CreateUser onSave={createUser} />
+        <CreateUser onSave={createUser} onInvite={inviteUser} />
       </Group>
       <Table
         columns={columns}

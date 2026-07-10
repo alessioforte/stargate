@@ -69,6 +69,7 @@ pub struct Smtp {
     message: Option<Message>,
     email: String,
     token: String,
+    link: String,
     template: Template,
     name: Option<String>,
     subject: Option<String>,
@@ -87,6 +88,7 @@ impl Smtp {
             message: None,
             email: "".to_string(),
             token: "".to_string(),
+            link: "".to_string(),
             template: Template::SignupRequest,
             name: None,
             subject: None,
@@ -106,6 +108,11 @@ impl Smtp {
 
     pub fn token(&mut self, token: String) -> &mut Self {
         self.token = token;
+        self
+    }
+
+    pub fn link(&mut self, link: String) -> &mut Self {
+        self.link = link;
         self
     }
 
@@ -154,9 +161,14 @@ impl Smtp {
                 path: file_path,
                 source,
             })?;
-        Ok(content
+        Ok(self.render_template(content))
+    }
+
+    fn render_template(&self, content: String) -> String {
+        content
             .replace("{{name}}", self.name.as_deref().unwrap_or(""))
-            .replace("{{token}}", &self.token))
+            .replace("{{token}}", &self.token)
+            .replace("{{signup_url}}", &self.link)
     }
 
     fn build_mailer(
@@ -253,6 +265,17 @@ mod tests {
             .build();
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn render_template_replaces_signup_url() {
+        let mut smtp = Smtp::new();
+        smtp.link("https://auth.example.com/signup?token=abc".to_string());
+
+        assert_eq!(
+            smtp.render_template("<a href=\"{{signup_url}}\">Sign up</a>".to_string()),
+            "<a href=\"https://auth.example.com/signup?token=abc\">Sign up</a>"
+        );
     }
 
     #[test]

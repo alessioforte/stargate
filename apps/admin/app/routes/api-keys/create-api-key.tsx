@@ -138,15 +138,15 @@ const CreateApiKey: React.FC<Props> = ({ serviceAccounts, users, onSave }) => {
               <Box>
                 <SegmentedControl
                   radius="md"
-                  data={[
-                    { value: "user", label: t("user") },
-                    { value: "service_account", label: t("serviceAccount") },
-                  ]}
                   value={form.values.ownerType}
                   onChange={(value) => {
                     form.setFieldValue("ownerType", value as ApiKeyOwnerType);
                     form.setFieldValue("ownerId", "");
                   }}
+                  data={[
+                    { value: "user", label: t("user") },
+                    { value: "service_account", label: t("serviceAccount") },
+                  ]}
                 />
               </Box>
             </Stack>

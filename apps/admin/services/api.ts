@@ -18,6 +18,7 @@ import type {
   CreateOrganizationRequest,
   CreateServiceAccountRequest,
   CreateUserRequest,
+  CreateUserInvitationRequest,
   EvaluateAccessControlRequest,
   EvaluateAccessControlResponse,
   List,
@@ -380,6 +381,14 @@ export default class AdminApiService {
   async createUser(body: CreateUserRequest) {
     return this.request<User>({
       url: this.url("/users"),
+      method: "POST",
+      data: body,
+    });
+  }
+
+  async inviteUser(body: CreateUserInvitationRequest) {
+    return this.request<MessageResponse>({
+      url: this.url("/users/invitations"),
       method: "POST",
       data: body,
     });

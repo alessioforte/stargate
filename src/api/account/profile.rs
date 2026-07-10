@@ -6,7 +6,6 @@ use crate::etc::sub::Subject;
 use axum::Json;
 use axum::extract::Request;
 use serde::Serialize;
-use serde_json::Value;
 use store::Store;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -19,9 +18,20 @@ pub struct UserSchema {
     pub nickname: String,
     pub picture: Option<String>,
     pub phone_number: Option<String>,
-    pub attrs: Value,
-    pub created_at: String,
-    pub updated_at: String,
+}
+
+impl From<db::ent::User> for UserSchema {
+    fn from(user: db::ent::User) -> Self {
+        UserSchema {
+            id: user.id,
+            email: user.email,
+            given_name: user.given_name,
+            family_name: user.family_name,
+            nickname: user.nickname,
+            picture: user.picture,
+            phone_number: user.phone_number,
+        }
+    }
 }
 
 #[utoipa::path(
@@ -37,7 +47,7 @@ pub struct UserSchema {
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
-pub async fn get_profile(req: Request) -> Result<Json<db::ent::User>, ErrorResponse> {
+pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse> {
     let token = req.get_token().ok_or_else(|| {
         ErrorResponse::from(HttpError::Unauthorized("Token not found".to_string()))
     })?;
@@ -78,5 +88,5 @@ pub async fn get_profile(req: Request) -> Result<Json<db::ent::User>, ErrorRespo
             ErrorResponse::from(HttpError::DocumentNotFound("User not found".to_string()))
         })?;
 
-    Ok(Json(user))
+    Ok(Json(user.into()))
 }

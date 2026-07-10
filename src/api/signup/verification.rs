@@ -24,6 +24,12 @@ pub async fn get_signup(
         .validate_token(&query.token)
         .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
 
+    if claim.sub != "signup_request" {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "Invalid token".to_string(),
+        )));
+    }
+
     let sid = claim
         .sid
         .clone()
@@ -37,27 +43,38 @@ pub async fn get_signup(
         })?;
 
     if let Some(ref claim_email) = claim.email
-        && &request != claim_email
+        && &request.email != claim_email
     {
         return Err(ErrorResponse::from(HttpError::Unauthorized(
             "Email does not match".to_string(),
         )));
     }
 
-    let new_sid = act::create_signup_request(&request)
+    if act::get_signup_request(&sid)
         .await
-        .map_err(ErrorResponse::internal)?;
-    let _ = act::delete_email_verification_request(&sid).await;
+        .map_err(ErrorResponse::internal)?
+        .is_none()
+    {
+        act::create_signup_request(&sid, &request)
+            .await
+            .map_err(ErrorResponse::internal)?;
+    }
 
-    let email = claim.email.unwrap_or_default();
     let new_claim = jwt::Claims::default()
         .subject("signup".to_string())
-        .sub_id(new_sid)
-        .email(email.clone());
+        .sub_id(sid)
+        .email(request.email.clone());
 
     let token = jwt_cfg
         .generate_token(&new_claim)
         .map_err(ErrorResponse::internal)?;
 
-    Ok(Json(EmailVerificationResponse { token, email }))
+    Ok(Json(EmailVerificationResponse {
+        token,
+        email: request.email,
+        given_name: request.given_name,
+        family_name: request.family_name,
+        nickname: request.nickname,
+        phone_number: request.phone_number,
+    }))
 }

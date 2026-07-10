@@ -27,9 +27,14 @@ pub struct SignupRequestBody {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct EmailVerificationResponse {
     pub email: String,
     pub token: String,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
+    pub nickname: Option<String>,
+    pub phone_number: Option<String>,
 }
 
 pub fn router() -> axum::Router {

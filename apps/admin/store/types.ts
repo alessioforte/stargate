@@ -24,6 +24,7 @@ import type {
   UpdateOAuthClientRequest,
   User,
   CreateUserRequest,
+  CreateUserInvitationRequest,
   UpdateUserRequest,
   Query,
   JsonValue,
@@ -152,6 +153,7 @@ export interface Actions {
   getUsers: (query?: Query) => Promise<void>;
   getSuperAdminUsers: (query?: Query) => Promise<void>;
   createUser: (user: CreateUserRequest) => Promise<void>;
+  inviteUser: (user: CreateUserInvitationRequest) => Promise<void>;
   updateUser: (id: string, user: UpdateUserRequest) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
   updateUserAttrs: (id: string, attrs: JsonValue) => Promise<void>;

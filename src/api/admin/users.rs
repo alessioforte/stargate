@@ -1,4 +1,5 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use crate::act::PendingSignupProfile;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
 use crate::etc::reqctx::take_audit_context_from;
@@ -80,8 +81,30 @@ pub struct CreateUserRequest {
     pub attrs: Value,
 }
 
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateUserInvitationRequest {
+    pub email: String,
+    #[serde(default)]
+    pub given_name: Option<String>,
+    #[serde(default)]
+    pub family_name: Option<String>,
+    #[serde(default)]
+    pub nickname: Option<String>,
+    #[serde(default)]
+    pub picture: Option<String>,
+    #[serde(default)]
+    pub phone_number: Option<String>,
+    #[serde(default = "default_invitation_attrs")]
+    pub attrs: Value,
+}
+
 fn default_attrs() -> Value {
     Value::Null
+}
+
+fn default_invitation_attrs() -> Value {
+    Value::Object(serde_json::Map::new())
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -271,6 +294,72 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .map_err(ErrorResponse::internal)?;
 
     Ok((StatusCode::CREATED, Json(user)).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/admin/users/invitations",
+    tags = ["Admin", "Users"],
+    request_body = CreateUserInvitationRequest,
+    responses(
+        (status = 202, description = "User invitation sent", body = MessageResponse),
+        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 409, description = "Conflict - user or invitation already exists", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorResponse> {
+    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+
+    let payload: CreateUserInvitationRequest = extract_json(req).await?;
+
+    if crate::db::get_user_by_username(&payload.email)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .is_some()
+    {
+        return Err(ErrorResponse::from(HttpError::Conflict(format!(
+            "User with email '{}' already exists",
+            payload.email
+        ))));
+    }
+
+    if let Some(nickname) = payload
+        .nickname
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        && crate::db::get_user_by_username(nickname)
+            .await
+            .map_err(ErrorResponse::internal)?
+            .is_some()
+    {
+        return Err(ErrorResponse::from(HttpError::Conflict(format!(
+            "User with nickname '{}' already exists",
+            nickname
+        ))));
+    }
+
+    let profile = PendingSignupProfile {
+        email: payload.email,
+        given_name: payload.given_name,
+        family_name: payload.family_name,
+        nickname: payload.nickname,
+        picture: payload.picture,
+        phone_number: payload.phone_number,
+        attrs: payload.attrs,
+    };
+    crate::api::signup::request::send_signup_request(profile).await?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(MessageResponse::new(
+            "User invitation sent successfully",
+            "user_invitation_sent",
+        )),
+    )
+        .into_response())
 }
 
 #[utoipa::path(
