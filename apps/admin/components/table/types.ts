@@ -22,6 +22,9 @@ export interface TableProps<T, V> {
   expandableRows?: boolean;
   loading?: boolean;
   empty?: boolean;
+  enableScrollContainer?: boolean;
+  minWidth?: number | string;
+  maxHeight?: number | string;
 }
 
 export type TableCellProps<T, V> = Cell<T, V> & { additionalProps: any };

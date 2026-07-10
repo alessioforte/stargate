@@ -72,6 +72,7 @@ const initialState: State = {
   organizations: new StoreItem<List<Organization>>(null),
   serviceAccounts: new StoreItem<List<ServiceAccount>>(null),
   users: new StoreItem<List<User>>(null),
+  usersQuery: {},
   superAdminUsers: new StoreItem<List<User>>(null),
 };
 
@@ -931,9 +932,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   },
 
   getUsers: async (query?: Query) => {
+    const usersQuery = query ?? get().usersQuery;
     const users = get().users;
-    set({ users: users.setLoading() });
-    const { data, error, message } = await Service.admin.getUsers(query);
+    set({ users: users.setLoading(), usersQuery });
+    const { data, error, message } = await Service.admin.getUsers(usersQuery);
     if (error) {
       set({ users: users.setError(message) });
       return;
@@ -974,7 +976,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       title: "Success",
       message: "User created successfully",
     });
-    get().getUsers();
+    get().getUsers(get().usersQuery);
   },
 
   inviteUser: async (user: CreateUserInvitationRequest) => {
@@ -999,7 +1001,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       title: "Success",
       message: message ?? "User invitation sent successfully",
     });
-    get().getUsers();
+    get().getUsers(get().usersQuery);
   },
 
   updateUser: async (id: string, user: UpdateUserRequest) => {
@@ -1025,7 +1027,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       message: "User updated successfully",
     });
 
-    get().getUsers();
+    get().getUsers(get().usersQuery);
   },
 
   deleteUser: async (id: string) => {
@@ -1051,7 +1053,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       message: "User deleted successfully",
     });
 
-    get().getUsers();
+    get().getUsers(get().usersQuery);
   },
 
   updateUserAttrs: async (id: string, attrs: JsonValue) => {
@@ -1079,7 +1081,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       message: "User attrs updated successfully",
     });
 
-    get().getUsers();
+    get().getUsers(get().usersQuery);
   },
 });
 

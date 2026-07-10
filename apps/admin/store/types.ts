@@ -74,6 +74,7 @@ export interface State {
   organizations: StoreItem<List<Organization>>;
   serviceAccounts: StoreItem<List<ServiceAccount>>;
   users: StoreItem<List<User>>;
+  usersQuery: Query;
   superAdminUsers: StoreItem<List<User>>;
 }
 

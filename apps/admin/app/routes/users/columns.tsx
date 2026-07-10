@@ -15,10 +15,11 @@ export const columns: ColumnDef<User>[] = [
     accessorKey: "isSuperAdmin",
     size: 30,
     header: () => <></>,
-    cell: ({row, table }) => {
-      const {superAdminUsers} = table.options.meta as DetailsColumnMeta<User>;
-      const isSuperAdmin = superAdminUsers.some((user) => user.id === row.original.id);
-      console.log(isSuperAdmin, row.original.id, superAdminUsers);
+    cell: ({ row, table }) => {
+      const { superAdminUsers } = table.options.meta as DetailsColumnMeta<User>;
+      const isSuperAdmin = superAdminUsers.some(
+        (user) => user.id === row.original.id,
+      );
       return isSuperAdmin ? (
         <Tooltip
           label={getTranslation("adminPermissions.superAdmin")}
@@ -27,7 +28,7 @@ export const columns: ColumnDef<User>[] = [
           <BsFillShieldFill color="var(--mantine-primary-color-6)" />
         </Tooltip>
       ) : null;
-    }
+    },
   },
   {
     accessorKey: "id",

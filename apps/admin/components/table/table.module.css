@@ -1,5 +1,22 @@
-.table thead {
-  z-index: 1;
+.tableLayout {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tableHeader {
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.tableBody {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.table {
+  table-layout: fixed;
+  width: 100%;
 }
 
 .table th {
@@ -11,7 +28,23 @@
 }
 
 .sticky {
-  position: sticky;
-  top: 0;
-  z-index: 9;
+  background-color: light-dark(
+    var(--mantine-color-white),
+    var(--mantine-color-dark-9)
+  );
+}
+
+.pagination {
+  border-top: 1px solid
+    light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+  flex: 0 0 auto;
+  justify-content: end;
+  align-items: flex-end;
+  min-height: 54px;
+  padding: var(--mantine-spacing-sm);
+}
+
+.emptyState {
+  height: 100%;
+  min-height: 300px;
 }

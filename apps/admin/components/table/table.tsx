@@ -3,7 +3,9 @@ import {
   Group,
   Table as MantineTable,
   Pagination,
+  ScrollArea,
   Select,
+  Skeleton,
   Text,
 } from "@mantine/core";
 import { GoChevronLeft, GoChevronRight } from "react-icons/go";
@@ -16,7 +18,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import React, { useEffect, useState } from "react";
-import { Box, LoadingOverlay } from "@mantine/core";
+import { Box } from "@mantine/core";
 import Empty from "../empty/empty";
 import { selectionColumn } from "./rox-checkbox";
 import { type TableProps } from "./types";
@@ -41,6 +43,9 @@ const Table = <T, V>({
   onSelectionChange,
   onSortingChange,
   defaultSorting,
+  enableScrollContainer = false,
+  minWidth,
+  maxHeight,
 }: TableProps<T, V>) => {
   const [rowSelection, setRowSelection] = React.useState({});
   const [sorting, setSorting] = useState<SortingState>(defaultSorting ?? []);
@@ -78,8 +83,6 @@ const Table = <T, V>({
   });
   const { rows } = table.getRowModel();
 
-  const loadingOverlayZIndex = 1;
-
   useEffect(() => {
     setPageIndex(paginationOptions?.pageIndex ?? 0);
     table.setPageSize(
@@ -99,29 +102,66 @@ const Table = <T, V>({
     setPageIndex(paginationOptions?.pageIndex ?? 0);
   }, [paginationOptions?.pageIndex]);
 
-  const pageCount =
-    paginationOptions?.totalItems &&
-    !Number.isNaN(Number(paginationOptions.totalItems))
-      ? Math.ceil(
-          Number(paginationOptions.totalItems) /
-            table.getState().pagination.pageSize,
-        )
-      : null;
+  const totalItems = Number(paginationOptions?.totalItems);
+  const pageCount = Number.isFinite(totalItems)
+    ? Math.max(1, Math.ceil(totalItems / table.getState().pagination.pageSize))
+    : null;
+  const showTable = !empty || loading;
+  const skeletonRows = Math.max(
+    5,
+    paginationOptions?.pageSize ?? DEFAULT_PAGE_LIMIT_SMALL,
+  );
+  const visibleColumns = table.getVisibleLeafColumns();
+  const totalColumnSize = Math.max(
+    1,
+    visibleColumns.reduce(
+      (total, column) => total + Math.max(column.getSize(), 1),
+      0,
+    ),
+  );
+
+  const renderColumnGroup = () => (
+    <colgroup>
+      {visibleColumns.map((column) => (
+        <col
+          key={column.id}
+          style={{
+            width: `${(Math.max(column.getSize(), 1) / totalColumnSize) * 100}%`,
+          }}
+        />
+      ))}
+    </colgroup>
+  );
+
+  const TableBodyContainer = ({
+    children,
+  }: React.PropsWithChildren): React.ReactElement => {
+    if (!enableScrollContainer) {
+      return <Box className={classes.tableBody}>{children}</Box>;
+    }
+
+    return (
+      <ScrollArea
+        className={classes.tableBody}
+        offsetScrollbars={false}
+        type="auto"
+      >
+        {children}
+      </ScrollArea>
+    );
+  };
 
   return (
     <>
-      <Box pos="relative">
-        <LoadingOverlay
-          visible={loading && !empty}
-          zIndex={loadingOverlayZIndex}
-        />
-        <MantineTable
-          className={classes.table}
-          verticalSpacing={verticalSpacing}
-          stickyHeader={stickyHeader}
-          highlightOnHover
-        >
-          {!empty && (
+      <Box className={classes.tableLayout} style={{ height: maxHeight }}>
+        <Box className={classes.tableHeader}>
+          <MantineTable
+            className={classes.table}
+            verticalSpacing={verticalSpacing}
+            highlightOnHover
+            style={{ minWidth }}
+          >
+            {renderColumnGroup()}
             <MantineTable.Thead className={stickyHeader ? classes.sticky : ""}>
               {React.Children.toArray(
                 table.getHeaderGroups().map((headerGroup) => (
@@ -142,132 +182,142 @@ const Table = <T, V>({
                 )),
               )}
             </MantineTable.Thead>
-          )}
+          </MantineTable>
+        </Box>
 
-          {!empty && (
-            <MantineTable.Tbody>
-              {React.Children.toArray(
-                rows.map((row) => (
-                  <MantineTable.Tr key={row.id}>
-                    {React.Children.toArray(
-                      row.getVisibleCells().map((cell) => (
-                        <MantineTable.Td
-                          key={cell.column.id}
-                          style={{ width: cell.column.columnDef.size }}
-                        >
-                          {flexRender(cell.column.columnDef.cell, {
-                            ...cell.getContext(),
-                          })}
+        <TableBodyContainer>
+          {showTable && (
+            <MantineTable
+              className={classes.table}
+              verticalSpacing={verticalSpacing}
+              highlightOnHover
+              style={{ minWidth }}
+            >
+              {renderColumnGroup()}
+              <MantineTable.Tbody>
+                {loading &&
+                  Array.from({ length: skeletonRows }, (_, rowIndex) => (
+                    <MantineTable.Tr key={`skeleton-${rowIndex}`}>
+                      {visibleColumns.map((column) => (
+                        <MantineTable.Td key={column.id}>
+                          <Skeleton height={28} radius="sm" />
                         </MantineTable.Td>
-                      )),
-                    )}
-                  </MantineTable.Tr>
-                )),
-              )}
-            </MantineTable.Tbody>
+                      ))}
+                    </MantineTable.Tr>
+                  ))}
+                {!loading &&
+                  React.Children.toArray(
+                    rows.map((row) => (
+                      <MantineTable.Tr key={row.id}>
+                        {React.Children.toArray(
+                          row.getVisibleCells().map((cell) => (
+                            <MantineTable.Td key={cell.column.id}>
+                              {flexRender(cell.column.columnDef.cell, {
+                                ...cell.getContext(),
+                              })}
+                            </MantineTable.Td>
+                          )),
+                        )}
+                      </MantineTable.Tr>
+                    )),
+                  )}
+              </MantineTable.Tbody>
+            </MantineTable>
           )}
-        </MantineTable>
 
-        {empty && (
-          <Box style={{ height: "300px" }}>
-            {!loading && (
-              <Empty
-                style={{
-                  height: "100%",
+          {empty && !loading && (
+            <Box className={classes.emptyState}>
+              <Empty style={{ height: "100%" }} />
+            </Box>
+          )}
+        </TableBodyContainer>
+
+        {pagination && (
+          <Group className={classes.pagination}>
+            {pageCount !== null && (
+              <Pagination
+                size="sm"
+                total={pageCount}
+                value={pageIndex + 1}
+                onChange={(value) => {
+                  setPageIndex(value - 1);
+                  onPaginationChange?.({
+                    pageIndex: value - 1,
+                    pageSize: table.getState().pagination.pageSize,
+                    sorting: table.getState().sorting,
+                  });
                 }}
               />
             )}
-            {loading && (
-              <LoadingOverlay visible zIndex={loadingOverlayZIndex} />
+            {pageCount === null && (
+              <Group gap={6}>
+                <ActionIcon
+                  size={26}
+                  variant="default"
+                  disabled={pageIndex === 0}
+                  onClick={() => {
+                    setPageIndex(pageIndex - 1);
+                    onPaginationChange?.({
+                      pageIndex: pageIndex - 1,
+                      pageSize: table.getState().pagination.pageSize,
+                      sorting: table.getState().sorting,
+                    });
+                  }}
+                >
+                  <GoChevronLeft size={11} />
+                </ActionIcon>
+                <ActionIcon size={26} variant="filled" color="primary">
+                  <Text size="xs" fw={500}>
+                    {pageIndex + 1}
+                  </Text>
+                </ActionIcon>
+                <ActionIcon
+                  disabled={
+                    data.length === 0 ||
+                    data.length < table.getState().pagination.pageSize
+                  }
+                  size={26}
+                  variant="default"
+                  onClick={() => {
+                    setPageIndex(pageIndex + 1);
+                    onPaginationChange?.({
+                      pageIndex: pageIndex + 1,
+                      pageSize: table.getState().pagination.pageSize,
+                      sorting: table.getState().sorting,
+                    });
+                  }}
+                >
+                  <GoChevronRight size={11} />
+                </ActionIcon>
+              </Group>
             )}
-          </Box>
-        )}
-      </Box>
-      {pagination && (
-        <Group mt={30}>
-          {pageCount !== null && (
-            <Pagination
-              size="sm"
-              total={pageCount}
-              value={pageIndex + 1}
+            <Select
+              size="xs"
+              variant="unstyled"
+              value={String(table.getState().pagination.pageSize)}
+              autoComplete="off"
+              style={{ maxWidth: 70 }}
               onChange={(value) => {
-                setPageIndex(value - 1);
+                if (!value) return;
+                table.setPageSize(Number(value));
+                setPageIndex(0);
                 onPaginationChange?.({
-                  pageIndex: value - 1,
-                  pageSize: table.getState().pagination.pageSize,
+                  pageIndex: 0,
+                  pageSize: Number(value),
                   sorting: table.getState().sorting,
                 });
               }}
+              data={[
+                { value: "10", label: "10" },
+                { value: "15", label: "15" },
+                { value: "20", label: "20" },
+                { value: "50", label: "50" },
+                { value: "100", label: "100" },
+              ]}
             />
-          )}
-          {pageCount === null && (
-            <Group gap={6}>
-              <ActionIcon
-                size={26}
-                variant="default"
-                disabled={pageIndex === 0}
-                onClick={() => {
-                  setPageIndex(pageIndex - 1);
-                  onPaginationChange?.({
-                    pageIndex: pageIndex - 1,
-                    pageSize: table.getState().pagination.pageSize,
-                    sorting: table.getState().sorting,
-                  });
-                }}
-              >
-                <GoChevronLeft size={11} />
-              </ActionIcon>
-              <ActionIcon size={26} variant="filled" color="primary">
-                <Text size="xs" fw={500}>
-                  {pageIndex + 1}
-                </Text>
-              </ActionIcon>
-              <ActionIcon
-                disabled={
-                  data.length === 0 ||
-                  data.length < table.getState().pagination.pageSize
-                }
-                size={26}
-                variant="default"
-                onClick={() => {
-                  setPageIndex(pageIndex + 1);
-                  onPaginationChange?.({
-                    pageIndex: pageIndex + 1,
-                    pageSize: table.getState().pagination.pageSize,
-                    sorting: table.getState().sorting,
-                  });
-                }}
-              >
-                <GoChevronRight size={11} />
-              </ActionIcon>
-            </Group>
-          )}
-          <Select
-            size="xs"
-            variant="unstyled"
-            value={String(table.getState().pagination.pageSize)}
-            autoComplete="off"
-            style={{ maxWidth: 70 }}
-            onChange={(value) => {
-              if (!value) return;
-              table.setPageSize(Number(value));
-              setPageIndex(0);
-              onPaginationChange?.({
-                pageIndex: 0,
-                pageSize: Number(value),
-                sorting: table.getState().sorting,
-              });
-            }}
-            data={[
-              { value: "10", label: "10" },
-              { value: "15", label: "15" },
-              { value: "20", label: "20" },
-              { value: "50", label: "50" },
-              { value: "100", label: "100" },
-            ]}
-          />
-        </Group>
-      )}
+          </Group>
+        )}
+      </Box>
     </>
   );
 };
