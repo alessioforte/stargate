@@ -144,6 +144,7 @@ const Table = <T, V>({
       <ScrollArea
         className={classes.tableBody}
         offsetScrollbars={false}
+        scrollbars="y"
         type="auto"
       >
         {children}

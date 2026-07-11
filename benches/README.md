@@ -8,3 +8,4 @@ This directory contains load testing scripts for the API using `wrk`.
 # Install wrk
 brew install wrk  # macOS
 sudo apt-get install wrk  # Ubuntu/Debian
+```

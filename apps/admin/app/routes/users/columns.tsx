@@ -1,5 +1,5 @@
 import { type ColumnDef } from "@tanstack/react-table";
-import { Tooltip } from "@mantine/core";
+import { Tooltip, Text } from "@mantine/core";
 import { BsFillShieldFill } from "react-icons/bs";
 import { type User } from "@/services/types";
 import { getTranslation } from "@/i18n";
@@ -32,12 +32,27 @@ export const columns: ColumnDef<User>[] = [
   },
   {
     accessorKey: "id",
+    cell: ({ row }) => (
+      <Text size="xs" truncate>
+        {row.original.id}
+      </Text>
+    ),
   },
   {
     accessorKey: "email",
+    cell: ({ row }) => (
+      <Text size="xs" truncate>
+        {row.original.email}
+      </Text>
+    ),
   },
   {
     accessorKey: "nickname",
+    cell: ({ row }) => (
+      <Text size="xs" truncate>
+        {row.original.nickname}
+      </Text>
+    ),
   },
   {
     accessorKey: "givenName",

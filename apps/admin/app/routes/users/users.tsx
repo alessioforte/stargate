@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import useStore from "@/store";
-import { Table } from "@/components";
+import { Table, SearchInput } from "@/components";
 import type { User } from "@/services/types";
 import { useTranslations } from "@/i18n";
 import CreateUser from "./create-user";
@@ -27,6 +27,7 @@ const UsersPage = () => {
 
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [search, setSearch] = useState("");
   const [pagination, setPagination] = useState({
     pageIndex: 0,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -34,10 +35,11 @@ const UsersPage = () => {
 
   useEffect(() => {
     getUsers({
+      q: search || undefined,
       limit: pagination.pageSize,
       offset: pagination.pageIndex * pagination.pageSize,
     });
-  }, [getUsers, pagination.pageIndex, pagination.pageSize]);
+  }, [getUsers, search, pagination.pageIndex, pagination.pageSize]);
 
   useEffect(() => {
     getSuperAdminUsers();
@@ -59,16 +61,28 @@ const UsersPage = () => {
     }
   }, [pagination.pageIndex, pagination.pageSize, users?.data?.total]);
 
+  const handleSearch = (query: string) => {
+    setSearch(query);
+    setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+  };
+
   return (
     <Box>
       <Group p="xs" justify="space-between">
         <Title order={4}>{t("users")}</Title>
+        <SearchInput
+          radius="lg"
+          variant="unstyled"
+          style={{ flex: 1 }}
+          placeholder={`${t("search").toLowerCase()}...`}
+          onSearch={handleSearch}
+        />
         <CreateUser onSave={createUser} onInvite={inviteUser} />
       </Group>
       <Table
         stickyHeader
         enableScrollContainer
-        maxHeight="calc(var(--page-height) - 48px)"
+        maxHeight="calc(var(--page-height) - 60px)"
         pagination
         paginationOptions={{
           defaultPageSize: DEFAULT_PAGE_SIZE,
