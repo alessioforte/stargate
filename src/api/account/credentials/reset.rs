@@ -19,6 +19,7 @@ use tracing::error;
     request_body = ChangePasswordRequestBody,
     responses(
         (status = 200, description = "OK", body = MessageResponse),
+        (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "User not found", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
@@ -59,6 +60,10 @@ pub async fn put_credentials(mut req: Request) -> Result<Json<MessageResponse>, 
         .ok_or_else(|| {
             ErrorResponse::from(HttpError::DocumentNotFound("User not found".to_string()))
         })?;
+
+    act::password_policy::validate_for_user(&user, &body.password)
+        .await
+        .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
 
     let password = crate::etc::pw::hash_password(body.password.clone())
         .await

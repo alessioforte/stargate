@@ -6,8 +6,8 @@ use super::repo::{
 use crate::backend::Pool;
 use crate::db::DbStore;
 use crate::ent::{
-    ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient,
-    OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
+    ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialHistory, CredentialType,
+    OAuthClient, OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
 };
 use crate::repo::{
     ADMIN_KEY, API_KEY, CREDENTIAL, OAUTH_CLIENT, ORGANIZATION, SERVICE_ACCOUNT, SUPER_ADMIN, USER,
@@ -337,6 +337,20 @@ impl DbStore for Service {
         ctx: AuditContext,
     ) -> Result<Credential> {
         let mut tx = self.pool.begin().await?;
+        // Keep the replaced hash so the `not recently used` password policy
+        // can check against it; committed atomically with the change.
+        if let Some(previous) = self
+            .credential
+            .get_by_user_id(&mut *tx, user_id, CredentialType::Password)
+            .await?
+        {
+            self.credential
+                .insert_history(&mut tx, user_id, &previous.value)
+                .await?;
+            self.credential
+                .prune_history(&mut tx, user_id, crate::repo::CREDENTIAL_HISTORY_KEEP)
+                .await?;
+        }
         let credential = self
             .credential
             .change_password(&mut tx, user_id, new_password)
@@ -358,6 +372,38 @@ impl DbStore for Service {
         self.credential
             .get_by_user_id(&self.pool, user_id, credential_type)
             .await
+    }
+
+    async fn get_credential_history(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<CredentialHistory>> {
+        self.credential.get_history(&self.pool, user_id, limit).await
+    }
+
+    async fn rehash_credential(
+        &self,
+        user_id: &str,
+        old_value: &str,
+        new_value: &str,
+        ctx: AuditContext,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let updated = self
+            .credential
+            .rehash_value(&mut tx, user_id, old_value, new_value)
+            .await?;
+        if updated {
+            let audit = ctx
+                .with_resource(CREDENTIAL.to_string())
+                .with_resource_id(user_id.to_string())
+                .with_metadata(serde_json::json!({ "credential_rehash": true }))
+                .build_audit(ActionType::Update);
+            self.audit.insert(&mut tx, &audit).await?;
+        }
+        tx.commit().await?;
+        Ok(updated)
     }
 
     // ── OAuth Clients ──────────────────────────────────────────────────────

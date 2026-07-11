@@ -4,8 +4,8 @@ use anyhow::Result;
 use db::{
     DbStore,
     ent::{
-        AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient, OAuthConsent,
-        Organization, Profile, ServiceAccount, SuperAdmin, User,
+        AdminKey, ApiKey, AuditContext, Credential, CredentialHistory, CredentialType, OAuthClient,
+        OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
     },
 };
 
@@ -115,6 +115,25 @@ pub async fn get_credential(
 ) -> Result<Option<Credential>> {
     let svc = service();
     svc.get_credential(user_id, credential_type).await
+}
+
+pub async fn get_credential_history(user_id: &str, limit: i64) -> Result<Vec<CredentialHistory>> {
+    service()
+        .get_credential_history(user_id, limit)
+        .await
+        .inspect_err(|e| tracing::error!("Error fetching credential history: {:?}", e))
+}
+
+pub async fn rehash_credential(
+    user_id: &str,
+    old_value: &str,
+    new_value: &str,
+    ctx: AuditContext,
+) -> Result<bool> {
+    service()
+        .rehash_credential(user_id, old_value, new_value, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error rehashing credential: {:?}", e))
 }
 
 // ── OAuth Clients ──────────────────────────────────────────────────────────

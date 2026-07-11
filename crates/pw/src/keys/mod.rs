@@ -1,9 +1,7 @@
-use rand::RngExt;
-use rand::distr::Alphanumeric;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 mod meta;
-// mod parse;
 
 pub fn generate_api_key() -> String {
     generate_api_key_with(meta::KeyType::Secret, meta::KeyEnvironment::Live)
@@ -14,20 +12,15 @@ pub fn generate_admin_key() -> String {
 }
 
 pub fn generate_api_key_with(key_type: meta::KeyType, env: meta::KeyEnvironment) -> String {
-    let key: String = rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(32) // Length of the API key
-        .map(char::from)
-        .collect();
+    // 32 random bytes (256 bits), base64url-encoded to 43 URL-safe chars.
+    let mut secret = [0u8; 32];
+    rand::rng().fill_bytes(&mut secret);
 
     format!(
         "{}_{}_{}",
         key_type.as_str(),
         env.as_str(),
-        base64::Engine::encode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            key.as_bytes()
-        )
+        base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, secret)
     )
 }
 

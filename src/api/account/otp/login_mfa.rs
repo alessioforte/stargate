@@ -16,6 +16,7 @@ use axum::response::{IntoResponse, Response};
     request_body = MfaChallengeVerifyRequestBody,
     responses(
         (status = 200, description = "OK", body = crate::api::account::AuthResponse),
+        (status = 202, description = "Password Expired", body = crate::api::account::credentials::expired::PasswordExpiredResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 409, description = "Conflict", body = ErrorResponse),
@@ -33,6 +34,16 @@ pub async fn put_login_mfa_challenge(
         .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
 
     let (user, auth_time) = complete_login_mfa(&challenge_id, &body.code).await?;
+
+    // The user is now fully authenticated (password + MFA); an expired
+    // password swaps the session for a change-password token.
+    if let Some(response) =
+        crate::api::account::credentials::expired::maybe_password_expired_response(&user, None)
+            .await?
+    {
+        return Ok(response);
+    }
+
     crate::api::account::session::issue_user_session(user, auth_time).await
 }
 

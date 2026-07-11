@@ -274,14 +274,21 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         ))));
     }
 
-    let hashed = crate::etc::pw::hash_password(payload.password.clone())
-        .await
-        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
-
     let nickname = payload
         .nickname
         .clone()
         .unwrap_or_else(|| payload.email.clone());
+
+    crate::act::password_policy::validate_global(
+        &payload.password,
+        Some(&nickname),
+        Some(&payload.email),
+    )
+    .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
+
+    let hashed = crate::etc::pw::hash_password(payload.password.clone())
+        .await
+        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
     let profile = Profile::new(payload.email.clone(), nickname)
         .given_name(payload.given_name.clone())
         .family_name(payload.family_name.clone())

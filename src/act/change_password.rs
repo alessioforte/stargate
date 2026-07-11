@@ -3,13 +3,17 @@ use store::Store;
 
 const KEY_PREFIX: &str = "change_password_requests";
 
+/// Lifetime of a change-password request (and the reset tokens minted for it).
+pub const CHANGE_PASSWORD_REQUEST_TTL_SECS: u64 = 60 * 60;
+
 pub async fn create_change_password_request(email: &str) -> Result<String, store::StoreError> {
     let store = use_store();
     let sid = ulid::Ulid::new().to_string();
 
     let key = format!("{}:{}", KEY_PREFIX, email);
-    let ttl = Some(60 * 60); // 1 hour in seconds
-    store.set(key.as_str(), &sid, ttl).await?;
+    store
+        .set(key.as_str(), &sid, Some(CHANGE_PASSWORD_REQUEST_TTL_SECS))
+        .await?;
     Ok(sid)
 }
 

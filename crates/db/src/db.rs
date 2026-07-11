@@ -1,6 +1,6 @@
 use crate::ent::{
-    AdminKey, ApiKey, AuditContext, Credential, CredentialType, OAuthClient, OAuthConsent,
-    Organization, Profile, ServiceAccount, SuperAdmin, User,
+    AdminKey, ApiKey, AuditContext, Credential, CredentialHistory, CredentialType, OAuthClient,
+    OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -44,6 +44,22 @@ pub trait DbStore {
         user_id: &str,
         credential_type: CredentialType,
     ) -> Result<Option<Credential>>;
+    /// Most recent previous password hashes, newest first.
+    async fn get_credential_history(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<CredentialHistory>>;
+    /// Upgrade a stored password hash in place (same password, new hash
+    /// parameters). Does not touch `updated_at` or history. Returns `false`
+    /// when the stored hash no longer matches `old_value`.
+    async fn rehash_credential(
+        &self,
+        user_id: &str,
+        old_value: &str,
+        new_value: &str,
+        ctx: AuditContext,
+    ) -> Result<bool>;
 
     // ── OAuth Clients ──────────────────────────────────────────────────────
     async fn create_oauth_client(

@@ -71,7 +71,13 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
         Command::Admin(admin) => match admin.command {
             AdminCommand::Bootstrap(args) => {
                 let generated_password = if args.generate_password {
-                    Some(pw::generator(40, true, true, true, false))
+                    Some(
+                        pw::Generator::new(40)
+                            .uppercase()
+                            .lowercase()
+                            .digits()
+                            .generate(),
+                    )
                 } else {
                     None
                 };
@@ -103,6 +109,17 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
                         ));
                     }
                 };
+
+                // Generated passwords are exempt: 40 chars of upper+lower+digits
+                // is categorically stronger than the composition policy.
+                if generated_password.is_none() {
+                    crate::act::password_policy::validate_global(
+                        &password,
+                        args.nickname.as_deref(),
+                        Some(&args.email),
+                    )
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+                }
 
                 if let Err(e) = db::init().await {
                     return Err(io::Error::other(format!(

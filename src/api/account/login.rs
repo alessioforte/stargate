@@ -1,5 +1,6 @@
 use super::{AuthResponse, UserCredentials};
 use crate::act::login_guard;
+use crate::api::account::credentials::expired::maybe_password_expired_response;
 use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
 use crate::api::account::session::issue_user_session;
 use crate::err::{ErrorResponse, HttpError};
@@ -19,7 +20,7 @@ use db::ent::CredentialType;
     request_body = UserCredentials,
     responses(
         (status = 200, description = "OK", body = AuthResponse),
-        (status = 202, description = "MFA Required", body = LoginMfaRequiredResponse),
+        (status = 202, description = "MFA Required (body: LoginMfaRequiredResponse) or Password Expired (body: PasswordExpiredResponse, carries a change-password resetToken)", body = LoginMfaRequiredResponse),
         (status = 429, description = "Too Many Requests", body = ErrorResponse),
         (status = 401, description = "Unauthorized - Invalid Credentials", body = ErrorResponse),
         (status = 503, description = "Service Unavailable", body = ErrorResponse),
@@ -92,12 +93,12 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
         )));
     };
 
-    let password_ok = crate::etc::pw::verify_password(
+    let password_check = crate::etc::pw::check_password(
         credentials.password.clone(),
         user_credential.value.clone(),
     )
     .await;
-    if !password_ok {
+    if !password_check.valid {
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
@@ -114,6 +115,16 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
     }
 
     audit_ctx = audit_ctx.with_actor(db::ent::ActorType::User, Some(user.id.clone()));
+
+    if password_check.needs_rehash {
+        spawn_credential_rehash(
+            user.id.clone(),
+            credentials.password.clone(),
+            user_credential.value.clone(),
+            audit_ctx.clone(),
+        );
+    }
+
     // Note: no downstream consumer in the handler chain (Stage D wires middleware);
     // drop audit_ctx after enrichment.
     let _ = audit_ctx;
@@ -124,7 +135,40 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
         return Ok(response);
     }
 
+    // For MFA users the expiry check runs after MFA verification instead, so
+    // an expired password alone never yields a reset token.
+    if let Some(response) =
+        maybe_password_expired_response(&user, Some(&user_credential)).await?
+    {
+        return Ok(response);
+    }
+
     issue_user_session(user, auth_time).await
+}
+
+/// Re-encode a verified password in the background when its stored hash
+/// predates the current Argon2 configuration (cost change or new pepper).
+/// Best-effort: failures only log, and the value-guarded update makes
+/// concurrent logins race-safe.
+fn spawn_credential_rehash(
+    user_id: String,
+    password: String,
+    old_hash: String,
+    ctx: db::ent::AuditContext,
+) {
+    tokio::spawn(async move {
+        let Some(new_hash) = crate::etc::pw::hash_password(password).await else {
+            tracing::warn!("credential rehash skipped: hashing failed");
+            return;
+        };
+        match crate::db::rehash_credential(&user_id, &old_hash, &new_hash, ctx).await {
+            Ok(true) => tracing::info!("credential hash upgraded for user {user_id}"),
+            Ok(false) => {
+                tracing::debug!("credential rehash skipped: hash changed concurrently")
+            }
+            Err(error) => tracing::warn!("credential rehash failed: {error}"),
+        }
+    });
 }
 
 fn login_guard_unavailable(error: store::StoreError) -> ErrorResponse {

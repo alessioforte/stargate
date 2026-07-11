@@ -7,7 +7,6 @@ use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use db::ent::{CredentialType, Profile};
-use pw::{PasswordPolicy, PasswordPolicyValidator};
 use smtp::Smtp;
 use tracing::error;
 
@@ -88,8 +87,7 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         )));
     }
 
-    PasswordPolicy::standard()
-        .validate(&body.password)
+    act::password_policy::validate_global(&body.password, Some(&nickname), Some(&signup.email))
         .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
 
     let profile = Profile::new(signup.email.clone(), nickname)

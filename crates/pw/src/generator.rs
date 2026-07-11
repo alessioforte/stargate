@@ -1,57 +1,120 @@
 use rand::RngExt;
 
-/// Generate a random password.
-/// # Arguments
-/// * `length` - The length of the password.
-/// * `use_upper` - Whether to use uppercase letters.
-/// * `use_lower` - Whether to use lowercase letters.
-/// * `use_digits` - Whether to use digits.
-/// * `use_special` - Whether to use special characters.
-/// # Returns
-/// * A random password as a `String`.
+const UPPERCASE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const LOWERCASE: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+const DIGITS: &[u8] = b"0123456789";
+const SPECIAL: &[u8] = b"!@#$%^&*()-_=+[]{}|;:,.<>?";
+
+/// Random password/secret generator.
+///
+/// Enable character classes with the builder methods, then call
+/// [`Generator::generate`]. When the requested length allows it, the output
+/// is guaranteed to contain at least one character from every enabled class,
+/// so generated passwords satisfy the composition rules they are built from.
 /// # Example
 /// ```
-/// use pw::generator;
+/// use pw::Generator;
 ///
-/// let password = generator(16, true, true, true, true);
-/// assert_eq!(password.len(), 16);
+/// let password = Generator::new(16)
+///     .uppercase()
+///     .lowercase()
+///     .digits()
+///     .special()
+///     .generate();
+/// assert_eq!(password.chars().count(), 16);
 /// ```
-/// # Note
-/// This function uses the `rand` crate to generate random numbers.
-pub fn generator(
+pub struct Generator {
     length: usize,
-    use_upper: bool,
-    use_lower: bool,
-    use_digits: bool,
-    use_special: bool,
-) -> String {
-    let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let lower = "abcdefghijklmnopqrstuvwxyz";
-    let digits = "0123456789";
-    let special = "!@#$%^&*()-_=+[]{}|;:,.<>?";
+    upper: bool,
+    lower: bool,
+    digits: bool,
+    special: bool,
+}
 
-    let mut charset = String::new();
-    if use_upper {
-        charset.push_str(upper);
-    }
-    if use_lower {
-        charset.push_str(lower);
-    }
-    if use_digits {
-        charset.push_str(digits);
-    }
-    if use_special {
-        charset.push_str(special);
+impl Generator {
+    /// Create a generator for a value of `length` characters with no
+    /// character classes enabled yet.
+    pub fn new(length: usize) -> Self {
+        Self {
+            length,
+            upper: false,
+            lower: false,
+            digits: false,
+            special: false,
+        }
     }
 
-    let mut rng = rand::rng();
-    let password: String = (0..length)
-        .map(|_| {
-            let idx = rng.random_range(0..charset.len());
-            charset.chars().nth(idx).unwrap()
-        })
-        .collect();
-    password
+    pub fn uppercase(mut self) -> Self {
+        self.upper = true;
+        self
+    }
+
+    pub fn lowercase(mut self) -> Self {
+        self.lower = true;
+        self
+    }
+
+    pub fn digits(mut self) -> Self {
+        self.digits = true;
+        self
+    }
+
+    pub fn special(mut self) -> Self {
+        self.special = true;
+        self
+    }
+
+    /// Generate the random value.
+    ///
+    /// If `length` is at least the number of enabled classes, the output
+    /// contains at least one character from each enabled class; positions
+    /// are shuffled so the guaranteed characters are not predictable.
+    ///
+    /// # Panics
+    /// Panics if no character class was enabled.
+    pub fn generate(&self) -> String {
+        let mut classes: Vec<&[u8]> = Vec::with_capacity(4);
+        if self.upper {
+            classes.push(UPPERCASE);
+        }
+        if self.lower {
+            classes.push(LOWERCASE);
+        }
+        if self.digits {
+            classes.push(DIGITS);
+        }
+        if self.special {
+            classes.push(SPECIAL);
+        }
+        assert!(
+            !classes.is_empty(),
+            "Generator requires at least one enabled character class"
+        );
+
+        let charset: Vec<u8> = classes.concat();
+        let mut rng = rand::rng();
+        let mut out: Vec<u8> = Vec::with_capacity(self.length);
+
+        // Guarantee one character per enabled class when the length allows.
+        if self.length >= classes.len() {
+            for class in &classes {
+                out.push(class[rng.random_range(0..class.len())]);
+            }
+        }
+
+        while out.len() < self.length {
+            out.push(charset[rng.random_range(0..charset.len())]);
+        }
+
+        // Fisher-Yates shuffle so the per-class characters are not always at
+        // the start of the value.
+        for i in (1..out.len()).rev() {
+            let j = rng.random_range(0..=i);
+            out.swap(i, j);
+        }
+
+        String::from_utf8(out).expect("charsets are ASCII")
+    }
 }
 
 #[cfg(test)]
@@ -60,16 +123,53 @@ mod tests {
 
     #[test]
     fn test_generate_password() {
-        let password = generator(16, true, true, true, true);
+        let password = Generator::new(16)
+            .uppercase()
+            .lowercase()
+            .digits()
+            .special()
+            .generate();
         assert_eq!(password.len(), 16);
     }
 
     #[test]
     fn test_generate_password_no_upper() {
-        let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let password = generator(16, false, true, true, true);
+        let password = Generator::new(16).lowercase().digits().special().generate();
         for c in password.chars() {
-            assert!(!upper.contains(c));
+            assert!(!c.is_ascii_uppercase());
         }
+    }
+
+    #[test]
+    fn every_enabled_class_is_present() {
+        for _ in 0..100 {
+            let password = Generator::new(8)
+                .uppercase()
+                .lowercase()
+                .digits()
+                .special()
+                .generate();
+            assert!(password.chars().any(|c| c.is_ascii_uppercase()));
+            assert!(password.chars().any(|c| c.is_ascii_lowercase()));
+            assert!(password.chars().any(|c| c.is_ascii_digit()));
+            assert!(password.chars().any(|c| !c.is_ascii_alphanumeric()));
+        }
+    }
+
+    #[test]
+    fn length_shorter_than_class_count_is_respected() {
+        let password = Generator::new(2)
+            .uppercase()
+            .lowercase()
+            .digits()
+            .special()
+            .generate();
+        assert_eq!(password.len(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one enabled character class")]
+    fn no_classes_panics() {
+        Generator::new(8).generate();
     }
 }

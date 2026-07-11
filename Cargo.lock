@@ -2935,7 +2935,11 @@ dependencies = [
  "argon2",
  "base64",
  "hex",
+ "password-hash",
  "rand 0.10.1",
+ "regex",
+ "serde",
+ "serde_json",
  "sha2 0.10.9",
 ]
 

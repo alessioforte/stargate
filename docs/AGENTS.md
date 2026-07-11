@@ -32,7 +32,7 @@ stargate/
 │   ├── idp/           # External identity provider clients (Google, GitHub)
 │   ├── oidc/          # Pure OAuth/OIDC provider helpers (PKCE, codes, refresh, claims, metadata)
 │   ├── otp/           # Pure HOTP/TOTP + email/SMS OTP primitives
-│   ├── pw/            # Password hashing (argon2)
+│   ├── pw/            # Passwords: Argon2 hashing (tunable params + pepper), policy engine, generator, API keys
 │   ├── smtp/          # Email delivery (lettre)
 │   ├── store/         # State store (DashMap / Redis)
 │   └── tools/         # Shared utilities
@@ -411,6 +411,11 @@ IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
 | `MFA_REQUIRED_FOR_SUPER_ADMIN` | true | Requires MFA for super-admin users when `MFA_MODE=optional` |
 | `MFA_ADMIN_STEP_UP_REQUIRED` | false | Requires an authenticated `admin` MFA step-up marker for super-admin user-session admin grants |
 | `MFA_STEP_UP_TTL_SECS` | 300 | TTL for authenticated MFA step-up markers |
+| `PASSWORD_POLICY_*` | see `.env.example` | Global password policy (length, classes, banned list, expiry, history); per-org override via `organizations.attrs.password_policy`. Guide: `docs/password-policies-guide.md` |
+| `ARGON2_MEMORY_KIB` | 19456 | Argon2id memory cost; hash upgrades apply on next login |
+| `ARGON2_ITERATIONS` | 2 | Argon2id time cost |
+| `ARGON2_PARALLELISM` | 1 | Argon2id lanes |
+| `PASSWORD_PEPPER` | - | Optional Argon2 secret; pre-pepper hashes verify and rehash on login |
 
 Full list: `.env.example`
 

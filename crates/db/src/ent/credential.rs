@@ -34,3 +34,23 @@ impl Credential {
         }
     }
 }
+
+/// A previous password hash, kept for the `not recently used` policy.
+#[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
+pub struct CredentialHistory {
+    pub id: String,
+    pub user_id: String,
+    pub value: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl CredentialHistory {
+    pub fn new(user_id: String, value: String) -> Self {
+        CredentialHistory {
+            id: ulid::Ulid::new().to_string(),
+            user_id,
+            value,
+            created_at: Utc::now(),
+        }
+    }
+}

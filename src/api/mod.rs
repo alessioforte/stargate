@@ -39,6 +39,7 @@ use utoipa::OpenApi;
         crate::api::account::otp::mfa::get_mfa_methods,
         crate::api::account::otp::mfa::post_mfa_challenge,
         crate::api::account::otp::mfa::put_mfa_challenge,
+        crate::api::account::password_policy::get_password_policy,
         crate::api::account::profile::get_profile,
         crate::api::account::refresh_token::put_refresh_token,
         crate::api::account::credentials::forgot::post_credentials,

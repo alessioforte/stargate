@@ -1,3 +1,4 @@
+pub mod expired;
 pub mod forgot;
 pub mod reset;
 

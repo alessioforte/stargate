@@ -2,6 +2,7 @@ pub mod credentials;
 pub mod login;
 pub mod logout;
 pub mod otp;
+pub mod password_policy;
 pub mod profile;
 pub mod refresh_token;
 mod session;
@@ -62,4 +63,8 @@ pub fn router() -> axum::Router {
     axum::Router::new()
         .merge(sensitive)
         .route("/account/profile", get(profile::get_profile))
+        .route(
+            "/account/password-policy",
+            get(password_policy::get_password_policy),
+        )
 }

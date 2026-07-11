@@ -33,6 +33,7 @@ pub async fn run() -> std::io::Result<()> {
     dotenv().ok();
     tls::install_crypto_provider();
     let guard = log::init();
+    etc::pw::init();
 
     let cli = cli::parse();
     if let Some(command) = cli.command {
@@ -61,6 +62,7 @@ pub async fn run() -> std::io::Result<()> {
     info!("Graceful shutdown timeout: {}s", shutdown_timeout_secs);
 
     jwt::init();
+    act::password_policy::init();
     geoip::init();
     store::init().await;
     if let Err(e) = db::init().await {
