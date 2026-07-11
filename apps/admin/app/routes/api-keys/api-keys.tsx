@@ -14,11 +14,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const APIKeysPage = () => {
   const {
     apiKeys,
-    users,
-    serviceAccounts,
     getApiKeys,
-    getUsers,
-    getServiceAccounts,
     createApiKey,
     updateApiKeyAttrs,
     revokeApiKey,
@@ -41,11 +37,6 @@ const APIKeysPage = () => {
       offset: pagination.pageIndex * pagination.pageSize,
     });
   }, [getApiKeys, search, pagination.pageIndex, pagination.pageSize]);
-
-  useEffect(() => {
-    getUsers({ limit: 100 });
-    getServiceAccounts({ limit: 100 });
-  }, [getServiceAccounts, getUsers]);
 
   useEffect(() => {
     const total = apiKeys?.data?.total;
@@ -79,11 +70,7 @@ const APIKeysPage = () => {
           placeholder={t("search")}
           onSearch={handleSearch}
         />
-        <CreateApiKey
-          users={users?.data?.data ?? []}
-          serviceAccounts={serviceAccounts?.data?.data ?? []}
-          onSave={createApiKey}
-        />
+        <CreateApiKey onSave={createApiKey} />
       </Group>
       <Table
         stickyHeader

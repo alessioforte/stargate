@@ -195,6 +195,7 @@
   "routers": "Routers",
   "rawJson": "Raw JSON",
   "selectedObject": "Selected object",
+  "nothingFound": "Nothing found",
   "noObjects": "No objects",
   "newObject": "New object",
   "objectEditor": "Object editor",

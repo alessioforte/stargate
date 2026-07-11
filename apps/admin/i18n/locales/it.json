@@ -194,6 +194,7 @@
   "routers": "Router",
   "rawJson": "JSON grezzo",
   "selectedObject": "Oggetto selezionato",
+  "nothingFound": "Nessun risultato",
   "noObjects": "Nessun oggetto",
   "newObject": "Nuovo oggetto",
   "objectEditor": "Editor oggetto",

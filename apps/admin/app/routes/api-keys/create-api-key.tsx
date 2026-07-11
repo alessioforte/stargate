@@ -8,7 +8,6 @@ import {
   Group,
   Modal,
   SegmentedControl,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -19,6 +18,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { FaPlus } from "react-icons/fa6";
 import { GoCheck, GoCopy } from "react-icons/go";
 import { useTranslations } from "@/i18n";
+import services from "@/services";
 import type {
   ApiKeyOwnerType,
   CreateApiKeyRequest,
@@ -26,8 +26,8 @@ import type {
   ServiceAccount,
   User,
 } from "@/services/types";
-import { CodeBox, EntityDrawer } from "@/components";
-import { serviceAccountOptions, userOptions } from "./options";
+import { AsyncSearchSelect, CodeBox, EntityDrawer } from "@/components";
+import type { AsyncSearchSelectOption } from "@/components/async-search-select/async-search-select";
 
 interface FormValues {
   attrs: string;
@@ -37,8 +37,6 @@ interface FormValues {
 }
 
 interface Props {
-  serviceAccounts: ServiceAccount[];
-  users: User[];
   onSave: (apiKey: CreateApiKeyRequest) => Promise<CreateApiKeyResponse | null>;
 }
 
@@ -49,7 +47,7 @@ const emptyFormValues: FormValues = {
   ownerType: "user",
 };
 
-const CreateApiKey: React.FC<Props> = ({ serviceAccounts, users, onSave }) => {
+const CreateApiKey: React.FC<Props> = ({ onSave }) => {
   const t = useTranslations();
   const [opened, { open, close }] = useDisclosure(false);
   const [keyModalOpened, { open: openKeyModal, close: closeKeyModal }] =
@@ -101,10 +99,31 @@ const CreateApiKey: React.FC<Props> = ({ serviceAccounts, users, onSave }) => {
     closeKeyModal();
   };
 
-  const ownerOptions =
-    form.values.ownerType === "service_account"
-      ? serviceAccountOptions(serviceAccounts)
-      : userOptions(users);
+  const fetchUsers = async (
+    query: string,
+  ): Promise<AsyncSearchSelectOption[]> => {
+    const res = await services.admin.getUsers({
+      q: query || undefined,
+      limit: 20,
+    });
+    return (res.data?.data ?? []).map((user: User) => ({
+      value: user.id,
+      label: `${user.email} (${user.nickname})`,
+    }));
+  };
+
+  const fetchServiceAccounts = async (
+    query: string,
+  ): Promise<AsyncSearchSelectOption[]> => {
+    const res = await services.admin.getServiceAccounts({
+      q: query || undefined,
+      limit: 20,
+    });
+    return (res.data?.data ?? []).map((sa: ServiceAccount) => ({
+      value: sa.id,
+      label: `${sa.name} (${sa.id})`,
+    }));
+  };
 
   return (
     <>
@@ -151,10 +170,7 @@ const CreateApiKey: React.FC<Props> = ({ serviceAccounts, users, onSave }) => {
               </Box>
             </Stack>
 
-            <Select
-              clearable
-              searchable
-              variant="filled"
+            <AsyncSearchSelect
               label={
                 form.values.ownerType === "service_account"
                   ? t("serviceAccount")
@@ -165,7 +181,11 @@ const CreateApiKey: React.FC<Props> = ({ serviceAccounts, users, onSave }) => {
                   ? t("selectServiceAccount")
                   : t("selectUser")
               }
-              data={ownerOptions}
+              fetchFn={
+                form.values.ownerType === "service_account"
+                  ? fetchServiceAccounts
+                  : fetchUsers
+              }
               value={form.values.ownerId || null}
               error={form.errors.ownerId}
               onChange={(value) => form.setFieldValue("ownerId", value ?? "")}

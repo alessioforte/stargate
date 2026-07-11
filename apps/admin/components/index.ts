@@ -14,3 +14,4 @@ export { default as SparkleSpinner } from "./sparkle-loader/sparkle-loader";
 export { default as Loader } from "./loader/loader";
 export { default as MultiDrawer } from "./multi-drawer/multi-drawer";
 export { default as SearchInput } from "./search-input/search-input";
+export { default as AsyncSearchSelect } from "./async-search-select/async-search-select";
