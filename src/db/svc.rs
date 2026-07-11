@@ -297,6 +297,16 @@ pub async fn count_api_keys() -> Result<i64> {
     svc.count_api_keys().await
 }
 
+pub async fn search_api_keys(query: &str, limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
+    let svc = service();
+    svc.search_api_keys(query, limit, offset).await
+}
+
+pub async fn count_search_api_keys(query: &str) -> Result<i64> {
+    let svc = service();
+    svc.count_search_api_keys(query).await
+}
+
 pub async fn update_api_key(api_key: ApiKey, ctx: AuditContext) -> Result<ApiKey> {
     service()
         .update_api_key(api_key, ctx)

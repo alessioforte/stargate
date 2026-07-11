@@ -379,7 +379,9 @@ impl DbStore for Service {
         user_id: &str,
         limit: i64,
     ) -> Result<Vec<CredentialHistory>> {
-        self.credential.get_history(&self.pool, user_id, limit).await
+        self.credential
+            .get_history(&self.pool, user_id, limit)
+            .await
     }
 
     async fn rehash_credential(
@@ -663,6 +665,14 @@ impl DbStore for Service {
 
     async fn count_api_keys(&self) -> Result<i64> {
         self.api_key.count(&self.pool).await
+    }
+
+    async fn search_api_keys(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
+        self.api_key.search(&self.pool, query, limit, offset).await
+    }
+
+    async fn count_search_api_keys(&self, query: &str) -> Result<i64> {
+        self.api_key.count_search(&self.pool, query).await
     }
 
     async fn update_api_key(&self, api_key: ApiKey, ctx: AuditContext) -> Result<ApiKey> {

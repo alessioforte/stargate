@@ -145,6 +145,8 @@ pub trait DbStore {
     ) -> Result<Vec<ApiKey>>;
     async fn count_service_account_api_keys(&self) -> Result<i64>;
     async fn count_api_keys(&self) -> Result<i64>;
+    async fn search_api_keys(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;
+    async fn count_search_api_keys(&self, query: &str) -> Result<i64>;
     async fn update_api_key(&self, api_key: ApiKey, ctx: AuditContext) -> Result<ApiKey>;
     async fn revoke_api_key(&self, id: &str, ctx: AuditContext) -> Result<()>;
     async fn delete_api_key(&self, id: &str, ctx: AuditContext) -> Result<()>;

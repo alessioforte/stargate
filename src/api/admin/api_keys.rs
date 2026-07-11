@@ -46,6 +46,8 @@ pub struct ListApiKeysQuery {
     #[serde(default)]
     pub offset: Option<i64>,
     #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
     pub owner_type: Option<String>,
     #[serde(default)]
     pub user_id: Option<String>,
@@ -98,52 +100,65 @@ pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    let (keys, total) = if let Some(user_id) = &query.user_id {
-        let keys = crate::db::get_api_keys_by_user_id(user_id)
-            .await
-            .map_err(ErrorResponse::internal)?;
-        let total = keys.len() as i64;
-        (keys, total)
-    } else if let Some(sa_id) = &query.service_account_id {
-        let keys = crate::db::get_api_keys_by_service_account_id(sa_id)
-            .await
-            .map_err(ErrorResponse::internal)?;
-        let total = keys.len() as i64;
-        (keys, total)
-    } else if let Some(owner_type) = &query.owner_type {
-        match owner_type.as_str() {
-            "user" => {
-                let keys = crate::db::get_all_user_api_keys(limit, offset)
+    let (keys, total) = match &query.q {
+        Some(q) if !q.trim().is_empty() => {
+            let keys = crate::db::search_api_keys(q, limit, offset)
+                .await
+                .map_err(ErrorResponse::internal)?;
+            let total = crate::db::count_search_api_keys(q)
+                .await
+                .map_err(ErrorResponse::internal)?;
+            (keys, total)
+        }
+        _ => {
+            if let Some(user_id) = &query.user_id {
+                let keys = crate::db::get_api_keys_by_user_id(user_id)
                     .await
                     .map_err(ErrorResponse::internal)?;
-                let total = crate::db::count_user_api_keys()
+                let total = keys.len() as i64;
+                (keys, total)
+            } else if let Some(sa_id) = &query.service_account_id {
+                let keys = crate::db::get_api_keys_by_service_account_id(sa_id)
+                    .await
+                    .map_err(ErrorResponse::internal)?;
+                let total = keys.len() as i64;
+                (keys, total)
+            } else if let Some(owner_type) = &query.owner_type {
+                match owner_type.as_str() {
+                    "user" => {
+                        let keys = crate::db::get_all_user_api_keys(limit, offset)
+                            .await
+                            .map_err(ErrorResponse::internal)?;
+                        let total = crate::db::count_user_api_keys()
+                            .await
+                            .map_err(ErrorResponse::internal)?;
+                        (keys, total)
+                    }
+                    "service_account" => {
+                        let keys = crate::db::get_all_service_account_api_keys(limit, offset)
+                            .await
+                            .map_err(ErrorResponse::internal)?;
+                        let total = crate::db::count_service_account_api_keys()
+                            .await
+                            .map_err(ErrorResponse::internal)?;
+                        (keys, total)
+                    }
+                    _ => {
+                        return Err(ErrorResponse::from(HttpError::BadRequest(
+                            "Invalid owner_type: must be 'user' or 'service_account'".to_string(),
+                        )));
+                    }
+                }
+            } else {
+                let keys = crate::db::get_all_api_keys(limit, offset)
+                    .await
+                    .map_err(ErrorResponse::internal)?;
+                let total = crate::db::count_api_keys()
                     .await
                     .map_err(ErrorResponse::internal)?;
                 (keys, total)
-            }
-            "service_account" => {
-                let keys = crate::db::get_all_service_account_api_keys(limit, offset)
-                    .await
-                    .map_err(ErrorResponse::internal)?;
-                let total = crate::db::count_service_account_api_keys()
-                    .await
-                    .map_err(ErrorResponse::internal)?;
-                (keys, total)
-            }
-            _ => {
-                return Err(ErrorResponse::from(HttpError::BadRequest(
-                    "Invalid owner_type: must be 'user' or 'service_account'".to_string(),
-                )));
             }
         }
-    } else {
-        let keys = crate::db::get_all_api_keys(limit, offset)
-            .await
-            .map_err(ErrorResponse::internal)?;
-        let total = crate::db::count_api_keys()
-            .await
-            .map_err(ErrorResponse::internal)?;
-        (keys, total)
     };
 
     Ok(Json(PaginatedResponse {

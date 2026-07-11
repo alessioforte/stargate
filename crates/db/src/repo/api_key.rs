@@ -281,6 +281,57 @@ impl ApiKeyRepository {
         Ok(row)
     }
 
+    pub async fn search<'c, E>(
+        &self,
+        ex: E,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ApiKey>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let pattern = crate::backend::like_contains(query);
+        let rows = sqlx::query_as::<_, ApiKey>(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT * FROM {api_keys}
+            WHERE label {like} $1 {esc}
+            ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3
+        ",
+            api_keys = API_KEY,
+            like = crate::backend::LIKE,
+            esc = crate::backend::LIKE_ESCAPE
+        )))
+        .bind(&pattern)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(ex)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_search<'c, E>(&self, ex: E, query: &str) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let pattern = crate::backend::like_contains(query);
+        let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT COUNT(*) FROM {api_keys}
+            WHERE label {like} $1 {esc}
+        ",
+            api_keys = API_KEY,
+            like = crate::backend::LIKE,
+            esc = crate::backend::LIKE_ESCAPE
+        )))
+        .bind(&pattern)
+        .fetch_one(ex)
+        .await?;
+
+        Ok(row.0)
+    }
+
     pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<ApiKey>>
     where
         E: crate::backend::ReadExecutor<'c>,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Table } from "@/components";
+import { Table, SearchInput } from "@/components";
 import { useTranslations } from "@/i18n";
 import type { ApiKey } from "@/services/types";
 import useStore from "@/store";
@@ -28,6 +28,7 @@ const APIKeysPage = () => {
 
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedApiKey, setSelectedApiKey] = useState<ApiKey | null>(null);
+  const [search, setSearch] = useState("");
   const [pagination, setPagination] = useState({
     pageIndex: 0,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -35,10 +36,11 @@ const APIKeysPage = () => {
 
   useEffect(() => {
     getApiKeys({
+      q: search || undefined,
       limit: pagination.pageSize,
       offset: pagination.pageIndex * pagination.pageSize,
     });
-  }, [getApiKeys, pagination.pageIndex, pagination.pageSize]);
+  }, [getApiKeys, search, pagination.pageIndex, pagination.pageSize]);
 
   useEffect(() => {
     getUsers({ limit: 100 });
@@ -61,10 +63,22 @@ const APIKeysPage = () => {
     }
   }, [pagination.pageIndex, pagination.pageSize, apiKeys?.data?.total]);
 
+  const handleSearch = (query: string) => {
+    setSearch(query);
+    setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+  };
+
   return (
     <Box>
       <Group p="xs" justify="space-between">
         <Title order={4}>{t("apiKeys")}</Title>
+        <SearchInput
+          radius="lg"
+          variant="unstyled"
+          style={{ flex: 1 }}
+          placeholder={t("search")}
+          onSearch={handleSearch}
+        />
         <CreateApiKey
           users={users?.data?.data ?? []}
           serviceAccounts={serviceAccounts?.data?.data ?? []}

@@ -159,6 +159,7 @@ export interface UpdateAdminKeyPermissionsRequest {
 export type ApiKeyOwnerType = "user" | "service_account";
 
 export interface ApiKeyQuery extends PaginationQuery {
+  q?: string;
   ownerType?: ApiKeyOwnerType;
   serviceAccountId?: string;
   userId?: string;
