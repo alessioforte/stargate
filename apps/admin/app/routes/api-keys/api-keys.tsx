@@ -9,6 +9,8 @@ import { columns } from "./columns";
 import CreateApiKey from "./create-api-key";
 import EditApiKey from "./edit-api-key";
 
+const DEFAULT_PAGE_SIZE = 20;
+
 const APIKeysPage = () => {
   const {
     apiKeys,
@@ -26,12 +28,38 @@ const APIKeysPage = () => {
 
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedApiKey, setSelectedApiKey] = useState<ApiKey | null>(null);
+  const [pagination, setPagination] = useState({
+    pageIndex: 0,
+    pageSize: DEFAULT_PAGE_SIZE,
+  });
 
   useEffect(() => {
-    getApiKeys();
+    getApiKeys({
+      limit: pagination.pageSize,
+      offset: pagination.pageIndex * pagination.pageSize,
+    });
+  }, [getApiKeys, pagination.pageIndex, pagination.pageSize]);
+
+  useEffect(() => {
     getUsers({ limit: 100 });
     getServiceAccounts({ limit: 100 });
-  }, [getApiKeys, getServiceAccounts, getUsers]);
+  }, [getServiceAccounts, getUsers]);
+
+  useEffect(() => {
+    const total = apiKeys?.data?.total;
+    if (total === undefined) return;
+
+    const lastPageIndex = Math.max(
+      0,
+      Math.ceil(total / pagination.pageSize) - 1,
+    );
+    if (pagination.pageIndex > lastPageIndex) {
+      setPagination((current) => ({
+        ...current,
+        pageIndex: lastPageIndex,
+      }));
+    }
+  }, [pagination.pageIndex, pagination.pageSize, apiKeys?.data?.total]);
 
   return (
     <Box>
@@ -44,6 +72,19 @@ const APIKeysPage = () => {
         />
       </Group>
       <Table
+        stickyHeader
+        enableScrollContainer
+        maxHeight="calc(var(--page-height) - 60px)"
+        pagination
+        paginationOptions={{
+          defaultPageSize: DEFAULT_PAGE_SIZE,
+          pageIndex: pagination.pageIndex,
+          pageSize: pagination.pageSize,
+          totalItems: apiKeys?.data?.total,
+        }}
+        onPaginationChange={({ pageIndex, pageSize }) => {
+          setPagination({ pageIndex, pageSize });
+        }}
         columns={columns}
         data={apiKeys?.data?.data ?? []}
         empty={apiKeys?.data?.data?.length === 0}
