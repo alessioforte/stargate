@@ -47,9 +47,10 @@ pub async fn put_refresh_token(
         .await
         .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
 
-    match session {
-        Some(_) => {
+    let old_subject = match session {
+        Some(subject) => {
             let _ = store.delete(&sid).await;
+            subject
         }
         None => {
             return Err(ErrorResponse::from(HttpError::Unauthorized(
@@ -62,6 +63,24 @@ pub async fn put_refresh_token(
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+
+    crate::act::sessions::forget_session(&user.id, &sid).await;
+
+    // Re-validate the session's active org: a user removed from the org
+    // cannot carry its context past the access-token lifetime. The role is
+    // re-read so role changes propagate on rotation.
+    let org = match old_subject.org_id.as_deref() {
+        Some(org_id) => {
+            let membership = crate::db::get_user_organization(&user.id, org_id)
+                .await
+                .map_err(ErrorResponse::internal)?
+                .ok_or_else(|| {
+                    ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string()))
+                })?;
+            Some(crate::act::sessions::OrgContext::from(&membership))
+        }
+        None => None,
+    };
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
@@ -79,6 +98,7 @@ pub async fn put_refresh_token(
         .email_verified(true)
         .sid(new_sid.clone());
     new_claims.auth_time = Some(auth_time);
+    new_claims.org_id = org.as_ref().map(|org| org.org_id.clone());
 
     let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
         .await
@@ -95,17 +115,22 @@ pub async fn put_refresh_token(
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
-    let subject = Subject::from(user.clone());
+    let mut subject = Subject::from(user.clone());
+    subject.org_id = org.as_ref().map(|org| org.org_id.clone());
+    subject.org_role = org.as_ref().map(|org| org.role.clone());
     store
         .set(&new_sid, &subject, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
+    crate::act::sessions::register_session(&user.id, &new_sid, subject.org_id.as_deref(), sttl)
+        .await;
 
     let cookie = build_jwt_cookie(&access_token, cttl);
     let body = AuthResponse {
         access_token,
         refresh_token,
         token_type: "Bearer".to_string(),
+        org_id: subject.org_id.clone(),
     };
 
     let mut resp = Json(body).into_response();

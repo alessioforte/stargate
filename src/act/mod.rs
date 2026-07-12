@@ -5,6 +5,7 @@ pub mod login_guard;
 pub mod oauth_state;
 pub mod otp;
 pub mod password_policy;
+pub mod sessions;
 mod signup_request;
 pub mod token_revocation;
 

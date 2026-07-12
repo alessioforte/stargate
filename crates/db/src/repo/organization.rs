@@ -1,5 +1,5 @@
 use super::USER;
-use crate::ent::{Organization, User};
+use crate::ent::{OrgMember, OrgMembership, Organization};
 use anyhow::Result;
 use chrono::Utc;
 pub const ORGANIZATION: &str = "organizations";
@@ -41,7 +41,8 @@ impl OrganizationRepository {
         .bind(&org.id)
         .bind(&org.name)
         .bind(&org.description)
-        .bind(attrs)
+        // The column is NOT NULL; a request without attrs means "empty".
+        .bind(attrs.unwrap_or(&org.attrs))
         .bind(org.created_at)
         .bind(org.updated_at)
         .fetch_one(&mut **tx)
@@ -190,13 +191,22 @@ impl OrganizationRepository {
         tx: &mut crate::backend::Tx<'_>,
         user_id: &str,
         org_id: &str,
+        role: &str,
     ) -> Result<()> {
+        // Upsert: re-adding an existing member updates the role but keeps
+        // the original membership created_at.
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO {tbl} (user_id, org_id) VALUES ($1, $2)",
+            "
+            INSERT INTO {tbl} (user_id, org_id, role, created_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, org_id) DO UPDATE SET role = EXCLUDED.role
+        ",
             tbl = USER_ORGANIZATION
         )))
         .bind(user_id)
         .bind(org_id)
+        .bind(role)
+        .bind(Utc::now())
         .execute(&mut **tx)
         .await?;
 
@@ -221,13 +231,13 @@ impl OrganizationRepository {
         Ok(())
     }
 
-    pub async fn get_users<'c, E>(&self, ex: E, org_id: &str) -> Result<Vec<User>>
+    pub async fn get_users<'c, E>(&self, ex: E, org_id: &str) -> Result<Vec<OrgMember>>
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let rows = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+        let rows = sqlx::query_as::<_, OrgMember>(sqlx::AssertSqlSafe(format!(
             "
-            SELECT u.* FROM {users} u
+            SELECT u.*, uo.role, uo.created_at AS member_since FROM {users} u
             INNER JOIN {tbl} uo ON u.id = uo.user_id
             WHERE uo.org_id = $1
             ORDER BY u.created_at DESC, u.id DESC
@@ -248,12 +258,12 @@ impl OrganizationRepository {
         org_id: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<User>>
+    ) -> Result<Vec<OrgMember>>
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let rows = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
-            "SELECT u.* FROM {users} u
+        let rows = sqlx::query_as::<_, OrgMember>(sqlx::AssertSqlSafe(format!(
+            "SELECT u.*, uo.role, uo.created_at AS member_since FROM {users} u
                 INNER JOIN {tbl} uo ON u.id = uo.user_id
                 WHERE uo.org_id = $1
                 ORDER BY u.created_at DESC, u.id DESC LIMIT $2 OFFSET $3",
@@ -287,13 +297,13 @@ impl OrganizationRepository {
         Ok(row.0)
     }
 
-    pub async fn get_orgs_by_user<'c, E>(&self, ex: E, user_id: &str) -> Result<Vec<Organization>>
+    pub async fn get_orgs_by_user<'c, E>(&self, ex: E, user_id: &str) -> Result<Vec<OrgMembership>>
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let rows = sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
+        let rows = sqlx::query_as::<_, OrgMembership>(sqlx::AssertSqlSafe(format!(
             "
-            SELECT o.* FROM {tbl_org} o
+            SELECT o.*, uo.role, uo.created_at AS member_since FROM {tbl_org} o
             INNER JOIN {tbl_uo} uo ON o.id = uo.org_id
             WHERE uo.user_id = $1
             ORDER BY o.created_at DESC, o.id DESC
@@ -306,5 +316,31 @@ impl OrganizationRepository {
         .await?;
 
         Ok(rows)
+    }
+
+    pub async fn get_membership<'c, E>(
+        &self,
+        ex: E,
+        user_id: &str,
+        org_id: &str,
+    ) -> Result<Option<OrgMembership>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let row = sqlx::query_as::<_, OrgMembership>(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT o.*, uo.role, uo.created_at AS member_since FROM {tbl_org} o
+            INNER JOIN {tbl_uo} uo ON o.id = uo.org_id
+            WHERE uo.user_id = $1 AND uo.org_id = $2
+        ",
+            tbl_org = ORGANIZATION,
+            tbl_uo = USER_ORGANIZATION
+        )))
+        .bind(user_id)
+        .bind(org_id)
+        .fetch_optional(ex)
+        .await?;
+
+        Ok(row)
     }
 }

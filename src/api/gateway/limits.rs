@@ -189,6 +189,7 @@ mod tests {
             id: "sub_123".to_string(),
             sub_type: SubjectType::ApiKey,
             org_id: None,
+            org_role: None,
             attrs,
         }
     }

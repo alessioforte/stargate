@@ -14,6 +14,18 @@ pub struct ApiKey {
     pub updated_at: DateTime<Utc>,
 }
 
+/// An API key joined with its owner's organization binding, used to build
+/// the gateway auth subject: user keys carry `user_api_keys.org_id`, service
+/// account keys inherit `service_accounts.org_id`.
+#[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyAuth {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    pub api_key: ApiKey,
+    pub org_id: Option<String>,
+}
+
 impl ApiKey {
     pub fn new(key_hash: String, label: String, attrs: Value) -> Self {
         let id = ulid::Ulid::new().to_string();

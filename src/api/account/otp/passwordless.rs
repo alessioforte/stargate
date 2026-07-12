@@ -59,5 +59,5 @@ pub async fn put_login_email_otp(req: Request) -> Result<Response, ErrorResponse
         .await
         .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
     let (user, auth_time) = complete_passwordless_email_otp(&body.challenge_id, &body.code).await?;
-    crate::api::account::session::issue_user_session(user, auth_time).await
+    crate::api::account::session::issue_user_session(user, auth_time, None).await
 }

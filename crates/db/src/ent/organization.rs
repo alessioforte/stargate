@@ -1,3 +1,4 @@
+use super::user::User;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -31,4 +32,29 @@ impl Organization {
         self.attrs = attrs;
         self
     }
+}
+
+/// An organization a user belongs to, with the membership metadata.
+///
+/// `member_since` is nullable because sqlite rows created before the
+/// multi-org migration are backfilled, but the column itself stays nullable.
+#[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgMembership {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    pub organization: Organization,
+    pub role: String,
+    pub member_since: Option<DateTime<Utc>>,
+}
+
+/// A user belonging to an organization, with the membership metadata.
+#[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgMember {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    pub user: User,
+    pub role: String,
+    pub member_since: Option<DateTime<Utc>>,
 }

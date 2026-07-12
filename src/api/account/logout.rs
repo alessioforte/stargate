@@ -38,6 +38,10 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         .await
         .map_err(ErrorResponse::internal)?;
 
+    if let Some(user_id) = claims.sub_id.as_deref() {
+        crate::act::sessions::forget_session(user_id, &sid).await;
+    }
+
     Ok(Json(MessageResponse::new(
         "User logged out successfully",
         "logout_success",

@@ -35,7 +35,7 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> 
         return Some(subject);
     }
 
-    let result = match crate::db::get_api_key_by_hash(&hash_key).await {
+    let result = match crate::db::get_api_key_auth_by_hash(&hash_key).await {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to get api key: {}", e);
@@ -43,12 +43,12 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> 
         }
     };
 
-    if let Some(api_key) = result {
-        if api_key.revoked {
+    if let Some(auth) = result {
+        if auth.api_key.revoked {
             return None;
         }
 
-        let subject = Subject::from(api_key.clone());
+        let subject = Subject::from(auth);
         let ttl = Some(3600);
         match store.set(&hash_key, &subject, ttl).await {
             Ok(_) => (),
@@ -61,6 +61,19 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<Subject> 
     }
 
     None
+}
+
+/// Remove cached auth subjects for the given API key hashes. Call after
+/// revoking keys so they stop authenticating immediately instead of when
+/// the cache entry expires. Best-effort: failures are logged and the cache
+/// entry dies at its TTL.
+pub async fn purge_api_key_subjects(key_hashes: &[String]) {
+    let store = etc::store::use_store();
+    for hash in key_hashes {
+        if let Err(e) = store.delete(hash).await {
+            error!("Failed to purge cached api key subject: {}", e);
+        }
+    }
 }
 
 /// Verify JWT token and return subject if valid from the session store

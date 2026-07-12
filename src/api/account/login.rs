@@ -131,7 +131,9 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
 
     let auth_time = chrono::Utc::now().timestamp() as usize;
 
-    if let Some(response) = maybe_start_login_mfa(&user, &client_ip, auth_time).await? {
+    if let Some(response) =
+        maybe_start_login_mfa(&user, &client_ip, auth_time, credentials.org_id.as_deref()).await?
+    {
         return Ok(response);
     }
 
@@ -143,7 +145,7 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
         return Ok(response);
     }
 
-    issue_user_session(user, auth_time).await
+    issue_user_session(user, auth_time, credentials.org_id.as_deref()).await
 }
 
 /// Re-encode a verified password in the background when its stored hash

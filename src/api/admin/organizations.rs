@@ -261,9 +261,26 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
         ))));
     }
 
-    crate::db::delete_organization(&id, ctx)
+    // Snapshot the member list first: after the delete the membership rows
+    // are gone, and each member's sessions active in this org must die.
+    let members = crate::db::get_organization_users(&id)
         .await
         .map_err(ErrorResponse::internal)?;
+
+    let revoked_key_hashes = crate::db::delete_organization(&id, ctx)
+        .await
+        .map_err(ErrorResponse::internal)?;
+    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+
+    for member in &members {
+        if let Err(error) = crate::act::sessions::revoke_org_sessions(&member.user.id, &id).await {
+            tracing::error!(
+                user_id = %member.user.id,
+                org_id = %id,
+                "failed to revoke org sessions after org delete: {error}"
+            );
+        }
+    }
 
     Ok((
         StatusCode::NO_CONTENT,

@@ -1,6 +1,7 @@
 use crate::ent::{
-    AdminKey, ApiKey, AuditContext, Credential, CredentialHistory, CredentialType, OAuthClient,
-    OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
+    AdminKey, ApiKey, ApiKeyAuth, AuditContext, Credential, CredentialHistory, CredentialType,
+    OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount,
+    SuperAdmin, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -32,7 +33,10 @@ pub trait DbStore {
     async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>>;
     async fn count_search_users(&self, query: &str) -> Result<i64>;
     async fn update_user(&self, user: User, ctx: AuditContext) -> Result<User>;
-    async fn delete_user(&self, id: &str, ctx: AuditContext) -> Result<()>;
+    /// Deletes the user and revokes their API keys in the same transaction
+    /// (the FK cascade only removes ownership links, not the key rows).
+    /// Returns the revoked key hashes so callers can purge cached subjects.
+    async fn delete_user(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>>;
     async fn change_password(
         &self,
         user_id: &str,
@@ -118,6 +122,7 @@ pub trait DbStore {
         key_hash: &str,
         label: &str,
         attrs: Option<JsonValue>,
+        org_id: Option<&str>,
         ctx: AuditContext,
     ) -> Result<ApiKey>;
     async fn create_service_account_api_key(
@@ -129,6 +134,8 @@ pub trait DbStore {
         ctx: AuditContext,
     ) -> Result<ApiKey>;
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>>;
+    /// API key joined with its owner's org binding, for gateway auth.
+    async fn get_api_key_auth_by_hash(&self, key_hash: &str) -> Result<Option<ApiKeyAuth>>;
     async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>>;
     async fn get_all_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;
     async fn get_api_keys_by_user_id(&self, user_id: &str) -> Result<Vec<ApiKey>>;
@@ -197,7 +204,9 @@ pub trait DbStore {
         org_id: Option<&str>,
         ctx: AuditContext,
     ) -> Result<ServiceAccount>;
-    async fn delete_service_account(&self, id: &str, ctx: AuditContext) -> Result<()>;
+    /// Deletes the service account and revokes its API keys in the same
+    /// transaction. Returns the revoked key hashes.
+    async fn delete_service_account(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>>;
 
     // ── Organizations ───────────────────────────────────────────────────────
     async fn create_organization(
@@ -225,26 +234,38 @@ pub trait DbStore {
         attrs: Option<&serde_json::Value>,
         ctx: AuditContext,
     ) -> Result<Organization>;
-    async fn delete_organization(&self, id: &str, ctx: AuditContext) -> Result<()>;
+    /// Deletes the organization and revokes every key acting in it (user
+    /// keys bound to the org, keys of its cascading service accounts).
+    /// Returns the revoked key hashes.
+    async fn delete_organization(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>>;
+    /// Upsert: adds the membership or updates the role of an existing one.
     async fn add_user_to_organization(
         &self,
         user_id: &str,
         org_id: &str,
+        role: &str,
         ctx: AuditContext,
     ) -> Result<()>;
+    /// Removes the membership and revokes the user's API keys bound to that
+    /// org in the same transaction. Returns the revoked key hashes.
     async fn remove_user_from_organization(
         &self,
         user_id: &str,
         org_id: &str,
         ctx: AuditContext,
-    ) -> Result<()>;
-    async fn get_organization_users(&self, org_id: &str) -> Result<Vec<User>>;
+    ) -> Result<Vec<String>>;
+    async fn get_organization_users(&self, org_id: &str) -> Result<Vec<OrgMember>>;
     async fn get_organization_users_paginated(
         &self,
         org_id: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<User>>;
+    ) -> Result<Vec<OrgMember>>;
     async fn count_organization_users(&self, org_id: &str) -> Result<i64>;
-    async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<Organization>>;
+    async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<OrgMembership>>;
+    async fn get_user_organization(
+        &self,
+        user_id: &str,
+        org_id: &str,
+    ) -> Result<Option<OrgMembership>>;
 }

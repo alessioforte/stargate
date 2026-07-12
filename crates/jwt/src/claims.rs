@@ -28,6 +28,7 @@ pub struct Claims {
     pub sid: Option<String>,                // session ID
     pub scope: Option<String>,              // scope
     pub role: Option<String>,               // role
+    pub org_id: Option<String>,             // active organization
     pub auth_time: Option<usize>,           // authentication time
     pub nonce: Option<String>,              // OIDC nonce
     pub preferred_username: Option<String>, // OIDC preferred username
@@ -56,6 +57,7 @@ impl Default for Claims {
             sid: None,
             scope: None,
             role: None,
+            org_id: None,
             auth_time: None,
             nonce: None,
             preferred_username: None,
@@ -117,6 +119,11 @@ impl Claims {
 
     pub fn role(mut self, role: String) -> Self {
         self.role = Some(role);
+        self
+    }
+
+    pub fn org_id(mut self, org_id: String) -> Self {
+        self.org_id = Some(org_id);
         self
     }
 

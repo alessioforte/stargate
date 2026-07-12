@@ -1,4 +1,5 @@
 use super::AuthResponse;
+use crate::act::sessions;
 use crate::err::ErrorResponse;
 use crate::etc;
 use crate::etc::jwt::jwt_config;
@@ -11,8 +12,13 @@ use store::Store;
 pub(crate) async fn issue_user_session(
     user: db::ent::User,
     auth_time: usize,
+    requested_org_id: Option<&str>,
 ) -> Result<Response, ErrorResponse> {
-    let subject = etc::sub::Subject::from(user.clone());
+    let org = sessions::resolve_org_context(&user, requested_org_id).await?;
+
+    let mut subject = etc::sub::Subject::from(user.clone());
+    subject.org_id = org.as_ref().map(|org| org.org_id.clone());
+    subject.org_role = org.as_ref().map(|org| org.role.clone());
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
@@ -29,6 +35,7 @@ pub(crate) async fn issue_user_session(
         .sid(sid.clone());
 
     claims.auth_time = Some(auth_time);
+    claims.org_id = org.as_ref().map(|org| org.org_id.clone());
 
     let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
         .await
@@ -51,12 +58,14 @@ pub(crate) async fn issue_user_session(
         .set(&sid, &subject, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
+    sessions::register_session(&user.id, &sid, subject.org_id.as_deref(), sttl).await;
 
     let cookie = build_jwt_cookie(&access_token, cttl);
     let body = AuthResponse {
         access_token,
         refresh_token,
         token_type: "Bearer".to_string(),
+        org_id: subject.org_id.clone(),
     };
 
     let mut resp = Json(body).into_response();
