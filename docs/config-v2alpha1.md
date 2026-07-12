@@ -389,6 +389,31 @@ ALLOW user FOR "financial_reports:READ" WHEN user.role == "admin";
 ALLOW user FOR "financial_reports:READ" WHEN user.role == "analyst";
 ```
 
+Subjects acting in an organization additionally expose the org context of
+their session or key binding:
+
+- `user.org_id` / `user.org_role` — the active org of the user session and
+  the user's membership role in it (convention: `owner` | `admin` |
+  `member`).
+- `api_key.org_id` — the org a user API key is bound to, or the owning
+  service account's org.
+
+These come from the validated membership, not from subject attrs (an attr
+of the same name cannot shadow them), and are absent for org-less
+subjects. Keep resource names global and express org scoping in
+conditions:
+
+```text
+# @id reports-org-admins
+ALLOW user FOR "reports:READ" WHEN user.org_role == "admin" OR user.org_role == "owner";
+
+# @id billing-single-org
+ALLOW user FOR "billing" WHEN user.org_id == "01H8XYZ..." AND user.org_role == "owner";
+
+# @id ingest-org-bound-keys
+ALLOW api_key FOR "ingest" WHEN api_key.org_id == "01H8XYZ...";
+```
+
 The admin rule APIs manage this file directly:
 
 - `GET /admin/access-control/rules`

@@ -140,15 +140,15 @@ Goal: policies can condition on org. The decision-cache fix and the
 context injection land **in the same commit** — the cache key without org
 is a cross-org correctness bug the moment org context exists.
 
-- [ ] **Context injection** (`src/etc/ac.rs::create_context`): add
+- [x] **Context injection** (`src/etc/ac.rs::create_context`): add
   `user.org_id`, `user.org_role` for user subjects and `api_key.org_id`
   for key subjects (skip when `None`). (S)
-- [ ] **Decision-cache key** (`src/etc/ac.rs::DecisionKey`): include
+- [x] **Decision-cache key** (`src/etc/ac.rs::DecisionKey`): include
   `org_id` and `org_role` (fields or folded into the hash). (S)
-- [ ] **Tests**: same subject attrs, different orgs → independent cache
+- [x] **Tests**: same subject attrs, different orgs → independent cache
   entries and decisions; org switch changes the decision without a policy
   reload; org-less subjects unaffected. (S)
-- [ ] **Docs**: policy examples in the design doc / ACE docs:
+- [x] **Docs**: policy examples in the design doc / ACE docs:
   ```text
   ALLOW user FOR "reports:read" WHEN user.org_role == "admin" OR user.org_role == "owner";
   ALLOW user FOR "billing" WHEN user.org_id == "01H..." AND user.org_role == "owner";
