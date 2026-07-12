@@ -101,7 +101,10 @@ mod tests {
 
     #[test]
     fn ignores_non_string_and_missing_values() {
-        assert_eq!(overrides_from_attrs(&json!({})), OrgLimitOverrides::default());
+        assert_eq!(
+            overrides_from_attrs(&json!({})),
+            OrgLimitOverrides::default()
+        );
         assert_eq!(
             overrides_from_attrs(&json!({ "rate_limit": 5, "quota": null })),
             OrgLimitOverrides::default()

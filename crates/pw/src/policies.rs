@@ -196,7 +196,9 @@ impl PasswordPolicySet {
             violations.push(PolicyViolation::ContainsEmail);
         }
         if self.banned_passwords {
-            let banned = ctx.banned.unwrap_or_else(|| BannedPasswords::default_list());
+            let banned = ctx
+                .banned
+                .unwrap_or_else(|| BannedPasswords::default_list());
             if banned.contains(password) {
                 violations.push(PolicyViolation::BannedPassword);
             }
@@ -250,9 +252,15 @@ fn has_run_longer_than(password: &str, max: usize) -> bool {
 /// (i18n keys, frontend checklists); `Display` is the human message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyViolation {
-    TooManyBytes { max: usize },
-    TooShort { min: usize },
-    TooLong { max: usize },
+    TooManyBytes {
+        max: usize,
+    },
+    TooShort {
+        min: usize,
+    },
+    TooLong {
+        max: usize,
+    },
     MissingLowercase,
     MissingUppercase,
     MissingDigit,
@@ -261,7 +269,9 @@ pub enum PolicyViolation {
     ContainsEmail,
     BannedPassword,
     PatternMismatch,
-    RepeatedCharacters { max: usize },
+    RepeatedCharacters {
+        max: usize,
+    },
     /// Emitted by the application's stateful history check, never by
     /// `validate_all`.
     RecentlyUsed,
@@ -362,10 +372,7 @@ mod tests {
             policy.validate("Password", &ctx()),
             Err(PolicyViolation::MissingDigit)
         );
-        assert_eq!(
-            policy.validate("Xk9$mQ2!vLp7", &ctx()),
-            Ok(())
-        );
+        assert_eq!(policy.validate("Xk9$mQ2!vLp7", &ctx()), Ok(()));
     }
 
     #[test]

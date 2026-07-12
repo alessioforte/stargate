@@ -22,8 +22,7 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
                     Err(_) => {
                         std::fs::create_dir_all(jwks_path)
                             .expect("Unable to create JWKS directory");
-                        let generated =
-                            pw::Generator::new(512).lowercase().digits().generate();
+                        let generated = pw::Generator::new(512).lowercase().digits().generate();
                         std::fs::write(&secret_path, &generated)
                             .expect("Unable to write secret key");
                         generated

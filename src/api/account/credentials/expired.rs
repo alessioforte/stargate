@@ -35,10 +35,9 @@ pub(crate) async fn maybe_password_expired_response(
     let changed_at = match credential {
         Some(credential) => credential.updated_at,
         None => {
-            let Some(credential) =
-                crate::db::get_credential(&user.id, CredentialType::Password)
-                    .await
-                    .map_err(ErrorResponse::internal)?
+            let Some(credential) = crate::db::get_credential(&user.id, CredentialType::Password)
+                .await
+                .map_err(ErrorResponse::internal)?
             else {
                 return Ok(None);
             };

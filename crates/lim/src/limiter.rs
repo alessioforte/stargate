@@ -44,9 +44,27 @@ mod tests {
         let key = "lim:org:01ORG";
 
         // Exhaust the strict limit.
-        assert!(limiter.check("strict", key, None).await.unwrap().is_allowed());
-        assert!(limiter.check("strict", key, None).await.unwrap().is_allowed());
-        assert!(!limiter.check("strict", key, None).await.unwrap().is_allowed());
+        assert!(
+            limiter
+                .check("strict", key, None)
+                .await
+                .unwrap()
+                .is_allowed()
+        );
+        assert!(
+            limiter
+                .check("strict", key, None)
+                .await
+                .unwrap()
+                .is_allowed()
+        );
+        assert!(
+            !limiter
+                .check("strict", key, None)
+                .await
+                .unwrap()
+                .is_allowed()
+        );
 
         // The permissive limit for the same key starts fresh.
         let decision = limiter.check("permissive", key, None).await.unwrap();

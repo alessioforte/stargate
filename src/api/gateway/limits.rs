@@ -104,8 +104,14 @@ pub async fn apply_limits(
         let mut key = String::with_capacity(4 + selected.subject_key.len());
         key.push_str("lim:");
         key.push_str(&selected.subject_key);
-        let decision =
-            run_check(&limiter, &selected.rate_limit_name, &key, None, "rate_limit").await?;
+        let decision = run_check(
+            &limiter,
+            &selected.rate_limit_name,
+            &key,
+            None,
+            "rate_limit",
+        )
+        .await?;
         push_rate_check(&mut rate_checks, decision, "subject")?;
     }
 
@@ -147,8 +153,14 @@ pub async fn apply_limits(
         let mut key = String::with_capacity(6 + selected.subject_key.len());
         key.push_str("quota:");
         key.push_str(&selected.subject_key);
-        let decision =
-            run_check(&limiter, quota_name, &key, Some(selected.quota_cost), "quota").await?;
+        let decision = run_check(
+            &limiter,
+            quota_name,
+            &key,
+            Some(selected.quota_cost),
+            "quota",
+        )
+        .await?;
         push_quota_check(&mut quota_checks, decision, "subject")?;
     }
 
@@ -246,7 +258,10 @@ fn limited_response(
     let mut response = ErrorResponse::from(HttpError::TooManyRequests(message.to_string()));
     response
         .insert_header("retry-after", &retry_after)
-        .insert_header(&format!("{header_prefix}-limit"), &decision.limit.to_string())
+        .insert_header(
+            &format!("{header_prefix}-limit"),
+            &decision.limit.to_string(),
+        )
         .insert_header(
             &format!("{header_prefix}-remaining"),
             &decision.remaining.to_string(),
@@ -277,7 +292,10 @@ fn insert_limit_headers(
 ) {
     let entries = [
         (format!("{prefix}-limit"), decision.limit.to_string()),
-        (format!("{prefix}-remaining"), decision.remaining.to_string()),
+        (
+            format!("{prefix}-remaining"),
+            decision.remaining.to_string(),
+        ),
         (format!("{prefix}-scope"), scope.to_string()),
     ];
     for (name, value) in entries {
