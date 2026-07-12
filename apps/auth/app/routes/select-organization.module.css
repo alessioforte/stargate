@@ -1,0 +1,20 @@
+.orgButton {
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.orgButton:hover:not(:disabled) {
+  background-color: var(--mantine-color-default-hover);
+  border-color: var(--mantine-primary-color-filled);
+}
+
+.orgButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.orgButton[data-active] {
+  border-color: var(--mantine-primary-color-filled);
+}

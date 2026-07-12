@@ -344,5 +344,13 @@
   "save": "Salva",
   "cancel": "Annulla",
   "createdAt": "Creato il",
-  "updatedAt": "Aggiornato il"
+  "updatedAt": "Aggiornato il",
+  "add": "Aggiungi",
+  "role": "Ruolo",
+  "addToOrganization": "Aggiungi all'organizzazione",
+  "removeFromOrganization": "Rimuovi dall'organizzazione",
+  "memberSince": "Membro dal",
+  "noOrganizations": "Non appartiene a nessuna organizzazione",
+  "organizationOptional": "Organizzazione (opzionale)",
+  "orgBindingHint": "Associa la chiave a una delle organizzazioni dell'utente: agirà sempre in quella organizzazione"
 }

@@ -33,11 +33,13 @@ import type {
   UpdateAccessControlRulesRequest,
   UpdateAdminKeyPermissionsRequest,
   UpdateOAuthClientRequest,
+  OrganizationMembershipRequest,
   UpdateOrganizationRequest,
   UpdateServiceAccountRequest,
   UpdateUserRequest,
   User,
   UserAttrsRequest,
+  UserOrganization,
   ValidateAccessControlRulesRequest,
   ValidateAccessControlRulesResponse,
 } from "./types";
@@ -449,18 +451,24 @@ export default class AdminApiService {
   }
 
   async getUserOrganizations(id: string) {
-    return this.request<Organization[]>({
+    return this.request<UserOrganization[]>({
       url: this.url(`/users/${this.pathParam(id)}/organizations`),
       method: "GET",
     });
   }
 
-  async addUserToOrganization(id: string, orgId: string) {
+  /** Upsert: adds the membership or updates the role of an existing one. */
+  async addUserToOrganization(
+    id: string,
+    orgId: string,
+    body?: OrganizationMembershipRequest,
+  ) {
     return this.request<MessageResponse>({
       url: this.url(
         `/users/${this.pathParam(id)}/organizations/${this.pathParam(orgId)}`,
       ),
       method: "PUT",
+      data: body,
     });
   }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActionIcon,
   Box,
@@ -8,6 +8,7 @@ import {
   Group,
   Modal,
   SegmentedControl,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -34,6 +35,7 @@ interface FormValues {
   label: string;
   ownerId: string;
   ownerType: ApiKeyOwnerType;
+  orgId: string;
 }
 
 interface Props {
@@ -45,6 +47,7 @@ const emptyFormValues: FormValues = {
   label: "",
   ownerId: "",
   ownerType: "user",
+  orgId: "",
 };
 
 const CreateApiKey: React.FC<Props> = ({ onSave }) => {
@@ -77,6 +80,8 @@ const CreateApiKey: React.FC<Props> = ({ onSave }) => {
       userId: values.ownerType === "user" ? values.ownerId : null,
       serviceAccountId:
         values.ownerType === "service_account" ? values.ownerId : null,
+      orgId:
+        values.ownerType === "user" && values.orgId ? values.orgId : null,
       attrs: JSON.parse(values.attrs) ?? {},
     };
 
@@ -98,6 +103,32 @@ const CreateApiKey: React.FC<Props> = ({ onSave }) => {
     setCreatedApiKey(null);
     closeKeyModal();
   };
+
+  // Org binding options for user keys: the selected user's memberships.
+  const [userOrgOptions, setUserOrgOptions] = useState<
+    AsyncSearchSelectOption[]
+  >([]);
+  const ownerId = form.values.ownerId;
+  const ownerType = form.values.ownerType;
+
+  useEffect(() => {
+    form.setFieldValue("orgId", "");
+    setUserOrgOptions([]);
+
+    if (ownerType !== "user" || !ownerId) return;
+
+    let cancelled = false;
+    services.admin.getUserOrganizations(ownerId).then((res) => {
+      if (cancelled) return;
+      setUserOrgOptions(
+        (res.data ?? []).map((org) => ({ value: org.id, label: org.name })),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerId, ownerType]);
 
   const fetchUsers = async (
     query: string,
@@ -190,6 +221,23 @@ const CreateApiKey: React.FC<Props> = ({ onSave }) => {
               error={form.errors.ownerId}
               onChange={(value) => form.setFieldValue("ownerId", value ?? "")}
             />
+
+            {form.values.ownerType === "user" &&
+              form.values.ownerId &&
+              userOrgOptions.length > 0 && (
+                <Select
+                  variant="filled"
+                  label={t("organizationOptional")}
+                  description={t("orgBindingHint")}
+                  placeholder={t("selectOrganization")}
+                  data={userOrgOptions}
+                  value={form.values.orgId || null}
+                  clearable
+                  onChange={(value) =>
+                    form.setFieldValue("orgId", value ?? "")
+                  }
+                />
+              )}
 
             <TextInput
               variant="filled"

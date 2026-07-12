@@ -1,4 +1,4 @@
-use super::limits::apply_limits;
+use super::limits::{OrgScopedLimit, OrgScopedQuota, SelectedLimitPolicies, apply_limits};
 use super::types::AuthKind;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{ac::access_control, reqctx, sub::Subject, telemetry};
@@ -6,7 +6,7 @@ use ::http::{HeaderMap, Request};
 use axum::body::Body;
 use gate::{
     Gate,
-    cfg::{AuthStrategy, EnvProfile},
+    cfg::{AuthStrategy, EnvProfile, LimitScope},
     graph::{HttpGraph, PolicyNode, RouterNode},
 };
 use std::sync::Arc;
@@ -22,8 +22,7 @@ pub async fn apply_policies(
     client_ip: &str,
     response_headers: &mut HeaderMap,
 ) -> Result<(), ErrorResponse> {
-    let mut rate_limit_override = None;
-    let mut quota_override = None;
+    let mut selected_limits = SelectedLimitPolicies::default();
 
     for policy_name in &router.policies {
         let policy = graph.policies.get(policy_name).ok_or_else(|| {
@@ -70,32 +69,61 @@ pub async fn apply_policies(
                 }
                 telemetry::record_gateway_policy("access_control", "allowed");
             }
-            PolicyNode::RateLimit { limit } => {
-                if rate_limit_override.replace(limit.clone()).is_some() {
+            PolicyNode::RateLimit {
+                limit,
+                scope,
+                on_missing,
+            } => {
+                let duplicate = match scope {
+                    LimitScope::Subject => selected_limits
+                        .subject_rate
+                        .replace(limit.clone())
+                        .is_some(),
+                    LimitScope::Org => selected_limits
+                        .org_rate
+                        .replace(OrgScopedLimit {
+                            limit: limit.clone(),
+                            on_missing: *on_missing,
+                        })
+                        .is_some(),
+                };
+                if duplicate {
                     return Err(ErrorResponse::from(HttpError::InternalServerError(
-                        "Multiple rate_limit policies are not supported".to_string(),
+                        "Multiple rate_limit policies for the same scope are not supported"
+                            .to_string(),
                     )));
                 }
             }
-            PolicyNode::Quota { limit, cost } => {
-                if quota_override.replace((limit.clone(), *cost)).is_some() {
+            PolicyNode::Quota {
+                limit,
+                cost,
+                scope,
+                on_missing,
+            } => {
+                let duplicate = match scope {
+                    LimitScope::Subject => selected_limits
+                        .subject_quota
+                        .replace((limit.clone(), *cost))
+                        .is_some(),
+                    LimitScope::Org => selected_limits
+                        .org_quota
+                        .replace(OrgScopedQuota {
+                            limit: limit.clone(),
+                            cost: *cost,
+                            on_missing: *on_missing,
+                        })
+                        .is_some(),
+                };
+                if duplicate {
                     return Err(ErrorResponse::from(HttpError::InternalServerError(
-                        "Multiple quota policies are not supported".to_string(),
+                        "Multiple quota policies for the same scope are not supported".to_string(),
                     )));
                 }
             }
         }
     }
 
-    apply_limits(
-        gate,
-        subject,
-        client_ip,
-        response_headers,
-        rate_limit_override,
-        quota_override,
-    )
-    .await
+    apply_limits(gate, subject, client_ip, response_headers, selected_limits).await
 }
 
 fn auth_strategy_allowed(strategies: &[AuthStrategy], kind: AuthKind) -> bool {

@@ -165,7 +165,7 @@ switches; resource names stay global (org scoping only in conditions).
 Goal: routes can enforce subject **and** org limits side by side; orgs
 override limit names via attrs; changes propagate without re-login.
 
-- [ ] **`crates/gate` v2alpha1 schema**
+- [x] **`crates/gate` v2alpha1 schema**
   (`crates/gate/src/cfg/v2alpha1.rs`, `graph.rs`): `rate_limit` and
   `quota` policies gain `scope: subject | org` (default `subject`) and
   `on_missing: skip | ip_fallback | deny` (default `skip`) for
@@ -173,15 +173,15 @@ override limit names via attrs; changes propagate without re-login.
   validation rejects unknown values. (M)
   - **validate:** `on_missing` default `skip` — an org-less subject passes
     the org policy silently. Alternative default `deny` for org-only APIs.
-- [ ] **Policy collection** (`src/api/gateway/policies.rs`): relax
+- [x] **Policy collection** (`src/api/gateway/policies.rs`): relax
   "multiple rate_limit/quota policies unsupported" to **one per scope**;
   duplicates within a scope remain an error. (S)
-- [ ] **Org context cache**: `org:ctx:{org_id}` in the store, TTL ~60s,
+- [x] **Org context cache**: `org:ctx:{org_id}` in the store, TTL ~60s,
   holding the org-attrs subset the gateway needs
   (`rate_limit`, `quota`, `plan`, …). Loader on the gateway path;
   admin org-update handler deletes the key on write so changes propagate
   within one request. (M)
-- [ ] **`apply_limits`** (`src/api/gateway/limits.rs`): (L)
+- [x] **`apply_limits`** (`src/api/gateway/limits.rs`): (L)
   - Multi-scope: run org checks first (coarser gate), then subject.
   - Org keys: `lim:org:{org_id}` / `quota:org:{org_id}`.
   - Limit-name resolution for `scope: org`: policy name → org attrs
@@ -193,15 +193,15 @@ override limit names via attrs; changes propagate without re-login.
   - Known accepted imprecision: consume-on-check means an earlier bucket
     may be charged when a later one denies (documented; refund op in
     `crates/lim` only if it ever matters).
-- [ ] **Optional `org.*` ACE namespace**: feed `create_context` from the
+- [x] **Optional `org.*` ACE namespace**: feed `create_context` from the
   same `org:ctx` cache so policies can use `org.plan == "enterprise"`.
   If included, the ACE decision-cache key must also include the org-ctx
   version/hash. (M)
   - **validate:** include now or defer? Deferring keeps phase 4 purely
     about limits.
-- [ ] **Docs**: `docs/config-v2alpha1.md` — `scope`, `on_missing`, org
+- [x] **Docs**: `docs/config-v2alpha1.md` — `scope`, `on_missing`, org
   attr overrides, header semantics. (S)
-- [ ] **Tests**: two orgs on one route consume separate org buckets;
+- [x] **Tests**: two orgs on one route consume separate org buckets;
   subject + org limits coexist and the stricter one binds; org attr
   change takes effect on the next request after admin update; edge
   (in-process) and cluster (Redis) parity. (M)
@@ -211,25 +211,31 @@ override limit names via attrs; changes propagate without re-login.
 ```yaml
 http:
   policies:
-    api-rate:  { rate_limit: { limit: default,     scope: subject } }
-    org-rate:  { rate_limit: { limit: org-default, scope: org, on_missing: skip } }
-    org-quota: { quota:      { limit: org-monthly, scope: org, cost: 1 } }
+    api-rate:  { kind: rate_limit, limit: default }
+    org-rate:  { kind: rate_limit, limit: org-default, scope: org, on_missing: skip }
+    org-quota: { kind: quota, limit: org-monthly, cost: 1, scope: org }
   routers:
     api:
       policies: [require-auth, api-rate, org-rate, org-quota]
 ```
 
+*(Sample corrected to the real `kind`-tagged policy schema. Verified live
+2026-07-12; the e2e run also surfaced and fixed a pre-existing `lim` bug:
+limiter state was keyed by check key only, so two named limits sharing a
+key shared replenish state — `Limiter::check` now namespaces state by
+limit name.)*
+
 ---
 
 ## Phase 5 — UI and polish
 
-- [ ] Org switcher in the UI (list from `GET /account/organizations`,
+- [x] Org switcher in the UI (list from `GET /account/organizations`,
   switch via `PUT /account/session/organization`, swap tokens client-side).
-- [ ] Admin UI: membership role management (upsert role), org limit/plan
+- [x] Admin UI: membership role management (upsert role), org limit/plan
   attrs editing.
-- [ ] API key creation UI: optional org binding for user keys.
-- [ ] `POST /account/logout/all` if deferred from phase 2.
-- [ ] User-facing docs: org switching guide; update
+- [x] API key creation UI: optional org binding for user keys.
+- [x] `POST /account/logout/all` if deferred from phase 2.
+- [x] User-facing docs: org switching guide; update
   `docs/multi-org-design.md` status to "implemented".
 
 ---
@@ -243,7 +249,7 @@ http:
 | 2 | Refresh when membership removed | reject (401), no downgrade |
 | 2 | Org-bound user API keys on membership removal | revoke, don't unbind *(confirmed)* |
 | 2 | Org-bound user API keys on **org deletion** | revoke, don't degrade to org-less |
-| 2 | `logout/all` endpoint | defer to phase 5 |
+| 2 | `logout/all` endpoint | defer to phase 5 *(done in phase 5)* |
 | 4 | `on_missing` default | `skip` |
 | 4 | `x-ratelimit-scope` header | add it |
-| 4 | `org.*` ACE namespace | defer decision to phase 4 start |
+| 4 | `org.*` ACE namespace | deferred — future enhancement, not needed yet |

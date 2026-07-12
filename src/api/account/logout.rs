@@ -47,3 +47,31 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         "logout_success",
     )))
 }
+
+#[utoipa::path(
+    post,
+    path = "/account/logout/all",
+    tags = ["Account"],
+    summary = "Logout Everywhere",
+    description = "Invalidate every session of the authenticated user, including forked org-context sessions on other devices. Access and refresh tokens stop working immediately.",
+    responses(
+        (status = 200, description = "OK", body = MessageResponse),
+        (status = 401, description = "Unauthorized - Invalid Token", body = ErrorResponse),
+        (status = 500, description = "Internal Server Error", body = ErrorResponse)
+    )
+)]
+pub async fn post_logout_all(req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
+    use crate::etc::ext::RequestExt;
+
+    let session = crate::act::sessions::authenticated_session(req.get_token()).await?;
+
+    let revoked = crate::act::sessions::revoke_all_sessions(&session.user.id)
+        .await
+        .map_err(ErrorResponse::internal)?;
+    tracing::info!(user_id = %session.user.id, revoked, "user logged out everywhere");
+
+    Ok(Json(MessageResponse::new(
+        "All sessions logged out successfully",
+        "logout_all_success",
+    )))
+}

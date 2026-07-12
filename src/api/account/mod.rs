@@ -45,6 +45,7 @@ pub fn router() -> axum::Router {
     let sensitive = axum::Router::new()
         .route("/account/login", post(login::post_login))
         .route("/account/logout", delete(logout::delete_logout))
+        .route("/account/logout/all", post(logout::post_logout_all))
         .route(
             "/account/login/otp/email",
             post(otp::post_login_email_otp).put(otp::put_login_email_otp),

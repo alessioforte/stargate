@@ -8,7 +8,9 @@ mod v2alpha1;
 pub use limit::{Limit, LimitSpec};
 pub use load_balancer::LoadBalancer;
 pub use mtls::MtlsConfig;
-pub use v2alpha1::{AuthStrategy, Config, EnvProfile, Service, UpstreamProtocol};
+pub use v2alpha1::{
+    AuthStrategy, Config, EnvProfile, LimitScope, OnMissingOrg, Service, UpstreamProtocol,
+};
 
 use graph::CompiledConfig;
 use serde_yaml_bw::Value;

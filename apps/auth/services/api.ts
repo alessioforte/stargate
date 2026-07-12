@@ -1,5 +1,6 @@
 import { Http } from "./http";
 import type {
+  AccountOrganizationsResponse,
   LoginRequest,
   LoginMFAResponse,
   LoginResponse,
@@ -8,6 +9,7 @@ import type {
   OtpChallengeResponse,
   SignupCompleteRequest,
   SignupVerificationResponse,
+  SwitchOrganizationResponse,
 } from "./types";
 
 export default class AuthService {
@@ -103,6 +105,28 @@ export default class AuthService {
     const response = await this.http.request<GeneralResponse>({
       method: "DELETE",
       url: `${this.baseURL}/account/logout`,
+    });
+    return response;
+  }
+
+  /** The session cookie authenticates these; no bearer token needed. */
+  async getOrganizations() {
+    const response = await this.http.request<AccountOrganizationsResponse>({
+      method: "GET",
+      url: `${this.baseURL}/account/organizations`,
+    });
+    return response;
+  }
+
+  /**
+   * Issues a fresh token pair (and session cookie) acting in the given org.
+   * The previous session keeps working until it expires (fork semantics).
+   */
+  async switchOrganization(orgId: string) {
+    const response = await this.http.request<SwitchOrganizationResponse>({
+      method: "PUT",
+      url: `${this.baseURL}/account/session/organization`,
+      data: { orgId },
     });
     return response;
   }

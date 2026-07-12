@@ -33,6 +33,7 @@ use utoipa::OpenApi;
         crate::api::social::google::get_google,
         crate::api::account::login::post_login,
         crate::api::account::logout::delete_logout,
+        crate::api::account::logout::post_logout_all,
         crate::api::account::otp::passwordless::post_login_email_otp,
         crate::api::account::otp::passwordless::put_login_email_otp,
         crate::api::account::otp::login_mfa::put_login_mfa_challenge,

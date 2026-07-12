@@ -67,3 +67,26 @@ export interface MFAMethodsResponse {
   preferredMethod: OtpMethod | null;
   required: boolean;
 }
+
+/** One of the caller's org memberships (GET /account/organizations). */
+export interface AccountOrganization {
+  id: string;
+  name: string;
+  description?: string | null;
+  role: string;
+  memberSince?: string | null;
+  active: boolean;
+}
+
+export interface AccountOrganizationsResponse {
+  activeOrgId?: string | null;
+  organizations: AccountOrganization[];
+}
+
+/** Fresh token pair issued by PUT /account/session/organization. */
+export interface SwitchOrganizationResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  orgId?: string | null;
+}

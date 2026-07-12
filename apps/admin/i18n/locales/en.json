@@ -345,5 +345,13 @@
   "save": "Save",
   "cancel": "Cancel",
   "createdAt": "Created at",
-  "updatedAt": "Updated at"
+  "updatedAt": "Updated at",
+  "add": "Add",
+  "role": "Role",
+  "addToOrganization": "Add to organization",
+  "removeFromOrganization": "Remove from organization",
+  "memberSince": "Member since",
+  "noOrganizations": "Not a member of any organization",
+  "organizationOptional": "Organization (optional)",
+  "orgBindingHint": "Bind the key to one of the user's organizations: it will always act in that organization"
 }

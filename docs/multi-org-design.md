@@ -1,8 +1,9 @@
 # Multi-Org Users: Sessions, Access Control, and Org-Level Limits
 
-**Status: accepted — not yet implemented.**
+**Status: implemented** (all five phases, 2026-07-12).
 Drafted 2026-07-12; decisions resolved 2026-07-12 (see end).
 Task breakdown: [`multi-org-tasks.md`](multi-org-tasks.md).
+Usage guide: [`multi-org-guide.md`](multi-org-guide.md).
 
 This document designs three related features:
 

@@ -45,6 +45,11 @@ pub use clock::CachedClock;
     all(feature = "memory", not(feature = "redis")),
     all(feature = "redis", not(feature = "memory")),
 ))]
+pub use decision::RateLimitDecision;
+#[cfg(any(
+    all(feature = "memory", not(feature = "redis")),
+    all(feature = "redis", not(feature = "memory")),
+))]
 pub use limiter::Limiter;
 #[cfg(any(
     all(feature = "memory", not(feature = "redis")),

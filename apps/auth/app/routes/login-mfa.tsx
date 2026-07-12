@@ -15,11 +15,9 @@ import {
 import { useForm } from "@mantine/form";
 import {
   clearPendingMfa,
-  clearReturnTo,
   getPendingMfa,
   getReturnTo,
   hrefWithReturnTo,
-  redirectToReturnTo,
   storePendingMfa,
   storeReturnTo,
 } from "@/lib/auth-flow";
@@ -75,8 +73,7 @@ export default function LoginMFAPage() {
 
     if (result.status === "authenticated") {
       clearPendingMfa();
-      clearReturnTo();
-      redirectToReturnTo(router, returnTo);
+      router.replace(hrefWithReturnTo("/select-organization", returnTo));
     }
   };
 

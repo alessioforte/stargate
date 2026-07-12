@@ -179,6 +179,8 @@ export interface CreateApiKeyRequest {
   label: string;
   serviceAccountId?: string | null;
   userId?: string | null;
+  /** Optional org binding for user API keys; the user must be a member. */
+  orgId?: string | null;
 }
 
 export interface CreateApiKeyResponse extends ApiKey {
@@ -282,6 +284,17 @@ export interface Organization {
   id: string;
   name: string;
   updatedAt: string;
+}
+
+/** An organization a user belongs to, with the membership metadata. */
+export interface UserOrganization extends Organization {
+  role: string;
+  memberSince?: string | null;
+}
+
+export interface OrganizationMembershipRequest {
+  /** Free-form role; convention: owner | admin | member. Defaults to member. */
+  role?: string;
 }
 
 export interface CreateOrganizationRequest {

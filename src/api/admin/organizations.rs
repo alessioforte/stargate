@@ -228,6 +228,10 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
     .await
     .map_err(ErrorResponse::internal)?;
 
+    // Attr changes (e.g. limit overrides) must reach the gateway on the
+    // next request, not after the cache TTL.
+    crate::act::orgs::invalidate(&id).await;
+
     Ok(Json(org).into_response())
 }
 
@@ -271,6 +275,7 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
         .await
         .map_err(ErrorResponse::internal)?;
     crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::act::orgs::invalidate(&id).await;
 
     for member in &members {
         if let Err(error) = crate::act::sessions::revoke_org_sessions(&member.user.id, &id).await {

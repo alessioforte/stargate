@@ -22,6 +22,7 @@ import {
   EntityDrawer,
   JsonAttributesForm,
 } from "@/components";
+import UserOrganizations from "./user-organizations";
 
 interface FormValues {
   id: string;
@@ -200,6 +201,10 @@ const EditUser: React.FC<Props> = ({
                 onClose();
               }}
             />
+
+            <Divider my="md" />
+
+            <UserOrganizations userId={user.id} />
 
             <Divider my="md" />
 
