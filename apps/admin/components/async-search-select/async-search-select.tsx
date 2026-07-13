@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Box,
   Combobox,
@@ -16,6 +16,7 @@ export interface AsyncSearchSelectOption {
 }
 
 interface AsyncSearchSelectProps {
+  size?: "xs" | "sm" | "md" | "lg";
   label: string;
   placeholder: string;
   fetchFn: (
@@ -28,6 +29,7 @@ interface AsyncSearchSelectProps {
 }
 
 export default function AsyncSearchSelect({
+  size = "sm",
   label,
   placeholder,
   fetchFn,
@@ -41,11 +43,12 @@ export default function AsyncSearchSelect({
   const [options, setOptions] = useState<AsyncSearchSelectOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedLabel, setSelectedLabel] = useState("");
+  const selectedLabelRef = useRef("");
 
   const combobox = useCombobox({
     onDropdownClose: () => {
-      if (value) {
-        setSearch(selectedLabel);
+      if (selectedLabelRef.current) {
+        setSearch(selectedLabelRef.current);
       } else {
         setSearch("");
         setOptions([]);
@@ -98,6 +101,7 @@ export default function AsyncSearchSelect({
     const option = options.find((o) => o.value === val);
     if (option) {
       setSelectedLabel(option.label);
+      selectedLabelRef.current = option.label;
       setSearch(option.label);
     }
     onChange(val);
@@ -107,6 +111,7 @@ export default function AsyncSearchSelect({
   const handleClear = () => {
     setSearch("");
     setSelectedLabel("");
+    selectedLabelRef.current = "";
     setOptions([]);
     onChange(null);
     combobox.openDropdown();
@@ -120,6 +125,7 @@ export default function AsyncSearchSelect({
     >
       <Combobox.Target>
         <TextInput
+          size={size}
           variant="filled"
           label={label}
           placeholder={placeholder}

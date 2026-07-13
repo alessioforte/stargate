@@ -138,7 +138,6 @@ pub enum PolicyNode {
     },
     Quota {
         limit: String,
-        cost: u64,
         scope: LimitScope,
         on_missing: OnMissingOrg,
     },
@@ -153,6 +152,9 @@ pub struct RouterNode {
     pub service: String,
     pub middlewares: Vec<String>,
     pub policies: Vec<String>,
+    /// Quota units one request on this route consumes, charged to every
+    /// quota bucket that applies (policy-selected and subject `attrs.quota`).
+    pub quota_cost: u64,
 }
 
 #[derive(Debug, Clone)]

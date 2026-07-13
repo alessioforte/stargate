@@ -251,7 +251,6 @@ pub enum Policy {
     },
     Quota {
         limit: String,
-        cost: u64,
         #[serde(default)]
         scope: LimitScope,
         #[serde(default)]
@@ -302,6 +301,11 @@ pub struct Router {
     pub middlewares: Vec<String>,
     #[serde(default)]
     pub policies: Vec<String>,
+    /// Quota units one request on this route consumes (default 1). Charged
+    /// to every quota bucket that applies: attached `quota` policies of any
+    /// scope and the subject's `attrs.quota`.
+    #[serde(default)]
+    pub quota_cost: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -546,21 +550,13 @@ fn compile_policies(
             }
             Policy::Quota {
                 limit,
-                cost,
                 scope,
                 on_missing,
             } => {
                 ensure_limit_exists(name, limit, limit_names, "quota")?;
-                if *cost == 0 {
-                    return Err(CompileError::new(
-                        format!("http.policies.{}.cost", name),
-                        "quota cost must be greater than zero",
-                    ));
-                }
                 let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
                 PolicyNode::Quota {
                     limit: limit.clone(),
-                    cost: *cost,
                     scope: *scope,
                     on_missing,
                 }
@@ -832,6 +828,13 @@ fn compile_routers(
             }
         }
 
+        if router.quota_cost == Some(0) {
+            return Err(CompileError::new(
+                format!("http.routers.{}.quota_cost", name),
+                "quota_cost must be greater than zero",
+            ));
+        }
+
         out.push(RouterNode {
             name: name.clone(),
             priority: router.priority.unwrap_or(0),
@@ -840,6 +843,7 @@ fn compile_routers(
             service: router.service.clone(),
             middlewares: router.middlewares.clone(),
             policies: router.policies.clone(),
+            quota_cost: router.quota_cost.unwrap_or(1),
         });
     }
 
@@ -1136,7 +1140,6 @@ http:
     quota-default:
       kind: quota
       limit: daily
-      cost: 10
   routers:
     fallback:
       priority: -1000
@@ -1157,14 +1160,17 @@ http:
               eq: v2
       service: reports-v2
       middlewares: [strip-api]
-      policies: [auth-default, reports-read, rl-default]
+      policies: [auth-default, reports-read, rl-default, quota-default]
+      quota_cost: 10
 "#,
         );
 
         let compiled = config.compile().expect("config should compile");
         assert_eq!(compiled.http.routers.len(), 2);
         assert_eq!(compiled.http.routers[0].name, "reports-v2-by-header");
+        assert_eq!(compiled.http.routers[0].quota_cost, 10);
         assert_eq!(compiled.http.routers[1].name, "fallback");
+        assert_eq!(compiled.http.routers[1].quota_cost, 1);
         assert!(matches!(
             compiled.http.services["reports-canary"],
             ServiceNode::Weighted { .. }
@@ -1224,7 +1230,6 @@ http:
     org-quota:
       kind: quota
       limit: org-monthly
-      cost: 1
       scope: org
   routers:
     api:
@@ -1300,6 +1305,31 @@ http:
 
         let error = config.compile().expect_err("compile should fail");
         assert_eq!(error.path, "http.policies.bad.on_missing");
+    }
+
+    /// `quota_cost` of zero is a compile error.
+    #[test]
+    fn rejects_zero_router_quota_cost() {
+        let config = parse_config(
+            r#"
+schema: stargate/v2alpha1
+http:
+  services:
+    ok:
+      kind: direct_response
+      status: 200
+  routers:
+    api:
+      match:
+        path:
+          prefix: /
+      service: ok
+      quota_cost: 0
+"#,
+        );
+
+        let error = config.compile().expect_err("compile should fail");
+        assert_eq!(error.path, "http.routers.api.quota_cost");
     }
 
     #[test]

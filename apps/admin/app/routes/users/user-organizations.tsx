@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  Badge,
   ActionIcon,
-  Button,
   Group,
   Loader,
   Select,
@@ -9,7 +9,13 @@ import {
   Text,
   Tooltip,
 } from "@mantine/core";
-import { AiOutlineDelete } from "react-icons/ai";
+import {
+  AiOutlineCheck,
+  AiOutlineClose,
+  AiOutlineDelete,
+  AiOutlinePlus,
+} from "react-icons/ai";
+import { FiEdit2 } from "react-icons/fi";
 import { useTranslations } from "@/i18n";
 import services from "@/services";
 import type { Organization, UserOrganization } from "@/services/types";
@@ -18,6 +24,34 @@ import type { AsyncSearchSelectOption } from "@/components/async-search-select/a
 
 const ROLE_OPTIONS = ["owner", "admin", "member"];
 const DEFAULT_ROLE = "member";
+
+interface InlineEditorProps {
+  disabled: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+  children: React.ReactNode;
+}
+
+function InlineEditor({
+  disabled,
+  onSave,
+  onCancel,
+  children,
+}: InlineEditorProps) {
+  return (
+    <Group gap="xs" wrap="nowrap" align="flex-end">
+      {children}
+      <Group gap={5}>
+        <ActionIcon color="gray" onClick={onCancel}>
+          <AiOutlineClose />
+        </ActionIcon>
+        <ActionIcon color="green" disabled={disabled} onClick={onSave}>
+          <AiOutlineCheck />
+        </ActionIcon>
+      </Group>
+    </Group>
+  );
+}
 
 interface Props {
   userId: string;
@@ -31,6 +65,9 @@ const UserOrganizations: React.FC<Props> = ({ userId }) => {
   const [newOrgId, setNewOrgId] = useState<string | null>(null);
   const [newRole, setNewRole] = useState<string>(DEFAULT_ROLE);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingRole, setEditingRole] = useState<string>("");
+  const [isAdding, setIsAdding] = useState(false);
 
   const refresh = useCallback(async () => {
     const res = await services.admin.getUserOrganizations(userId);
@@ -98,14 +135,16 @@ const UserOrganizations: React.FC<Props> = ({ userId }) => {
       }));
   };
 
-  const roleSelectData = (role: string) =>
-    ROLE_OPTIONS.includes(role) ? ROLE_OPTIONS : [role, ...ROLE_OPTIONS];
-
   return (
     <Stack p="sm" gap="sm">
-      <Text size="sm" fw={700}>
-        {t("organizations")}
-      </Text>
+      <Group justify="space-between" align="center">
+        <Text size="sm" fw={700}>
+          {t("organizations")}
+        </Text>
+        <ActionIcon onClick={() => setIsAdding((v) => !v)}>
+          <AiOutlinePlus />
+        </ActionIcon>
+      </Group>
 
       {memberships === null ? (
         <Group justify="center" p="sm">
@@ -118,7 +157,12 @@ const UserOrganizations: React.FC<Props> = ({ userId }) => {
       ) : (
         <Stack gap="xs">
           {memberships.map((membership) => (
-            <Group key={membership.id} justify="space-between" wrap="nowrap">
+            <Group
+              key={membership.id}
+              justify="space-between"
+              align="center"
+              wrap="nowrap"
+            >
               <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
                 <Text size="sm" truncate>
                   {membership.name}
@@ -130,64 +174,106 @@ const UserOrganizations: React.FC<Props> = ({ userId }) => {
                   </Text>
                 )}
               </Stack>
-              <Select
-                size="xs"
-                w={110}
-                variant="filled"
-                disabled={saving}
-                data={roleSelectData(membership.role)}
-                value={membership.role}
-                allowDeselect={false}
-                onChange={(role) => {
-                  if (role && role !== membership.role) {
-                    upsertMembership(membership.id, role);
-                  }
-                }}
-              />
-              <Tooltip label={t("removeFromOrganization")} position="left">
-                <ActionIcon
-                  color="red"
-                  variant="light"
+              {editingId === membership.id && (
+                <InlineEditor
                   disabled={saving}
-                  onClick={() => handleRemove(membership.id)}
+                  onSave={async () => {
+                    if (editingRole !== membership.role) {
+                      await upsertMembership(membership.id, editingRole);
+                    }
+                    setEditingId(null);
+                  }}
+                  onCancel={() => setEditingId(null)}
                 >
-                  <AiOutlineDelete />
-                </ActionIcon>
-              </Tooltip>
+                  <Select
+                    size="xs"
+                    w={110}
+                    variant="filled"
+                    disabled={saving}
+                    data={
+                      ROLE_OPTIONS.includes(membership.role)
+                        ? ROLE_OPTIONS
+                        : [membership.role, ...ROLE_OPTIONS]
+                    }
+                    value={editingRole}
+                    allowDeselect={false}
+                    onChange={(role) => role && setEditingRole(role)}
+                  />
+                </InlineEditor>
+              )}
+              {editingId !== membership.id && (
+                <>
+                  <Badge color="teal" size="lg">
+                    {membership.role}
+                  </Badge>
+                  <Group gap={5}>
+                    <ActionIcon
+                      variant="light"
+                      color="blue"
+                      disabled={saving}
+                      onClick={() => {
+                        setEditingId(membership.id);
+                        setEditingRole(membership.role);
+                      }}
+                    >
+                      <FiEdit2 />
+                    </ActionIcon>
+                    <Tooltip
+                      label={t("removeFromOrganization")}
+                      position="left"
+                    >
+                      <ActionIcon
+                        color="red"
+                        variant="light"
+                        disabled={saving}
+                        onClick={() => handleRemove(membership.id)}
+                      >
+                        <AiOutlineDelete />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Group>
+                </>
+              )}
             </Group>
           ))}
         </Stack>
       )}
 
-      <Group align="flex-end" wrap="nowrap" gap="xs">
-        <div style={{ flex: 1 }}>
-          <AsyncSearchSelect
-            label={t("addToOrganization")}
-            placeholder={t("selectOrganization")}
-            fetchFn={fetchOrganizations}
-            value={newOrgId}
-            onChange={setNewOrgId}
-          />
-        </div>
-        <Select
-          size="sm"
-          w={110}
-          variant="filled"
-          label={t("role")}
-          data={ROLE_OPTIONS}
-          value={newRole}
-          allowDeselect={false}
-          onChange={(role) => setNewRole(role ?? DEFAULT_ROLE)}
-        />
-        <Button
-          size="sm"
-          variant="light"
-          disabled={!newOrgId || saving}
-          onClick={handleAdd}
+      {isAdding && (
+        <InlineEditor
+          disabled={saving || !newOrgId}
+          onSave={async () => {
+            await handleAdd();
+            setIsAdding(false);
+          }}
+          onCancel={() => {
+            setNewOrgId(null);
+            setNewRole(DEFAULT_ROLE);
+            setIsAdding(false);
+          }}
         >
-          {t("add")}
-        </Button>
-      </Group>
+          <div style={{ flex: 1 }}>
+            <AsyncSearchSelect
+              size="xs"
+              label={t("organization")}
+              placeholder={t("selectOrganization")}
+              fetchFn={fetchOrganizations}
+              value={newOrgId}
+              onChange={setNewOrgId}
+            />
+          </div>
+          <Select
+            size="xs"
+            w={110}
+            variant="filled"
+            label={t("role")}
+            data={ROLE_OPTIONS}
+            value={newRole}
+            allowDeselect={false}
+            onChange={(role) => setNewRole(role ?? DEFAULT_ROLE)}
+          />
+        </InlineEditor>
+      )}
     </Stack>
   );
 };

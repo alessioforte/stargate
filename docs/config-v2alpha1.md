@@ -333,7 +333,6 @@ http:
     daily-quota:
       kind: quota
       limit: daily
-      cost: 1
 ```
 
 Attach policies on a router:
@@ -371,8 +370,37 @@ router policy still wins, so endpoint-specific limits stay enforced.
 
 Quota is selected independently from rate limiting. A router `quota` policy or
 subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
-limit and quota are selected, both checks run. Quota policies can also set a
-per-request `cost`; subject `attrs.quota` uses cost `1`.
+limit and quota are selected, both checks run.
+
+The per-request cost is a property of the **route**, not the policy: routers
+accept a `quota_cost` (default `1`) that says how many quota units one request
+on that route consumes. It charges every quota bucket that applies — the
+attached `quota` policies of any scope and the subject's `attrs.quota` — so an
+expensive endpoint burns more of the same shared allowance:
+
+```yaml
+http:
+  policies:
+    daily-quota:
+      kind: quota
+      limit: daily
+  routers:
+    process-image:
+      match:
+        path:
+          exact: /process_image
+      service: images
+      policies: [daily-quota]
+      quota_cost: 5
+    api:
+      match:
+        path:
+          prefix: /
+      service: api
+      policies: [daily-quota]   # same bucket, cost 1
+```
+
+Setting `cost` on a `quota` policy is a compile error pointing at `quota_cost`.
 
 ### Org-scoped limits
 
@@ -396,7 +424,6 @@ http:
     org-monthly:
       kind: quota
       limit: org-monthly
-      cost: 1
       scope: org
   routers:
     api:

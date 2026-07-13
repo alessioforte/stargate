@@ -3,7 +3,6 @@ import {
   Checkbox,
   Divider,
   Group,
-  NumberInput,
   Select,
   Stack,
   TextInput,
@@ -15,7 +14,6 @@ import GatewayEntityForm from "./gateway-entity-form";
 import {
   getObjectNameErrorKey,
   nameOptions,
-  positiveInteger,
   type GatewayNamedFormProps,
 } from "./gateway-form-utils";
 import {
@@ -23,11 +21,17 @@ import {
   envProfileOptions,
   isAuthStrategy,
   isEnvProfile,
+  isOnMissing,
   isPolicyKind,
+  isPolicyScope,
+  onMissingOptions,
   policyKindOptions,
+  policyScopeOptions,
   type AuthStrategy,
   type EnvProfile,
+  type OnMissing,
   type PolicyKind,
+  type PolicyScope,
 } from "./schema-options";
 
 interface Props extends GatewayNamedFormProps {
@@ -42,7 +46,8 @@ interface FormValues {
   env: EnvProfile;
   rateLimit: string;
   quotaLimit: string;
-  quotaCost: number | string;
+  scope: PolicyScope;
+  onMissing: OnMissing;
 }
 
 interface BuildContext {
@@ -62,7 +67,8 @@ const defaultValues: FormValues = {
   env: "none",
   rateLimit: "",
   quotaLimit: "",
-  quotaCost: 1,
+  scope: "subject",
+  onMissing: "skip",
 };
 
 function policyToFormValues(
@@ -87,10 +93,12 @@ function policyToFormValues(
       typeof selectedValue.limit === "string" ? selectedValue.limit : "",
     quotaLimit:
       typeof selectedValue.limit === "string" ? selectedValue.limit : "",
-    quotaCost:
-      typeof selectedValue.cost === "number"
-        ? selectedValue.cost
-        : defaultValues.quotaCost,
+    scope: isPolicyScope(selectedValue.scope)
+      ? selectedValue.scope
+      : defaultValues.scope,
+    onMissing: isOnMissing(selectedValue.on_missing)
+      ? selectedValue.on_missing
+      : defaultValues.onMissing,
   };
 }
 
@@ -137,12 +145,18 @@ function formValuesToPolicy(
       const limitError = validateLimitReference(limit, context.limitNames);
       if (limitError) return { errorKey: limitError, value: null };
 
+      const policy: JsonRecord = {
+        kind: "rate_limit",
+        limit,
+      };
+      if (values.scope !== "subject") policy.scope = values.scope;
+      if (values.scope === "org" && values.onMissing !== "skip") {
+        policy.on_missing = values.onMissing;
+      }
+
       return {
         errorKey: null,
-        value: {
-          kind: "rate_limit",
-          limit,
-        },
+        value: policy,
       };
     }
     case "quota": {
@@ -150,16 +164,18 @@ function formValuesToPolicy(
       const limitError = validateLimitReference(limit, context.limitNames);
       if (limitError) return { errorKey: limitError, value: null };
 
-      const cost = positiveInteger(values.quotaCost);
-      if (!cost) return { errorKey: "quotaCostRequired", value: null };
+      const policy: JsonRecord = {
+        kind: "quota",
+        limit,
+      };
+      if (values.scope !== "subject") policy.scope = values.scope;
+      if (values.scope === "org" && values.onMissing !== "skip") {
+        policy.on_missing = values.onMissing;
+      }
 
       return {
         errorKey: null,
-        value: {
-          kind: "quota",
-          limit,
-          cost,
-        },
+        value: policy,
       };
     }
   }
@@ -289,38 +305,83 @@ const PolicyForm: React.FC<Props> = ({
         )}
 
         {values.kind === "rate_limit" && (
-          <Select
-            searchable
-            variant="filled"
-            label={t("limit")}
-            placeholder={t("selectLimit")}
-            data={limitOptions}
-            value={values.rateLimit || null}
-            onChange={(limit) => setField("rateLimit", limit ?? "")}
-          />
-        )}
-
-        {values.kind === "quota" && (
-          <Group grow align="flex-start">
+          <Stack gap="xs">
             <Select
               searchable
               variant="filled"
               label={t("limit")}
               placeholder={t("selectLimit")}
               data={limitOptions}
-              value={values.quotaLimit || null}
-              onChange={(limit) => setField("quotaLimit", limit ?? "")}
+              value={values.rateLimit || null}
+              onChange={(limit) => setField("rateLimit", limit ?? "")}
             />
-            <NumberInput
-              min={1}
-              step={1}
-              allowDecimal={false}
+            <Select
+              allowDeselect={false}
               variant="filled"
-              label={t("cost")}
-              value={values.quotaCost}
-              onChange={(cost) => setField("quotaCost", cost)}
+              label={t("scope")}
+              data={policyScopeOptions}
+              value={values.scope}
+              onChange={(scope) =>
+                setField("scope", (scope ?? values.scope) as PolicyScope)
+              }
             />
-          </Group>
+            {values.scope === "org" && (
+              <Select
+                allowDeselect={false}
+                variant="filled"
+                label={t("onMissing")}
+                data={onMissingOptions}
+                value={values.onMissing}
+                onChange={(value) =>
+                  setField(
+                    "onMissing",
+                    (value ?? values.onMissing) as OnMissing,
+                  )
+                }
+              />
+            )}
+          </Stack>
+        )}
+
+        {values.kind === "quota" && (
+          <Stack gap="xs">
+            <Group grow align="flex-start">
+              <Select
+                searchable
+                variant="filled"
+                label={t("limit")}
+                placeholder={t("selectLimit")}
+                data={limitOptions}
+                value={values.quotaLimit || null}
+                onChange={(limit) => setField("quotaLimit", limit ?? "")}
+              />
+            </Group>
+            <Select
+              allowDeselect={false}
+              variant="filled"
+              label={t("scope")}
+              data={policyScopeOptions}
+              value={values.scope}
+              onChange={(scope) =>
+                setField("scope", (scope ?? values.scope) as PolicyScope)
+              }
+            />
+            {values.scope === "org" && (
+              <Select
+                allowDeselect={false}
+                variant="filled"
+                label={t("onMissing")}
+                data={onMissingOptions}
+                value={values.onMissing}
+                onChange={(value) =>
+                  setField(
+                    "onMissing",
+                    (value ?? values.onMissing) as OnMissing,
+                  )
+                }
+              />
+            )}
+          </Stack>
         )}
       </Stack>
     </GatewayEntityForm>

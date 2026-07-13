@@ -66,6 +66,17 @@ export const envProfileOptions = [
   { value: "geo", label: "Geo" },
 ] as const;
 
+export const policyScopeOptions = [
+  { value: "subject", label: "Subject" },
+  { value: "org", label: "Org" },
+] as const;
+
+export const onMissingOptions = [
+  { value: "skip", label: "Skip" },
+  { value: "ip_fallback", label: "IP fallback" },
+  { value: "deny", label: "Deny" },
+] as const;
+
 export const matchKindOptions = [
   { value: "path", label: "Path" },
   { value: "method", label: "Method" },
@@ -109,6 +120,8 @@ export type MiddlewareKind = (typeof middlewareKindOptions)[number]["value"];
 export type PolicyKind = (typeof policyKindOptions)[number]["value"];
 export type AuthStrategy = (typeof authStrategyOptions)[number]["value"];
 export type EnvProfile = (typeof envProfileOptions)[number]["value"];
+export type PolicyScope = (typeof policyScopeOptions)[number]["value"];
+export type OnMissing = (typeof onMissingOptions)[number]["value"];
 export type MatchKind = (typeof matchKindOptions)[number]["value"];
 export type PathOperator = (typeof pathOperatorOptions)[number]["value"];
 export type ValueOperator = (typeof valueOperatorOptions)[number]["value"];
@@ -149,6 +162,14 @@ export function isAuthStrategy(value: unknown): value is AuthStrategy {
 
 export function isEnvProfile(value: unknown): value is EnvProfile {
   return envProfileOptions.some((option) => option.value === value);
+}
+
+export function isPolicyScope(value: unknown): value is PolicyScope {
+  return policyScopeOptions.some((option) => option.value === value);
+}
+
+export function isOnMissing(value: unknown): value is OnMissing {
+  return onMissingOptions.some((option) => option.value === value);
 }
 
 export function isMatchKind(value: unknown): value is MatchKind {
