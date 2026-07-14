@@ -1,5 +1,6 @@
 use crate::cfg::{
-    Limit, LoadBalancer, MtlsConfig, {AuthStrategy, EnvProfile, UpstreamProtocol},
+    Limit, LoadBalancer, MtlsConfig,
+    {AuthStrategy, EnvProfile, LimitScope, OnMissingOrg, UpstreamProtocol},
 };
 use indexmap::IndexMap;
 use regex::Regex;
@@ -132,10 +133,14 @@ pub enum PolicyNode {
     },
     RateLimit {
         limit: String,
+        scope: LimitScope,
+        on_missing: OnMissingOrg,
     },
     Quota {
         limit: String,
         cost: u64,
+        scope: LimitScope,
+        on_missing: OnMissingOrg,
     },
 }
 

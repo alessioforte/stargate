@@ -186,7 +186,10 @@ async fn org_policies_for_user(user_id: &str) -> Vec<PasswordPolicySet> {
             return Vec::new();
         }
     };
-    organizations.iter().filter_map(org_policy).collect()
+    organizations
+        .iter()
+        .filter_map(|membership| org_policy(&membership.organization))
+        .collect()
 }
 
 fn org_policy(organization: &Organization) -> Option<PasswordPolicySet> {

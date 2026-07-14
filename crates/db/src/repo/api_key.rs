@@ -1,4 +1,5 @@
-use crate::ent::ApiKey;
+use super::SERVICE_ACCOUNT;
+use crate::ent::{ApiKey, ApiKeyAuth};
 use anyhow::Result;
 use chrono::Utc;
 
@@ -60,13 +61,15 @@ impl ApiKeyRepository {
         tx: &mut crate::backend::Tx<'_>,
         api_key_id: &str,
         user_id: &str,
+        org_id: Option<&str>,
     ) -> Result<()> {
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO {tbl} (api_key_id, user_id) VALUES ($1, $2)",
+            "INSERT INTO {tbl} (api_key_id, user_id, org_id) VALUES ($1, $2, $3)",
             tbl = USER_API_KEY
         )))
         .bind(api_key_id)
         .bind(user_id)
+        .bind(org_id)
         .execute(&mut **tx)
         .await?;
 
@@ -232,6 +235,163 @@ impl ApiKeyRepository {
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn get_auth_by_hash<'c, E>(&self, ex: E, key_hash: &str) -> Result<Option<ApiKeyAuth>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let row = sqlx::query_as::<_, ApiKeyAuth>(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT ak.*, COALESCE(uak.org_id, sa.org_id) AS org_id
+            FROM {api_keys} ak
+            LEFT JOIN {user_api_keys} uak ON uak.api_key_id = ak.id
+            LEFT JOIN {sa_api_keys} sak ON sak.api_key_id = ak.id
+            LEFT JOIN {service_accounts} sa ON sa.id = sak.service_account_id
+            WHERE ak.key_hash = $1
+        ",
+            api_keys = API_KEY,
+            user_api_keys = USER_API_KEY,
+            sa_api_keys = SERVICE_ACCOUNT_API_KEY,
+            service_accounts = SERVICE_ACCOUNT
+        )))
+        .bind(key_hash)
+        .fetch_optional(ex)
+        .await?;
+
+        Ok(row)
+    }
+
+    /// Revoke every key owned by the user. Returns the revoked key hashes so
+    /// callers can purge cached auth subjects. Run in the same transaction as
+    /// the user delete: the FK cascade only removes the ownership link rows,
+    /// so without this the `api_keys` rows would survive orphaned and keep
+    /// authenticating.
+    pub async fn revoke_by_user(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        user_id: &str,
+    ) -> Result<Vec<String>> {
+        let hashes: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "
+            UPDATE {api_keys} SET revoked = TRUE, updated_at = $2
+            WHERE revoked = FALSE
+              AND id IN (SELECT api_key_id FROM {user_api_keys} WHERE user_id = $1)
+            RETURNING key_hash
+        ",
+            api_keys = API_KEY,
+            user_api_keys = USER_API_KEY
+        )))
+        .bind(user_id)
+        .bind(Utc::now())
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(hashes)
+    }
+
+    /// Revoke the user's keys bound to the given org (an org-bound key is
+    /// revoked — not unbound — when the membership goes away, so it cannot
+    /// silently degrade to an org-less credential).
+    pub async fn revoke_by_user_and_org(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        user_id: &str,
+        org_id: &str,
+    ) -> Result<Vec<String>> {
+        let hashes: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "
+            UPDATE {api_keys} SET revoked = TRUE, updated_at = $3
+            WHERE revoked = FALSE
+              AND id IN (
+                SELECT api_key_id FROM {user_api_keys}
+                WHERE user_id = $1 AND org_id = $2
+              )
+            RETURNING key_hash
+        ",
+            api_keys = API_KEY,
+            user_api_keys = USER_API_KEY
+        )))
+        .bind(user_id)
+        .bind(org_id)
+        .bind(Utc::now())
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(hashes)
+    }
+
+    /// Revoke every key owned by the service account (see `revoke_by_user`
+    /// for why this must run in the delete transaction).
+    pub async fn revoke_by_service_account(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        service_account_id: &str,
+    ) -> Result<Vec<String>> {
+        let hashes: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "
+            UPDATE {api_keys} SET revoked = TRUE, updated_at = $2
+            WHERE revoked = FALSE
+              AND id IN (
+                SELECT api_key_id FROM {sa_api_keys} WHERE service_account_id = $1
+              )
+            RETURNING key_hash
+        ",
+            api_keys = API_KEY,
+            sa_api_keys = SERVICE_ACCOUNT_API_KEY
+        )))
+        .bind(service_account_id)
+        .bind(Utc::now())
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok(hashes)
+    }
+
+    /// Revoke every key acting in the org: user keys bound to it and keys of
+    /// its service accounts (which the org delete is about to cascade away).
+    pub async fn revoke_by_org(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        org_id: &str,
+    ) -> Result<Vec<String>> {
+        let mut hashes: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "
+            UPDATE {api_keys} SET revoked = TRUE, updated_at = $2
+            WHERE revoked = FALSE
+              AND id IN (SELECT api_key_id FROM {user_api_keys} WHERE org_id = $1)
+            RETURNING key_hash
+        ",
+            api_keys = API_KEY,
+            user_api_keys = USER_API_KEY
+        )))
+        .bind(org_id)
+        .bind(Utc::now())
+        .fetch_all(&mut **tx)
+        .await?;
+
+        let sa_hashes: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "
+            UPDATE {api_keys} SET revoked = TRUE, updated_at = $2
+            WHERE revoked = FALSE
+              AND id IN (
+                SELECT sak.api_key_id FROM {sa_api_keys} sak
+                INNER JOIN {service_accounts} sa ON sa.id = sak.service_account_id
+                WHERE sa.org_id = $1
+              )
+            RETURNING key_hash
+        ",
+            api_keys = API_KEY,
+            sa_api_keys = SERVICE_ACCOUNT_API_KEY,
+            service_accounts = SERVICE_ACCOUNT
+        )))
+        .bind(org_id)
+        .bind(Utc::now())
+        .fetch_all(&mut **tx)
+        .await?;
+
+        hashes.extend(sa_hashes);
+        Ok(hashes)
     }
 
     pub async fn revoke_by_id(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {

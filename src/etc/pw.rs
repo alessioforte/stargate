@@ -15,8 +15,8 @@ use pw::Hash;
 /// hashes with the same configuration as the server); invalid values panic
 /// with a clear message.
 pub fn init() {
-    let memory_kib: u32 = super::env::parse_or("ARGON2_MEMORY_KIB", 19_456)
-        .unwrap_or_else(|error| panic!("{error}"));
+    let memory_kib: u32 =
+        super::env::parse_or("ARGON2_MEMORY_KIB", 19_456).unwrap_or_else(|error| panic!("{error}"));
     let iterations: u32 =
         super::env::parse_or("ARGON2_ITERATIONS", 2).unwrap_or_else(|error| panic!("{error}"));
     let parallelism: u32 =

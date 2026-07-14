@@ -255,9 +255,10 @@ pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorR
         ))));
     }
 
-    crate::db::delete_service_account(&id, ctx)
+    let revoked_key_hashes = crate::db::delete_service_account(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
+    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
 
     Ok(Json(MessageResponse::new(
         "Service account deleted successfully",

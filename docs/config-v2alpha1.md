@@ -374,6 +374,64 @@ subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
 limit and quota are selected, both checks run. Quota policies can also set a
 per-request `cost`; subject `attrs.quota` uses cost `1`.
 
+### Org-scoped limits
+
+`rate_limit` and `quota` policies accept a `scope` (default `subject`). With
+`scope: org` the check consumes the bucket of the subject's active
+organization (`lim:org:{org_id}` / `quota:org:{org_id}`), shared by every
+member and org-bound API key acting in it. A router may carry one rate limit
+and one quota **per scope**, so subject and org limits enforce side by side:
+
+```yaml
+http:
+  policies:
+    subject-burst:
+      kind: rate_limit
+      limit: default
+    org-burst:
+      kind: rate_limit
+      limit: org-default
+      scope: org
+      on_missing: skip
+    org-monthly:
+      kind: quota
+      limit: org-monthly
+      cost: 1
+      scope: org
+  routers:
+    api:
+      match:
+        path:
+          prefix: /api
+      service: api
+      policies: [auth, subject-burst, org-burst, org-monthly]
+```
+
+`on_missing` (valid only with `scope: org`) controls what happens when the
+subject has no organization:
+
+- `skip` (default): the org check is skipped; subject-scoped checks still
+  apply.
+- `ip_fallback`: the org limit is applied keyed by client IP instead.
+- `deny`: the request is rejected with `403` — the route requires an org
+  context.
+
+Organizations override the policy's limit name the same way subjects do:
+`organizations.attrs.rate_limit` / `organizations.attrs.quota` name a
+configured limit spec and apply to `scope: org` checks for that org (e.g. an
+enterprise org sets `attrs: { rate_limit: "org-premium" }`). The gateway
+caches this subset of org attrs for ~60s; admin org updates invalidate the
+cache so changes take effect on the next request.
+
+Org checks run before subject checks. With consume-on-check strategies an
+earlier bucket may be charged for a request a later check rejects — accepted
+imprecision.
+
+Response headers report the check closest to exhaustion, and
+`x-ratelimit-scope` / `x-quota-scope` say which scope that was
+(`org`, `subject`, or `ip` for `ip_fallback` checks). Denials carry the same
+headers for the check that rejected.
+
 `kind: access_control` points at resources evaluated by the ACE rule file
 (`.stargate/policies`). The gateway config decides where a check applies; the
 ACE file decides which subjects may access that resource.
@@ -387,6 +445,31 @@ ALLOW user FOR "financial_reports:READ" WHEN user.role == "admin";
 
 # @id reports-read-analyst
 ALLOW user FOR "financial_reports:READ" WHEN user.role == "analyst";
+```
+
+Subjects acting in an organization additionally expose the org context of
+their session or key binding:
+
+- `user.org_id` / `user.org_role` — the active org of the user session and
+  the user's membership role in it (convention: `owner` | `admin` |
+  `member`).
+- `api_key.org_id` — the org a user API key is bound to, or the owning
+  service account's org.
+
+These come from the validated membership, not from subject attrs (an attr
+of the same name cannot shadow them), and are absent for org-less
+subjects. Keep resource names global and express org scoping in
+conditions:
+
+```text
+# @id reports-org-admins
+ALLOW user FOR "reports:READ" WHEN user.org_role == "admin" OR user.org_role == "owner";
+
+# @id billing-single-org
+ALLOW user FOR "billing" WHEN user.org_id == "01H8XYZ..." AND user.org_role == "owner";
+
+# @id ingest-org-bound-keys
+ALLOW api_key FOR "ingest" WHEN api_key.org_id == "01H8XYZ...";
 ```
 
 The admin rule APIs manage this file directly:

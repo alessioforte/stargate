@@ -59,5 +59,8 @@
     "invalidSignupToken": "Invalid or missing signup token",
     "401": "Invalid username or password",
     "500": "Internal server error"
-  }
+  },
+  "chooseOrganization": "Choose an organization",
+  "chooseOrganizationHint": "Select which organization to sign in to. You can switch later.",
+  "currentOrganization": "Current"
 }

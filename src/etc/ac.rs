@@ -15,6 +15,11 @@ struct DecisionKey {
     sub_type: Box<str>,
     resource: Box<str>,
     action: Option<ace::ResourceAction>,
+    // Org context must be part of the key: two subjects with identical attrs
+    // but different orgs (or the same subject after an org switch) must not
+    // share a cached decision.
+    org_id: Option<Box<str>>,
+    org_role: Option<Box<str>>,
     attrs_hash: u64,
 }
 
@@ -74,6 +79,8 @@ pub fn access_control(
         sub_type: Box::from(sub_type),
         resource: Box::from(resource_name),
         action: resource_action,
+        org_id: subject.org_id.as_deref().map(Box::from),
+        org_role: subject.org_role.as_deref().map(Box::from),
         attrs_hash: attrs_hash(subject),
     };
 
@@ -164,11 +171,12 @@ fn create_context(sub: &Subject, env: &Env) -> HashMap<String, ace::Value> {
     let attrs = sub.attrs.as_object();
     let attrs_len = attrs.map(|a| a.len()).unwrap_or(0);
     let env_len = env.len();
-    if attrs_len == 0 && env_len == 0 {
+    let org_len = usize::from(sub.org_id.is_some()) + usize::from(sub.org_role.is_some());
+    if attrs_len == 0 && env_len == 0 && org_len == 0 {
         return HashMap::new();
     }
 
-    let mut entries = HashMap::with_capacity(attrs_len + env_len);
+    let mut entries = HashMap::with_capacity(attrs_len + env_len + org_len);
     let sub_type = sub.sub_type.as_str();
 
     if let Some(attrs) = attrs {
@@ -179,6 +187,23 @@ fn create_context(sub: &Subject, env: &Env) -> HashMap<String, ace::Value> {
             key.push_str(k);
             entries.insert(key, ace::Value::from(v));
         }
+    }
+
+    // Org context comes from the validated membership, not from subject
+    // attrs — inserted after them so an attrs key of the same name cannot
+    // shadow it. Yields `user.org_id`/`user.org_role` for user subjects and
+    // `api_key.org_id` for key subjects.
+    if let Some(org_id) = sub.org_id.as_deref() {
+        entries.insert(
+            format!("{sub_type}.org_id"),
+            ace::Value::String(org_id.to_string()),
+        );
+    }
+    if let Some(org_role) = sub.org_role.as_deref() {
+        entries.insert(
+            format!("{sub_type}.org_role"),
+            ace::Value::String(org_role.to_string()),
+        );
     }
 
     for (k, v) in env.iter() {
@@ -234,5 +259,100 @@ impl Env {
 
     fn len(&self) -> usize {
         self.iter().count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::etc::sub::SubjectType;
+    use serde_json::json;
+
+    fn engine(policies: &str) -> ace::PolicyEngine {
+        let mut engine = ace::PolicyEngine::new();
+        engine.parse_file(policies).unwrap();
+        engine
+    }
+
+    fn user_subject(org_id: Option<&str>, org_role: Option<&str>) -> Subject {
+        let mut subject = Subject::new("user_1".to_string(), SubjectType::User, None);
+        subject.org_id = org_id.map(str::to_string);
+        subject.org_role = org_role.map(str::to_string);
+        subject
+    }
+
+    #[test]
+    fn org_role_condition_gates_access() {
+        let pe = engine(r#"ALLOW user FOR "reports" WHEN user.org_role == "admin";"#);
+        let env = Env::default();
+
+        let admin = user_subject(Some("org_a"), Some("admin"));
+        let member = user_subject(Some("org_a"), Some("member"));
+        let orgless = user_subject(None, None);
+
+        assert!(access_control(&pe, &admin, &env, "reports"));
+        assert!(!access_control(&pe, &member, &env, "reports"));
+        assert!(!access_control(&pe, &orgless, &env, "reports"));
+    }
+
+    /// Identical attrs, different orgs: the second evaluation must not hit
+    /// the first one's cached decision.
+    #[test]
+    fn decision_cache_does_not_leak_across_orgs() {
+        let pe = engine(r#"ALLOW user FOR "billing" WHEN user.org_id == "org_a";"#);
+        let env = Env::default();
+
+        let in_org_a = user_subject(Some("org_a"), Some("member"));
+        let in_org_b = user_subject(Some("org_b"), Some("member"));
+
+        // Prime the cache with the allowed decision, then flip org.
+        assert!(access_control(&pe, &in_org_a, &env, "billing"));
+        assert!(!access_control(&pe, &in_org_b, &env, "billing"));
+        // And back: org_a's cached decision is still the right one.
+        assert!(access_control(&pe, &in_org_a, &env, "billing"));
+    }
+
+    /// The same subject switching org context (same attrs hash) must be
+    /// re-evaluated, not served the pre-switch decision.
+    #[test]
+    fn decision_cache_does_not_survive_org_switch() {
+        let pe = engine(r#"ALLOW user FOR "exports" WHEN user.org_role == "owner";"#);
+        let env = Env::default();
+
+        let as_owner = user_subject(Some("org_a"), Some("owner"));
+        assert!(access_control(&pe, &as_owner, &env, "exports"));
+
+        let as_member = user_subject(Some("org_a"), Some("member"));
+        assert!(!access_control(&pe, &as_member, &env, "exports"));
+    }
+
+    #[test]
+    fn api_key_subjects_expose_org_id() {
+        let pe = engine(r#"ALLOW api_key FOR "ingest" WHEN api_key.org_id == "org_a";"#);
+        let env = Env::default();
+
+        let mut bound = Subject::new("key_1".to_string(), SubjectType::ApiKey, None);
+        bound.org_id = Some("org_a".to_string());
+        let unbound = Subject::new("key_2".to_string(), SubjectType::ApiKey, None);
+
+        assert!(access_control(&pe, &bound, &env, "ingest"));
+        assert!(!access_control(&pe, &unbound, &env, "ingest"));
+    }
+
+    /// Org context comes from the validated membership; a subject attr with
+    /// the same name must not shadow it.
+    #[test]
+    fn membership_org_wins_over_attrs_of_the_same_name() {
+        let pe = engine(r#"ALLOW user FOR "wire" WHEN user.org_id == "org_spoofed";"#);
+        let env = Env::default();
+
+        let mut subject = Subject::new(
+            "user_1".to_string(),
+            SubjectType::User,
+            Some(json!({ "org_id": "org_spoofed" })),
+        );
+        subject.org_id = Some("org_real".to_string());
+
+        assert!(!access_control(&pe, &subject, &env, "wire"));
     }
 }

@@ -72,6 +72,11 @@ pub struct CreateApiKeyRequest {
     pub label: String,
     #[serde(default)]
     pub attrs: Option<Value>,
+    /// Optional org binding for user API keys: the key always acts in this
+    /// organization. The user must be a member. Service account keys inherit
+    /// the service account's organization instead.
+    #[serde(default)]
+    pub org_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -226,6 +231,23 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         )));
     }
 
+    if payload.org_id.is_some() && payload.user_id.is_none() {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "org_id is only supported for user API keys; service account keys inherit the service account's organization".to_string(),
+        )));
+    }
+
+    if let (Some(user_id), Some(org_id)) = (&payload.user_id, &payload.org_id) {
+        let membership = crate::db::get_user_organization(user_id, org_id)
+            .await
+            .map_err(ErrorResponse::internal)?;
+        if membership.is_none() {
+            return Err(ErrorResponse::from(HttpError::BadRequest(format!(
+                "User '{user_id}' is not a member of organization '{org_id}'"
+            ))));
+        }
+    }
+
     let secret = pw::generate_api_key();
     let key_hash = pw::hash_api_key(&secret);
 
@@ -235,6 +257,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
             &key_hash,
             &payload.label,
             payload.attrs.clone(),
+            payload.org_id.as_deref(),
             ctx,
         )
         .await

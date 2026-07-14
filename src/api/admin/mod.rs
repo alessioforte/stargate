@@ -191,6 +191,25 @@ where
     Ok(value)
 }
 
+/// Like `extract_json`, but an empty body yields `None` instead of a 400,
+/// for endpoints whose body is optional.
+pub async fn extract_optional_json<T>(req: Request) -> Result<Option<T>, ErrorResponse>
+where
+    T: serde::de::DeserializeOwned + Send + 'static,
+{
+    const MAX_OPTIONAL_BODY_BYTES: usize = 64 * 1024;
+
+    let bytes = axum::body::to_bytes(req.into_body(), MAX_OPTIONAL_BODY_BYTES)
+        .await
+        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let value = serde_json::from_slice(&bytes)
+        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+    Ok(Some(value))
+}
+
 #[macro_export]
 macro_rules! require_grants {
     ($req:expr, $($grant:expr),+ $(,)?) => {{

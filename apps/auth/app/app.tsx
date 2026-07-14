@@ -10,6 +10,7 @@ import LoginPage from "./routes/login";
 import LoginMFAPage from "./routes/login-mfa";
 import PasswordlessLoginPage from "./routes/login-passwordless";
 import ResetPasswordPage from "./routes/reset-password";
+import SelectOrganizationPage from "./routes/select-organization";
 import SignupPage from "./routes/signup";
 import { getAuthBasePath } from "@/lib/base-path";
 import "./globals.css";
@@ -40,6 +41,10 @@ const router = createBrowserRouter(
         {
           path: "login/passwordless",
           element: <PasswordlessLoginPage />,
+        },
+        {
+          path: "select-organization",
+          element: <SelectOrganizationPage />,
         },
         {
           path: "reset-password",

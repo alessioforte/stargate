@@ -33,7 +33,7 @@ pub async fn put_login_mfa_challenge(
         .await
         .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
 
-    let (user, auth_time) = complete_login_mfa(&challenge_id, &body.code).await?;
+    let (user, auth_time, requested_org_id) = complete_login_mfa(&challenge_id, &body.code).await?;
 
     // The user is now fully authenticated (password + MFA); an expired
     // password swaps the session for a change-password token.
@@ -44,15 +44,17 @@ pub async fn put_login_mfa_challenge(
         return Ok(response);
     }
 
-    crate::api::account::session::issue_user_session(user, auth_time).await
+    crate::api::account::session::issue_user_session(user, auth_time, requested_org_id.as_deref())
+        .await
 }
 
 pub(crate) async fn maybe_start_login_mfa(
     user: &db::ent::User,
     client_ip: &str,
     auth_time: usize,
+    requested_org_id: Option<&str>,
 ) -> Result<Option<Response>, ErrorResponse> {
-    let Some(body) = start_login_mfa(user, client_ip, auth_time).await? else {
+    let Some(body) = start_login_mfa(user, client_ip, auth_time, requested_org_id).await? else {
         return Ok(None);
     };
 

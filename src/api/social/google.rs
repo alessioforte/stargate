@@ -139,13 +139,18 @@ pub async fn get_google(mut req: Request) -> Result<Response, ErrorResponse> {
         claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
     }
 
+    let org = crate::act::sessions::resolve_org_context(&user, None).await?;
+    claims.org_id = org.as_ref().map(|org| org.org_id.clone());
+
     let (access_token, refresh_token) = crate::fun::generate_tokens(claims).map_err(|e| {
         tracing::error!("Token generation error: {}", e);
         ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
     })?;
 
     let store = etc::store::use_store();
-    let subject = etc::sub::Subject::from(user.clone());
+    let mut subject = etc::sub::Subject::from(user.clone());
+    subject.org_id = org.as_ref().map(|org| org.org_id.clone());
+    subject.org_role = org.as_ref().map(|org| org.role.clone());
     let refresh_exp = jwt_config().refresh_exp;
     let access_exp = jwt_config().access_exp;
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
@@ -155,6 +160,7 @@ pub async fn get_google(mut req: Request) -> Result<Response, ErrorResponse> {
         tracing::error!("Failed to store OAuth session: {}", e);
         ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
     })?;
+    crate::act::sessions::register_session(&user.id, &sid, subject.org_id.as_deref(), sttl).await;
 
     let cookie = build_jwt_cookie(&access_token, cttl);
     let body = AuthResponse {

@@ -13,13 +13,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import {
-  clearReturnTo,
-  getReturnTo,
-  hrefWithReturnTo,
-  redirectToReturnTo,
-  storeReturnTo,
-} from "@/lib/auth-flow";
+import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 import { useRouterLike } from "../../lib/navigation";
@@ -68,8 +62,9 @@ export default function Login() {
     });
 
     if (result.status === "authenticated") {
-      clearReturnTo();
-      redirectToReturnTo(router, returnTo);
+      // The picker redirects straight to return_to unless the user belongs
+      // to more than one organization.
+      navigate(hrefWithReturnTo("/select-organization", returnTo));
       return;
     }
 

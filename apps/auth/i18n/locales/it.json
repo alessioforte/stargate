@@ -59,5 +59,8 @@
     "invalidSignupToken": "Token di registrazione non valido o mancante",
     "401": "Credenziali non valide",
     "500": "Si è verificato un errore interno e non è stato possibile completare l'operazione"
-  }
+  },
+  "chooseOrganization": "Scegli un'organizzazione",
+  "chooseOrganizationHint": "Seleziona in quale organizzazione accedere. Potrai cambiarla in seguito.",
+  "currentOrganization": "Attuale"
 }

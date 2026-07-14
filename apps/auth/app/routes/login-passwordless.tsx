@@ -13,11 +13,9 @@ import {
 import { useForm } from "@mantine/form";
 import {
   clearPendingPasswordless,
-  clearReturnTo,
   getPendingPasswordless,
   getReturnTo,
-  // hrefWithReturnTo,
-  redirectToReturnTo,
+  hrefWithReturnTo,
   storePendingPasswordless,
   storeReturnTo,
   type PendingPasswordlessChallenge,
@@ -99,8 +97,7 @@ export default function PasswordlessLoginPage() {
 
     if (result.status === "authenticated") {
       clearPendingPasswordless();
-      clearReturnTo();
-      redirectToReturnTo(router, returnTo);
+      router.replace(hrefWithReturnTo("/select-organization", returnTo));
     }
   };
 

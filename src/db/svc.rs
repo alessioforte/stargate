@@ -4,8 +4,9 @@ use anyhow::Result;
 use db::{
     DbStore,
     ent::{
-        AdminKey, ApiKey, AuditContext, Credential, CredentialHistory, CredentialType, OAuthClient,
-        OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
+        AdminKey, ApiKey, ApiKeyAuth, AuditContext, Credential, CredentialHistory, CredentialType,
+        OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount,
+        SuperAdmin, User,
     },
 };
 
@@ -91,7 +92,7 @@ pub async fn update_user(user: User, ctx: AuditContext) -> Result<User> {
         .inspect_err(|e| tracing::error!("Error updating user: {:?}", e))
 }
 
-pub async fn delete_user(id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn delete_user(id: &str, ctx: AuditContext) -> Result<Vec<String>> {
     service()
         .delete_user(id, ctx)
         .await
@@ -225,10 +226,11 @@ pub async fn create_user_api_key(
     key_hash: &str,
     label: &str,
     attrs: Option<serde_json::Value>,
+    org_id: Option<&str>,
     ctx: AuditContext,
 ) -> Result<ApiKey> {
     service()
-        .create_user_api_key(user_id, key_hash, label, attrs, ctx)
+        .create_user_api_key(user_id, key_hash, label, attrs, org_id, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error creating user API key: {:?}", e))
 }
@@ -249,6 +251,11 @@ pub async fn create_service_account_api_key(
 pub async fn get_api_key_by_hash(key_hash: &str) -> Result<Option<ApiKey>> {
     let svc = service();
     svc.get_api_key_by_hash(key_hash).await
+}
+
+pub async fn get_api_key_auth_by_hash(key_hash: &str) -> Result<Option<ApiKeyAuth>> {
+    let svc = service();
+    svc.get_api_key_auth_by_hash(key_hash).await
 }
 
 pub async fn get_api_key_by_id(id: &str) -> Result<Option<ApiKey>> {
@@ -438,7 +445,7 @@ pub async fn update_service_account(
         .inspect_err(|e| tracing::error!("Error updating service account: {:?}", e))
 }
 
-pub async fn delete_service_account(id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn delete_service_account(id: &str, ctx: AuditContext) -> Result<Vec<String>> {
     service()
         .delete_service_account(id, ctx)
         .await
@@ -501,7 +508,7 @@ pub async fn update_organization(
         .inspect_err(|e| tracing::error!("Error updating organization: {:?}", e))
 }
 
-pub async fn delete_organization(id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn delete_organization(id: &str, ctx: AuditContext) -> Result<Vec<String>> {
     service()
         .delete_organization(id, ctx)
         .await
@@ -511,10 +518,11 @@ pub async fn delete_organization(id: &str, ctx: AuditContext) -> Result<()> {
 pub async fn add_user_to_organization(
     user_id: &str,
     org_id: &str,
+    role: &str,
     ctx: AuditContext,
 ) -> Result<()> {
     service()
-        .add_user_to_organization(user_id, org_id, ctx)
+        .add_user_to_organization(user_id, org_id, role, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error adding user to organization: {:?}", e))
 }
@@ -523,18 +531,23 @@ pub async fn remove_user_from_organization(
     user_id: &str,
     org_id: &str,
     ctx: AuditContext,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     service()
         .remove_user_from_organization(user_id, org_id, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error removing user from organization: {:?}", e))
 }
 
+pub async fn get_organization_users(org_id: &str) -> Result<Vec<OrgMember>> {
+    let svc = service();
+    svc.get_organization_users(org_id).await
+}
+
 pub async fn get_organization_users_paginated(
     org_id: &str,
     limit: i64,
     offset: i64,
-) -> Result<Vec<User>> {
+) -> Result<Vec<OrgMember>> {
     let svc = service();
     svc.get_organization_users_paginated(org_id, limit, offset)
         .await
@@ -545,7 +558,12 @@ pub async fn count_organization_users(org_id: &str) -> Result<i64> {
     svc.count_organization_users(org_id).await
 }
 
-pub async fn get_user_organizations(user_id: &str) -> Result<Vec<Organization>> {
+pub async fn get_user_organizations(user_id: &str) -> Result<Vec<OrgMembership>> {
     let svc = service();
     svc.get_user_organizations(user_id).await
+}
+
+pub async fn get_user_organization(user_id: &str, org_id: &str) -> Result<Option<OrgMembership>> {
+    let svc = service();
+    svc.get_user_organization(user_id, org_id).await
 }

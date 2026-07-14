@@ -1,4 +1,4 @@
-use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use super::{SUPER_ADMIN, extract_json, extract_optional_json, extract_path, extract_query};
 use crate::act::PendingSignupProfile;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
@@ -31,15 +31,66 @@ pub struct UserSchema {
     pub updated_at: String,
 }
 
+/// An organization a user belongs to, with the membership role.
 #[derive(Serialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct OrganizationSchema {
+pub struct UserOrganizationSchema {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
     pub attrs: Value,
     pub created_at: String,
     pub updated_at: String,
+    pub role: String,
+    pub member_since: Option<String>,
+}
+
+/// A member of an organization, with the membership role.
+#[derive(Serialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationUserSchema {
+    pub id: String,
+    pub email: String,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
+    pub nickname: String,
+    pub picture: Option<String>,
+    pub phone_number: Option<String>,
+    pub attrs: Value,
+    pub created_at: String,
+    pub updated_at: String,
+    pub role: String,
+    pub member_since: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationMembershipRequest {
+    /// Membership role; free-form with the convention `owner` | `admin` |
+    /// `member`. Defaults to `member` when the body is omitted.
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+const DEFAULT_MEMBERSHIP_ROLE: &str = "member";
+const MAX_MEMBERSHIP_ROLE_LEN: usize = 50;
+
+fn normalize_membership_role(role: Option<String>) -> Result<String, ErrorResponse> {
+    let Some(role) = role else {
+        return Ok(DEFAULT_MEMBERSHIP_ROLE.to_string());
+    };
+    let role = role.trim();
+    if role.is_empty() {
+        return Err(ErrorResponse::from(HttpError::BadRequest(
+            "role must not be empty".to_string(),
+        )));
+    }
+    if role.len() > MAX_MEMBERSHIP_ROLE_LEN {
+        return Err(ErrorResponse::from(HttpError::BadRequest(format!(
+            "role must be at most {MAX_MEMBERSHIP_ROLE_LEN} characters"
+        ))));
+    }
+    Ok(role.to_string())
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
@@ -609,9 +660,16 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
         )));
     }
 
-    crate::db::delete_user(&id, ctx)
+    let revoked_key_hashes = crate::db::delete_user(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
+
+    // Kill everything that could still authenticate as this user: cached
+    // subjects of the just-revoked keys, and every live session.
+    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+    if let Err(error) = crate::act::sessions::revoke_all_sessions(&id).await {
+        tracing::error!(user_id = %id, "failed to revoke sessions after user delete: {error}");
+    }
 
     Ok(Json(MessageResponse::new(
         "User deleted successfully",
@@ -626,7 +684,7 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
     tags = ["Admin", "Users"],
     params(("id" = String, Path, description = "User ID")),
     responses(
-        (status = 200, description = "User organizations retrieved successfully", body = Vec<OrganizationSchema>),
+        (status = 200, description = "User organizations retrieved successfully", body = Vec<UserOrganizationSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "User not found", body = ErrorResponse),
@@ -664,7 +722,7 @@ pub async fn get_user_organizations(mut req: Request) -> Result<Response, ErrorR
         ListUsersQuery
     ),
     responses(
-        (status = 200, description = "Organization users retrieved successfully", body = PaginatedResponse<UserSchema>),
+        (status = 200, description = "Organization users retrieved successfully", body = PaginatedResponse<OrganizationUserSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Organization not found", body = ErrorResponse),
@@ -715,8 +773,10 @@ pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorR
         ("id" = String, Path, description = "User ID"),
         ("org_id" = String, Path, description = "Organization ID")
     ),
+    request_body(content = OrganizationMembershipRequest, description = "Optional membership settings; omit for the default role", content_type = "application/json"),
     responses(
         (status = 200, description = "User added to organization successfully", body = MessageResponse),
+        (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "User or organization not found", body = ErrorResponse),
@@ -728,6 +788,8 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
 
     let ctx = take_audit_context_from(req.extensions_mut());
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
+    let payload: Option<OrganizationMembershipRequest> = extract_optional_json(req).await?;
+    let role = normalize_membership_role(payload.and_then(|p| p.role))?;
 
     if crate::db::get_user_by_id(&user_id)
         .await
@@ -750,7 +812,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
         ))));
     }
 
-    crate::db::add_user_to_organization(&user_id, &org_id, ctx)
+    crate::db::add_user_to_organization(&user_id, &org_id, &role, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -804,13 +866,50 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
         ))));
     }
 
-    crate::db::remove_user_from_organization(&user_id, &org_id, ctx)
+    let revoked_key_hashes = crate::db::remove_user_from_organization(&user_id, &org_id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
+
+    // The membership is gone: org-bound keys were revoked in the same
+    // transaction (purge their cached subjects), and sessions acting in
+    // this org die now. Org-less and other-org sessions survive.
+    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+    if let Err(error) = crate::act::sessions::revoke_org_sessions(&user_id, &org_id).await {
+        tracing::error!(
+            user_id = %user_id,
+            org_id = %org_id,
+            "failed to revoke org sessions after membership removal: {error}"
+        );
+    }
 
     Ok(Json(MessageResponse::new(
         "User removed from organization successfully",
         "user_removed_from_organization",
     ))
     .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_membership_role;
+
+    #[test]
+    fn membership_role_defaults_to_member() {
+        assert_eq!(normalize_membership_role(None).unwrap(), "member");
+    }
+
+    #[test]
+    fn membership_role_is_trimmed() {
+        assert_eq!(
+            normalize_membership_role(Some("  admin  ".to_string())).unwrap(),
+            "admin"
+        );
+    }
+
+    #[test]
+    fn membership_role_rejects_empty_and_oversized() {
+        assert!(normalize_membership_role(Some("   ".to_string())).is_err());
+        assert!(normalize_membership_role(Some("x".repeat(51))).is_err());
+        assert!(normalize_membership_role(Some("x".repeat(50))).is_ok());
+    }
 }

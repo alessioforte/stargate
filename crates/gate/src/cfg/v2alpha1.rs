@@ -244,11 +244,44 @@ pub enum Policy {
     },
     RateLimit {
         limit: String,
+        #[serde(default)]
+        scope: LimitScope,
+        #[serde(default)]
+        on_missing: Option<OnMissingOrg>,
     },
     Quota {
         limit: String,
         cost: u64,
+        #[serde(default)]
+        scope: LimitScope,
+        #[serde(default)]
+        on_missing: Option<OnMissingOrg>,
     },
+}
+
+/// Whose bucket a rate limit / quota check consumes: the authenticated
+/// subject's (or client IP for anonymous traffic), or the subject's active
+/// organization's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitScope {
+    #[default]
+    Subject,
+    Org,
+}
+
+/// What an org-scoped check does when the subject has no organization.
+/// Only valid together with `scope: org`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnMissingOrg {
+    /// Let the request through this check (default).
+    #[default]
+    Skip,
+    /// Apply the limit keyed by client IP instead.
+    IpFallback,
+    /// Reject the request: the route requires an org context.
+    Deny,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -498,13 +531,25 @@ fn compile_policies(
                     env: *env,
                 }
             }
-            Policy::RateLimit { limit } => {
+            Policy::RateLimit {
+                limit,
+                scope,
+                on_missing,
+            } => {
                 ensure_limit_exists(name, limit, limit_names, "rate limit")?;
+                let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
                 PolicyNode::RateLimit {
                     limit: limit.clone(),
+                    scope: *scope,
+                    on_missing,
                 }
             }
-            Policy::Quota { limit, cost } => {
+            Policy::Quota {
+                limit,
+                cost,
+                scope,
+                on_missing,
+            } => {
                 ensure_limit_exists(name, limit, limit_names, "quota")?;
                 if *cost == 0 {
                     return Err(CompileError::new(
@@ -512,9 +557,12 @@ fn compile_policies(
                         "quota cost must be greater than zero",
                     ));
                 }
+                let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
                 PolicyNode::Quota {
                     limit: limit.clone(),
                     cost: *cost,
+                    scope: *scope,
+                    on_missing,
                 }
             }
         };
@@ -523,6 +571,20 @@ fn compile_policies(
     }
 
     Ok(out)
+}
+
+fn resolve_on_missing(
+    policy_name: &str,
+    scope: LimitScope,
+    on_missing: Option<OnMissingOrg>,
+) -> Result<OnMissingOrg, CompileError> {
+    match (scope, on_missing) {
+        (LimitScope::Subject, Some(_)) => Err(CompileError::new(
+            format!("http.policies.{}.on_missing", policy_name),
+            "`on_missing` is only valid with `scope: org`",
+        )),
+        (_, on_missing) => Ok(on_missing.unwrap_or_default()),
+    }
 }
 
 fn ensure_limit_exists(
@@ -1122,6 +1184,122 @@ http:
             }
             other => panic!("unexpected matcher: {other:?}"),
         }
+    }
+
+    #[test]
+    fn compiles_org_scoped_limit_policies_with_defaults() {
+        let config = parse_config(
+            r#"
+schema: stargate/v2alpha1
+limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 3
+      replenish_1_per: 500ms
+  org-default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
+  org-monthly:
+    strategy: quota_tracker
+    params:
+      limit: 1000
+      period: day
+http:
+  services:
+    ok:
+      kind: direct_response
+      status: 200
+  policies:
+    subject-rate:
+      kind: rate_limit
+      limit: default
+    org-rate:
+      kind: rate_limit
+      limit: org-default
+      scope: org
+      on_missing: ip_fallback
+    org-quota:
+      kind: quota
+      limit: org-monthly
+      cost: 1
+      scope: org
+  routers:
+    api:
+      match:
+        path:
+          prefix: /
+      service: ok
+      policies: [subject-rate, org-rate, org-quota]
+"#,
+        );
+
+        let compiled = config.compile().expect("config should compile");
+
+        match &compiled.http.policies["subject-rate"] {
+            crate::graph::PolicyNode::RateLimit {
+                scope, on_missing, ..
+            } => {
+                assert_eq!(*scope, super::LimitScope::Subject);
+                assert_eq!(*on_missing, super::OnMissingOrg::Skip);
+            }
+            other => panic!("unexpected policy node: {other:?}"),
+        }
+        match &compiled.http.policies["org-rate"] {
+            crate::graph::PolicyNode::RateLimit {
+                scope, on_missing, ..
+            } => {
+                assert_eq!(*scope, super::LimitScope::Org);
+                assert_eq!(*on_missing, super::OnMissingOrg::IpFallback);
+            }
+            other => panic!("unexpected policy node: {other:?}"),
+        }
+        match &compiled.http.policies["org-quota"] {
+            crate::graph::PolicyNode::Quota {
+                scope, on_missing, ..
+            } => {
+                assert_eq!(*scope, super::LimitScope::Org);
+                assert_eq!(*on_missing, super::OnMissingOrg::Skip);
+            }
+            other => panic!("unexpected policy node: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_on_missing_with_subject_scope() {
+        let config = parse_config(
+            r#"
+schema: stargate/v2alpha1
+limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 3
+      replenish_1_per: 500ms
+http:
+  services:
+    ok:
+      kind: direct_response
+      status: 200
+  policies:
+    bad:
+      kind: rate_limit
+      limit: default
+      on_missing: deny
+  routers:
+    api:
+      match:
+        path:
+          prefix: /
+      service: ok
+      policies: [bad]
+"#,
+        );
+
+        let error = config.compile().expect_err("compile should fail");
+        assert_eq!(error.path, "http.policies.bad.on_missing");
     }
 
     #[test]

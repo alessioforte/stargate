@@ -7,7 +7,10 @@ interface SearchInputProps extends TextInputProps {
 
 const SearchInput = (props: SearchInputProps) => {
   const { onSearch, ...rest } = props;
-  const { debounce: debouncedOnSearch } = useDebounce(onSearch, 900);
+  const { debounce: debouncedOnSearch } = useDebounce(
+    onSearch ?? (() => {}),
+    900,
+  );
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (rest.onChange) rest.onChange(e);

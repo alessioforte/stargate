@@ -93,11 +93,9 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
         )));
     };
 
-    let password_check = crate::etc::pw::check_password(
-        credentials.password.clone(),
-        user_credential.value.clone(),
-    )
-    .await;
+    let password_check =
+        crate::etc::pw::check_password(credentials.password.clone(), user_credential.value.clone())
+            .await;
     if !password_check.valid {
         login_guard::record_failed_attempt(&throttle)
             .await
@@ -131,19 +129,19 @@ pub async fn post_login(mut req: Request) -> Result<Response, ErrorResponse> {
 
     let auth_time = chrono::Utc::now().timestamp() as usize;
 
-    if let Some(response) = maybe_start_login_mfa(&user, &client_ip, auth_time).await? {
+    if let Some(response) =
+        maybe_start_login_mfa(&user, &client_ip, auth_time, credentials.org_id.as_deref()).await?
+    {
         return Ok(response);
     }
 
     // For MFA users the expiry check runs after MFA verification instead, so
     // an expired password alone never yields a reset token.
-    if let Some(response) =
-        maybe_password_expired_response(&user, Some(&user_credential)).await?
-    {
+    if let Some(response) = maybe_password_expired_response(&user, Some(&user_credential)).await? {
         return Ok(response);
     }
 
-    issue_user_session(user, auth_time).await
+    issue_user_session(user, auth_time, credentials.org_id.as_deref()).await
 }
 
 /// Re-encode a verified password in the background when its stored hash

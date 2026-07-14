@@ -109,6 +109,7 @@ pub(crate) async fn maybe_start_login_mfa(
     user: &db::ent::User,
     client_ip: &str,
     auth_time: usize,
+    requested_org_id: Option<&str>,
 ) -> Result<Option<LoginMfaRequiredResponse>, ErrorResponse> {
     let policy = mfa_policy_for_user(user).await?;
     if !policy.required {
@@ -125,9 +126,15 @@ pub(crate) async fn maybe_start_login_mfa(
     check_and_record_otp_request(client_ip, &format!("mfa-login:{}", user.id)).await?;
 
     match method {
-        OtpMethod::Email => start_email_login_mfa(user, method, auth_time, current_unix_time()?)
-            .await
-            .map(Some),
+        OtpMethod::Email => start_email_login_mfa(
+            user,
+            method,
+            auth_time,
+            requested_org_id,
+            current_unix_time()?,
+        )
+        .await
+        .map(Some),
     }
 }
 
@@ -135,6 +142,7 @@ async fn start_email_login_mfa(
     user: &db::ent::User,
     method: OtpMethod,
     auth_time: usize,
+    requested_org_id: Option<&str>,
     now: u64,
 ) -> Result<LoginMfaRequiredResponse, ErrorResponse> {
     let pepper = email_otp_pepper()?;
@@ -157,6 +165,7 @@ async fn start_email_login_mfa(
         method,
         challenge,
         auth_time,
+        requested_org_id: requested_org_id.map(str::to_string),
         created_at_unix: now,
         expires_at_unix: response.expires_at_unix,
     };
@@ -189,7 +198,7 @@ async fn start_email_login_mfa(
 pub(crate) async fn complete_login_mfa(
     challenge_id: &str,
     code: &str,
-) -> Result<(db::ent::User, usize), ErrorResponse> {
+) -> Result<(db::ent::User, usize, Option<String>), ErrorResponse> {
     validate_challenge_id(challenge_id)?;
     validate_code(code)?;
 
@@ -207,7 +216,7 @@ pub(crate) async fn complete_login_mfa(
         .map_err(ErrorResponse::internal)?
         .ok_or_else(invalid_or_expired_code)?;
 
-    Ok((user, pending.auth_time))
+    Ok((user, pending.auth_time, pending.requested_org_id))
 }
 
 pub(crate) async fn list_mfa_methods(

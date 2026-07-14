@@ -6,8 +6,9 @@ use super::repo::{
 use crate::backend::Pool;
 use crate::db::DbStore;
 use crate::ent::{
-    ActionType, AdminKey, ApiKey, AuditContext, Credential, CredentialHistory, CredentialType,
-    OAuthClient, OAuthConsent, Organization, Profile, ServiceAccount, SuperAdmin, User,
+    ActionType, AdminKey, ApiKey, ApiKeyAuth, AuditContext, Credential, CredentialHistory,
+    CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization, Profile,
+    ServiceAccount, SuperAdmin, User,
 };
 use crate::repo::{
     ADMIN_KEY, API_KEY, CREDENTIAL, OAUTH_CLIENT, ORGANIZATION, SERVICE_ACCOUNT, SUPER_ADMIN, USER,
@@ -318,16 +319,20 @@ impl DbStore for Service {
         Ok(updated_user)
     }
 
-    async fn delete_user(&self, id: &str, ctx: AuditContext) -> Result<()> {
+    async fn delete_user(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>> {
         let mut tx = self.pool.begin().await?;
+        // Revoke before the delete: the cascade only removes the ownership
+        // link rows, so unrevoked api_keys rows would keep authenticating.
+        let revoked_key_hashes = self.api_key.revoke_by_user(&mut tx, id).await?;
         self.user.delete(&mut tx, id).await?;
         let audit = ctx
             .with_resource(USER.to_string())
             .with_resource_id(id.to_string())
+            .with_metadata(serde_json::json!({ "revokedApiKeys": revoked_key_hashes.len() }))
             .build_audit(ActionType::Delete);
         self.audit.insert(&mut tx, &audit).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(revoked_key_hashes)
     }
 
     async fn change_password(
@@ -576,12 +581,13 @@ impl DbStore for Service {
         key_hash: &str,
         label: &str,
         attrs: Option<JsonValue>,
+        org_id: Option<&str>,
         ctx: AuditContext,
     ) -> Result<ApiKey> {
         let mut tx = self.pool.begin().await?;
         let api_key = self.api_key.create(&mut tx, key_hash, label, attrs).await?;
         self.api_key
-            .link_to_user(&mut tx, &api_key.id, user_id)
+            .link_to_user(&mut tx, &api_key.id, user_id, org_id)
             .await?;
         let audit = ctx
             .with_resource(API_KEY.to_string())
@@ -616,6 +622,10 @@ impl DbStore for Service {
 
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>> {
         self.api_key.get_by_hash(&self.pool, key_hash).await
+    }
+
+    async fn get_api_key_auth_by_hash(&self, key_hash: &str) -> Result<Option<ApiKeyAuth>> {
+        self.api_key.get_auth_by_hash(&self.pool, key_hash).await
     }
 
     async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>> {
@@ -866,16 +876,18 @@ impl DbStore for Service {
         Ok(sa)
     }
 
-    async fn delete_service_account(&self, id: &str, ctx: AuditContext) -> Result<()> {
+    async fn delete_service_account(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>> {
         let mut tx = self.pool.begin().await?;
+        let revoked_key_hashes = self.api_key.revoke_by_service_account(&mut tx, id).await?;
         self.service_account.delete(&mut tx, id).await?;
         let audit = ctx
             .with_resource(SERVICE_ACCOUNT.to_string())
             .with_resource_id(id.to_string())
+            .with_metadata(serde_json::json!({ "revokedApiKeys": revoked_key_hashes.len() }))
             .build_audit(ActionType::Delete);
         self.audit.insert(&mut tx, &audit).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(revoked_key_hashes)
     }
 
     // ── Organizations ───────────────────────────────────────────────────────
@@ -952,29 +964,38 @@ impl DbStore for Service {
         Ok(org)
     }
 
-    async fn delete_organization(&self, id: &str, ctx: AuditContext) -> Result<()> {
+    async fn delete_organization(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>> {
         let mut tx = self.pool.begin().await?;
+        // Keys acting in the org are revoked, not left to degrade org-less:
+        // user keys bound to the org and keys of its (cascading) service
+        // accounts.
+        let revoked_key_hashes = self.api_key.revoke_by_org(&mut tx, id).await?;
         self.organization.delete(&mut tx, id).await?;
         let audit = ctx
             .with_resource(ORGANIZATION.to_string())
             .with_resource_id(id.to_string())
+            .with_metadata(serde_json::json!({ "revokedApiKeys": revoked_key_hashes.len() }))
             .build_audit(ActionType::Delete);
         self.audit.insert(&mut tx, &audit).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(revoked_key_hashes)
     }
 
     async fn add_user_to_organization(
         &self,
         user_id: &str,
         org_id: &str,
+        role: &str,
         ctx: AuditContext,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.organization.add_user(&mut tx, user_id, org_id).await?;
+        self.organization
+            .add_user(&mut tx, user_id, org_id, role)
+            .await?;
         let audit = ctx
             .with_resource(ORGANIZATION.to_string())
             .with_resource_id(org_id.to_string())
+            .with_metadata(serde_json::json!({ "userId": user_id, "role": role }))
             .build_audit(ActionType::Update);
         self.audit.insert(&mut tx, &audit).await?;
         tx.commit().await?;
@@ -986,21 +1007,31 @@ impl DbStore for Service {
         user_id: &str,
         org_id: &str,
         ctx: AuditContext,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         let mut tx = self.pool.begin().await?;
+        // Org-bound keys are revoked, not unbound: unbinding would silently
+        // turn them into working org-less credentials.
+        let revoked_key_hashes = self
+            .api_key
+            .revoke_by_user_and_org(&mut tx, user_id, org_id)
+            .await?;
         self.organization
             .remove_user(&mut tx, user_id, org_id)
             .await?;
         let audit = ctx
             .with_resource(ORGANIZATION.to_string())
             .with_resource_id(org_id.to_string())
+            .with_metadata(serde_json::json!({
+                "userId": user_id,
+                "revokedApiKeys": revoked_key_hashes.len(),
+            }))
             .build_audit(ActionType::Update);
         self.audit.insert(&mut tx, &audit).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(revoked_key_hashes)
     }
 
-    async fn get_organization_users(&self, org_id: &str) -> Result<Vec<User>> {
+    async fn get_organization_users(&self, org_id: &str) -> Result<Vec<OrgMember>> {
         self.organization.get_users(&self.pool, org_id).await
     }
 
@@ -1009,7 +1040,7 @@ impl DbStore for Service {
         org_id: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<User>> {
+    ) -> Result<Vec<OrgMember>> {
         self.organization
             .get_users_paginated(&self.pool, org_id, limit, offset)
             .await
@@ -1019,10 +1050,319 @@ impl DbStore for Service {
         self.organization.count_users(&self.pool, org_id).await
     }
 
-    async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<Organization>> {
+    async fn get_user_organizations(&self, user_id: &str) -> Result<Vec<OrgMembership>> {
         self.organization
             .get_orgs_by_user(&self.pool, user_id)
             .await
+    }
+
+    async fn get_user_organization(
+        &self,
+        user_id: &str,
+        org_id: &str,
+    ) -> Result<Option<OrgMembership>> {
+        self.organization
+            .get_membership(&self.pool, user_id, org_id)
+            .await
+    }
+}
+
+// ── sqlite integration tests ────────────────────────────────────────────────
+//
+// Each test runs against its own in-memory sqlite database with the real
+// migrations applied (pool capped at one connection: every sqlite `:memory:`
+// connection is a separate database).
+#[cfg(all(test, feature = "sqlite"))]
+mod sqlite_tests {
+    use super::*;
+    use crate::db::DbStore;
+    use crate::ent::{ActorType, AuditContext, CredentialType, Organization, Profile, User};
+
+    async fn test_service() -> Service {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite pool");
+        let service = Service::new(pool);
+        service.migrate().await.expect("migrations apply");
+        service
+    }
+
+    fn ctx() -> AuditContext {
+        AuditContext::new(ActorType::System, None)
+    }
+
+    async fn create_test_user(svc: &Service, tag: &str) -> User {
+        let profile = Profile::new(format!("{tag}@example.com"), tag.to_string());
+        svc.create_user(profile, CredentialType::Password, "hash", ctx())
+            .await
+            .expect("create user")
+    }
+
+    async fn create_test_org(svc: &Service, name: &str) -> Organization {
+        let attrs = serde_json::json!({});
+        svc.create_organization(name, None, Some(&attrs), ctx())
+            .await
+            .expect("create organization")
+    }
+
+    #[tokio::test]
+    async fn membership_defaults_and_upsert_updates_role_keeping_created_at() {
+        let svc = test_service().await;
+        let user = create_test_user(&svc, "alice").await;
+        let org = create_test_org(&svc, "acme").await;
+
+        svc.add_user_to_organization(&user.id, &org.id, "member", ctx())
+            .await
+            .expect("add membership");
+
+        let membership = svc
+            .get_user_organization(&user.id, &org.id)
+            .await
+            .expect("query membership")
+            .expect("membership exists");
+        assert_eq!(membership.role, "member");
+        assert_eq!(membership.organization.id, org.id);
+        let member_since = membership.member_since.expect("member_since set");
+
+        // Re-adding upserts the role without duplicating the row or touching
+        // the original membership timestamp.
+        svc.add_user_to_organization(&user.id, &org.id, "admin", ctx())
+            .await
+            .expect("upsert role");
+
+        let membership = svc
+            .get_user_organization(&user.id, &org.id)
+            .await
+            .expect("query membership")
+            .expect("membership exists");
+        assert_eq!(membership.role, "admin");
+        assert_eq!(membership.member_since, Some(member_since));
+        assert_eq!(svc.count_organization_users(&org.id).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn membership_lookup_is_none_for_non_members() {
+        let svc = test_service().await;
+        let user = create_test_user(&svc, "alice").await;
+        let org = create_test_org(&svc, "acme").await;
+
+        assert!(
+            svc.get_user_organization(&user.id, &org.id)
+                .await
+                .expect("query membership")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn membership_listings_carry_roles_in_both_directions() {
+        let svc = test_service().await;
+        let alice = create_test_user(&svc, "alice").await;
+        let bob = create_test_user(&svc, "bob").await;
+        let acme = create_test_org(&svc, "acme").await;
+        let globex = create_test_org(&svc, "globex").await;
+
+        svc.add_user_to_organization(&alice.id, &acme.id, "owner", ctx())
+            .await
+            .unwrap();
+        svc.add_user_to_organization(&alice.id, &globex.id, "member", ctx())
+            .await
+            .unwrap();
+        svc.add_user_to_organization(&bob.id, &acme.id, "member", ctx())
+            .await
+            .unwrap();
+
+        let mut alice_orgs = svc.get_user_organizations(&alice.id).await.unwrap();
+        alice_orgs.sort_by(|a, b| a.organization.name.cmp(&b.organization.name));
+        assert_eq!(alice_orgs.len(), 2);
+        assert_eq!(alice_orgs[0].organization.id, acme.id);
+        assert_eq!(alice_orgs[0].role, "owner");
+        assert_eq!(alice_orgs[1].organization.id, globex.id);
+        assert_eq!(alice_orgs[1].role, "member");
+
+        let mut members = svc
+            .get_organization_users_paginated(&acme.id, 10, 0)
+            .await
+            .unwrap();
+        members.sort_by(|a, b| a.user.nickname.cmp(&b.user.nickname));
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].user.id, alice.id);
+        assert_eq!(members[0].role, "owner");
+        assert_eq!(members[1].user.id, bob.id);
+        assert_eq!(members[1].role, "member");
+    }
+
+    #[tokio::test]
+    async fn user_api_key_org_binding_flows_to_auth_lookup() {
+        let svc = test_service().await;
+        let user = create_test_user(&svc, "alice").await;
+        let org = create_test_org(&svc, "acme").await;
+        svc.add_user_to_organization(&user.id, &org.id, "member", ctx())
+            .await
+            .unwrap();
+
+        svc.create_user_api_key(&user.id, "hash-bound", "bound", None, Some(&org.id), ctx())
+            .await
+            .expect("create bound key");
+        svc.create_user_api_key(&user.id, "hash-unbound", "unbound", None, None, ctx())
+            .await
+            .expect("create unbound key");
+
+        let bound = svc
+            .get_api_key_auth_by_hash("hash-bound")
+            .await
+            .expect("query bound key")
+            .expect("bound key exists");
+        assert_eq!(bound.org_id.as_deref(), Some(org.id.as_str()));
+        assert!(!bound.api_key.revoked);
+
+        let unbound = svc
+            .get_api_key_auth_by_hash("hash-unbound")
+            .await
+            .expect("query unbound key")
+            .expect("unbound key exists");
+        assert_eq!(unbound.org_id, None);
+    }
+
+    #[tokio::test]
+    async fn service_account_api_key_inherits_org_in_auth_lookup() {
+        let svc = test_service().await;
+        let org = create_test_org(&svc, "acme").await;
+        let sa = svc
+            .create_service_account("worker", None, Some(&org.id), ctx())
+            .await
+            .expect("create service account");
+
+        svc.create_service_account_api_key(&sa.id, "hash-sa", "sa-key", None, ctx())
+            .await
+            .expect("create sa key");
+
+        let auth = svc
+            .get_api_key_auth_by_hash("hash-sa")
+            .await
+            .expect("query sa key")
+            .expect("sa key exists");
+        assert_eq!(auth.org_id.as_deref(), Some(org.id.as_str()));
+    }
+
+    async fn assert_key_revoked(svc: &Service, hash: &str, expected: bool) {
+        let auth = svc
+            .get_api_key_auth_by_hash(hash)
+            .await
+            .expect("query key")
+            .expect("key row exists");
+        assert_eq!(auth.api_key.revoked, expected, "revoked state of {hash}");
+    }
+
+    #[tokio::test]
+    async fn delete_user_revokes_owned_keys_in_the_same_transaction() {
+        let svc = test_service().await;
+        let user = create_test_user(&svc, "alice").await;
+        svc.create_user_api_key(&user.id, "hash-a", "a", None, None, ctx())
+            .await
+            .unwrap();
+        svc.create_user_api_key(&user.id, "hash-b", "b", None, None, ctx())
+            .await
+            .unwrap();
+
+        let mut hashes = svc.delete_user(&user.id, ctx()).await.expect("delete user");
+        hashes.sort();
+
+        assert_eq!(hashes, vec!["hash-a".to_string(), "hash-b".to_string()]);
+        // The rows survive the cascade orphaned — but revoked, so they no
+        // longer authenticate.
+        assert_key_revoked(&svc, "hash-a", true).await;
+        assert_key_revoked(&svc, "hash-b", true).await;
+    }
+
+    #[tokio::test]
+    async fn membership_removal_revokes_only_org_bound_keys() {
+        let svc = test_service().await;
+        let user = create_test_user(&svc, "alice").await;
+        let org = create_test_org(&svc, "acme").await;
+        svc.add_user_to_organization(&user.id, &org.id, "member", ctx())
+            .await
+            .unwrap();
+        svc.create_user_api_key(&user.id, "hash-bound", "bound", None, Some(&org.id), ctx())
+            .await
+            .unwrap();
+        svc.create_user_api_key(&user.id, "hash-unbound", "unbound", None, None, ctx())
+            .await
+            .unwrap();
+
+        let hashes = svc
+            .remove_user_from_organization(&user.id, &org.id, ctx())
+            .await
+            .expect("remove membership");
+
+        assert_eq!(hashes, vec!["hash-bound".to_string()]);
+        assert_key_revoked(&svc, "hash-bound", true).await;
+        assert_key_revoked(&svc, "hash-unbound", false).await;
+        assert!(
+            svc.get_user_organization(&user.id, &org.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn org_delete_revokes_bound_user_keys_and_service_account_keys() {
+        let svc = test_service().await;
+        let user = create_test_user(&svc, "alice").await;
+        let org = create_test_org(&svc, "acme").await;
+        svc.add_user_to_organization(&user.id, &org.id, "member", ctx())
+            .await
+            .unwrap();
+        svc.create_user_api_key(&user.id, "hash-bound", "bound", None, Some(&org.id), ctx())
+            .await
+            .unwrap();
+        svc.create_user_api_key(&user.id, "hash-unbound", "unbound", None, None, ctx())
+            .await
+            .unwrap();
+        let sa = svc
+            .create_service_account("worker", None, Some(&org.id), ctx())
+            .await
+            .unwrap();
+        svc.create_service_account_api_key(&sa.id, "hash-sa", "sa-key", None, ctx())
+            .await
+            .unwrap();
+
+        let mut hashes = svc
+            .delete_organization(&org.id, ctx())
+            .await
+            .expect("delete org");
+        hashes.sort();
+
+        assert_eq!(
+            hashes,
+            vec!["hash-bound".to_string(), "hash-sa".to_string()]
+        );
+        assert_key_revoked(&svc, "hash-bound", true).await;
+        assert_key_revoked(&svc, "hash-sa", true).await;
+        assert_key_revoked(&svc, "hash-unbound", false).await;
+    }
+
+    #[tokio::test]
+    async fn service_account_delete_revokes_its_keys() {
+        let svc = test_service().await;
+        let sa = svc
+            .create_service_account("worker", None, None, ctx())
+            .await
+            .unwrap();
+        svc.create_service_account_api_key(&sa.id, "hash-sa", "sa-key", None, ctx())
+            .await
+            .unwrap();
+
+        let hashes = svc
+            .delete_service_account(&sa.id, ctx())
+            .await
+            .expect("delete service account");
+
+        assert_eq!(hashes, vec!["hash-sa".to_string()]);
+        assert_key_revoked(&svc, "hash-sa", true).await;
     }
 }
 
