@@ -10,13 +10,27 @@ const DEFAULT_RATE_LIMIT: &str = "default";
 
 /// Limit policies selected by a route: at most one rate limit and one quota
 /// per scope. Org-scoped checks run against the subject's active org bucket
-/// alongside (before) the subject-scoped ones.
-#[derive(Debug, Default)]
+/// alongside (before) the subject-scoped ones. `quota_cost` comes from the
+/// router — one request costs the same no matter whose bucket it charges.
+#[derive(Debug)]
 pub struct SelectedLimitPolicies {
     pub subject_rate: Option<String>,
-    pub subject_quota: Option<(String, u64)>,
+    pub subject_quota: Option<String>,
     pub org_rate: Option<OrgScopedLimit>,
-    pub org_quota: Option<OrgScopedQuota>,
+    pub org_quota: Option<OrgScopedLimit>,
+    pub quota_cost: u64,
+}
+
+impl Default for SelectedLimitPolicies {
+    fn default() -> Self {
+        Self {
+            subject_rate: None,
+            subject_quota: None,
+            org_rate: None,
+            org_quota: None,
+            quota_cost: 1,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -25,18 +39,10 @@ pub struct OrgScopedLimit {
     pub on_missing: OnMissingOrg,
 }
 
-#[derive(Debug)]
-pub struct OrgScopedQuota {
-    pub limit: String,
-    pub cost: u64,
-    pub on_missing: OnMissingOrg,
-}
-
 struct SelectedLimits {
     subject_key: String,
     rate_limit_name: String,
     quota_name: Option<String>,
-    quota_cost: u64,
 }
 
 /// Which bucket an org-scoped check should consume when the subject has —
@@ -69,10 +75,7 @@ pub async fn apply_limits(
         subject,
         client_ip,
         policies.subject_rate.as_deref(),
-        policies
-            .subject_quota
-            .as_ref()
-            .map(|(name, cost)| (name.as_str(), *cost)),
+        policies.subject_quota.as_deref(),
     );
 
     // ── Rate limits: org bucket first (the coarser gate), then subject ──────
@@ -130,7 +133,7 @@ pub async fn apply_limits(
                 let name = org_overrides.quota.as_deref().unwrap_or(&org_quota.limit);
                 let key = format!("quota:org:{org_id}");
                 let decision =
-                    run_check(&limiter, name, &key, Some(org_quota.cost), "quota").await?;
+                    run_check(&limiter, name, &key, Some(policies.quota_cost), "quota").await?;
                 push_quota_check(&mut quota_checks, decision, "org")?;
             }
             Some(OrgTarget::Ip) => {
@@ -139,7 +142,7 @@ pub async fn apply_limits(
                     &limiter,
                     &org_quota.limit,
                     &key,
-                    Some(org_quota.cost),
+                    Some(policies.quota_cost),
                     "quota",
                 )
                 .await?;
@@ -157,7 +160,7 @@ pub async fn apply_limits(
             &limiter,
             quota_name,
             &key,
-            Some(selected.quota_cost),
+            Some(policies.quota_cost),
             "quota",
         )
         .await?;
@@ -312,13 +315,12 @@ fn select_limits(
     subject: Option<&Subject>,
     client_ip: &str,
     rate_limit_override: Option<&str>,
-    quota_override: Option<(&str, u64)>,
+    quota_override: Option<&str>,
 ) -> SelectedLimits {
     let mut rate_limit_name = rate_limit_override
         .unwrap_or(DEFAULT_RATE_LIMIT)
         .to_string();
-    let mut quota_name = quota_override.map(|(name, _)| name.to_string());
-    let mut quota_cost = quota_override.map(|(_, cost)| cost).unwrap_or(1);
+    let mut quota_name = quota_override.map(str::to_string);
     let mut subject_key = client_ip.to_string();
 
     if let Some(subject) = subject {
@@ -334,7 +336,6 @@ fn select_limits(
             && let Some(quota) = subject.get_attr("quota").and_then(|value| value.as_str())
         {
             quota_name = Some(quota.to_string());
-            quota_cost = 1;
         }
 
         subject_key = subject.id.clone();
@@ -344,7 +345,6 @@ fn select_limits(
         subject_key,
         rate_limit_name,
         quota_name,
-        quota_cost,
     }
 }
 
@@ -386,7 +386,6 @@ mod tests {
         assert_eq!(selected.subject_key, "203.0.113.10");
         assert_eq!(selected.rate_limit_name, "default");
         assert_eq!(selected.quota_name, None);
-        assert_eq!(selected.quota_cost, 1);
     }
 
     #[test]
@@ -401,7 +400,6 @@ mod tests {
         assert_eq!(selected.subject_key, "sub_123");
         assert_eq!(selected.rate_limit_name, "premium");
         assert_eq!(selected.quota_name, Some("monthly-premium".to_string()));
-        assert_eq!(selected.quota_cost, 1);
     }
 
     #[test]
@@ -427,21 +425,15 @@ mod tests {
     }
 
     #[test]
-    fn quota_policy_overrides_subject_quota_attr_and_preserves_cost() {
+    fn quota_policy_overrides_subject_quota_attr() {
         let subject = subject(json!({
             "quota": "monthly-premium"
         }));
 
-        let selected = select_limits(
-            Some(&subject),
-            "203.0.113.10",
-            None,
-            Some(("daily-reports", 10)),
-        );
+        let selected = select_limits(Some(&subject), "203.0.113.10", None, Some("daily-reports"));
 
         assert_eq!(selected.rate_limit_name, "default");
         assert_eq!(selected.quota_name, Some("daily-reports".to_string()));
-        assert_eq!(selected.quota_cost, 10);
     }
 
     #[test]

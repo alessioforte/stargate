@@ -1,4 +1,4 @@
-use super::limits::{OrgScopedLimit, OrgScopedQuota, SelectedLimitPolicies, apply_limits};
+use super::limits::{OrgScopedLimit, SelectedLimitPolicies, apply_limits};
 use super::types::AuthKind;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{ac::access_control, reqctx, sub::Subject, telemetry};
@@ -22,7 +22,10 @@ pub async fn apply_policies(
     client_ip: &str,
     response_headers: &mut HeaderMap,
 ) -> Result<(), ErrorResponse> {
-    let mut selected_limits = SelectedLimitPolicies::default();
+    let mut selected_limits = SelectedLimitPolicies {
+        quota_cost: router.quota_cost,
+        ..Default::default()
+    };
 
     for policy_name in &router.policies {
         let policy = graph.policies.get(policy_name).ok_or_else(|| {
@@ -96,20 +99,18 @@ pub async fn apply_policies(
             }
             PolicyNode::Quota {
                 limit,
-                cost,
                 scope,
                 on_missing,
             } => {
                 let duplicate = match scope {
                     LimitScope::Subject => selected_limits
                         .subject_quota
-                        .replace((limit.clone(), *cost))
+                        .replace(limit.clone())
                         .is_some(),
                     LimitScope::Org => selected_limits
                         .org_quota
-                        .replace(OrgScopedQuota {
+                        .replace(OrgScopedLimit {
                             limit: limit.clone(),
-                            cost: *cost,
                             on_missing: *on_missing,
                         })
                         .is_some(),

@@ -14,6 +14,7 @@ import GatewayEntityForm from "./gateway-entity-form";
 import {
   getObjectNameErrorKey,
   nameOptions,
+  positiveInteger,
   type GatewayNamedFormProps,
 } from "./gateway-form-utils";
 import MatchExpressionEditor from "./match-expression-editor";
@@ -36,6 +37,7 @@ interface FormValues {
   service: string;
   middlewares: string[];
   policies: string[];
+  quotaCost: number | string;
 }
 
 interface BuildContext {
@@ -66,6 +68,7 @@ function routerToFormValues(
       service: "",
       middlewares: [],
       policies: [],
+      quotaCost: "",
     };
   }
 
@@ -78,6 +81,10 @@ function routerToFormValues(
       typeof selectedValue.service === "string" ? selectedValue.service : "",
     middlewares: stringsToForm(selectedValue.middlewares),
     policies: stringsToForm(selectedValue.policies),
+    quotaCost:
+      typeof selectedValue.quota_cost === "number"
+        ? selectedValue.quota_cost
+        : "",
   };
 }
 
@@ -122,6 +129,9 @@ function formValuesToRouter(
     policies: values.policies,
   };
   if (priority !== undefined) router.priority = priority;
+
+  const quotaCost = positiveInteger(values.quotaCost);
+  if (quotaCost) router.quota_cost = quotaCost;
 
   return { errorKey: null, value: router };
 }
@@ -212,6 +222,15 @@ const RouterForm: React.FC<Props> = ({
           label={t("priority")}
           value={values.priority}
           onChange={(priority) => setField("priority", priority)}
+        />
+        <NumberInput
+          min={1}
+          step={1}
+          allowDecimal={false}
+          variant="filled"
+          label={t("quotaCost")}
+          value={values.quotaCost}
+          onChange={(cost) => setField("quotaCost", cost)}
         />
         <Select
           searchable
