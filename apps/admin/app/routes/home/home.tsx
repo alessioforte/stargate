@@ -1,28 +1,12 @@
-import { Box, Stack, Text } from "@mantine/core";
-import useStore from "@/store";
+import { Box, Text, Title } from "@mantine/core";
 
 export default function AdminHomePage() {
-  const adminStatus = useStore((state) => state.adminStatus);
-
   return (
     <Box p="xl">
-      <Stack gap="xs">
-        <Text c="dimmed" size="sm">
-          Status: {adminStatus?.status ?? "unknown"}
-        </Text>
-        <Text c="dimmed" size="sm">
-          API: {adminStatus?.apiName ?? "Stargate"}
-        </Text>
-        <Text c="dimmed" size="sm">
-          Version: {adminStatus?.version ?? "unknown"}
-        </Text>
-        <Text c="dimmed" size="sm">
-          Database: {adminStatus?.databaseStatus ?? "unknown"}
-        </Text>
-        <Text c="dimmed" size="sm">
-          Store: {adminStatus?.storeStatus ?? "unknown"}
-        </Text>
-      </Stack>
+      <Title order={3}>Welcome</Title>
+      <Text c="dimmed" size="sm" mt="xs">
+        System status is displayed in the footer.
+      </Text>
     </Box>
   );
 }
