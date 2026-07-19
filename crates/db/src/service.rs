@@ -201,6 +201,7 @@ fn snapshot(value: impl Serialize) -> Result<JsonValue> {
     serde_json::to_value(value).context("failed to serialize safe audit snapshot")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_outbox_event(
     context: &TrustedAuditContext,
     occurred_at: DateTime<Utc>,
