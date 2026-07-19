@@ -1,8 +1,8 @@
 use super::{SUPER_ADMIN, extract_json, extract_optional_json, extract_path, extract_query};
 use crate::act::PendingSignupProfile;
+use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context_from;
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -315,7 +315,7 @@ pub async fn get_user(mut req: Request) -> Result<Response, ErrorResponse> {
 pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateUserRequest = extract_json(req).await?;
 
     if let Ok(Some(_)) = crate::db::get_user_by_username(&payload.email).await {
@@ -438,7 +438,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
 pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: UpdateUserRequest = extract_json(req).await?;
 
@@ -491,7 +491,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
 pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: PatchUserRequest = extract_json(req).await?;
 
@@ -549,7 +549,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
 pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: UserAttrsRequest = extract_json(req).await?;
 
@@ -590,7 +590,7 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
 pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: UserAttrsRequest = extract_json(req).await?;
 
@@ -638,7 +638,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
 pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
     let user = crate::db::get_user_by_id(&id)
@@ -786,7 +786,7 @@ pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorR
 pub async fn add_user_to_organization(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
     let payload: Option<OrganizationMembershipRequest> = extract_optional_json(req).await?;
     let role = normalize_membership_role(payload.and_then(|p| p.role))?;
@@ -842,7 +842,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
 pub async fn remove_user_from_organization(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, USERS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
 
     if crate::db::get_user_by_id(&user_id)

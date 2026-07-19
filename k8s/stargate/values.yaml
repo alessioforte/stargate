@@ -119,7 +119,7 @@ configmap:
   data:
     # Cluster profile expects shared backends to be provided here.
     # SERVER_SHUTDOWN_TIMEOUT_SECS: "25"
-    # AUDIT_STREAM: "audit:events"
+    # AUDIT_REDIS_STREAM: "audit.raw"
     # AUDIT_STREAM_MAXLEN: "100000"
     # REDIS_URL: redis://redis.default.svc.cluster.local:6379
     # POSTGRES_ENDPOINT: postgres.default.svc.cluster.local

@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context_from;
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -157,7 +157,7 @@ pub async fn get_service_account(mut req: Request) -> Result<Response, ErrorResp
 pub async fn create_service_account(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, SA_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateServiceAccountRequest = extract_json(req).await?;
 
     if payload.name.trim().is_empty() {
@@ -196,7 +196,7 @@ pub async fn create_service_account(mut req: Request) -> Result<Response, ErrorR
 pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, SA_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: UpdateServiceAccountRequest = extract_json(req).await?;
 
@@ -241,7 +241,7 @@ pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorR
 pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, SA_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
     if crate::db::get_service_account_by_id(&id)

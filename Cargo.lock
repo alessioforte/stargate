@@ -4086,6 +4086,7 @@ dependencies = [
  "opentelemetry_sdk",
  "otp",
  "pw",
+ "redis",
  "rustls",
  "rustls-pemfile",
  "serde",

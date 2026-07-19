@@ -4,7 +4,8 @@ use once_cell::sync::Lazy;
 use opentelemetry::{
     Context, KeyValue, global,
     metrics::{Counter, Histogram},
-    propagation::{Extractor, Injector, TextMapCompositePropagator},
+    propagation::{Extractor, Injector, TextMapCompositePropagator, TextMapPropagator},
+    trace::TraceContextExt,
 };
 use opentelemetry_sdk::{
     Resource,
@@ -163,6 +164,17 @@ pub fn extract_context(headers: &HeaderMap) -> Context {
     global::get_text_map_propagator(|propagator| propagator.extract(&HeaderExtractor(headers)))
 }
 
+/// Return only a syntactically valid W3C trace id. Audit request facts do not
+/// copy the raw `traceparent` header.
+pub fn trace_id_from_headers(headers: &HeaderMap) -> Option<String> {
+    let context = TraceContextPropagator::new().extract(&HeaderExtractor(headers));
+    let span = context.span();
+    let span_context = span.span_context();
+    span_context
+        .is_valid()
+        .then(|| span_context.trace_id().to_string())
+}
+
 pub fn set_span_parent_from_headers(span: &tracing::Span, headers: &HeaderMap) {
     let parent = extract_context(headers);
     if let Err(error) = span.set_parent(parent) {
@@ -227,6 +239,35 @@ pub struct Metrics {
     #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_errors: Counter<u64>,
     config_reloads: Counter<u64>,
+}
+
+#[cfg(test)]
+mod audit_trace_tests {
+    use super::*;
+
+    #[test]
+    fn audit_trace_id_accepts_only_valid_w3c_traceparent() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+        );
+        headers.insert(
+            "x-trace-id",
+            HeaderValue::from_static("client-selected-value"),
+        );
+
+        assert_eq!(
+            trace_id_from_headers(&headers).as_deref(),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736")
+        );
+
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_static("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
+        );
+        assert!(trace_id_from_headers(&headers).is_none());
+    }
 }
 
 static METRICS: Lazy<Metrics> = Lazy::new(|| {

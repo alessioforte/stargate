@@ -68,6 +68,23 @@ impl ServiceAccountRepository {
         Ok(row)
     }
 
+    pub async fn get_by_id_for_update(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        id: &str,
+    ) -> Result<Option<ServiceAccount>> {
+        let row = sqlx::query_as::<_, ServiceAccount>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {tbl} WHERE id = $1 {for_update}",
+            tbl = SERVICE_ACCOUNT,
+            for_update = crate::backend::FOR_UPDATE,
+        )))
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn get_all<'c, E>(
         &self,
         ex: E,

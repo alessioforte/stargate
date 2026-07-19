@@ -70,7 +70,7 @@ pub async fn run() -> std::io::Result<()> {
         std::process::exit(1);
     }
 
-    aud::spawn();
+    aud::spawn()?;
 
     let gate = gate::init();
 

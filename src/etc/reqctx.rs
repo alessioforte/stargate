@@ -1,6 +1,6 @@
 use crate::etc::{ac::Env, geoip};
 use chrono::{DateTime, Utc};
-use db::ent::AuditContext;
+use db::ent::{TrustedAuditContext, TrustedAuditRequest};
 use gate::cfg::EnvProfile;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
@@ -12,6 +12,7 @@ pub struct RequestContext {
     started_at: DateTime<Utc>,
     client_ip: Option<IpAddr>,
     user_agent: Option<Box<str>>,
+    trace_id: Option<Box<str>>,
     geo: OnceLock<Arc<geoip::GeoInfo>>,
 }
 
@@ -21,12 +22,14 @@ impl RequestContext {
         started_at: DateTime<Utc>,
         client_ip: Option<IpAddr>,
         user_agent: Option<String>,
+        trace_id: Option<String>,
     ) -> Self {
         Self {
             request_id: request_id.into_boxed_str(),
             started_at,
             client_ip,
             user_agent: user_agent.map(String::into_boxed_str),
+            trace_id: trace_id.map(String::into_boxed_str),
             geo: OnceLock::new(),
         }
     }
@@ -35,8 +38,13 @@ impl RequestContext {
         &self.request_id
     }
 
-    pub fn audit_context(&self) -> AuditContext {
-        AuditContext::anonymous().with_request_id(self.request_id().to_string())
+    pub fn audit_request(&self) -> TrustedAuditRequest {
+        TrustedAuditRequest::from_http(
+            self.request_id(),
+            self.trace_id.as_deref().map(str::to_string),
+            self.client_ip.map(|ip| ip.to_string()),
+            self.user_agent.as_deref().map(str::to_string),
+        )
     }
 
     pub fn env(&self, profile: EnvProfile) -> Env {
@@ -92,14 +100,21 @@ pub fn request_id_from(extensions: &http::Extensions) -> String {
         .unwrap_or_else(|| Ulid::new().to_string())
 }
 
-pub fn take_audit_context_from(extensions: &mut http::Extensions) -> AuditContext {
-    if let Some(ctx) = extensions.remove::<AuditContext>() {
-        return ctx;
-    }
+pub fn audit_request_from(extensions: &http::Extensions) -> TrustedAuditRequest {
     extensions
         .get::<RequestContext>()
-        .map(RequestContext::audit_context)
-        .unwrap_or_else(AuditContext::anonymous)
+        .map(RequestContext::audit_request)
+        .unwrap_or_else(|| {
+            TrustedAuditRequest::from_http(request_id_from(extensions), None, None, None)
+        })
+}
+
+/// Consume a context established by a trusted route or authentication
+/// boundary. This never invents a scope.
+pub fn take_trusted_audit_context_from(
+    extensions: &mut http::Extensions,
+) -> Option<TrustedAuditContext> {
+    extensions.remove::<TrustedAuditContext>()
 }
 
 pub fn build_env_from(extensions: &mut http::Extensions, profile: EnvProfile) -> Env {

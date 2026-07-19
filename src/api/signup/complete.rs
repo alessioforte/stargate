@@ -2,11 +2,11 @@ use super::SignupCompleteRequestBody;
 use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context_from;
+use crate::etc::reqctx::audit_request_from;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
-use db::ent::{CredentialType, Profile};
+use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
 use smtp::Smtp;
 use tracing::error;
 
@@ -23,8 +23,8 @@ use tracing::error;
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
-pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
-    let ctx = take_audit_context_from(req.extensions_mut());
+pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
+    let audit_request = audit_request_from(req.extensions());
 
     let Json(body) = Json::<SignupCompleteRequestBody>::from_request(req, &())
         .await
@@ -101,7 +101,9 @@ pub async fn put_signup(mut req: Request) -> Result<Json<MessageResponse>, Error
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 
-    let user = crate::db::create_user(profile, CredentialType::Password, &password, ctx)
+    let audit_context =
+        TrustedAuditContext::application(TrustedAuditActor::anonymous(), audit_request);
+    let user = crate::db::create_user(profile, CredentialType::Password, &password, audit_context)
         .await
         .map_err(ErrorResponse::internal)?;
 

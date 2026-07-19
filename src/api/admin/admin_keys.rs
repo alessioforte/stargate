@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context_from;
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -198,7 +198,7 @@ pub async fn get_admin_key(mut req: Request) -> Result<Response, ErrorResponse> 
 pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateAdminKeyRequest = extract_json(req).await?;
 
     validate_admin_key_permissions(&payload.permissions)?;
@@ -242,7 +242,7 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
 pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: UpdateAdminKeyPermissionsRequest = extract_json(req).await?;
 
@@ -290,7 +290,7 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
 pub async fn revoke_admin_key(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
     let key = crate::db::get_admin_key_by_id(&id)
@@ -336,7 +336,7 @@ pub async fn revoke_admin_key(mut req: Request) -> Result<Response, ErrorRespons
 pub async fn delete_admin_key(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
     if crate::db::get_admin_key_by_id(&id)

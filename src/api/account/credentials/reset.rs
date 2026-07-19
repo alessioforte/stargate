@@ -3,7 +3,7 @@ use crate::act;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context_from;
+use crate::etc::reqctx::audit_request_from;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
@@ -25,8 +25,8 @@ use tracing::error;
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
-pub async fn put_credentials(mut req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
-    let ctx = take_audit_context_from(req.extensions_mut());
+pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
+    let audit_request = audit_request_from(req.extensions());
 
     let Json(body) = Json::<ChangePasswordRequestBody>::from_request(req, &())
         .await
@@ -69,7 +69,11 @@ pub async fn put_credentials(mut req: Request) -> Result<Json<MessageResponse>, 
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 
-    crate::db::change_password(&user.id, &password, ctx)
+    let audit_context = db::ent::TrustedAuditContext::application(
+        db::ent::TrustedAuditActor::user(&user.id),
+        audit_request,
+    );
+    crate::db::change_password(&user.id, &password, audit_context)
         .await
         .map_err(|e| {
             error!("Could not update password: {:?}", e);

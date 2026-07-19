@@ -66,6 +66,23 @@ impl OrganizationRepository {
         Ok(row)
     }
 
+    pub async fn get_by_id_for_update(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        id: &str,
+    ) -> Result<Option<Organization>> {
+        let row = sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {tbl} WHERE id = $1 {for_update}",
+            tbl = ORGANIZATION,
+            for_update = crate::backend::FOR_UPDATE,
+        )))
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<Organization>>
     where
         E: crate::backend::ReadExecutor<'c>,
@@ -339,6 +356,31 @@ impl OrganizationRepository {
         .bind(user_id)
         .bind(org_id)
         .fetch_optional(ex)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn get_membership_for_update(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        user_id: &str,
+        org_id: &str,
+    ) -> Result<Option<OrgMembership>> {
+        let row = sqlx::query_as::<_, OrgMembership>(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT o.*, uo.role, uo.created_at AS member_since FROM {tbl_org} o
+            INNER JOIN {tbl_uo} uo ON o.id = uo.org_id
+            WHERE uo.user_id = $1 AND uo.org_id = $2
+            {for_update}
+        ",
+            tbl_org = ORGANIZATION,
+            tbl_uo = USER_ORGANIZATION,
+            for_update = crate::backend::FOR_UPDATE,
+        )))
+        .bind(user_id)
+        .bind(org_id)
+        .fetch_optional(&mut **tx)
         .await?;
 
         Ok(row)

@@ -156,6 +156,7 @@ pub async fn trace_middleware(
     let path = req.uri().path().to_string();
     let query = sanitize_query(req.uri().query().unwrap_or(""));
     let user_agent = req.get_user_agent();
+    let trace_id = telemetry::trace_id_from_headers(req.headers());
     let peer_ip = req
         .extensions()
         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
@@ -171,6 +172,7 @@ pub async fn trace_middleware(
         now,
         client_ip_addr,
         user_agent.clone(),
+        trace_id,
     ));
 
     let span = tracing::info_span!(

@@ -16,7 +16,7 @@ stargate/
 │   ├── main.rs        # Entry: init logging/DB/services, Axum router, Hyper server (plain or TLS)
 │   ├── act/           # Stateful app flows (login guard, OTP/MFA, oauth state, signup, email verify, change password) + shutdown signal
 │   ├── api/           # Axum routers + handlers + gateway fallback service
-│   ├── aud/           # Audit service - buffered async event bus
+│   ├── aud/           # PostgreSQL-to-Redis audit outbox relay (cluster only)
 │   ├── cli/           # Admin CLI (bootstrap super-admin)
 │   ├── db/            # DB pool init (feature-gated postgres/sqlite)
 │   ├── err/           # HTTP error types -> JSON responses (axum IntoResponse)
@@ -180,23 +180,28 @@ Missing:
 
 ### Audit (transactional outbox)
 
-Audit events are inserted into the `audits` table in the **same transaction** as
-the mutation they record: `crates/db` `Service` mutators take an `AuditContext`
-and write the audit row before commit, so it commits iff the mutation does. No
-in-process buffer or event bus; nothing is dropped on crash.
+Audit producers construct and validate the versioned raw-event contract, then
+store its final immutable JSON in `outbox_events` in the **same transaction** as
+the mutation. `crates/db` service mutators receive a `TrustedAuditContext`, so
+actor, request facts, and scope come from authenticated or persisted state. All
+`/admin/*` events are `control_plane`. There is no in-process event buffer.
 
-- **Edge**: the insert is terminal — rows persist and are queryable, no relay.
+- **Edge**: SQLite uses the aligned outbox schema, but starts no relay. New rows
+  remain durable and pending with `published_at = NULL`.
 - **Cluster**: one background relay per process (`src/aud/relay.rs`) ships
-  unpublished rows to Redis Streams:
-  - Claims a batch with `... WHERE published_at IS NULL ORDER BY seq LIMIT n FOR
-    UPDATE SKIP LOCKED` in an open tx (nodes drain concurrently, no double-claim).
-  - `XADD`s the batch to `AUDIT_STREAM` (pipelined, `MAXLEN ~` trim), then sets
-    `published_at` and commits. Publish-before-commit ⇒ **at-least-once**;
-    consumers dedupe on audit `id`. Redis/DB errors roll back and back off.
+  PostgreSQL rows to Redis Streams:
+  - Claims pending rows in `seq` order with `FOR UPDATE SKIP LOCKED`, allowing
+    multiple nodes to drain disjoint batches.
+  - Publishes to `AUDIT_REDIS_STREAM` (default `audit.raw`) with exactly one
+    Redis field: `payload = <stored JSON>`.
+  - Marks the claimed rows published and commits only after Redis accepts the
+    batch. Publish-before-commit gives **at-least-once** delivery; consumers
+    deduplicate using `event_id` inside the payload.
+  - Redis/DB failures roll back the claim and use exponential backoff. Relay
+    code never parses, rebuilds, substitutes, or logs the payload.
 
-`Service::record_audit(ctx, action)` writes a one-off audit (e.g. login/logout)
-in its own tx. Postgres `audits` gains `seq` (identity claim cursor) and
-`published_at` + a partial index on unpublished rows; sqlite schema unchanged.
+Login/logout audit events are not currently produced; any such coverage is a
+separately reviewed follow-up rather than part of the core outbox contract.
 
 ### Singletons / Runtime State
 
@@ -356,9 +361,15 @@ Currently implemented methods:
 
 ## Database Schema (migrations/)
 
-Tables: `organizations`, `users`, `super_admins`, `credentials`, `api_keys`, `admin_keys`, `audits`, `service_accounts`, `oauth_clients`, `oauth_consents`, `user_organizations`, `user_api_keys`, `service_account_api_keys`
+Tables include `organizations`, `users`, `super_admins`, `credentials`,
+`credential_history`, `api_keys`, `admin_keys`, `service_accounts`,
+`oauth_clients`, `oauth_consents`, `user_organizations`, `user_api_keys`,
+`service_account_api_keys`, and `outbox_events`.
 
-IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
+Entity and audit event ids are ULIDs stored as text. `outbox_events` stores the
+immutable raw JSON payload plus local `seq`, optional operation/pair metadata,
+`created_at`, and nullable `published_at`. PostgreSQL and SQLite expose the same
+logical outbox columns.
 
 ## Key Env Vars
 
@@ -391,7 +402,7 @@ IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
 | `AUDIT_RELAY_ENABLED` | true | Run the audit outbox relay (cluster) |
 | `AUDIT_RELAY_BATCH` | 256 | Rows claimed per relay batch |
 | `AUDIT_RELAY_INTERVAL_MS` | 1000 | Idle poll interval when caught up |
-| `AUDIT_STREAM` | audit:events | Redis stream for audit events |
+| `AUDIT_REDIS_STREAM` | audit.raw | Redis stream receiving one unchanged `payload` field per event |
 | `AUDIT_STREAM_MAXLEN` | 100000 | Approx stream cap (`MAXLEN ~`; 0 = unbounded) |
 | `TLS_ENABLED` | false | HTTPS |
 | `TRUSTED_PROXIES` | - | IP/CIDR for client IP |

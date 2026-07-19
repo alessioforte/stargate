@@ -123,3 +123,6 @@ sqlite = ["db/sqlite"]
 memory = ["store/memory", "gate/memory", "oidc/memory", "lim/memory"]
 redis = ["store/redis", "gate/redis", "lim/redis"]
 redis-compression = ["store/compression"]
+
+[dev-dependencies]
+redis = { version = "1.0.4", features = ["tokio-comp"] }

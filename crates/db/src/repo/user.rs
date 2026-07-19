@@ -211,6 +211,23 @@ impl UserRepository {
         Ok(row)
     }
 
+    pub async fn get_by_id_for_update(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        id: &str,
+    ) -> Result<Option<User>> {
+        let row = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {users} WHERE id = $1 {for_update}",
+            users = USER,
+            for_update = crate::backend::FOR_UPDATE,
+        )))
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn delete(&self, tx: &mut crate::backend::Tx<'_>, id: &str) -> Result<()> {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {users} WHERE id = $1",

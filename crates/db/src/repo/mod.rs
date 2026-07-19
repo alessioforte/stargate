@@ -1,21 +1,21 @@
 mod admin_key;
 mod api_key;
-mod audit;
 mod credential;
 mod oauth_client;
 mod oauth_consent;
 mod organization;
+mod outbox;
 mod service_account;
 mod super_admin;
 mod user;
 
 pub use admin_key::*;
 pub use api_key::*;
-pub use audit::*;
 pub use credential::*;
 pub use oauth_client::*;
 pub use oauth_consent::*;
 pub use organization::*;
+pub use outbox::*;
 pub use service_account::*;
 pub use super_admin::*;
 pub use user::*;

@@ -4,9 +4,9 @@ use anyhow::Result;
 use db::{
     DbStore,
     ent::{
-        AdminKey, ApiKey, ApiKeyAuth, AuditContext, Credential, CredentialHistory, CredentialType,
-        OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount,
-        SuperAdmin, User,
+        AdminKey, ApiKey, ApiKeyAuth, Credential, CredentialHistory, CredentialType, OAuthClient,
+        OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount, SuperAdmin,
+        TrustedAuditContext, User,
     },
 };
 
@@ -16,7 +16,7 @@ pub async fn create_user(
     profile: Profile,
     credential_type: CredentialType,
     value: &str,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<User> {
     service()
         .create_user(profile, credential_type, value, ctx)
@@ -28,7 +28,7 @@ pub async fn create_super_admin_user(
     profile: Profile,
     credential_type: CredentialType,
     value: &str,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<User> {
     service()
         .create_super_admin_user(profile, credential_type, value, ctx)
@@ -85,14 +85,14 @@ pub async fn count_search_users(query: &str) -> Result<i64> {
     svc.count_search_users(query).await
 }
 
-pub async fn update_user(user: User, ctx: AuditContext) -> Result<User> {
+pub async fn update_user(user: User, ctx: TrustedAuditContext) -> Result<User> {
     service()
         .update_user(user, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error updating user: {:?}", e))
 }
 
-pub async fn delete_user(id: &str, ctx: AuditContext) -> Result<Vec<String>> {
+pub async fn delete_user(id: &str, ctx: TrustedAuditContext) -> Result<Vec<String>> {
     service()
         .delete_user(id, ctx)
         .await
@@ -102,7 +102,7 @@ pub async fn delete_user(id: &str, ctx: AuditContext) -> Result<Vec<String>> {
 pub async fn change_password(
     user_id: &str,
     new_password: &str,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<Credential> {
     service()
         .change_password(user_id, new_password, ctx)
@@ -129,7 +129,7 @@ pub async fn rehash_credential(
     user_id: &str,
     old_value: &str,
     new_value: &str,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<bool> {
     service()
         .rehash_credential(user_id, old_value, new_value, ctx)
@@ -139,7 +139,10 @@ pub async fn rehash_credential(
 
 // ── OAuth Clients ──────────────────────────────────────────────────────────
 
-pub async fn create_oauth_client(client: OAuthClient, ctx: AuditContext) -> Result<OAuthClient> {
+pub async fn create_oauth_client(
+    client: OAuthClient,
+    ctx: TrustedAuditContext,
+) -> Result<OAuthClient> {
     service()
         .create_oauth_client(client, ctx)
         .await
@@ -175,7 +178,10 @@ pub async fn count_search_oauth_clients(query: &str) -> Result<i64> {
     svc.count_search_oauth_clients(query).await
 }
 
-pub async fn update_oauth_client(client: OAuthClient, ctx: AuditContext) -> Result<OAuthClient> {
+pub async fn update_oauth_client(
+    client: OAuthClient,
+    ctx: TrustedAuditContext,
+) -> Result<OAuthClient> {
     service()
         .update_oauth_client(client, ctx)
         .await
@@ -185,7 +191,7 @@ pub async fn update_oauth_client(client: OAuthClient, ctx: AuditContext) -> Resu
 pub async fn update_oauth_client_secret_hash(
     client_id: &str,
     client_secret_hash: Option<&str>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<OAuthClient> {
     service()
         .update_oauth_client_secret_hash(client_id, client_secret_hash, ctx)
@@ -196,7 +202,7 @@ pub async fn update_oauth_client_secret_hash(
 pub async fn set_oauth_client_enabled(
     client_id: &str,
     enabled: bool,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<OAuthClient> {
     service()
         .set_oauth_client_enabled(client_id, enabled, ctx)
@@ -204,7 +210,7 @@ pub async fn set_oauth_client_enabled(
         .inspect_err(|e| tracing::error!("Error setting OAuth client enabled state: {:?}", e))
 }
 
-pub async fn delete_oauth_client(client_id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn delete_oauth_client(client_id: &str, ctx: TrustedAuditContext) -> Result<()> {
     service()
         .delete_oauth_client(client_id, ctx)
         .await
@@ -227,7 +233,7 @@ pub async fn create_user_api_key(
     label: &str,
     attrs: Option<serde_json::Value>,
     org_id: Option<&str>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<ApiKey> {
     service()
         .create_user_api_key(user_id, key_hash, label, attrs, org_id, ctx)
@@ -240,7 +246,7 @@ pub async fn create_service_account_api_key(
     key_hash: &str,
     label: &str,
     attrs: Option<serde_json::Value>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<ApiKey> {
     service()
         .create_service_account_api_key(service_account_id, key_hash, label, attrs, ctx)
@@ -314,21 +320,21 @@ pub async fn count_search_api_keys(query: &str) -> Result<i64> {
     svc.count_search_api_keys(query).await
 }
 
-pub async fn update_api_key(api_key: ApiKey, ctx: AuditContext) -> Result<ApiKey> {
+pub async fn update_api_key(api_key: ApiKey, ctx: TrustedAuditContext) -> Result<ApiKey> {
     service()
         .update_api_key(api_key, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error updating API key: {:?}", e))
 }
 
-pub async fn revoke_api_key(id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn revoke_api_key(id: &str, ctx: TrustedAuditContext) -> Result<()> {
     service()
         .revoke_api_key(id, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error revoking API key: {:?}", e))
 }
 
-pub async fn delete_api_key(id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn delete_api_key(id: &str, ctx: TrustedAuditContext) -> Result<()> {
     service()
         .delete_api_key(id, ctx)
         .await
@@ -341,7 +347,7 @@ pub async fn create_admin_key(
     key_hash: &str,
     label: Option<String>,
     permissions: Vec<String>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<AdminKey> {
     service()
         .create_admin_key(key_hash, label, permissions, ctx)
@@ -369,21 +375,21 @@ pub async fn count_admin_keys() -> Result<i64> {
     svc.count_admin_keys().await
 }
 
-pub async fn update_admin_key(admin_key: AdminKey, ctx: AuditContext) -> Result<AdminKey> {
+pub async fn update_admin_key(admin_key: AdminKey, ctx: TrustedAuditContext) -> Result<AdminKey> {
     service()
         .update_admin_key(admin_key, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error updating admin key: {:?}", e))
 }
 
-pub async fn revoke_admin_key(id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn revoke_admin_key(id: &str, ctx: TrustedAuditContext) -> Result<()> {
     service()
         .revoke_admin_key(id, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error revoking admin key: {:?}", e))
 }
 
-pub async fn delete_admin_key(id: &str, ctx: AuditContext) -> Result<()> {
+pub async fn delete_admin_key(id: &str, ctx: TrustedAuditContext) -> Result<()> {
     service()
         .delete_admin_key(id, ctx)
         .await
@@ -396,7 +402,7 @@ pub async fn create_service_account(
     name: &str,
     description: Option<&str>,
     org_id: Option<&str>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<ServiceAccount> {
     service()
         .create_service_account(name, description, org_id, ctx)
@@ -437,15 +443,15 @@ pub async fn update_service_account(
     id: &str,
     name: &str,
     description: Option<&str>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<ServiceAccount> {
     service()
-        .update_service_account(id, name, description, None, ctx)
+        .update_service_account(id, name, description, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error updating service account: {:?}", e))
 }
 
-pub async fn delete_service_account(id: &str, ctx: AuditContext) -> Result<Vec<String>> {
+pub async fn delete_service_account(id: &str, ctx: TrustedAuditContext) -> Result<Vec<String>> {
     service()
         .delete_service_account(id, ctx)
         .await
@@ -458,7 +464,7 @@ pub async fn create_organization(
     name: &str,
     description: Option<&str>,
     attrs: Option<&serde_json::Value>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<Organization> {
     service()
         .create_organization(name, description, attrs, ctx)
@@ -500,7 +506,7 @@ pub async fn update_organization(
     name: &str,
     description: Option<&str>,
     attrs: Option<&serde_json::Value>,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<Organization> {
     service()
         .update_organization(id, name, description, attrs, ctx)
@@ -508,7 +514,7 @@ pub async fn update_organization(
         .inspect_err(|e| tracing::error!("Error updating organization: {:?}", e))
 }
 
-pub async fn delete_organization(id: &str, ctx: AuditContext) -> Result<Vec<String>> {
+pub async fn delete_organization(id: &str, ctx: TrustedAuditContext) -> Result<Vec<String>> {
     service()
         .delete_organization(id, ctx)
         .await
@@ -519,7 +525,7 @@ pub async fn add_user_to_organization(
     user_id: &str,
     org_id: &str,
     role: &str,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<()> {
     service()
         .add_user_to_organization(user_id, org_id, role, ctx)
@@ -530,7 +536,7 @@ pub async fn add_user_to_organization(
 pub async fn remove_user_from_organization(
     user_id: &str,
     org_id: &str,
-    ctx: AuditContext,
+    ctx: TrustedAuditContext,
 ) -> Result<Vec<String>> {
     service()
         .remove_user_from_organization(user_id, org_id, ctx)
