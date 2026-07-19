@@ -241,35 +241,6 @@ pub struct Metrics {
     config_reloads: Counter<u64>,
 }
 
-#[cfg(test)]
-mod audit_trace_tests {
-    use super::*;
-
-    #[test]
-    fn audit_trace_id_accepts_only_valid_w3c_traceparent() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "traceparent",
-            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
-        );
-        headers.insert(
-            "x-trace-id",
-            HeaderValue::from_static("client-selected-value"),
-        );
-
-        assert_eq!(
-            trace_id_from_headers(&headers).as_deref(),
-            Some("4bf92f3577b34da6a3ce929d0e0e4736")
-        );
-
-        headers.insert(
-            "traceparent",
-            HeaderValue::from_static("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
-        );
-        assert!(trace_id_from_headers(&headers).is_none());
-    }
-}
-
 static METRICS: Lazy<Metrics> = Lazy::new(|| {
     let meter = global::meter(INSTRUMENTATION_NAME);
     Metrics {
@@ -444,4 +415,33 @@ pub fn record_config_reload(kind: &str, outcome: &str) {
 
 fn duration_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+#[cfg(test)]
+mod audit_trace_tests {
+    use super::*;
+
+    #[test]
+    fn audit_trace_id_accepts_only_valid_w3c_traceparent() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+        );
+        headers.insert(
+            "x-trace-id",
+            HeaderValue::from_static("client-selected-value"),
+        );
+
+        assert_eq!(
+            trace_id_from_headers(&headers).as_deref(),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736")
+        );
+
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_static("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
+        );
+        assert!(trace_id_from_headers(&headers).is_none());
+    }
 }
