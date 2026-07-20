@@ -30,6 +30,12 @@ pub struct UpstreamNode {
     pub targets: Vec<UpstreamTargetNode>,
     pub load_balancer: LoadBalancer,
     pub transport: Option<TransportNode>,
+    pub internal_context: Option<InternalContextNode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InternalContextNode {
+    pub audience: String,
 }
 
 #[derive(Debug, Clone)]

@@ -7,7 +7,9 @@ mod err;
 mod etc;
 mod fun;
 
-use crate::etc::{cors, gate, geoip, headers, jwt, log, logo, profile, run, store, tls};
+use crate::etc::{
+    cors, gate, geoip, headers, internal_context, jwt, log, logo, profile, run, store, tls,
+};
 
 use axum::Extension;
 use axum::middleware::from_fn;
@@ -62,6 +64,7 @@ pub async fn run() -> std::io::Result<()> {
     info!("Graceful shutdown timeout: {}s", shutdown_timeout_secs);
 
     jwt::init();
+    internal_context::init().map_err(std::io::Error::other)?;
     act::password_policy::init();
     geoip::init();
     store::init().await;

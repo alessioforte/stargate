@@ -1,0 +1,35 @@
+{
+  "aud": "urn:stargate:service:orders",
+  "exp": 1784474130,
+  "iat": 1784474100,
+  "iss": "https://auth.example.com/internal-context",
+  "jti": "01JZ000000000000000000000J",
+  "stg": {
+    "actor": {
+      "type": "api_key"
+    },
+    "authentication": {
+      "kind": "api_key"
+    },
+    "dispatch": {
+      "attempt": 2,
+      "kind": "shadow"
+    },
+    "request": {
+      "client_ip": "203.0.113.10",
+      "id": "01JZ000000000000000000000R",
+      "method": "POST",
+      "original_path": "/api/orders",
+      "path": "/v1/orders",
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "user_agent": "example-client/1.0"
+    },
+    "route": {
+      "policy_revision": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "router": "orders-write",
+      "service": "orders"
+    },
+    "v": 1
+  },
+  "sub": "01JZ000000000000000000000C"
+}

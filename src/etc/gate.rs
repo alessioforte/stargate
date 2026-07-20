@@ -1,4 +1,4 @@
-use crate::etc::{store::use_store, telemetry};
+use crate::etc::{internal_context, store::use_store, telemetry};
 use gate::{
     Gate,
     cfg::{RuntimeConfig, Service},
@@ -54,7 +54,11 @@ pub fn get_policies_path() -> String {
 
 fn load_config() -> RuntimeConfig {
     let config_file_path = get_config_path();
-    RuntimeConfig::from_file(&config_file_path).expect("Unable to load gateway config")
+    let config =
+        RuntimeConfig::from_file(&config_file_path).expect("Unable to load gateway config");
+    internal_context::preflight_config(&config)
+        .expect("Gateway config failed internal-context preflight");
+    config
 }
 
 pub fn init() -> std::sync::Arc<Gate> {
@@ -198,6 +202,11 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                                 continue;
                             }
                         };
+                        if let Err(error) = internal_context::preflight_config(&config) {
+                            telemetry::record_config_reload("gateway_config", "error");
+                            error!(%error, "Configuration file changed but failed internal-context preflight; keeping previous config");
+                            continue;
+                        }
                         let config_version = update_cached_config(config.clone());
                         CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                         info!(config_version, "Configuration file changed, reloading...");

@@ -1,8 +1,8 @@
 use super::graph::{
-    CompileError, CompiledConfig, HeaderValueNode, HttpGraph, MatchExprNode, MiddlewareNode,
-    MirrorServiceNode, NamedValuePredicate, PathPredicate, PolicyNode, ResponseBodyNode,
-    RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode, UpstreamTargetNode,
-    ValuePredicate, WeightedServiceNode,
+    CompileError, CompiledConfig, HeaderValueNode, HttpGraph, InternalContextNode, MatchExprNode,
+    MiddlewareNode, MirrorServiceNode, NamedValuePredicate, PathPredicate, PolicyNode,
+    ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode,
+    UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
 };
 use super::{Limit, LimitSpec, LoadBalancer, MtlsConfig};
 use indexmap::IndexMap;
@@ -12,6 +12,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 const SCHEMA: &str = "stargate/v2alpha1";
+const INTERNAL_CONTEXT_HEADER: &str = "stargate-context";
+const INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -122,6 +124,15 @@ pub struct Upstream {
     pub load_balancer: LoadBalancer,
     #[serde(default)]
     pub transport: Option<Transport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub internal_context: Option<InternalContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InternalContext {
+    #[serde(default)]
+    pub audience: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -436,11 +447,44 @@ fn compile_upstreams(
                     connect_timeout: transport.connect_timeout.clone(),
                     protocols: transport.protocols.clone(),
                 }),
+                internal_context: compile_internal_context(
+                    name,
+                    upstream.internal_context.as_ref(),
+                )?,
             },
         );
     }
 
     Ok(out)
+}
+
+fn compile_internal_context(
+    upstream_name: &str,
+    context: Option<&InternalContext>,
+) -> Result<Option<InternalContextNode>, CompileError> {
+    let Some(context) = context else {
+        return Ok(None);
+    };
+    let path = format!("http.upstreams.{}.internal_context.audience", upstream_name);
+    let audience = context
+        .audience
+        .as_deref()
+        .ok_or_else(|| CompileError::new(&path, "audience is required"))?;
+    if audience.trim().is_empty() {
+        return Err(CompileError::new(&path, "audience cannot be blank"));
+    }
+    if audience.len() > INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES {
+        return Err(CompileError::new(
+            path,
+            format!(
+                "audience cannot exceed {} UTF-8 bytes",
+                INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES
+            ),
+        ));
+    }
+    Ok(Some(InternalContextNode {
+        audience: audience.to_owned(),
+    }))
 }
 
 fn compile_middlewares(
@@ -483,18 +527,18 @@ fn compile_middlewares(
             Middleware::RequestHeaders { add, set, remove } => MiddlewareNode::RequestHeaders {
                 add: compile_headers(format!("http.middlewares.{}.add", name), add)?,
                 set: compile_headers(format!("http.middlewares.{}.set", name), set)?,
-                remove: remove
-                    .iter()
-                    .map(|value| value.to_ascii_lowercase())
-                    .collect(),
+                remove: compile_header_removals(
+                    format!("http.middlewares.{}.remove", name),
+                    remove,
+                )?,
             },
             Middleware::ResponseHeaders { add, set, remove } => MiddlewareNode::ResponseHeaders {
                 add: compile_headers(format!("http.middlewares.{}.add", name), add)?,
                 set: compile_headers(format!("http.middlewares.{}.set", name), set)?,
-                remove: remove
-                    .iter()
-                    .map(|value| value.to_ascii_lowercase())
-                    .collect(),
+                remove: compile_header_removals(
+                    format!("http.middlewares.{}.remove", name),
+                    remove,
+                )?,
             },
         };
 
@@ -1038,18 +1082,45 @@ fn compile_headers(
         .iter()
         .enumerate()
         .map(|(idx, header)| {
+            let name_path = format!("{}[{}].name", path, idx);
             if header.name.trim().is_empty() {
-                return Err(CompileError::new(
-                    format!("{}[{}].name", path, idx),
-                    "header name cannot be empty",
-                ));
+                return Err(CompileError::new(name_path, "header name cannot be empty"));
             }
+            ensure_not_reserved_header(&name_path, &header.name)?;
             Ok(HeaderValueNode {
                 name: header.name.to_ascii_lowercase(),
                 value: header.value.clone(),
             })
         })
         .collect()
+}
+
+fn compile_header_removals(path: String, headers: &[String]) -> Result<Vec<String>, CompileError> {
+    headers
+        .iter()
+        .enumerate()
+        .map(|(idx, header)| {
+            let header_path = format!("{}[{}]", path, idx);
+            if header.trim().is_empty() {
+                return Err(CompileError::new(
+                    &header_path,
+                    "header name cannot be empty",
+                ));
+            }
+            ensure_not_reserved_header(&header_path, header)?;
+            Ok(header.to_ascii_lowercase())
+        })
+        .collect()
+}
+
+fn ensure_not_reserved_header(path: &str, name: &str) -> Result<(), CompileError> {
+    if name.eq_ignore_ascii_case(INTERNAL_CONTEXT_HEADER) {
+        return Err(CompileError::new(
+            path,
+            format!("'{}' is reserved by Stargate", INTERNAL_CONTEXT_HEADER),
+        ));
+    }
+    Ok(())
 }
 
 fn compile_response_body(body: &ResponseBody) -> ResponseBodyNode {
@@ -1482,5 +1553,164 @@ http:
             }
             other => panic!("unexpected matcher: {other:?}"),
         }
+    }
+
+    #[test]
+    fn internal_context_is_optional_and_compiles_when_present() {
+        let absent = parse_config(
+            r#"
+schema: stargate/v2alpha1
+http:
+  upstreams:
+    orders:
+      targets:
+        - url: http://orders:8080
+"#,
+        )
+        .compile()
+        .expect("config should compile");
+        assert!(absent.http.upstreams["orders"].internal_context.is_none());
+
+        let present = parse_config(
+            r#"
+schema: stargate/v2alpha1
+http:
+  upstreams:
+    orders:
+      targets:
+        - url: http://orders:8080
+      internal_context:
+        audience: urn:stargate:service:orders
+"#,
+        )
+        .compile()
+        .expect("config should compile");
+        assert_eq!(
+            present.http.upstreams["orders"]
+                .internal_context
+                .as_ref()
+                .unwrap()
+                .audience,
+            "urn:stargate:service:orders"
+        );
+    }
+
+    #[test]
+    fn rejects_missing_blank_and_oversized_internal_context_audience() {
+        for (audience, message) in [
+            (None, "audience is required"),
+            (Some("   ".to_owned()), "audience cannot be blank"),
+            (
+                Some("a".repeat(super::INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES + 1)),
+                "audience cannot exceed 256 UTF-8 bytes",
+            ),
+        ] {
+            let audience = audience
+                .map(|value| format!("        audience: '{value}'\n"))
+                .unwrap_or_else(|| "        {}\n".to_owned());
+            let yaml = format!(
+                "schema: stargate/v2alpha1\nhttp:\n  upstreams:\n    orders:\n      targets:\n        - url: http://orders:8080\n      internal_context:\n{audience}"
+            );
+            let error = parse_config(&yaml)
+                .compile()
+                .expect_err("compile should fail");
+            assert_eq!(
+                error.path,
+                "http.upstreams.orders.internal_context.audience"
+            );
+            assert_eq!(error.message, message);
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_internal_context_fields() {
+        let error = serde_yaml_bw::from_str::<Config>(
+            r#"
+schema: stargate/v2alpha1
+http:
+  upstreams:
+    orders:
+      targets:
+        - url: http://orders:8080
+      internal_context:
+        audience: urn:stargate:service:orders
+        mode: dual
+"#,
+        )
+        .expect_err("unknown block fields must fail parsing");
+        assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn reserves_internal_context_header_in_all_header_middlewares() {
+        for (kind, operation, value, expected_suffix) in [
+            (
+                "request_headers",
+                "add",
+                "        - name: Stargate-Context\n          value: spoof",
+                "add[0].name",
+            ),
+            (
+                "request_headers",
+                "set",
+                "        - name: STARGATE-CONTEXT\n          value: spoof",
+                "set[0].name",
+            ),
+            (
+                "request_headers",
+                "remove",
+                "        - stargate-context",
+                "remove[0]",
+            ),
+            (
+                "response_headers",
+                "add",
+                "        - name: Stargate-Context\n          value: spoof",
+                "add[0].name",
+            ),
+            (
+                "response_headers",
+                "set",
+                "        - name: STARGATE-CONTEXT\n          value: spoof",
+                "set[0].name",
+            ),
+            (
+                "response_headers",
+                "remove",
+                "        - stargate-context",
+                "remove[0]",
+            ),
+        ] {
+            let yaml = format!(
+                "schema: stargate/v2alpha1\nhttp:\n  middlewares:\n    headers:\n      kind: {kind}\n      {operation}:\n{value}\n"
+            );
+            let error = parse_config(&yaml)
+                .compile()
+                .expect_err("compile should fail");
+            assert_eq!(
+                error.path,
+                format!("http.middlewares.headers.{expected_suffix}")
+            );
+        }
+    }
+
+    #[test]
+    fn reserves_internal_context_header_in_direct_responses() {
+        let error = parse_config(
+            r#"
+schema: stargate/v2alpha1
+http:
+  services:
+    response:
+      kind: direct_response
+      status: 200
+      headers:
+        - name: Stargate-Context
+          value: spoof
+"#,
+        )
+        .compile()
+        .expect_err("compile should fail");
+        assert_eq!(error.path, "http.services.response.headers[0].name");
     }
 }

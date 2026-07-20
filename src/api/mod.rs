@@ -5,6 +5,7 @@ pub mod auth_app;
 pub mod docs;
 pub mod gateway;
 pub mod health;
+pub mod internal_context;
 pub mod oidc;
 pub mod signup;
 pub mod social;
@@ -15,6 +16,7 @@ use utoipa::OpenApi;
 #[openapi(
     paths(
         crate::api::health::get_health,
+        crate::api::internal_context::get_internal_context_jwks,
         crate::api::oidc::well_known::get_jwks,
         crate::api::oidc::well_known::get_oauth_metadata,
         crate::api::oidc::well_known::get_openid_configuration,
@@ -113,6 +115,10 @@ pub fn router() -> axum::Router {
 
     axum::Router::new()
         .route("/health", get(health::get_health))
+        .route(
+            "/.well-known/stargate-context-jwks.json",
+            get(internal_context::get_internal_context_jwks),
+        )
         .route("/docs", get(docs::get_api_doc))
         .merge(signup::router())
         .merge(oidc::router())
@@ -177,6 +183,16 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["keys"].is_array());
+    }
+
+    #[tokio::test]
+    async fn internal_context_jwks_is_unavailable_when_not_configured() {
+        let resp = send("/.well-known/stargate-context-jwks.json").await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            resp.headers().get(CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
     }
 
     #[tokio::test]

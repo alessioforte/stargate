@@ -221,6 +221,62 @@ http:
       upstream: api-v1
 ```
 
+### Internal context (activation guarded)
+
+An upstream may declare the audience that will receive Stargate's signed
+internal request context:
+
+```yaml
+http:
+  upstreams:
+    orders:
+      targets:
+        - url: http://orders:8080
+      internal_context:
+        audience: urn:stargate:service:orders
+```
+
+`audience` is required, must not be blank, and is limited to 256 UTF-8 bytes.
+Omitting `internal_context` preserves the existing upstream behavior and emits
+no signed context.
+
+During P2, the block is intentionally activation-guarded: Stargate parses and
+compiles it, preflights the separate signing key and matching public `kid`, and
+then rejects activation until dispatch sanitization and replay behavior are
+complete in P5. A rejected startup or hot reload never replaces the previous
+active graph.
+
+`stargate-context` is reserved to the gateway. It cannot be added, set, or
+removed by request/response header middleware, and cannot be returned by a
+`direct_response` service. Matching is case-insensitive.
+
+The signer is configured independently from OAuth/OIDC keys:
+
+```dotenv
+INTERNAL_CONTEXT_ALGORITHM=RS256
+INTERNAL_CONTEXT_ISSUER=https://auth.example.com/internal-context
+INTERNAL_CONTEXT_KID=stargate-internal-current
+INTERNAL_CONTEXT_PRIVATE_KEY_PATH=.stargate/internal-context/private.pem
+INTERNAL_CONTEXT_JWKS_PATH=.stargate/internal-context/jwks.json
+INTERNAL_CONTEXT_TTL_SECS=30
+INTERNAL_CONTEXT_CLOCK_SKEW_SECS=5
+INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS=60
+```
+
+Only RS256 is accepted in version 1. Stargate does not generate missing
+internal keys. The JWKS file must contain public RSA keys with unique `kid`
+values and may contain both current and retiring keys. The active `kid` must
+match the private signing key. Public keys are exposed separately at
+`/.well-known/stargate-context-jwks.json`; the OAuth/OIDC JWKS is unchanged.
+
+Rotate keys in this order:
+
+1. Publish the new public JWK alongside the retiring key.
+2. Allow downstream caches to observe the overlapping JWKS.
+3. Deploy the new private key and change `INTERNAL_CONTEXT_KID`.
+4. Retain the old public key for at least the token TTL, maximum clock skew,
+   and downstream JWKS cache overlap before removing it.
+
 ### Upstream Health
 
 Each upstream target is fronted by a circuit breaker. Two independent signals
