@@ -1,3 +1,4 @@
+use super::dispatch::InternalDispatch;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
@@ -17,6 +18,7 @@ pub async fn handler(
     mut req: http::Request<Body>,
     uri: &str,
     preserve_host: bool,
+    internal_dispatch: Option<&InternalDispatch>,
 ) -> Result<Response, ErrorResponse> {
     if !hyper_tungstenite::is_upgrade_request(&req) {
         return Err(ErrorResponse::from(HttpError::BadRequest(
@@ -24,7 +26,8 @@ pub async fn handler(
         )));
     }
 
-    let upstream_request = build_upstream_request(uri, req.headers(), preserve_host)?;
+    let upstream_request =
+        build_upstream_request(uri, req.headers(), preserve_host, internal_dispatch)?;
     let (upstream_ws, upstream_response) =
         connect_async(upstream_request).await.map_err(|error| {
             tracing::error!(%uri, %error, "WebSocket upstream connect failed");
@@ -47,6 +50,9 @@ pub async fn handler(
             .insert(SEC_WEBSOCKET_PROTOCOL, protocol.clone());
     }
 
+    // Internal context authenticates only the completed HTTP handshake. The
+    // accepted connection then proxies frames without reminting or replacing
+    // the identity for its lifetime.
     tokio::spawn(async move {
         if let Err(error) = proxy_websocket(websocket, upstream_ws).await {
             tracing::warn!(%error, "WebSocket proxy closed with error");
@@ -60,6 +66,7 @@ fn build_upstream_request(
     uri: &str,
     incoming_headers: &http::HeaderMap,
     preserve_host: bool,
+    internal_dispatch: Option<&InternalDispatch>,
 ) -> Result<http::Request<()>, ErrorResponse> {
     let mut request = uri.into_client_request().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid WebSocket upstream URI");
@@ -69,7 +76,11 @@ fn build_upstream_request(
     })?;
 
     copy_forwarded_headers(request.headers_mut(), incoming_headers, preserve_host);
-    telemetry::inject_context(request.headers_mut());
+    if let Some(dispatch) = internal_dispatch {
+        dispatch.prepare(&mut request)?;
+    } else {
+        telemetry::inject_context(request.headers_mut());
+    }
 
     Ok(request)
 }
@@ -156,11 +167,68 @@ async fn proxy_websocket(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_upstream_request, copy_forwarded_headers, should_forward_request_header};
+    use super::*;
+    use crate::etc::{
+        guard::VerifiedIdentity,
+        internal_context::InternalContextRuntime,
+        reqctx::{INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext},
+    };
+    use chrono::Utc;
+    use ctx::{
+        ContextSigner, ContextVerifier, DispatchKind, ExpectedRequest, SignerConfig,
+        StaticKeyResolver, VerifierConfig,
+    };
     use http::header::{
         AUTHORIZATION, CONNECTION, COOKIE, HOST, ORIGIN, SEC_WEBSOCKET_EXTENSIONS,
         SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, UPGRADE,
     };
+    use std::sync::Arc;
+    use tokio::sync::oneshot;
+    use tokio_tungstenite::{
+        accept_hdr_async,
+        tungstenite::{
+            Message,
+            handshake::server::{Request as ServerRequest, Response as ServerResponse},
+        },
+    };
+
+    const ISSUER: &str = "https://stargate.test/internal-context";
+    const AUDIENCE: &str = "urn:stargate:service:socket";
+    const KEY_ID: &str = "stargate-internal-test";
+    const REQUEST_ID: &str = "01JZ000000000000000000000R";
+    const PRIVATE_KEY: &[u8] = include_bytes!("../../../crates/ctx/tests/fixtures/private.pem");
+    const PUBLIC_KEY: &[u8] = include_bytes!("../../../crates/ctx/tests/fixtures/public.pem");
+
+    fn internal_dispatch() -> InternalDispatch {
+        let signer = ContextSigner::from_rsa_pem(
+            SignerConfig::new(ISSUER, KEY_ID, 30).unwrap(),
+            PRIVATE_KEY,
+        )
+        .unwrap();
+        let runtime = InternalContextRuntime::from_signer_for_test(signer);
+        let request = RequestContext::new(REQUEST_ID.to_owned(), Utc::now(), None, None, None);
+        let draft = Arc::new(
+            PropagationDraft::build(
+                &VerifiedIdentity::anonymous(),
+                &request,
+                "GET",
+                "/socket",
+                "/socket",
+                "socket",
+                "socket",
+                None,
+            )
+            .unwrap(),
+        );
+        InternalDispatch::new(
+            AUDIENCE,
+            Some(&draft),
+            Some(&runtime),
+            DispatchKind::Primary,
+            1,
+        )
+        .unwrap()
+    }
 
     #[test]
     fn forwards_request_headers_needed_by_upstream() {
@@ -206,7 +274,8 @@ mod tests {
         headers.insert("x-trace-id", "trace_1".parse().unwrap());
 
         let request =
-            build_upstream_request("wss://upstream.example/socket?foo=1", &headers, false).unwrap();
+            build_upstream_request("wss://upstream.example/socket?foo=1", &headers, false, None)
+                .unwrap();
 
         assert_eq!(request.uri(), "wss://upstream.example/socket?foo=1");
         assert_eq!(
@@ -235,5 +304,99 @@ mod tests {
         copy_forwarded_headers(&mut target, &source, true);
 
         assert_eq!(target.get(HOST).unwrap(), "gateway.local");
+    }
+
+    // `accept_hdr_async` fixes the callback error type to tungstenite's full HTTP
+    // response; the test callback cannot make that dependency-owned type smaller.
+    #[allow(clippy::result_large_err)]
+    #[tokio::test]
+    async fn internal_websocket_handshake_is_sanitized_verified_and_frame_compatible() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, captured) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let callback = move |request: &ServerRequest, mut response: ServerResponse| {
+                if let Some(protocol) = request.headers().get(SEC_WEBSOCKET_PROTOCOL) {
+                    response
+                        .headers_mut()
+                        .insert(SEC_WEBSOCKET_PROTOCOL, protocol.clone());
+                }
+                sender
+                    .send((request.uri().clone(), request.headers().clone()))
+                    .unwrap();
+                Ok(response)
+            };
+            let mut socket = accept_hdr_async(stream, callback).await.unwrap();
+            let message = socket.next().await.unwrap().unwrap();
+            socket.send(message).await.unwrap();
+        });
+
+        let mut incoming = http::HeaderMap::new();
+        incoming.insert(AUTHORIZATION, "Bearer edge-secret".parse().unwrap());
+        incoming.insert("proxy-authorization", "Basic edge-secret".parse().unwrap());
+        incoming.insert("x-api-key", "edge-api-key".parse().unwrap());
+        incoming.insert("baggage", "private=value".parse().unwrap());
+        incoming.insert("x-request-id", "attacker-id".parse().unwrap());
+        incoming.insert("stargate-context", "attacker-context".parse().unwrap());
+        incoming.insert(COOKIE, "theme=dark; jwt=edge-session".parse().unwrap());
+        incoming.insert(ORIGIN, "https://client.test".parse().unwrap());
+        incoming.insert(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
+        let target = format!("ws://{address}/socket?%6awt=secret&safe=%2Fvalue");
+        let request =
+            build_upstream_request(&target, &incoming, false, Some(&internal_dispatch())).unwrap();
+
+        let (mut client, _) = connect_async(request).await.unwrap();
+        client.send(Message::Text("ping".into())).await.unwrap();
+        assert_eq!(
+            client.next().await.unwrap().unwrap(),
+            Message::Text("ping".into())
+        );
+        let (uri, headers) = captured.await.unwrap();
+
+        assert_eq!(uri.path(), "/socket");
+        assert_eq!(uri.query(), Some("safe=%2Fvalue"));
+        for name in [
+            AUTHORIZATION,
+            http::header::PROXY_AUTHORIZATION,
+            http::HeaderName::from_static("x-api-key"),
+            http::HeaderName::from_static("baggage"),
+        ] {
+            assert!(headers.get_all(name).iter().next().is_none());
+        }
+        assert_eq!(headers[COOKIE], "theme=dark");
+        assert_eq!(headers[ORIGIN], "https://client.test");
+        assert_eq!(headers[SEC_WEBSOCKET_PROTOCOL], "chat");
+        assert!(headers.get(SEC_WEBSOCKET_KEY).is_some());
+        assert_eq!(headers[SEC_WEBSOCKET_VERSION], "13");
+        assert_eq!(headers.get_all("x-request-id").iter().count(), 1);
+        assert_eq!(headers["x-request-id"], REQUEST_ID);
+
+        let tokens = headers
+            .get_all(INTERNAL_CONTEXT_HEADER)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(tokens.len(), 1);
+        let resolver = StaticKeyResolver::from_rsa_pem(KEY_ID, PUBLIC_KEY).unwrap();
+        let verifier = ContextVerifier::new(
+            VerifierConfig::new(ISSUER, AUDIENCE, 5).unwrap(),
+            Arc::new(resolver),
+        );
+        let trusted = verifier
+            .verify(
+                tokens[0],
+                ExpectedRequest {
+                    method: "GET",
+                    encoded_path: "/socket",
+                    request_id: REQUEST_ID,
+                },
+            )
+            .unwrap();
+        assert_eq!(trusted.context().dispatch.kind, DispatchKind::Primary);
+        assert_eq!(trusted.context().dispatch.attempt, 1);
+
+        client.close(None).await.unwrap();
+        server.await.unwrap();
     }
 }

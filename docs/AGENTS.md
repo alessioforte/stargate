@@ -69,7 +69,7 @@ Mounted as Axum `fallback_service`. Current request flow:
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
 5. Apply selected policies in fixed runtime order: auth, access control, rate limit, quota.
 6. Build an execution plan from the selected service: load-balanced upstream, weighted split, mirror, failover, or direct response.
-7. Buffer replayable requests when mirror traffic or response-status failover requires it.
+7. Buffer replayable requests for mirror traffic and every multi-attempt failover plan.
 8. Execute HTTP, WebSocket, or direct response and apply gateway/response headers.
 
 Gateway modules:
@@ -78,6 +78,7 @@ Gateway modules:
 - `policies.rs`: auth, ACE, rate limit, quota policy execution.
 - `planner.rs`: service graph expansion into an execution plan.
 - `executor.rs`: upstream/direct-response execution, mirror dispatch, failover execution.
+- `dispatch.rs`: shared internal-context sanitization, trace injection, and per-attempt signing boundary.
 - `replay.rs`: request buffering and replay body limits.
 - `headers.rs`, `path.rs`, `responses.rs`, `limits.rs`, `types.rs`: focused helpers and shared types.
 - `http.rs`, `ws.rs`: protocol-specific proxy implementations.
@@ -163,7 +164,7 @@ Implemented:
 - Failover on selected response status codes.
 - Direct response routes.
 - Fallback routes via low-priority catch-all routers.
-- Request replay buffering for mirror/status failover.
+- Request replay buffering for mirrors and all multi-attempt failover plans.
 - Replay body cap via `GATEWAY_REPLAY_BODY_LIMIT` (default `2MiB`).
 
 Partially implemented:
@@ -409,7 +410,7 @@ logical outbox columns.
 | `CORS_ORIGINS` | - | Allowed origins |
 | `TRUSTED_ORIGINS` | - | Trusted browser origins for sensitive IAM endpoints |
 | `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
-| `GATEWAY_REPLAY_BODY_LIMIT` | 2MiB | Max buffered body for mirror/status-failover replay |
+| `GATEWAY_REPLAY_BODY_LIMIT` | 2MiB | Max buffered body for mirror/failover replay |
 | `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | Request drain timeout during shutdown |
 | `EMAIL_OTP_PEPPER` | - | Server-side HMAC pepper for email/message OTP records |
 | `EMAIL_OTP_LENGTH` | 6 | Email OTP code length |

@@ -1,3 +1,4 @@
+mod dispatch;
 mod executor;
 mod headers;
 mod http;
@@ -94,6 +95,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             preserve_host: false,
             response_headers: ResponseHeaderMutations::default(),
             propagation_draft: None,
+            internal_context_runtime: crate::etc::internal_context::runtime().cloned(),
         };
 
         {
@@ -197,8 +199,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .await?
         } else if plan.requires_replay() {
             let limit = replay_body_limit();
-            if !plan.needs_status_failover_replay() && content_length_exceeds(req.headers(), limit)
-            {
+            if !plan.needs_failover_replay() && content_length_exceeds(req.headers(), limit) {
                 tracing::warn!(
                     limit,
                     "Skipping mirror traffic because request body exceeds replay limit"
@@ -219,13 +220,19 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 let replay = buffer_request(req, limit).await?;
                 telemetry::record_gateway_replay_bytes(replay.body.len());
                 spawn_mirrors(plan.mirrors.clone(), replay.clone(), state.clone());
-                execute_plan_from_replay(&plan, &replay, &state, Some(balancers.as_ref()))
-                    .instrument(tracing::info_span!(
-                        "gateway.execute",
-                        stargate.router = %router.name,
-                        stargate.service = %router.service,
-                    ))
-                    .await?
+                execute_plan_from_replay(
+                    &plan,
+                    &replay,
+                    &state,
+                    Some(balancers.as_ref()),
+                    ctx::DispatchKind::Primary,
+                )
+                .instrument(tracing::info_span!(
+                    "gateway.execute",
+                    stargate.router = %router.name,
+                    stargate.service = %router.service,
+                ))
+                .await?
             }
         } else {
             let selected = plan.attempts.first().ok_or_else(|| {

@@ -1,4 +1,4 @@
-use crate::etc::reqctx::PropagationDraft;
+use crate::etc::{internal_context::InternalContextRuntime, reqctx::PropagationDraft};
 use ::http::{HeaderMap, Method, StatusCode, Version};
 use gate::graph::{HeaderValueNode, InternalContextNode, ResponseBodyNode};
 use hyper::body::Bytes;
@@ -21,6 +21,7 @@ pub(super) struct RequestState {
     pub(super) preserve_host: bool,
     pub(super) response_headers: ResponseHeaderMutations,
     pub(super) propagation_draft: Option<Arc<PropagationDraft>>,
+    pub(super) internal_context_runtime: Option<Arc<InternalContextRuntime>>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,11 +55,11 @@ pub(super) struct ExecutionPlan {
 
 impl ExecutionPlan {
     pub(super) fn requires_replay(&self) -> bool {
-        !self.mirrors.is_empty() || (!self.failover_on_status.is_empty() && self.attempts.len() > 1)
+        !self.mirrors.is_empty() || self.attempts.len() > 1
     }
 
-    pub(super) fn needs_status_failover_replay(&self) -> bool {
-        !self.failover_on_status.is_empty() && self.attempts.len() > 1
+    pub(super) fn needs_failover_replay(&self) -> bool {
+        self.attempts.len() > 1
     }
 
     pub(super) fn should_failover_response(&self, status: StatusCode) -> bool {

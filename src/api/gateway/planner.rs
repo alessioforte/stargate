@@ -180,6 +180,22 @@ mod tests {
     use super::*;
     use gate::cfg::RuntimeConfig;
 
+    fn balancer(url: &str) -> DynLoadBalancer {
+        lb::BaseLoadBalancer::new(
+            lb::RoundRobin::new(),
+            vec![lb::Upstream::new(url.to_owned(), None)],
+        )
+    }
+
+    fn request_context() -> lb::RequestContext<'static> {
+        lb::RequestContext {
+            client_ip: "127.0.0.1",
+            path: "/orders",
+            method: "GET",
+            key: None,
+        }
+    }
+
     #[test]
     fn selected_leaf_carries_its_compiled_audience_not_its_target_url() {
         let config = RuntimeConfig::from_yaml_str(
@@ -200,20 +216,9 @@ http:
         )
         .unwrap();
         let graph = &config.compiled().http;
-        let balancer: DynLoadBalancer = lb::BaseLoadBalancer::new(
-            lb::RoundRobin::new(),
-            vec![lb::Upstream::new(
-                "http://orders.internal:8080".to_owned(),
-                None,
-            )],
-        );
+        let balancer = balancer("http://orders.internal:8080");
         let balancers = HashMap::from([("orders-leaf".to_owned(), balancer)]);
-        let request = lb::RequestContext {
-            client_ip: "127.0.0.1",
-            path: "/orders",
-            method: "GET",
-            key: None,
-        };
+        let request = request_context();
 
         let plan =
             build_execution_plan(graph, &balancers, "orders-leaf", &request, "request-id").unwrap();
@@ -233,5 +238,174 @@ http:
                 .map(|context| context.audience.as_str()),
             Some("urn:stargate:service:orders")
         );
+    }
+
+    #[test]
+    fn failover_and_mirror_plans_retain_each_leaf_audience() {
+        let config = RuntimeConfig::from_yaml_str(
+            r#"
+schema: stargate/v2alpha1
+http:
+  upstreams:
+    primary-pool:
+      targets:
+        - url: http://primary.internal
+      internal_context:
+        audience: urn:stargate:service:primary
+    fallback-pool:
+      targets:
+        - url: http://fallback.internal
+      internal_context:
+        audience: urn:stargate:service:fallback
+    shadow-pool:
+      targets:
+        - url: http://shadow.internal
+      internal_context:
+        audience: urn:stargate:service:shadow
+  services:
+    primary-leaf:
+      kind: load_balancer
+      upstream: primary-pool
+    fallback-leaf:
+      kind: load_balancer
+      upstream: fallback-pool
+    shadow-leaf:
+      kind: load_balancer
+      upstream: shadow-pool
+    primary-failover:
+      kind: failover
+      service: primary-leaf
+      failovers:
+        - fallback-leaf
+      on_status:
+        - 503
+    shadow-failover:
+      kind: failover
+      service: shadow-leaf
+      failovers:
+        - fallback-leaf
+    root:
+      kind: mirror
+      service: primary-failover
+      mirrors:
+        - service: shadow-failover
+          percent: 100
+"#,
+        )
+        .unwrap();
+        let graph = &config.compiled().http;
+        let balancers = HashMap::from([
+            (
+                "primary-leaf".to_owned(),
+                balancer("http://primary.internal"),
+            ),
+            (
+                "fallback-leaf".to_owned(),
+                balancer("http://fallback.internal"),
+            ),
+            ("shadow-leaf".to_owned(), balancer("http://shadow.internal")),
+        ]);
+
+        let plan =
+            build_execution_plan(graph, &balancers, "root", &request_context(), "request-id")
+                .unwrap();
+
+        let audiences = |attempts: &[SelectedService]| {
+            attempts
+                .iter()
+                .map(|selected| match selected {
+                    SelectedService::Upstream {
+                        internal_context, ..
+                    } => internal_context.as_ref().unwrap().audience.clone(),
+                    SelectedService::DirectResponse { .. } => "direct".to_owned(),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            audiences(&plan.attempts),
+            vec![
+                "urn:stargate:service:primary",
+                "urn:stargate:service:fallback"
+            ]
+        );
+        assert_eq!(plan.mirrors.len(), 1);
+        assert_eq!(
+            audiences(&plan.mirrors[0].attempts),
+            vec![
+                "urn:stargate:service:shadow",
+                "urn:stargate:service:fallback"
+            ]
+        );
+    }
+
+    #[test]
+    fn weighted_selection_keeps_the_chosen_leaf_audience() {
+        let config = RuntimeConfig::from_yaml_str(
+            r#"
+schema: stargate/v2alpha1
+http:
+  upstreams:
+    blue-pool:
+      targets:
+        - url: http://blue.internal
+      internal_context:
+        audience: urn:stargate:service:blue
+    green-pool:
+      targets:
+        - url: http://green.internal
+      internal_context:
+        audience: urn:stargate:service:green
+  services:
+    blue:
+      kind: load_balancer
+      upstream: blue-pool
+    green:
+      kind: load_balancer
+      upstream: green-pool
+    weighted:
+      kind: weighted
+      services:
+        - name: blue
+          weight: 1
+        - name: green
+          weight: 1
+"#,
+        )
+        .unwrap();
+        let graph = &config.compiled().http;
+        let balancers = HashMap::from([
+            ("blue".to_owned(), balancer("http://blue.internal")),
+            ("green".to_owned(), balancer("http://green.internal")),
+        ]);
+        let mut selected_urls = std::collections::HashSet::new();
+
+        for seed in 0..64 {
+            let plan = build_execution_plan(
+                graph,
+                &balancers,
+                "weighted",
+                &request_context(),
+                &seed.to_string(),
+            )
+            .unwrap();
+            let SelectedService::Upstream {
+                upstream_base_url,
+                internal_context,
+                ..
+            } = &plan.attempts[0]
+            else {
+                panic!("weighted leaf must be an upstream");
+            };
+            let expected = if upstream_base_url == "http://blue.internal" {
+                "urn:stargate:service:blue"
+            } else {
+                assert_eq!(upstream_base_url, "http://green.internal");
+                "urn:stargate:service:green"
+            };
+            assert_eq!(internal_context.as_ref().unwrap().audience, expected);
+            selected_urls.insert(upstream_base_url.clone());
+        }
+
+        assert_eq!(selected_urls.len(), 2);
     }
 }

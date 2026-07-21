@@ -6,9 +6,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ctx::{
     ActorType, AuthenticationKind, ClaimValidationError, ConfigError, ContextVerifier,
-    ExpectedRequest, IssueError, KeyMaterialError, PresentationError, SignerConfig,
-    StaticKeyResolver, VerificationError, VerificationKey, VerifierConfig, require_single_token,
-    truncate_utf8,
+    ExpectedRequest, IssueError, KeyMaterialError, MAX_TOKEN_BYTES, PresentationError,
+    SignerConfig, StaticKeyResolver, VerificationError, VerificationKey, VerifierConfig,
+    require_single_token, truncate_utf8,
 };
 use jsonwebtoken::{Algorithm, EncodingKey};
 
@@ -138,7 +138,11 @@ fn rejects_invalid_signature_and_compact_shape() {
         );
     }
     assert_eq!(
-        verifier(NOW).verify(&"a".repeat(4_097), expected()),
+        verifier(NOW).verify(&"a".repeat(MAX_TOKEN_BYTES), expected()),
+        Err(VerificationError::MalformedCompact)
+    );
+    assert_eq!(
+        verifier(NOW).verify(&"a".repeat(MAX_TOKEN_BYTES + 1), expected()),
         Err(VerificationError::TokenTooLarge)
     );
 }
@@ -407,6 +411,32 @@ fn enforces_utf8_and_final_compact_size_limits() {
     request.context.request.original_path = format!("/{}", "o".repeat(2_047));
     request.context.request.user_agent = Some("u".repeat(512));
     assert_eq!(signer().issue(&request), Err(IssueError::TokenTooLarge));
+
+    let protected =
+        r#"{"alg":"RS256","kid":"stargate-internal-test","typ":"stargate-context+jwt"}"#;
+    let encoded_header_len = URL_SAFE_NO_PAD.encode(protected).len();
+    let encoded_signature_len = URL_SAFE_NO_PAD.encode([0_u8; 256]).len();
+    let compact_len = |payload: &serde_json::Value| {
+        encoded_header_len
+            + URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(payload).unwrap())
+                .len()
+            + encoded_signature_len
+            + 2
+    };
+    let mut boundary_payload = valid_payload();
+    let boundary_original_path = (1..=2_048)
+        .find_map(|length| {
+            boundary_payload["stg"]["request"]["original_path"] =
+                serde_json::json!(format!("/{}", "o".repeat(length - 1)));
+            (compact_len(&boundary_payload) == MAX_TOKEN_BYTES)
+                .then(|| boundary_payload["stg"]["request"]["original_path"].clone())
+        })
+        .expect("a valid claims payload should exercise the exact 4 KiB boundary");
+    boundary_payload["stg"]["request"]["original_path"] = boundary_original_path;
+    let boundary_token = signed_json(protected, &boundary_payload);
+    assert_eq!(boundary_token.len(), MAX_TOKEN_BYTES);
+    assert!(verifier(NOW).verify(&boundary_token, expected()).is_ok());
 }
 
 #[test]
