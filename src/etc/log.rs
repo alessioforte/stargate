@@ -1,4 +1,9 @@
-use crate::etc::{env::bool_or, ext::RequestExt, reqctx::RequestContext, telemetry};
+use crate::etc::{
+    env::bool_or,
+    ext::RequestExt,
+    reqctx::{self, RequestContext},
+    telemetry,
+};
 use chrono::Utc;
 use std::time::Instant;
 use tracing::info;
@@ -156,7 +161,8 @@ pub async fn trace_middleware(
     let path = req.uri().path().to_string();
     let query = sanitize_query(req.uri().query().unwrap_or(""));
     let user_agent = req.get_user_agent();
-    let trace_id = telemetry::trace_id_from_headers(req.headers());
+    reqctx::sanitize_ingress_headers(req.headers_mut(), &request_id)
+        .expect("generated request id must be a valid header value");
     let peer_ip = req
         .extensions()
         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
@@ -166,14 +172,6 @@ pub async fn trace_middleware(
     let ip_address = client_ip_addr
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-
-    req.extensions_mut().insert(RequestContext::new(
-        request_id.clone(),
-        now,
-        client_ip_addr,
-        user_agent.clone(),
-        trace_id,
-    ));
 
     let span = tracing::info_span!(
         "http_request",
@@ -196,6 +194,14 @@ pub async fn trace_middleware(
     );
 
     telemetry::set_span_parent_from_headers(&span, req.headers());
+    let trace_id = telemetry::trace_id_from_span(&span);
+    req.extensions_mut().insert(RequestContext::new(
+        request_id.clone(),
+        now,
+        client_ip_addr,
+        user_agent.clone(),
+        trace_id,
+    ));
 
     let mut response = next.run(req).instrument(span.clone()).await;
     span.record("http.status_code", response.status().as_u16());
@@ -213,4 +219,51 @@ pub async fn trace_middleware(
         request_id.parse().unwrap(),
     );
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{Router, body::Body, middleware::from_fn, routing::get};
+    use http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    async fn assert_sanitized(req: axum::extract::Request) -> StatusCode {
+        assert!(
+            req.headers()
+                .get_all("stargate-context")
+                .iter()
+                .next()
+                .is_none()
+        );
+        let request_ids = req
+            .headers()
+            .get_all("x-request-id")
+            .iter()
+            .collect::<Vec<_>>();
+        assert_eq!(request_ids.len(), 1);
+        let context = req.extensions().get::<RequestContext>().unwrap();
+        assert_eq!(request_ids[0], context.request_id());
+        StatusCode::NO_CONTENT
+    }
+
+    #[tokio::test]
+    async fn trace_boundary_sanitizes_gateway_owned_headers_before_handler() {
+        let app = Router::new()
+            .route("/", get(assert_sanitized))
+            .layer(from_fn(trace_middleware));
+        let request = Request::builder()
+            .uri("/")
+            .header("stargate-context", "attacker-one")
+            .header("stargate-context", "attacker-two")
+            .header("x-request-id", "attacker-one")
+            .header("x-request-id", "attacker-two")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.headers().get_all("x-request-id").iter().count(), 1);
+    }
 }

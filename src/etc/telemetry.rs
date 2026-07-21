@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use opentelemetry::{
     Context, KeyValue, global,
     metrics::{Counter, Histogram},
-    propagation::{Extractor, Injector, TextMapCompositePropagator, TextMapPropagator},
+    propagation::{Extractor, Injector, TextMapCompositePropagator},
     trace::TraceContextExt,
 };
 use opentelemetry_sdk::{
@@ -16,6 +16,9 @@ use opentelemetry_sdk::{
 };
 use std::time::Duration;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+#[cfg(test)]
+use opentelemetry::propagation::TextMapPropagator as _;
 
 const INSTRUMENTATION_NAME: &str = "stargate";
 
@@ -166,6 +169,7 @@ pub fn extract_context(headers: &HeaderMap) -> Context {
 
 /// Return only a syntactically valid W3C trace id. Audit request facts do not
 /// copy the raw `traceparent` header.
+#[cfg(test)]
 pub fn trace_id_from_headers(headers: &HeaderMap) -> Option<String> {
     let context = TraceContextPropagator::new().extract(&HeaderExtractor(headers));
     let span = context.span();
@@ -180,6 +184,17 @@ pub fn set_span_parent_from_headers(span: &tracing::Span, headers: &HeaderMap) {
     if let Err(error) = span.set_parent(parent) {
         tracing::trace!(%error, "OpenTelemetry parent context was not attached to span");
     }
+}
+
+/// Return the trace id assigned to a tracing span by the OpenTelemetry layer.
+/// This captures a newly-created server trace when no valid parent was sent.
+pub fn trace_id_from_span(span: &tracing::Span) -> Option<String> {
+    let context = span.context();
+    let otel_span = context.span();
+    let span_context = otel_span.span_context();
+    span_context
+        .is_valid()
+        .then(|| span_context.trace_id().to_string())
 }
 
 pub fn inject_context(headers: &mut HeaderMap) {
@@ -231,6 +246,7 @@ pub struct Metrics {
     gateway_mirrors: Counter<u64>,
     gateway_replay_bytes: Histogram<u64>,
     gateway_policy_decisions: Counter<u64>,
+    gateway_propagation_drafts: Counter<u64>,
     // The audit relay only runs in cluster deployments (postgres + redis).
     #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_records: Counter<u64>,
@@ -287,6 +303,10 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         gateway_policy_decisions: meter
             .u64_counter("stargate.gateway.policy.decisions")
             .with_description("Gateway policy decisions")
+            .build(),
+        gateway_propagation_drafts: meter
+            .u64_counter("stargate.gateway.propagation.drafts")
+            .with_description("Trusted internal-context draft construction outcomes")
             .build(),
         #[cfg(all(feature = "postgres", feature = "redis"))]
         audit_relay_records: meter
@@ -391,6 +411,16 @@ pub fn record_gateway_policy(kind: &str, outcome: &str) {
     );
 }
 
+pub fn record_propagation_draft(outcome: &'static str, kind: &'static str) {
+    METRICS.gateway_propagation_drafts.add(
+        1,
+        &[
+            KeyValue::new("stargate.outcome", outcome),
+            KeyValue::new("stargate.kind", kind),
+        ],
+    );
+}
+
 #[cfg(all(feature = "postgres", feature = "redis"))]
 pub fn record_audit_relay_batch(outcome: &str, records: usize, elapsed: Duration) {
     let attrs = [KeyValue::new("stargate.outcome", outcome.to_string())];
@@ -420,6 +450,8 @@ fn duration_ms(duration: Duration) -> f64 {
 #[cfg(test)]
 mod audit_trace_tests {
     use super::*;
+    use opentelemetry::trace::TracerProvider as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
 
     #[test]
     fn audit_trace_id_accepts_only_valid_w3c_traceparent() {
@@ -443,5 +475,45 @@ mod audit_trace_tests {
             HeaderValue::from_static("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
         );
         assert!(trace_id_from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn server_span_has_a_trace_id_without_an_inbound_parent() {
+        let provider = SdkTracerProvider::builder().build();
+        let tracer = provider.tracer("stargate-test");
+        let subscriber =
+            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("test_server_span", otel.kind = "server");
+            assert!(trace_id_from_span(&span).is_some());
+        });
+
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn server_span_uses_a_valid_inbound_parent_trace_id() {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let provider = SdkTracerProvider::builder().build();
+        let tracer = provider.tracer("stargate-test");
+        let subscriber =
+            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "traceparent",
+            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("test_server_span", otel.kind = "server");
+            set_span_parent_from_headers(&span, &headers);
+            assert_eq!(
+                trace_id_from_span(&span).as_deref(),
+                Some("4bf92f3577b34da6a3ce929d0e0e4736")
+            );
+        });
+
+        provider.shutdown().unwrap();
     }
 }

@@ -1,15 +1,10 @@
+use crate::etc::reqctx::PropagationDraft;
 use ::http::{HeaderMap, Method, StatusCode, Version};
 use gate::graph::{HeaderValueNode, ResponseBodyNode};
 use hyper::body::Bytes;
 use std::sync::Arc;
 
 pub(super) type DynLoadBalancer = Arc<dyn lb::LoadBalancer + Send + Sync>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AuthKind {
-    ApiKey,
-    Jwt,
-}
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct ResponseHeaderMutations {
@@ -20,10 +15,12 @@ pub(super) struct ResponseHeaderMutations {
 
 #[derive(Debug, Clone)]
 pub(super) struct RequestState {
+    pub(super) original_path: String,
     pub(super) path: String,
     pub(super) query: String,
     pub(super) preserve_host: bool,
     pub(super) response_headers: ResponseHeaderMutations,
+    pub(super) _propagation_draft: Option<Arc<PropagationDraft>>,
 }
 
 #[derive(Debug, Clone)]
