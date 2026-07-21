@@ -1,6 +1,6 @@
 use crate::etc::reqctx::PropagationDraft;
 use ::http::{HeaderMap, Method, StatusCode, Version};
-use gate::graph::{HeaderValueNode, ResponseBodyNode};
+use gate::graph::{HeaderValueNode, InternalContextNode, ResponseBodyNode};
 use hyper::body::Bytes;
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ pub(super) struct RequestState {
     pub(super) query: String,
     pub(super) preserve_host: bool,
     pub(super) response_headers: ResponseHeaderMutations,
-    pub(super) _propagation_draft: Option<Arc<PropagationDraft>>,
+    pub(super) propagation_draft: Option<Arc<PropagationDraft>>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +36,7 @@ pub(super) enum SelectedService {
     Upstream {
         service_name: String,
         upstream_base_url: String,
+        internal_context: Option<InternalContextNode>,
     },
     DirectResponse {
         status: u16,

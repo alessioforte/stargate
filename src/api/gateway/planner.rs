@@ -18,9 +18,12 @@ pub(super) fn build_execution_plan(
     })?;
 
     match service {
-        ServiceNode::LoadBalancer { name, .. } => {
+        ServiceNode::LoadBalancer { name, upstream } => {
             let lb = balancers.get(name).ok_or_else(|| {
                 ServiceSelectionError::Internal(format!("Load balancer '{}' not found", name))
+            })?;
+            let upstream_node = graph.upstreams.get(upstream).ok_or_else(|| {
+                ServiceSelectionError::Internal(format!("Upstream '{}' not found", upstream))
             })?;
 
             let upstream = lb
@@ -31,6 +34,7 @@ pub(super) fn build_execution_plan(
                 attempts: vec![SelectedService::Upstream {
                     service_name: name.clone(),
                     upstream_base_url: upstream.base_url.clone(),
+                    internal_context: upstream_node.internal_context.clone(),
                 }],
                 ..ExecutionPlan::default()
             })
@@ -168,5 +172,66 @@ pub(super) fn selection_error_response(error: ServiceSelectionError) -> ErrorRes
         ServiceSelectionError::Internal(message) => {
             ErrorResponse::from(HttpError::InternalServerError(message))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gate::cfg::RuntimeConfig;
+
+    #[test]
+    fn selected_leaf_carries_its_compiled_audience_not_its_target_url() {
+        let config = RuntimeConfig::from_yaml_str(
+            r#"
+schema: stargate/v2alpha1
+http:
+  upstreams:
+    orders-pool:
+      targets:
+        - url: http://orders.internal:8080
+      internal_context:
+        audience: urn:stargate:service:orders
+  services:
+    orders-leaf:
+      kind: load_balancer
+      upstream: orders-pool
+"#,
+        )
+        .unwrap();
+        let graph = &config.compiled().http;
+        let balancer: DynLoadBalancer = lb::BaseLoadBalancer::new(
+            lb::RoundRobin::new(),
+            vec![lb::Upstream::new(
+                "http://orders.internal:8080".to_owned(),
+                None,
+            )],
+        );
+        let balancers = HashMap::from([("orders-leaf".to_owned(), balancer)]);
+        let request = lb::RequestContext {
+            client_ip: "127.0.0.1",
+            path: "/orders",
+            method: "GET",
+            key: None,
+        };
+
+        let plan =
+            build_execution_plan(graph, &balancers, "orders-leaf", &request, "request-id").unwrap();
+
+        let SelectedService::Upstream {
+            upstream_base_url,
+            internal_context,
+            ..
+        } = &plan.attempts[0]
+        else {
+            panic!("expected an upstream leaf");
+        };
+        assert_eq!(upstream_base_url, "http://orders.internal:8080");
+        assert_eq!(
+            internal_context
+                .as_ref()
+                .map(|context| context.audience.as_str()),
+            Some("urn:stargate:service:orders")
+        );
     }
 }

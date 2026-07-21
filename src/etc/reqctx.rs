@@ -6,9 +6,10 @@ use crate::etc::{
 };
 use chrono::{DateTime, Utc};
 use ctx::{
-    Actor, ActorType, Authentication, AuthenticationKind, MAX_METHOD_BYTES, MAX_NAME_BYTES,
-    MAX_PATH_BYTES, MAX_REQUEST_ID_BYTES, MAX_ROLE_BYTES, MAX_USER_AGENT_BYTES, Organization,
-    RequestContext as PropagatedRequestContext, RouteContext, truncate_utf8,
+    Actor, ActorType, Authentication, AuthenticationKind, DispatchContext, DispatchKind,
+    IssueRequest, MAX_METHOD_BYTES, MAX_NAME_BYTES, MAX_PATH_BYTES, MAX_REQUEST_ID_BYTES,
+    MAX_ROLE_BYTES, MAX_USER_AGENT_BYTES, Organization, RequestContext as PropagatedRequestContext,
+    RouteContext, StargateContext, VERSION, truncate_utf8,
 };
 use db::ent::{TrustedAuditContext, TrustedAuditRequest};
 use gate::cfg::EnvProfile;
@@ -154,7 +155,6 @@ impl PropagationDraftError {
 /// Immutable, unsigned facts captured after routing and policy success. It has
 /// no audience or dispatch data and therefore cannot itself be emitted.
 #[derive(Clone, PartialEq, Eq)]
-#[allow(dead_code)] // Retained for P4 issuance; P3 intentionally has no serializer.
 pub struct PropagationDraft {
     subject: Option<String>,
     actor: Actor,
@@ -211,7 +211,53 @@ impl PropagationDraft {
             ActorType::Anonymous => "anonymous",
         }
     }
+
+    pub fn request_id(&self) -> &str {
+        &self.request.id
+    }
+
+    pub fn trace_id(&self) -> Option<&str> {
+        self.request.trace_id.as_deref()
+    }
+
+    /// Bind this immutable request snapshot to one selected leaf and network
+    /// attempt. The caller supplies the final encoded path after the target
+    /// base URL is resolved, so the token describes the exact request on the
+    /// wire even when a target URL contributes a path prefix.
+    pub fn issue_request(
+        &self,
+        audience: &str,
+        kind: DispatchKind,
+        attempt: u16,
+        method: &str,
+        encoded_path: &str,
+    ) -> Result<IssueRequest, PropagationBindingError> {
+        if self.request.method != method {
+            return Err(PropagationBindingError);
+        }
+
+        let mut request = self.request.clone();
+        request.path = encoded_path.to_owned();
+
+        Ok(IssueRequest {
+            audience: audience.to_owned(),
+            subject: self.subject.clone(),
+            context: StargateContext {
+                v: VERSION,
+                actor: self.actor.clone(),
+                authentication: self.authentication.clone(),
+                organization: self.organization.clone(),
+                request,
+                route: self.route.clone(),
+                dispatch: DispatchContext { kind, attempt },
+            },
+        })
+    }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the final upstream request does not match the propagation draft")]
+pub struct PropagationBindingError;
 
 impl std::fmt::Debug for PropagationDraft {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -481,6 +527,49 @@ mod tests {
         assert!(!visible.contains("private@example.test"));
         assert!(!visible.contains("quota"));
         assert_eq!(format!("{draft:?}"), "PropagationDraft([redacted])");
+    }
+
+    #[test]
+    fn issuance_binds_leaf_dispatch_and_the_exact_final_path() {
+        let draft = PropagationDraft::build(
+            &VerifiedIdentity::anonymous(),
+            &request_context(None),
+            "POST",
+            "/orders",
+            "/api/orders",
+            "orders-write",
+            "orders",
+            None,
+        )
+        .unwrap();
+
+        let issued = draft
+            .issue_request(
+                "urn:stargate:service:orders",
+                DispatchKind::Primary,
+                1,
+                "POST",
+                "/internal/v1/orders",
+            )
+            .unwrap();
+
+        assert_eq!(issued.audience, "urn:stargate:service:orders");
+        assert_eq!(issued.context.request.path, "/internal/v1/orders");
+        assert_eq!(issued.context.request.original_path, "/api/orders");
+        assert_eq!(issued.context.dispatch.kind, DispatchKind::Primary);
+        assert_eq!(issued.context.dispatch.attempt, 1);
+        assert!(issued.subject.is_none());
+        assert!(
+            draft
+                .issue_request(
+                    "urn:stargate:service:orders",
+                    DispatchKind::Primary,
+                    1,
+                    "GET",
+                    "/internal/v1/orders",
+                )
+                .is_err()
+        );
     }
 
     #[test]

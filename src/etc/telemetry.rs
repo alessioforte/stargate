@@ -17,7 +17,6 @@ use opentelemetry_sdk::{
 use std::time::Duration;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-#[cfg(test)]
 use opentelemetry::propagation::TextMapPropagator as _;
 
 const INSTRUMENTATION_NAME: &str = "stargate";
@@ -204,6 +203,16 @@ pub fn inject_context(headers: &mut HeaderMap) {
     });
 }
 
+/// Replace any raw inbound W3C headers and inject only the active span's trace
+/// context. This is deterministic even when no exporter/SDK span is active:
+/// stale caller-authored trace headers are removed instead of leaking through.
+pub fn inject_trace_context(headers: &mut HeaderMap) {
+    headers.remove("traceparent");
+    headers.remove("tracestate");
+    let context = tracing::Span::current().context();
+    TraceContextPropagator::new().inject_context(&context, &mut HeaderInjector(headers));
+}
+
 struct HeaderExtractor<'a>(&'a HeaderMap);
 
 impl Extractor for HeaderExtractor<'_> {
@@ -247,6 +256,7 @@ pub struct Metrics {
     gateway_replay_bytes: Histogram<u64>,
     gateway_policy_decisions: Counter<u64>,
     gateway_propagation_drafts: Counter<u64>,
+    gateway_internal_context_issues: Counter<u64>,
     // The audit relay only runs in cluster deployments (postgres + redis).
     #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_records: Counter<u64>,
@@ -307,6 +317,10 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         gateway_propagation_drafts: meter
             .u64_counter("stargate.gateway.propagation.drafts")
             .with_description("Trusted internal-context draft construction outcomes")
+            .build(),
+        gateway_internal_context_issues: meter
+            .u64_counter("stargate.gateway.internal_context.issues")
+            .with_description("Internal-context issuance outcomes")
             .build(),
         #[cfg(all(feature = "postgres", feature = "redis"))]
         audit_relay_records: meter
@@ -421,6 +435,16 @@ pub fn record_propagation_draft(outcome: &'static str, kind: &'static str) {
     );
 }
 
+pub fn record_internal_context_issue(outcome: &'static str, reason: &'static str) {
+    METRICS.gateway_internal_context_issues.add(
+        1,
+        &[
+            KeyValue::new("stargate.outcome", outcome),
+            KeyValue::new("stargate.reason", reason),
+        ],
+    );
+}
+
 #[cfg(all(feature = "postgres", feature = "redis"))]
 pub fn record_audit_relay_batch(outcome: &str, records: usize, elapsed: Duration) {
     let attrs = [KeyValue::new("stargate.outcome", outcome.to_string())];
@@ -475,6 +499,24 @@ mod audit_trace_tests {
             HeaderValue::from_static("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
         );
         assert!(trace_id_from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn trace_only_injection_never_leaks_raw_headers_without_an_active_sdk_span() {
+        let dispatch = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+        tracing::dispatcher::with_default(&dispatch, || {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "traceparent",
+                HeaderValue::from_static("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"),
+            );
+            headers.insert("tracestate", HeaderValue::from_static("attacker=value"));
+
+            inject_trace_context(&mut headers);
+
+            assert!(headers.get("traceparent").is_none());
+            assert!(headers.get("tracestate").is_none());
+        });
     }
 
     #[test]

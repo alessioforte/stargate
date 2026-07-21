@@ -19,7 +19,9 @@ use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use executor::{execute_plan_from_replay, execute_selected_with_request, spawn_mirrors};
 use gate::Gate;
-use headers::{apply_gateway_headers, apply_response_header_mutations};
+use headers::{
+    apply_gateway_headers, apply_response_header_mutations, strip_internal_context_response,
+};
 use middlewares::apply_middlewares;
 use planner::{build_execution_plan, selection_error_response};
 use policies::apply_policies;
@@ -91,7 +93,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             query: req.uri().query().unwrap_or("").to_string(),
             preserve_host: false,
             response_headers: ResponseHeaderMutations::default(),
-            _propagation_draft: None,
+            propagation_draft: None,
         };
 
         {
@@ -143,7 +145,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             ) {
                 Ok(draft) => {
                     telemetry::record_propagation_draft("created", draft.actor_label());
-                    state._propagation_draft = Some(Arc::new(draft));
+                    state.propagation_draft = Some(Arc::new(draft));
                 }
                 Err(error) => {
                     telemetry::record_propagation_draft("rejected", error.category());
@@ -240,6 +242,9 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .await?
         };
 
+        // This is global gateway-owned response hygiene, including upstreams
+        // without internal context and direct responses.
+        strip_internal_context_response(response.headers_mut());
         apply_response_header_mutations(response.headers_mut(), &state.response_headers);
         apply_gateway_headers(response.headers_mut(), &response_headers);
         Ok(response)

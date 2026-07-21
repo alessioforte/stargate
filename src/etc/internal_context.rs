@@ -1,6 +1,9 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use ctx::{ContextSigner, MAX_CLOCK_SKEW_SECS, MAX_KEY_ID_BYTES, SignerConfig, VerificationKey};
+use ctx::{
+    ContextSigner, IssueError, IssueRequest, IssuedContext, MAX_CLOCK_SKEW_SECS, MAX_KEY_ID_BYTES,
+    SignerConfig, VerificationKey,
+};
 use gate::cfg::RuntimeConfig;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
@@ -72,13 +75,17 @@ pub enum InternalContextError {
 
 #[derive(Debug)]
 pub struct InternalContextRuntime {
-    _signer: Arc<ContextSigner>,
+    signer: Arc<ContextSigner>,
     public_jwks: Value,
     cache_max_age_secs: u64,
     _clock_skew_secs: u64,
 }
 
 impl InternalContextRuntime {
+    pub fn issue(&self, request: &IssueRequest) -> Result<IssuedContext, IssueError> {
+        self.signer.issue(request)
+    }
+
     pub fn public_jwks(&self) -> &Value {
         &self.public_jwks
     }
@@ -110,10 +117,20 @@ impl InternalContextRuntime {
         )?;
 
         Ok(Self {
-            _signer: Arc::new(signer),
+            signer: Arc::new(signer),
             public_jwks,
             cache_max_age_secs: settings.cache_max_age_secs,
             _clock_skew_secs: settings.clock_skew_secs,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_signer_for_test(signer: ContextSigner) -> Arc<Self> {
+        Arc::new(Self {
+            signer: Arc::new(signer),
+            public_jwks: serde_json::json!({ "keys": [] }),
+            cache_max_age_secs: DEFAULT_CACHE_MAX_AGE_SECS,
+            _clock_skew_secs: DEFAULT_CLOCK_SKEW_SECS,
         })
     }
 }

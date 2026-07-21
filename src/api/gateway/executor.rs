@@ -67,6 +67,7 @@ pub(super) async fn execute_selected_with_request(
         SelectedService::Upstream {
             service_name,
             upstream_base_url,
+            internal_context,
         } => {
             let protocol = req.get_protocol().to_string();
             let uri = upstream_uri(upstream_base_url, state);
@@ -77,12 +78,21 @@ pub(super) async fn execute_selected_with_request(
                 stargate.target_kind = "upstream",
                 network.protocol.name = %protocol,
                 stargate.upstream_base_url = %upstream_base_url,
+                stargate.dispatch.kind = tracing::field::Empty,
+                stargate.dispatch.attempt = tracing::field::Empty,
                 http.response.status_code = tracing::field::Empty,
                 otel.status_code = tracing::field::Empty,
             );
+            if internal_context.is_some() {
+                span.record("stargate.dispatch.kind", "primary");
+                span.record("stargate.dispatch.attempt", 1_u64);
+            }
             let started = Instant::now();
 
             if protocol == "ws" {
+                if internal_context.is_some() {
+                    return Err(unsupported_internal_path("websocket"));
+                }
                 let result = ws::handler(req, &uri, state.preserve_host)
                     .instrument(span.clone())
                     .await;
@@ -103,11 +113,27 @@ pub(super) async fn execute_selected_with_request(
                     "HTTP client not found".to_string(),
                 ))
             })?;
+            let internal_dispatch = internal_context
+                .as_ref()
+                .map(|settings| {
+                    http::InternalDispatch::primary(
+                        &settings.audience,
+                        state.propagation_draft.as_ref(),
+                    )
+                })
+                .transpose()?;
 
             let empty_headers = HeaderMap::new();
-            let result = http::handler(req, &empty_headers, &uri, &client, state.preserve_host)
-                .instrument(span.clone())
-                .await;
+            let result = http::handler(
+                req,
+                &empty_headers,
+                &uri,
+                &client,
+                state.preserve_host,
+                internal_dispatch.as_ref(),
+            )
+            .instrument(span.clone())
+            .await;
             record_attempt_span(&span, &result);
             record_attempt_metrics(
                 service_name,
@@ -148,7 +174,11 @@ async fn execute_selected_from_replay(
         SelectedService::Upstream {
             service_name,
             upstream_base_url,
+            internal_context,
         } => {
+            if internal_context.is_some() {
+                return Err(unsupported_internal_path("replay"));
+            }
             let uri = upstream_uri(upstream_base_url, state);
             let req = replay.build(&uri)?;
             let client = get_client(service_name).ok_or_else(|| {
@@ -169,9 +199,16 @@ async fn execute_selected_from_replay(
             );
             let started = Instant::now();
             let empty_headers = HeaderMap::new();
-            let result = http::handler(req, &empty_headers, &uri, &client, state.preserve_host)
-                .instrument(span.clone())
-                .await;
+            let result = http::handler(
+                req,
+                &empty_headers,
+                &uri,
+                &client,
+                state.preserve_host,
+                None,
+            )
+            .instrument(span.clone())
+            .await;
             record_attempt_span(&span, &result);
             record_attempt_metrics(service_name, "upstream", "http", &result, started.elapsed());
             if let Some(balancers) = balancers {
@@ -261,6 +298,17 @@ fn upstream_uri(base_url: &str, state: &RequestState) -> String {
     uri
 }
 
+fn unsupported_internal_path(path: &'static str) -> ErrorResponse {
+    telemetry::record_internal_context_issue("failure", "execution_path");
+    tracing::warn!(
+        path,
+        "Internal-context execution path remains activation guarded"
+    );
+    ErrorResponse::from(HttpError::InternalServerError(
+        "Internal upstream request preparation failed".to_string(),
+    ))
+}
+
 fn selected_service_name(selected: &SelectedService) -> &str {
     match selected {
         SelectedService::Upstream { service_name, .. } => service_name,
@@ -320,6 +368,8 @@ fn record_attempt_metrics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::etc::reqctx::INTERNAL_CONTEXT_HEADER;
+    use gate::graph::HeaderValueNode;
     use std::collections::HashMap;
 
     // Single-upstream balancer with the given open-after threshold and a long
@@ -361,6 +411,35 @@ mod tests {
 
     fn available(balancers: &HashMap<String, DynLoadBalancer>, service: &str) -> bool {
         balancers.get(service).unwrap().select(&ctx()).is_some()
+    }
+
+    #[tokio::test]
+    async fn direct_response_remains_local_and_has_no_internal_context() {
+        let selected = SelectedService::DirectResponse {
+            status: 202,
+            headers: vec![HeaderValueNode {
+                name: "x-direct".to_owned(),
+                value: "yes".to_owned(),
+            }],
+            body: None,
+        };
+        let state = RequestState {
+            original_path: "/direct".to_owned(),
+            path: "/direct".to_owned(),
+            query: String::new(),
+            preserve_host: false,
+            response_headers: Default::default(),
+            propagation_draft: None,
+        };
+        let request = Request::builder().body(Body::empty()).unwrap();
+
+        let response = execute_selected_with_request(&selected, request, &state, &HashMap::new())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 202);
+        assert_eq!(response.headers()["x-direct"], "yes");
+        assert!(response.headers().get(INTERNAL_CONTEXT_HEADER).is_none());
     }
 
     #[test]
