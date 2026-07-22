@@ -221,6 +221,7 @@ mod tests {
             .unwrap(),
         );
         InternalDispatch::new(
+            "orders",
             AUDIENCE,
             Some(&draft),
             Some(&runtime),

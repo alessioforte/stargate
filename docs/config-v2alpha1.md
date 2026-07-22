@@ -221,7 +221,7 @@ http:
       upstream: api-v1
 ```
 
-### Internal context (activation guarded)
+### Internal context
 
 An upstream may declare the audience that will receive Stargate's signed
 internal request context:
@@ -240,11 +240,13 @@ http:
 Omitting `internal_context` preserves the existing upstream behavior and emits
 no signed context.
 
-During P2, the block is intentionally activation-guarded: Stargate parses and
-compiles it, preflights the separate signing key and matching public `kid`, and
-then rejects activation until dispatch sanitization and replay behavior are
-complete in P5. A rejected startup or hot reload never replaces the previous
-active graph.
+Stargate parses and compiles the block and preflights the separate signing key
+and matching public `kid` before activation. A rejected startup or hot reload
+never replaces the previous active graph. Do not enable the block for an
+upstream until its deployed consumer follows the fail-closed validation and
+ownership requirements in `docs/internal-context-consumer-guide.md`. Record
+real enablement and its external evidence in
+`docs/internal-context-upstream-inventory.md`.
 
 `stargate-context` is reserved to the gateway. It cannot be added, set, or
 removed by request/response header middleware, and cannot be returned by a
@@ -271,11 +273,19 @@ match the private signing key. Public keys are exposed separately at
 
 Rotate keys in this order:
 
-1. Publish the new public JWK alongside the retiring key.
-2. Allow downstream caches to observe the overlapping JWKS.
-3. Deploy the new private key and change `INTERNAL_CONTEXT_KID`.
-4. Retain the old public key for at least the token TTL, maximum clock skew,
-   and downstream JWKS cache overlap before removing it.
+1. Roll/restart Stargate with the current signer and both public JWKs.
+2. Allow downstream caches to observe the overlapping JWKS and validate the
+   new key through unknown-`kid` refresh.
+3. Roll/restart Stargate with the new private key and
+   `INTERNAL_CONTEXT_KID`, while continuing to publish both public keys.
+4. After the last old signer stops, retain the old public key for at least the
+   token TTL, maximum clock skew, and downstream JWKS cache overlap.
+5. Remove the old public key and roll/restart again.
+
+The signer and JWKS are loaded into memory at process startup; editing the
+files alone does not rotate a running process. Metrics, alert guidance,
+permissions, drills, benchmarks, rotation, recovery, and compromise response
+are documented in `docs/internal-context-operations.md`.
 
 ### Upstream Health
 

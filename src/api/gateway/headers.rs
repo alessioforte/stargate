@@ -236,6 +236,47 @@ mod tests {
     }
 
     #[test]
+    fn final_internal_sanitizer_removes_credentials_added_by_request_middleware() {
+        let mut headers = HeaderMap::new();
+        apply_request_headers(
+            &mut headers,
+            &[
+                HeaderValueNode {
+                    name: "authorization".to_owned(),
+                    value: "Bearer middleware-secret".to_owned(),
+                },
+                HeaderValueNode {
+                    name: "x-api-key".to_owned(),
+                    value: "middleware-api-key".to_owned(),
+                },
+                HeaderValueNode {
+                    name: "baggage".to_owned(),
+                    value: "private=middleware".to_owned(),
+                },
+            ],
+            &[
+                HeaderValueNode {
+                    name: "cookie".to_owned(),
+                    value: "theme=dark; jwt=middleware-session".to_owned(),
+                },
+                HeaderValueNode {
+                    name: "x-request-id".to_owned(),
+                    value: "middleware-request-id".to_owned(),
+                },
+            ],
+            &[],
+        );
+
+        sanitize_internal_request_headers(&mut headers, "01JZ000000000000000000000R").unwrap();
+
+        assert!(headers.get(AUTHORIZATION).is_none());
+        assert!(headers.get("x-api-key").is_none());
+        assert!(headers.get("baggage").is_none());
+        assert_eq!(headers[COOKIE], "theme=dark");
+        assert_eq!(headers[REQUEST_ID_HEADER], "01JZ000000000000000000000R");
+    }
+
+    #[test]
     fn cookie_removal_is_exact_and_drops_an_empty_result() {
         let mut headers = HeaderMap::new();
         headers.append(COOKIE, HeaderValue::from_static("JWT=keep; jwt=remove"));

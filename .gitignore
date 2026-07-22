@@ -2,6 +2,7 @@
 .claude
 
 /target
+/crates/*/target
 NOTE.md
 
 .env

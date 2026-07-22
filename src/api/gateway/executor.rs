@@ -35,10 +35,14 @@ impl DispatchAttempt {
     }
 
     const fn kind_label(self) -> &'static str {
-        match self.kind {
-            DispatchKind::Primary => "primary",
-            DispatchKind::Shadow => "shadow",
-        }
+        dispatch_kind_label(self.kind)
+    }
+}
+
+const fn dispatch_kind_label(kind: DispatchKind) -> &'static str {
+    match kind {
+        DispatchKind::Primary => "primary",
+        DispatchKind::Shadow => "shadow",
     }
 }
 
@@ -117,6 +121,7 @@ pub(super) async fn execute_selected_with_request(
                 .as_ref()
                 .map(|settings| {
                     InternalDispatch::new(
+                        service_name,
                         &settings.audience,
                         state.propagation_draft.as_ref(),
                         state.internal_context_runtime.as_ref(),
@@ -202,13 +207,15 @@ async fn execute_selected_from_replay(
             upstream_base_url,
             internal_context,
         } => {
-            let dispatch_attempt = dispatch_attempt.ok_or_else(attempt_limit_failure)?;
+            let dispatch_attempt =
+                dispatch_attempt.ok_or_else(|| attempt_limit_failure(service_name, "unknown"))?;
             let uri = upstream_uri(upstream_base_url, state);
             let req = replay.build(&uri)?;
             let internal_dispatch = internal_context
                 .as_ref()
                 .map(|settings| {
                     InternalDispatch::new(
+                        service_name,
                         &settings.audience,
                         state.propagation_draft.as_ref(),
                         state.internal_context_runtime.as_ref(),
@@ -366,9 +373,22 @@ fn upstream_uri(base_url: &str, state: &RequestState) -> String {
     uri
 }
 
-fn attempt_limit_failure() -> ErrorResponse {
-    telemetry::record_internal_context_issue("failure", "attempt");
-    tracing::warn!("Internal-context dispatch attempt limit exceeded");
+fn attempt_limit_failure(service: &str, dispatch_kind: &'static str) -> ErrorResponse {
+    telemetry::record_internal_context_issue(
+        service,
+        dispatch_kind,
+        "failure",
+        "attempt",
+        None,
+        None,
+    );
+    tracing::warn!(
+        stargate.service = service,
+        stargate.dispatch.kind = dispatch_kind,
+        stargate.outcome = "failure",
+        stargate.reason = "attempt",
+        "Internal-context dispatch attempt limit exceeded"
+    );
     ErrorResponse::from(HttpError::InternalServerError(
         "Internal upstream request preparation failed".to_string(),
     ))
@@ -379,12 +399,12 @@ fn next_dispatch_attempt(
     kind: DispatchKind,
     network_attempt: &mut u16,
 ) -> Result<Option<DispatchAttempt>, ErrorResponse> {
-    if !matches!(selected, SelectedService::Upstream { .. }) {
+    let SelectedService::Upstream { service_name, .. } = selected else {
         return Ok(None);
-    }
+    };
     *network_attempt = (*network_attempt)
         .checked_add(1)
-        .ok_or_else(attempt_limit_failure)?;
+        .ok_or_else(|| attempt_limit_failure(service_name, dispatch_kind_label(kind)))?;
     Ok(Some(DispatchAttempt {
         kind,
         number: *network_attempt,

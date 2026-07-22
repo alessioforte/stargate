@@ -24,6 +24,7 @@ stargate/
 │   └── fun/           # Business logic (token gen, name format, super-admin)
 ├── crates/
 │   ├── ace/           # Access Control Engine (ABAC policy evaluation)
+│   ├── ctx/           # Stargate-side signed internal context issuer and contract tests
 │   ├── db/            # DB repo traits + sqlx implementations
 │   ├── gate/          # Gateway config schema, compiler, runtime graph
 │   ├── jwt/           # JWT encode/decode
@@ -153,7 +154,11 @@ Quota is independent from rate limiting. A router `quota` policy or subject
 `attrs.quota` selects a named `quota_tracker` limit. If both rate limit and
 quota are configured for a request, both checks run with separate tracker keys.
 
-Full schema notes and examples: `docs/config-v2alpha1.md`.
+Full schema notes and examples: `docs/config-v2alpha1.md`. Internal-context
+consumers follow `docs/internal-context-consumer-guide.md`; real upstream
+enablement is recorded in `docs/internal-context-upstream-inventory.md`.
+Advanced context features are not part of version 1; their reopening criteria
+are recorded in `docs/internal-context-deferred-capabilities.md`.
 
 ### Traffic Management
 
@@ -386,6 +391,14 @@ logical outbox columns.
 | `JWT_REFRESH_EXP` | 1d | Refresh token TTL |
 | `OAUTH_BASE_URL` | issuer/localhost | Public base URL for metadata endpoint links |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
+| `INTERNAL_CONTEXT_ALGORITHM` | RS256 | Internal-context signing algorithm; version 1 accepts only RS256 |
+| `INTERNAL_CONTEXT_ISSUER` | - | Exact issuer for signed internal request contexts |
+| `INTERNAL_CONTEXT_KID` | - | Active internal-context signing key id |
+| `INTERNAL_CONTEXT_PRIVATE_KEY_PATH` | - | Dedicated internal-context RSA private key |
+| `INTERNAL_CONTEXT_JWKS_PATH` | - | Dedicated public internal-context JWKS |
+| `INTERNAL_CONTEXT_TTL_SECS` | 30 | Internal-context token lifetime |
+| `INTERNAL_CONTEXT_CLOCK_SKEW_SECS` | 5 | Consumer clock-skew allowance |
+| `INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS` | 60 | Published internal JWKS cache max-age |
 | `POSTGRES_ENDPOINT` | - | Postgres host (cluster) |
 | `POSTGRES_USERNAME` | - | Postgres user |
 | `POSTGRES_PASSWORD` | - | Postgres password |
@@ -464,7 +477,9 @@ Flags: `--password <val>`, `--password-stdin`, `--generate-password`
 
 - `GET /health` - health check
 - `GET /docs` - Swagger UI
-- `/.well-known/*` - OAuth/OIDC metadata and JWKS
+- `/.well-known/*` - OAuth/OIDC metadata and public JWKS
+- `GET /.well-known/stargate-context-jwks.json` - dedicated public
+  internal-context JWKS when the signer is configured
 - `/account/*` - login, logout, profile, account refresh tokens, credentials
 - `/account/login/otp/email`, `/account/login/mfa/challenges/*`, `/account/mfa/*` - passwordless email OTP and MFA
 - `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`, `/oauth/introspect`, `/oauth/revoke` - OAuth/OIDC provider endpoints
@@ -601,3 +616,10 @@ Following the arrows keeps each concern in exactly one place.
 - OAuth/OIDC non-redirect errors still use Stargate's generic error envelope rather than full RFC-shaped error bodies.
 - OTP/MFA API modules are intentionally thin Axum/OpenAPI bindings; workflow changes should usually go in `src/act/otp`.
 - Email OTP is currently the only wired account MFA method. TOTP/HOTP and SMS primitives exist in `crates/otp` for future account integrations.
+- Internal-context issuance exports bounded outcome, signing-duration, and
+  token-size telemetry. Operations, rotation, recovery, alerts, and the local
+  signing benchmark are documented in `docs/internal-context-operations.md`.
+- P9 is the final internal-context implementation-plan phase and is
+  documentation-only. Delegation, new transports, replay caches, JWE, and
+  other advanced capabilities remain deferred until Stargate directly needs
+  them; see `docs/internal-context-deferred-capabilities.md`.

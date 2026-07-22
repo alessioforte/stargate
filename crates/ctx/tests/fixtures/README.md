@@ -5,8 +5,9 @@ These files freeze the language-neutral version 1 interoperability vectors.
 - `*.jwt` contains one compact RS256 token on a single line.
 - `*.claims.json` contains the decoded payload for that token.
 - `public.pem` and `public.jwk.json` are equivalent verification keys.
-- `private.pem` is test-only fixture material and must never be used outside
-  tests.
+- `private.pem` and `rotation-next-private.pem` are test-only fixture material
+  and must never be used outside tests. The latter is used only by the
+  Stargate key-rotation drill.
 
 All vectors use:
 

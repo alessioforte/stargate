@@ -279,6 +279,7 @@ mod tests {
         let draft = anonymous_draft(Some(trace_id.clone()));
         let runtime = test_runtime();
         let dispatch = InternalDispatch::new(
+            "orders",
             AUDIENCE,
             Some(&draft),
             Some(&runtime),
@@ -388,6 +389,7 @@ mod tests {
         let draft = anonymous_draft(None);
         let runtime = test_runtime();
         let dispatch = InternalDispatch::new(
+            "orders",
             &oversized_audience,
             Some(&draft),
             Some(&runtime),

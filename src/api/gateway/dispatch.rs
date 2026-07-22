@@ -6,13 +6,17 @@ use crate::etc::{
     telemetry,
 };
 use ctx::{DispatchKind, IssueError};
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 /// Unsigned inputs for one selected network attempt. Cloning this value never
 /// clones or reuses a compact token; [`prepare`] mints after the final URI and
 /// headers are known.
 #[derive(Clone)]
 pub(super) struct InternalDispatch {
+    service: String,
     audience: String,
     draft: Arc<PropagationDraft>,
     runtime: Arc<InternalContextRuntime>,
@@ -22,17 +26,21 @@ pub(super) struct InternalDispatch {
 
 impl InternalDispatch {
     pub(super) fn new(
+        service: &str,
         audience: &str,
         draft: Option<&Arc<PropagationDraft>>,
         runtime: Option<&Arc<InternalContextRuntime>>,
         kind: DispatchKind,
         attempt: u16,
     ) -> Result<Self, ErrorResponse> {
-        let draft = draft.cloned().ok_or_else(|| internal_failure("draft"))?;
+        let draft = draft
+            .cloned()
+            .ok_or_else(|| internal_failure(service, kind, "draft", None, None))?;
         let runtime = runtime
             .cloned()
-            .ok_or_else(|| internal_failure("runtime"))?;
+            .ok_or_else(|| internal_failure(service, kind, "runtime", None, None))?;
         Ok(Self {
+            service: service.to_owned(),
             audience: audience.to_owned(),
             draft,
             runtime,
@@ -44,16 +52,23 @@ impl InternalDispatch {
     /// Apply the shared final internal-egress boundary to an HTTP request or
     /// WebSocket handshake and mint exactly one token for this attempt.
     pub(super) fn prepare<B>(&self, req: &mut http::Request<B>) -> Result<(), ErrorResponse> {
-        let uri = sanitize_internal_uri(req.uri()).map_err(|_| internal_failure("sanitization"))?;
+        let uri = sanitize_internal_uri(req.uri())
+            .map_err(|_| internal_failure(&self.service, self.kind, "sanitization", None, None))?;
         *req.uri_mut() = uri;
 
         sanitize_internal_request_headers(req.headers_mut(), self.draft.request_id())
-            .map_err(|_| internal_failure("sanitization"))?;
+            .map_err(|_| internal_failure(&self.service, self.kind, "sanitization", None, None))?;
 
         telemetry::inject_trace_context(req.headers_mut());
         let active_trace_id = telemetry::trace_id_from_span(&tracing::Span::current());
         if self.draft.trace_id() != active_trace_id.as_deref() {
-            return Err(internal_failure("trace"));
+            return Err(internal_failure(
+                &self.service,
+                self.kind,
+                "trace",
+                None,
+                None,
+            ));
         }
 
         let issue_request = self
@@ -65,17 +80,51 @@ impl InternalDispatch {
                 req.method().as_str(),
                 req.uri().path(),
             )
-            .map_err(|_| internal_failure("binding"))?;
-        let issued = self
-            .runtime
-            .issue(&issue_request)
-            .map_err(|error| internal_failure(issue_error_category(&error)))?;
-        let value = http::HeaderValue::from_str(issued.compact())
-            .map_err(|_| internal_failure("header"))?;
+            .map_err(|_| internal_failure(&self.service, self.kind, "binding", None, None))?;
+        let signing_started = Instant::now();
+        let issued = match self.runtime.issue(&issue_request) {
+            Ok(issued) => issued,
+            Err(error) => {
+                return Err(internal_failure(
+                    &self.service,
+                    self.kind,
+                    issue_error_category(&error),
+                    Some(signing_started.elapsed()),
+                    None,
+                ));
+            }
+        };
+        let signing_elapsed = signing_started.elapsed();
+        let token_bytes = issued.compact().len();
+        let value = http::HeaderValue::from_str(issued.compact()).map_err(|_| {
+            internal_failure(
+                &self.service,
+                self.kind,
+                "header",
+                Some(signing_elapsed),
+                Some(token_bytes),
+            )
+        })?;
 
         req.headers_mut().remove(&INTERNAL_CONTEXT_HEADER);
         req.headers_mut().insert(&INTERNAL_CONTEXT_HEADER, value);
-        telemetry::record_internal_context_issue("success", "none");
+        telemetry::record_internal_context_issue(
+            &self.service,
+            dispatch_kind_label(self.kind),
+            "success",
+            "none",
+            Some(signing_elapsed),
+            Some(token_bytes),
+        );
+        tracing::debug!(
+            stargate.service = %self.service,
+            stargate.dispatch.kind = dispatch_kind_label(self.kind),
+            stargate.outcome = "success",
+            stargate.reason = "none",
+            stargate.internal_context.signing.duration_ms = signing_elapsed.as_secs_f64() * 1_000.0,
+            stargate.internal_context.token.size = token_bytes as u64,
+            "Internal-context issuance completed"
+        );
         Ok(())
     }
 }
@@ -95,9 +144,56 @@ fn issue_error_category(error: &IssueError) -> &'static str {
     }
 }
 
-fn internal_failure(reason: &'static str) -> ErrorResponse {
-    telemetry::record_internal_context_issue("failure", reason);
-    tracing::warn!(reason, "Internal upstream request preparation failed");
+fn dispatch_kind_label(kind: DispatchKind) -> &'static str {
+    match kind {
+        DispatchKind::Primary => "primary",
+        DispatchKind::Shadow => "shadow",
+    }
+}
+
+fn internal_failure(
+    service: &str,
+    kind: DispatchKind,
+    reason: &'static str,
+    signing_elapsed: Option<Duration>,
+    token_bytes: Option<usize>,
+) -> ErrorResponse {
+    telemetry::record_internal_context_issue(
+        service,
+        dispatch_kind_label(kind),
+        "failure",
+        reason,
+        signing_elapsed,
+        token_bytes,
+    );
+    if let (Some(signing_elapsed), Some(token_bytes)) = (signing_elapsed, token_bytes) {
+        tracing::warn!(
+            stargate.service = service,
+            stargate.dispatch.kind = dispatch_kind_label(kind),
+            stargate.outcome = "failure",
+            stargate.reason = reason,
+            stargate.internal_context.signing.duration_ms = signing_elapsed.as_secs_f64() * 1_000.0,
+            stargate.internal_context.token.size = token_bytes as u64,
+            "Internal upstream request preparation failed"
+        );
+    } else if let Some(signing_elapsed) = signing_elapsed {
+        tracing::warn!(
+            stargate.service = service,
+            stargate.dispatch.kind = dispatch_kind_label(kind),
+            stargate.outcome = "failure",
+            stargate.reason = reason,
+            stargate.internal_context.signing.duration_ms = signing_elapsed.as_secs_f64() * 1_000.0,
+            "Internal upstream request preparation failed"
+        );
+    } else {
+        tracing::warn!(
+            stargate.service = service,
+            stargate.dispatch.kind = dispatch_kind_label(kind),
+            stargate.outcome = "failure",
+            stargate.reason = reason,
+            "Internal upstream request preparation failed"
+        );
+    }
     ErrorResponse::from(HttpError::InternalServerError(
         "Internal upstream request preparation failed".to_string(),
     ))
@@ -272,9 +368,15 @@ mod tests {
             let draft = Arc::clone(&draft);
             let replay = replay.clone();
             tasks.push(tokio::spawn(async move {
-                let dispatch =
-                    InternalDispatch::new(audience, Some(&draft), Some(&runtime), kind, attempt)
-                        .unwrap();
+                let dispatch = InternalDispatch::new(
+                    "orders",
+                    audience,
+                    Some(&draft),
+                    Some(&runtime),
+                    kind,
+                    attempt,
+                )
+                .unwrap();
                 let mut request: http::Request<Body> = replay
                     .build("http://orders.test/orders?jwt=secret&safe=1")
                     .unwrap();

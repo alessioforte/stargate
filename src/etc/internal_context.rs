@@ -69,8 +69,6 @@ pub enum InternalContextError {
     KeyPairMismatch,
     #[error("internal context is not configured")]
     NotConfigured,
-    #[error("internal_context activation is guarded until P5; configured upstreams: {upstreams}")]
-    ActivationGuard { upstreams: String },
 }
 
 #[derive(Debug)]
@@ -204,22 +202,18 @@ fn preflight_config_with(
     config: &RuntimeConfig,
     load: impl FnOnce() -> Result<Option<Arc<InternalContextRuntime>>, InternalContextError>,
 ) -> Result<(), InternalContextError> {
-    let upstreams = config
+    let requires_internal_context = config
         .compiled()
         .http
         .upstreams
         .values()
-        .filter(|upstream| upstream.internal_context.is_some())
-        .map(|upstream| upstream.name.as_str())
-        .collect::<Vec<_>>();
-    if upstreams.is_empty() {
+        .any(|upstream| upstream.internal_context.is_some());
+    if !requires_internal_context {
         return Ok(());
     }
 
     load()?.ok_or(InternalContextError::NotConfigured)?;
-    Err(InternalContextError::ActivationGuard {
-        upstreams: upstreams.join(", "),
-    })
+    Ok(())
 }
 
 fn load_from_env() -> Result<Option<Arc<InternalContextRuntime>>, InternalContextError> {
@@ -401,6 +395,8 @@ mod tests {
     use super::*;
 
     const PRIVATE_KEY: &[u8] = include_bytes!("../../crates/ctx/tests/fixtures/private.pem");
+    const ROTATION_NEXT_PRIVATE_KEY: &[u8] =
+        include_bytes!("../../crates/ctx/tests/fixtures/rotation-next-private.pem");
     const PUBLIC_JWK: &str = include_str!("../../crates/ctx/tests/fixtures/public.jwk.json");
 
     fn settings(key_id: &str) -> RuntimeSettings {
@@ -417,6 +413,74 @@ mod tests {
 
     fn jwks(jwk: Value) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({ "keys": [jwk] })).unwrap()
+    }
+
+    fn public_jwk(private_key_pem: &[u8], key_id: &str) -> Value {
+        let private_key = parse_private_key(private_key_pem).unwrap();
+        serde_json::json!({
+            "kty": "RSA",
+            "use": "sig",
+            "key_ops": ["verify"],
+            "alg": "RS256",
+            "kid": key_id,
+            "n": URL_SAFE_NO_PAD.encode(private_key.n().to_bytes_be()),
+            "e": URL_SAFE_NO_PAD.encode(private_key.e().to_bytes_be()),
+        })
+    }
+
+    fn anonymous_issue_request() -> IssueRequest {
+        IssueRequest {
+            audience: "urn:stargate:service:orders".to_owned(),
+            subject: None,
+            context: ctx::StargateContext {
+                v: ctx::VERSION,
+                actor: ctx::Actor {
+                    actor_type: ctx::ActorType::Anonymous,
+                },
+                authentication: ctx::Authentication {
+                    kind: ctx::AuthenticationKind::None,
+                    sid: None,
+                    auth_time: None,
+                },
+                organization: None,
+                request: ctx::RequestContext {
+                    id: "01JZ000000000000000000000R".to_owned(),
+                    trace_id: None,
+                    method: "POST".to_owned(),
+                    path: "/v1/orders".to_owned(),
+                    original_path: "/api/orders".to_owned(),
+                    client_ip: None,
+                    user_agent: None,
+                },
+                route: ctx::RouteContext {
+                    router: "orders-write".to_owned(),
+                    service: "orders".to_owned(),
+                    policy_revision: None,
+                },
+                dispatch: ctx::DispatchContext {
+                    kind: ctx::DispatchKind::Primary,
+                    attempt: 1,
+                },
+            },
+        }
+    }
+
+    fn verifier(jwks: &[Value]) -> ctx::ContextVerifier {
+        let mut resolver = ctx::StaticKeyResolver::new();
+        for jwk in jwks {
+            let key_id = jwk["kid"].as_str().unwrap();
+            let key = VerificationKey::from_jwk_json(&serde_json::to_vec(jwk).unwrap()).unwrap();
+            resolver.insert(key_id, key);
+        }
+        ctx::ContextVerifier::new(
+            ctx::VerifierConfig::new(
+                "https://stargate.test/internal-context",
+                "urn:stargate:service:orders",
+                DEFAULT_CLOCK_SKEW_SECS,
+            )
+            .unwrap(),
+            Arc::new(resolver),
+        )
     }
 
     fn config(yaml: &str) -> RuntimeConfig {
@@ -521,6 +585,62 @@ mod tests {
     }
 
     #[test]
+    fn rotation_drill_accepts_both_keys_before_retiring_the_old_key() {
+        let current_key_id = "stargate-internal-current";
+        let next_key_id = "stargate-internal-next";
+        let current_jwk = public_jwk(PRIVATE_KEY, current_key_id);
+        let next_jwk = public_jwk(ROTATION_NEXT_PRIVATE_KEY, next_key_id);
+        let overlapping_jwks = serde_json::to_vec(&serde_json::json!({
+            "keys": [current_jwk.clone(), next_jwk.clone()]
+        }))
+        .unwrap();
+
+        let current_runtime = InternalContextRuntime::from_material(
+            settings(current_key_id),
+            PRIVATE_KEY,
+            &overlapping_jwks,
+        )
+        .unwrap();
+        let next_runtime = InternalContextRuntime::from_material(
+            settings(next_key_id),
+            ROTATION_NEXT_PRIVATE_KEY,
+            &overlapping_jwks,
+        )
+        .unwrap();
+        let request = anonymous_issue_request();
+        let current_token = current_runtime.issue(&request).unwrap();
+        let next_token = next_runtime.issue(&request).unwrap();
+        let expected = ctx::ExpectedRequest {
+            method: "POST",
+            encoded_path: "/v1/orders",
+            request_id: "01JZ000000000000000000000R",
+        };
+
+        let overlap_verifier = verifier(&[current_jwk.clone(), next_jwk.clone()]);
+        assert!(
+            overlap_verifier
+                .verify(current_token.compact(), expected)
+                .is_ok()
+        );
+        assert!(
+            overlap_verifier
+                .verify(next_token.compact(), expected)
+                .is_ok()
+        );
+
+        let retired_verifier = verifier(&[next_jwk]);
+        assert!(
+            retired_verifier
+                .verify(next_token.compact(), expected)
+                .is_ok()
+        );
+        assert_eq!(
+            retired_verifier.verify(current_token.compact(), expected),
+            Err(ctx::VerificationError::KeyResolution)
+        );
+    }
+
+    #[test]
     fn private_jwk_members_are_rejected() {
         let mut jwk: Value = serde_json::from_str(PUBLIC_JWK).unwrap();
         jwk["d"] = Value::String("private".to_owned());
@@ -575,7 +695,7 @@ http:
     }
 
     #[test]
-    fn valid_present_block_remains_activation_guarded() {
+    fn valid_present_block_passes_preflight() {
         let config = config(
             r#"
 schema: stargate/v2alpha1
@@ -595,10 +715,6 @@ http:
             &jwks(jwk),
         )
         .unwrap();
-        let error = preflight_config_with(&config, || Ok(Some(Arc::new(runtime)))).unwrap_err();
-        assert!(matches!(
-            error,
-            InternalContextError::ActivationGuard { .. }
-        ));
+        preflight_config_with(&config, || Ok(Some(Arc::new(runtime)))).unwrap();
     }
 }

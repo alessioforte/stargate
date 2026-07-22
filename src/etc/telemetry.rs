@@ -257,6 +257,8 @@ pub struct Metrics {
     gateway_policy_decisions: Counter<u64>,
     gateway_propagation_drafts: Counter<u64>,
     gateway_internal_context_issues: Counter<u64>,
+    gateway_internal_context_signing_duration: Histogram<f64>,
+    gateway_internal_context_token_size: Histogram<u64>,
     // The audit relay only runs in cluster deployments (postgres + redis).
     #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_records: Counter<u64>,
@@ -321,6 +323,16 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         gateway_internal_context_issues: meter
             .u64_counter("stargate.gateway.internal_context.issues")
             .with_description("Internal-context issuance outcomes")
+            .build(),
+        gateway_internal_context_signing_duration: meter
+            .f64_histogram("stargate.gateway.internal_context.signing.duration")
+            .with_description("Internal-context RS256 signing duration")
+            .with_unit("ms")
+            .build(),
+        gateway_internal_context_token_size: meter
+            .u64_histogram("stargate.gateway.internal_context.token.size")
+            .with_description("Issued compact internal-context token size")
+            .with_unit("By")
             .build(),
         #[cfg(all(feature = "postgres", feature = "redis"))]
         audit_relay_records: meter
@@ -435,14 +447,31 @@ pub fn record_propagation_draft(outcome: &'static str, kind: &'static str) {
     );
 }
 
-pub fn record_internal_context_issue(outcome: &'static str, reason: &'static str) {
-    METRICS.gateway_internal_context_issues.add(
-        1,
-        &[
-            KeyValue::new("stargate.outcome", outcome),
-            KeyValue::new("stargate.reason", reason),
-        ],
-    );
+pub fn record_internal_context_issue(
+    service: &str,
+    dispatch_kind: &'static str,
+    outcome: &'static str,
+    reason: &'static str,
+    signing_elapsed: Option<Duration>,
+    token_bytes: Option<usize>,
+) {
+    let attrs = [
+        KeyValue::new("stargate.service", service.to_owned()),
+        KeyValue::new("stargate.dispatch.kind", dispatch_kind),
+        KeyValue::new("stargate.outcome", outcome),
+        KeyValue::new("stargate.reason", reason),
+    ];
+    METRICS.gateway_internal_context_issues.add(1, &attrs);
+    if let Some(elapsed) = signing_elapsed {
+        METRICS
+            .gateway_internal_context_signing_duration
+            .record(duration_ms(elapsed), &attrs);
+    }
+    if let Some(bytes) = token_bytes {
+        METRICS
+            .gateway_internal_context_token_size
+            .record(bytes as u64, &attrs);
+    }
 }
 
 #[cfg(all(feature = "postgres", feature = "redis"))]
