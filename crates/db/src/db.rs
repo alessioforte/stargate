@@ -1,7 +1,7 @@
 use crate::ent::{
-    AdminKey, ApiKey, ApiKeyAuth, AuditContext, Credential, CredentialHistory, CredentialType,
-    OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount,
-    SuperAdmin, User,
+    AdminKey, ApiKey, ApiKeyAuth, Credential, CredentialHistory, CredentialType, OAuthClient,
+    OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount, SuperAdmin,
+    TrustedAuditContext, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -14,14 +14,14 @@ pub trait DbStore {
         user: Profile,
         credential_type: CredentialType,
         value: &str,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<User>;
     async fn create_super_admin_user(
         &self,
         user: Profile,
         credential_type: CredentialType,
         value: &str,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<User>;
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
     async fn get_user_by_id(&self, id: &str) -> Result<Option<User>>;
@@ -32,16 +32,16 @@ pub trait DbStore {
     async fn super_admin_exists(&self) -> Result<bool>;
     async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>>;
     async fn count_search_users(&self, query: &str) -> Result<i64>;
-    async fn update_user(&self, user: User, ctx: AuditContext) -> Result<User>;
+    async fn update_user(&self, user: User, ctx: TrustedAuditContext) -> Result<User>;
     /// Deletes the user and revokes their API keys in the same transaction
     /// (the FK cascade only removes ownership links, not the key rows).
     /// Returns the revoked key hashes so callers can purge cached subjects.
-    async fn delete_user(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>>;
+    async fn delete_user(&self, id: &str, ctx: TrustedAuditContext) -> Result<Vec<String>>;
     async fn change_password(
         &self,
         user_id: &str,
         new_password: &str,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<Credential>;
     async fn get_credential(
         &self,
@@ -62,14 +62,14 @@ pub trait DbStore {
         user_id: &str,
         old_value: &str,
         new_value: &str,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<bool>;
 
     // ── OAuth Clients ──────────────────────────────────────────────────────
     async fn create_oauth_client(
         &self,
         client: OAuthClient,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<OAuthClient>;
     async fn get_oauth_client_by_client_id(&self, client_id: &str) -> Result<Option<OAuthClient>>;
     async fn get_all_oauth_clients(&self, limit: i64, offset: i64) -> Result<Vec<OAuthClient>>;
@@ -84,21 +84,21 @@ pub trait DbStore {
     async fn update_oauth_client(
         &self,
         client: OAuthClient,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<OAuthClient>;
     async fn update_oauth_client_secret_hash(
         &self,
         client_id: &str,
         client_secret_hash: Option<&str>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<OAuthClient>;
     async fn set_oauth_client_enabled(
         &self,
         client_id: &str,
         enabled: bool,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<OAuthClient>;
-    async fn delete_oauth_client(&self, client_id: &str, ctx: AuditContext) -> Result<()>;
+    async fn delete_oauth_client(&self, client_id: &str, ctx: TrustedAuditContext) -> Result<()>;
 
     // ── OAuth Consents ─────────────────────────────────────────────────────
     async fn upsert_oauth_consent(&self, consent: OAuthConsent) -> Result<OAuthConsent>;
@@ -123,7 +123,7 @@ pub trait DbStore {
         label: &str,
         attrs: Option<JsonValue>,
         org_id: Option<&str>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<ApiKey>;
     async fn create_service_account_api_key(
         &self,
@@ -131,7 +131,7 @@ pub trait DbStore {
         key_hash: &str,
         label: &str,
         attrs: Option<JsonValue>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<ApiKey>;
     async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>>;
     /// API key joined with its owner's org binding, for gateway auth.
@@ -154,9 +154,9 @@ pub trait DbStore {
     async fn count_api_keys(&self) -> Result<i64>;
     async fn search_api_keys(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;
     async fn count_search_api_keys(&self, query: &str) -> Result<i64>;
-    async fn update_api_key(&self, api_key: ApiKey, ctx: AuditContext) -> Result<ApiKey>;
-    async fn revoke_api_key(&self, id: &str, ctx: AuditContext) -> Result<()>;
-    async fn delete_api_key(&self, id: &str, ctx: AuditContext) -> Result<()>;
+    async fn update_api_key(&self, api_key: ApiKey, ctx: TrustedAuditContext) -> Result<ApiKey>;
+    async fn revoke_api_key(&self, id: &str, ctx: TrustedAuditContext) -> Result<()>;
+    async fn delete_api_key(&self, id: &str, ctx: TrustedAuditContext) -> Result<()>;
 
     // ── Admin Keys ──────────────────────────────────────────────────────────
     async fn create_admin_key(
@@ -164,15 +164,19 @@ pub trait DbStore {
         key_hash: &str,
         label: Option<String>,
         permissions: Vec<String>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<AdminKey>;
     async fn get_admin_key_by_hash(&self, key_hash: &str) -> Result<Option<AdminKey>>;
     async fn get_admin_key_by_id(&self, id: &str) -> Result<Option<AdminKey>>;
     async fn get_all_admin_keys(&self, limit: i64, offset: i64) -> Result<Vec<AdminKey>>;
     async fn count_admin_keys(&self) -> Result<i64>;
-    async fn update_admin_key(&self, admin_key: AdminKey, ctx: AuditContext) -> Result<AdminKey>;
-    async fn revoke_admin_key(&self, id: &str, ctx: AuditContext) -> Result<()>;
-    async fn delete_admin_key(&self, id: &str, ctx: AuditContext) -> Result<()>;
+    async fn update_admin_key(
+        &self,
+        admin_key: AdminKey,
+        ctx: TrustedAuditContext,
+    ) -> Result<AdminKey>;
+    async fn revoke_admin_key(&self, id: &str, ctx: TrustedAuditContext) -> Result<()>;
+    async fn delete_admin_key(&self, id: &str, ctx: TrustedAuditContext) -> Result<()>;
 
     // ── Service Accounts ────────────────────────────────────────────────────
     async fn create_service_account(
@@ -180,7 +184,7 @@ pub trait DbStore {
         name: &str,
         description: Option<&str>,
         org_id: Option<&str>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<ServiceAccount>;
     async fn get_service_account_by_id(&self, id: &str) -> Result<Option<ServiceAccount>>;
     async fn get_all_service_accounts(
@@ -201,12 +205,15 @@ pub trait DbStore {
         id: &str,
         name: &str,
         description: Option<&str>,
-        org_id: Option<&str>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<ServiceAccount>;
     /// Deletes the service account and revokes its API keys in the same
     /// transaction. Returns the revoked key hashes.
-    async fn delete_service_account(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>>;
+    async fn delete_service_account(
+        &self,
+        id: &str,
+        ctx: TrustedAuditContext,
+    ) -> Result<Vec<String>>;
 
     // ── Organizations ───────────────────────────────────────────────────────
     async fn create_organization(
@@ -214,7 +221,7 @@ pub trait DbStore {
         name: &str,
         description: Option<&str>,
         attrs: Option<&serde_json::Value>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<Organization>;
     async fn get_organization_by_id(&self, id: &str) -> Result<Option<Organization>>;
     async fn get_all_organizations(&self, limit: i64, offset: i64) -> Result<Vec<Organization>>;
@@ -232,19 +239,19 @@ pub trait DbStore {
         name: &str,
         description: Option<&str>,
         attrs: Option<&serde_json::Value>,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<Organization>;
     /// Deletes the organization and revokes every key acting in it (user
     /// keys bound to the org, keys of its cascading service accounts).
     /// Returns the revoked key hashes.
-    async fn delete_organization(&self, id: &str, ctx: AuditContext) -> Result<Vec<String>>;
+    async fn delete_organization(&self, id: &str, ctx: TrustedAuditContext) -> Result<Vec<String>>;
     /// Upsert: adds the membership or updates the role of an existing one.
     async fn add_user_to_organization(
         &self,
         user_id: &str,
         org_id: &str,
         role: &str,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<()>;
     /// Removes the membership and revokes the user's API keys bound to that
     /// org in the same transaction. Returns the revoked key hashes.
@@ -252,7 +259,7 @@ pub trait DbStore {
         &self,
         user_id: &str,
         org_id: &str,
-        ctx: AuditContext,
+        ctx: TrustedAuditContext,
     ) -> Result<Vec<String>>;
     async fn get_organization_users(&self, org_id: &str) -> Result<Vec<OrgMember>>;
     async fn get_organization_users_paginated(

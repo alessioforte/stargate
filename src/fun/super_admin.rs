@@ -1,5 +1,7 @@
 use anyhow::{Result, bail};
-use db::ent::{AuditContext, CredentialType, Profile};
+use db::ent::{
+    CredentialType, Profile, TrustedAuditBoundary, TrustedAuditContext, TrustedBackgroundActor,
+};
 use tracing::info;
 
 pub const SUPER_ADMIN_ROLE: &str = "super_admin";
@@ -41,7 +43,10 @@ pub async fn bootstrap_super_admin(
         profile,
         CredentialType::Password,
         &hash,
-        AuditContext::system(),
+        TrustedAuditContext::background(
+            TrustedAuditBoundary::control_plane(),
+            TrustedBackgroundActor::system(None),
+        ),
     )
     .await?;
 

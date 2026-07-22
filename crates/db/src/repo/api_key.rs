@@ -7,6 +7,15 @@ pub const API_KEY: &str = "api_keys";
 pub const USER_API_KEY: &str = "user_api_keys";
 pub const SERVICE_ACCOUNT_API_KEY: &str = "service_account_api_keys";
 
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub struct ApiKeyAuditRecord {
+    #[sqlx(flatten)]
+    pub api_key: ApiKey,
+    pub owner_type: String,
+    pub owner_id: String,
+    pub org_id: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct ApiKeyRepository {}
 
@@ -257,6 +266,40 @@ impl ApiKeyRepository {
         )))
         .bind(key_hash)
         .fetch_optional(ex)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn get_audit_by_id_for_update(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        id: &str,
+    ) -> Result<Option<ApiKeyAuditRecord>> {
+        let row = sqlx::query_as::<_, ApiKeyAuditRecord>(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT ak.*,
+                   CASE
+                       WHEN uak.user_id IS NOT NULL THEN 'user'
+                       WHEN sak.service_account_id IS NOT NULL THEN 'service_account'
+                   END AS owner_type,
+                   COALESCE(uak.user_id, sak.service_account_id) AS owner_id,
+                   COALESCE(uak.org_id, sa.org_id) AS org_id
+            FROM {api_keys} ak
+            LEFT JOIN {user_api_keys} uak ON uak.api_key_id = ak.id
+            LEFT JOIN {sa_api_keys} sak ON sak.api_key_id = ak.id
+            LEFT JOIN {service_accounts} sa ON sa.id = sak.service_account_id
+            WHERE ak.id = $1
+            {for_update}
+        ",
+            api_keys = API_KEY,
+            user_api_keys = USER_API_KEY,
+            sa_api_keys = SERVICE_ACCOUNT_API_KEY,
+            service_accounts = SERVICE_ACCOUNT,
+            for_update = crate::backend::FOR_UPDATE_API_KEY,
+        )))
+        .bind(id)
+        .fetch_optional(&mut **tx)
         .await?;
 
         Ok(row)

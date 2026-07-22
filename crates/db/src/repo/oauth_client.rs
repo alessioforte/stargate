@@ -79,6 +79,23 @@ impl OAuthClientRepository {
         Ok(row)
     }
 
+    pub async fn get_by_client_id_for_update(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        client_id: &str,
+    ) -> Result<Option<OAuthClient>> {
+        let row = sqlx::query_as::<_, OAuthClient>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {tbl} WHERE client_id = $1 {for_update}",
+            tbl = OAUTH_CLIENT,
+            for_update = crate::backend::FOR_UPDATE,
+        )))
+        .bind(client_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<OAuthClient>>
     where
         E: crate::backend::ReadExecutor<'c>,
@@ -178,8 +195,7 @@ impl OAuthClientRepository {
                 scopes = $8,
                 audiences = $9,
                 attrs = $10,
-                client_secret_hash = $11,
-                updated_at = $12
+                updated_at = $11
             WHERE client_id = $1
             RETURNING *
         ",
@@ -195,7 +211,6 @@ impl OAuthClientRepository {
         .bind(&client.scopes)
         .bind(&client.audiences)
         .bind(&client.attrs)
-        .bind(&client.client_secret_hash)
         .bind(updated_at)
         .fetch_one(&mut **tx)
         .await?;

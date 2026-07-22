@@ -1,0 +1,30 @@
+{
+  "aud": "urn:stargate:service:orders",
+  "exp": 1784474130,
+  "iat": 1784474100,
+  "iss": "https://auth.example.com/internal-context",
+  "jti": "01JZ000000000000000000000J",
+  "stg": {
+    "actor": {
+      "type": "anonymous"
+    },
+    "authentication": {
+      "kind": "none"
+    },
+    "dispatch": {
+      "attempt": 1,
+      "kind": "primary"
+    },
+    "request": {
+      "id": "01JZ000000000000000000000R",
+      "method": "POST",
+      "original_path": "/api/orders",
+      "path": "/v1/orders"
+    },
+    "route": {
+      "router": "orders-write",
+      "service": "orders"
+    },
+    "v": 1
+  }
+}

@@ -1,9 +1,8 @@
 //! Audit subsystem.
 //!
-//! Audit events are written to the `audits` table inside the same database
-//! transaction as the mutation they record — the table doubles as a
-//! transactional outbox (see [`db::svc::Service`]). There is no in-process
-//! buffering or async event bus: durability is the transaction's job.
+//! Audit events are written to `outbox_events` inside the same database
+//! transaction as the mutation they record. There is no in-process buffering
+//! or async event bus: durability is the transaction's job.
 //!
 //! In cluster deployments a background [`relay`] tails the unpublished rows and
 //! ships them to the message broker (Redis Streams). Edge deployments run no
@@ -16,9 +15,12 @@ mod relay;
 
 /// Start the audit relay. Tails the audit outbox and ships rows to the broker in
 /// cluster deployments; a no-op for edge deployments, which have no relay.
-pub fn spawn() {
+pub fn spawn() -> std::io::Result<()> {
     #[cfg(all(feature = "postgres", feature = "redis"))]
-    relay::spawn();
+    return relay::spawn();
+
+    #[cfg(not(all(feature = "postgres", feature = "redis")))]
+    Ok(())
 }
 
 /// Stop the audit relay and wait for its in-flight batch to finish. A no-op for
@@ -26,4 +28,13 @@ pub fn spawn() {
 pub async fn shutdown() {
     #[cfg(all(feature = "postgres", feature = "redis"))]
     relay::shutdown().await;
+}
+
+#[cfg(all(test, feature = "edge"))]
+mod tests {
+    #[tokio::test]
+    async fn audit_edge_relay_lifecycle_is_a_noop() {
+        super::spawn().expect("edge relay start must be a no-op");
+        super::shutdown().await;
+    }
 }

@@ -18,6 +18,7 @@ readme = "README.md"
 members = [
     ".",
     "crates/ace",
+    "crates/ctx",
     "crates/db",
     "crates/gate",
     "crates/idp",
@@ -53,6 +54,7 @@ push = false
 
 [dependencies]
 ace = { path = "crates/ace" }
+ctx = { path = "crates/ctx" }
 http = "1"
 axum = { version = "0.8", features = ["macros"] }
 hyper = { version = "1.9", features = ["full"] }
@@ -100,6 +102,7 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = ["
 opentelemetry-appender-tracing = "0.32"
 tracing-opentelemetry = "0.33"
 base64 = "0.22.1"
+rsa = "0.9.10"
 sha2 = "0.10.9"
 url = "2.5.8"
 ulid = "1.2.1"
@@ -123,3 +126,6 @@ sqlite = ["db/sqlite"]
 memory = ["store/memory", "gate/memory", "oidc/memory", "lim/memory"]
 redis = ["store/redis", "gate/redis", "lim/redis"]
 redis-compression = ["store/compression"]
+
+[dev-dependencies]
+redis = { version = "1.0.4", features = ["tokio-comp"] }

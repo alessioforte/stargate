@@ -5,7 +5,7 @@ use super::shared::{
     oauth_invalid_client, resolve_client_credentials_parts,
 };
 use crate::err::OAuthErrorResponse;
-use crate::etc::reqctx::take_audit_context_from;
+use crate::etc::reqctx::{audit_request_from, take_trusted_audit_context_from};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
@@ -125,7 +125,9 @@ pub async fn post_introspect(req: Request) -> OAuthResult<Json<IntrospectionResp
 pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
     let basic = extract_basic_client_credentials(&req)?;
     let has_admin_grant = has_token_operation_grant(&req);
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let audit_request = audit_request_from(req.extensions());
+    let authenticated_admin_actor = take_trusted_audit_context_from(req.extensions_mut())
+        .map(|context| context.actor().clone());
     let form = extract_token_form(req).await?;
     let _ = form.token_type_hint.as_deref();
     let caller = authorize_token_operation(has_admin_grant, &form, basic).await?;
@@ -155,7 +157,13 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
                 .map_err(OAuthErrorResponse::internal)?;
         }
         Err(_) => {
-            revoke_api_key_token(&form.token, ctx).await?;
+            revoke_api_key_token(
+                &form.token,
+                &caller,
+                authenticated_admin_actor,
+                audit_request,
+            )
+            .await?;
         }
     }
 
@@ -399,24 +407,68 @@ async fn resolve_token_operation_client(
     Ok(client)
 }
 
-async fn revoke_api_key_token(token: &str, ctx: db::ent::AuditContext) -> OAuthResult<()> {
+fn oauth_revoke_audit_context(
+    caller: &TokenOperationCaller,
+    authenticated_admin_actor: Option<db::ent::TrustedAuditActor>,
+    request: db::ent::TrustedAuditRequest,
+    persisted_org_id: Option<&str>,
+) -> OAuthResult<db::ent::TrustedAuditContext> {
+    let actor = match caller {
+        TokenOperationCaller::Admin => {
+            let actor = authenticated_admin_actor.ok_or_else(|| {
+                OAuthErrorResponse::internal("missing authenticated admin audit actor")
+            })?;
+            if !matches!(actor.actor_type(), "admin" | "admin_key") {
+                return Err(OAuthErrorResponse::internal(
+                    "invalid admin token-operation audit actor",
+                ));
+            }
+            actor
+        }
+        TokenOperationCaller::Client(client) => {
+            db::ent::TrustedAuditActor::service(&client.client_id)
+        }
+    };
+
+    match persisted_org_id {
+        Some(org_id) => {
+            db::ent::TrustedAuditContext::organization(actor, request, Some(org_id), None)
+                .map_err(OAuthErrorResponse::internal)
+        }
+        None => Ok(db::ent::TrustedAuditContext::application(actor, request)),
+    }
+}
+
+async fn revoke_api_key_token(
+    token: &str,
+    caller: &TokenOperationCaller,
+    authenticated_admin_actor: Option<db::ent::TrustedAuditActor>,
+    audit_request: db::ent::TrustedAuditRequest,
+) -> OAuthResult<()> {
     if !looks_like_api_key(token) {
         return Ok(());
     }
 
     let hash = pw::hash_api_key(token);
-    let Some(key) = crate::db::get_api_key_by_hash(&hash)
+    let Some(auth) = crate::db::get_api_key_auth_by_hash(&hash)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(());
     };
 
-    if key.revoked {
+    if auth.api_key.revoked {
         return Ok(());
     }
 
-    crate::db::revoke_api_key(&key.id, ctx)
+    let context = oauth_revoke_audit_context(
+        caller,
+        authenticated_admin_actor,
+        audit_request,
+        auth.org_id.as_deref(),
+    )?;
+
+    crate::db::revoke_api_key(&auth.api_key.id, context)
         .await
         .map_err(OAuthErrorResponse::internal)?;
     crate::etc::store::use_store()
@@ -446,6 +498,54 @@ mod tests {
             vec!["gateway".to_string()],
             serde_json::json!({}),
         )
+    }
+
+    fn audit_request() -> db::ent::TrustedAuditRequest {
+        db::ent::TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None)
+    }
+
+    #[test]
+    fn oauth_revoke_client_uses_service_actor_and_persisted_organization_scope() {
+        let caller = TokenOperationCaller::Client(Box::new(test_client("audit-wrapper")));
+        let org_id = "01JZ000000000000000000000B";
+        let context = oauth_revoke_audit_context(&caller, None, audit_request(), Some(org_id))
+            .expect("persisted owner establishes scope");
+
+        assert_eq!(context.actor().actor_type(), "service");
+        assert_eq!(context.actor().id(), Some("audit-wrapper"));
+        assert_eq!(
+            context.boundary().scope(),
+            &db::ent::AuditScopeSelector::Organization {
+                organization_id: org_id.to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn oauth_revoke_admin_remains_application_scoped_for_unbound_key() {
+        let context = oauth_revoke_audit_context(
+            &TokenOperationCaller::Admin,
+            Some(db::ent::TrustedAuditActor::admin(
+                "01JZ000000000000000000000A",
+            )),
+            audit_request(),
+            None,
+        )
+        .expect("authenticated admin context");
+
+        assert_eq!(context.actor().actor_type(), "admin");
+        assert_eq!(
+            context.boundary().scope(),
+            &db::ent::AuditScopeSelector::Application
+        );
+    }
+
+    #[test]
+    fn oauth_revoke_admin_requires_authenticated_actor() {
+        assert!(
+            oauth_revoke_audit_context(&TokenOperationCaller::Admin, None, audit_request(), None,)
+                .is_err()
+        );
     }
 
     #[test]

@@ -83,6 +83,23 @@ impl AdminKeyRepository {
         Ok(row)
     }
 
+    pub async fn get_by_id_for_update(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        id: &str,
+    ) -> Result<Option<AdminKey>> {
+        let row = sqlx::query_as::<_, AdminKey>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {admin_keys} WHERE id = $1 {for_update}",
+            admin_keys = ADMIN_KEY,
+            for_update = crate::backend::FOR_UPDATE,
+        )))
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<AdminKey>>
     where
         E: crate::backend::ReadExecutor<'c>,

@@ -1,4 +1,5 @@
 use super::{
+    dispatch::InternalDispatch,
     http,
     responses::build_direct_response,
     types::{DynLoadBalancer, ExecutionPlan, ReplayRequest, RequestState, SelectedService},
@@ -8,6 +9,7 @@ use crate::err::{ErrorResponse, HttpError};
 use crate::etc::{ext::RequestExt, gate::get_client, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::{body::Body, response::Response};
+use ctx::DispatchKind;
 use http_body_util::BodyExt;
 use std::{collections::HashMap, time::Instant};
 use tracing::Instrument;
@@ -17,6 +19,32 @@ use tracing::Instrument;
 /// unreachable or overloaded) rather than application errors like 500, so they
 /// must not be conflated with normal handler failures.
 const UNHEALTHY_STATUSES: [u16; 3] = [502, 503, 504];
+
+#[derive(Clone, Copy)]
+struct DispatchAttempt {
+    kind: DispatchKind,
+    number: u16,
+}
+
+impl DispatchAttempt {
+    const fn primary() -> Self {
+        Self {
+            kind: DispatchKind::Primary,
+            number: 1,
+        }
+    }
+
+    const fn kind_label(self) -> &'static str {
+        dispatch_kind_label(self.kind)
+    }
+}
+
+const fn dispatch_kind_label(kind: DispatchKind) -> &'static str {
+    match kind {
+        DispatchKind::Primary => "primary",
+        DispatchKind::Shadow => "shadow",
+    }
+}
 
 /// Feed a live upstream attempt back into its load balancer's circuit breaker:
 /// a transport error or an infrastructure 5xx marks the upstream dead, any
@@ -67,7 +95,9 @@ pub(super) async fn execute_selected_with_request(
         SelectedService::Upstream {
             service_name,
             upstream_base_url,
+            internal_context,
         } => {
+            let attempt = DispatchAttempt::primary();
             let protocol = req.get_protocol().to_string();
             let uri = upstream_uri(upstream_base_url, state);
             let span = tracing::info_span!(
@@ -77,15 +107,35 @@ pub(super) async fn execute_selected_with_request(
                 stargate.target_kind = "upstream",
                 network.protocol.name = %protocol,
                 stargate.upstream_base_url = %upstream_base_url,
+                stargate.dispatch.kind = tracing::field::Empty,
+                stargate.dispatch.attempt = tracing::field::Empty,
                 http.response.status_code = tracing::field::Empty,
                 otel.status_code = tracing::field::Empty,
             );
+            if internal_context.is_some() {
+                span.record("stargate.dispatch.kind", attempt.kind_label());
+                span.record("stargate.dispatch.attempt", u64::from(attempt.number));
+            }
             let started = Instant::now();
+            let internal_dispatch = internal_context
+                .as_ref()
+                .map(|settings| {
+                    InternalDispatch::new(
+                        service_name,
+                        &settings.audience,
+                        state.propagation_draft.as_ref(),
+                        state.internal_context_runtime.as_ref(),
+                        attempt.kind,
+                        attempt.number,
+                    )
+                })
+                .transpose()?;
 
             if protocol == "ws" {
-                let result = ws::handler(req, &uri, state.preserve_host)
-                    .instrument(span.clone())
-                    .await;
+                let result =
+                    ws::handler(req, &uri, state.preserve_host, internal_dispatch.as_ref())
+                        .instrument(span.clone())
+                        .await;
                 record_attempt_span(&span, &result);
                 record_attempt_metrics(
                     service_name,
@@ -103,11 +153,17 @@ pub(super) async fn execute_selected_with_request(
                     "HTTP client not found".to_string(),
                 ))
             })?;
-
             let empty_headers = HeaderMap::new();
-            let result = http::handler(req, &empty_headers, &uri, &client, state.preserve_host)
-                .instrument(span.clone())
-                .await;
+            let result = http::handler(
+                req,
+                &empty_headers,
+                &uri,
+                &client,
+                state.preserve_host,
+                internal_dispatch.as_ref(),
+            )
+            .instrument(span.clone())
+            .await;
             record_attempt_span(&span, &result);
             record_attempt_metrics(
                 service_name,
@@ -127,6 +183,7 @@ async fn execute_selected_from_replay(
     replay: &ReplayRequest,
     state: &RequestState,
     balancers: Option<&HashMap<String, DynLoadBalancer>>,
+    dispatch_attempt: Option<DispatchAttempt>,
 ) -> Result<Response, ErrorResponse> {
     match selected {
         SelectedService::DirectResponse {
@@ -148,9 +205,25 @@ async fn execute_selected_from_replay(
         SelectedService::Upstream {
             service_name,
             upstream_base_url,
+            internal_context,
         } => {
+            let dispatch_attempt =
+                dispatch_attempt.ok_or_else(|| attempt_limit_failure(service_name, "unknown"))?;
             let uri = upstream_uri(upstream_base_url, state);
             let req = replay.build(&uri)?;
+            let internal_dispatch = internal_context
+                .as_ref()
+                .map(|settings| {
+                    InternalDispatch::new(
+                        service_name,
+                        &settings.audience,
+                        state.propagation_draft.as_ref(),
+                        state.internal_context_runtime.as_ref(),
+                        dispatch_attempt.kind,
+                        dispatch_attempt.number,
+                    )
+                })
+                .transpose()?;
             let client = get_client(service_name).ok_or_else(|| {
                 ErrorResponse::from(HttpError::InternalServerError(
                     "HTTP client not found".to_string(),
@@ -164,14 +237,30 @@ async fn execute_selected_from_replay(
                 stargate.target_kind = "upstream",
                 network.protocol.name = "http",
                 stargate.upstream_base_url = %upstream_base_url,
+                stargate.dispatch.kind = tracing::field::Empty,
+                stargate.dispatch.attempt = tracing::field::Empty,
                 http.response.status_code = tracing::field::Empty,
                 otel.status_code = tracing::field::Empty,
             );
+            if internal_context.is_some() {
+                span.record("stargate.dispatch.kind", dispatch_attempt.kind_label());
+                span.record(
+                    "stargate.dispatch.attempt",
+                    u64::from(dispatch_attempt.number),
+                );
+            }
             let started = Instant::now();
             let empty_headers = HeaderMap::new();
-            let result = http::handler(req, &empty_headers, &uri, &client, state.preserve_host)
-                .instrument(span.clone())
-                .await;
+            let result = http::handler(
+                req,
+                &empty_headers,
+                &uri,
+                &client,
+                state.preserve_host,
+                internal_dispatch.as_ref(),
+            )
+            .instrument(span.clone())
+            .await;
             record_attempt_span(&span, &result);
             record_attempt_metrics(service_name, "upstream", "http", &result, started.elapsed());
             if let Some(balancers) = balancers {
@@ -187,23 +276,44 @@ pub(super) async fn execute_plan_from_replay(
     replay: &ReplayRequest,
     state: &RequestState,
     balancers: Option<&HashMap<String, DynLoadBalancer>>,
+    dispatch_kind: DispatchKind,
 ) -> Result<Response, ErrorResponse> {
     let last_idx = plan.attempts.len().saturating_sub(1);
+    let mut network_attempt = 0_u16;
     for (idx, selected) in plan.attempts.iter().enumerate() {
-        let response = execute_selected_from_replay(selected, replay, state, balancers)
-            .instrument(tracing::debug_span!(
-                "gateway.replay_attempt",
-                attempt = idx,
-                stargate.service = %selected_service_name(selected),
-                stargate.target_kind = selected_target_kind(selected),
-            ))
-            .await?;
+        let dispatch_attempt =
+            next_dispatch_attempt(selected, dispatch_kind, &mut network_attempt)?;
+        let result =
+            execute_selected_from_replay(selected, replay, state, balancers, dispatch_attempt)
+                .instrument(tracing::debug_span!(
+                    "gateway.replay_attempt",
+                    plan_index = idx + 1,
+                    attempt = dispatch_attempt.map(|attempt| attempt.number),
+                    dispatch_kind = dispatch_attempt.map(DispatchAttempt::kind_label),
+                    stargate.service = %selected_service_name(selected),
+                    stargate.target_kind = selected_target_kind(selected),
+                ))
+                .await;
+        let response = match result {
+            Ok(response) => response,
+            Err(error) if idx < last_idx && error.code == ::http::StatusCode::BAD_GATEWAY => {
+                telemetry::record_gateway_failover("transport", None);
+                tracing::warn!(
+                    plan_index = idx + 1,
+                    attempt = dispatch_attempt.map(|attempt| attempt.number),
+                    "Failing over after upstream transport error"
+                );
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if idx < last_idx && plan.should_failover_response(response.status()) {
             let status = response.status();
             telemetry::record_gateway_failover("status", Some(status.as_u16()));
             tracing::warn!(
                 status = status.as_u16(),
-                attempt = idx,
+                plan_index = idx + 1,
+                attempt = dispatch_attempt.map(|attempt| attempt.number),
                 "Failing over response by status"
             );
             if let Err(error) = response.into_body().collect().await {
@@ -233,7 +343,9 @@ pub(super) fn spawn_mirrors(
             async move {
                 // Mirror traffic is shadow traffic: its outcomes must not feed the
                 // circuit breaker, so pass no balancers.
-                match execute_plan_from_replay(&mirror, &replay, &state, None).await {
+                match execute_plan_from_replay(&mirror, &replay, &state, None, DispatchKind::Shadow)
+                    .await
+                {
                     Ok(response) => {
                         telemetry::record_gateway_mirror("success");
                         let status = response.status();
@@ -259,6 +371,44 @@ fn upstream_uri(base_url: &str, state: &RequestState) -> String {
         uri.push_str(&state.query);
     }
     uri
+}
+
+fn attempt_limit_failure(service: &str, dispatch_kind: &'static str) -> ErrorResponse {
+    telemetry::record_internal_context_issue(
+        service,
+        dispatch_kind,
+        "failure",
+        "attempt",
+        None,
+        None,
+    );
+    tracing::warn!(
+        stargate.service = service,
+        stargate.dispatch.kind = dispatch_kind,
+        stargate.outcome = "failure",
+        stargate.reason = "attempt",
+        "Internal-context dispatch attempt limit exceeded"
+    );
+    ErrorResponse::from(HttpError::InternalServerError(
+        "Internal upstream request preparation failed".to_string(),
+    ))
+}
+
+fn next_dispatch_attempt(
+    selected: &SelectedService,
+    kind: DispatchKind,
+    network_attempt: &mut u16,
+) -> Result<Option<DispatchAttempt>, ErrorResponse> {
+    let SelectedService::Upstream { service_name, .. } = selected else {
+        return Ok(None);
+    };
+    *network_attempt = (*network_attempt)
+        .checked_add(1)
+        .ok_or_else(|| attempt_limit_failure(service_name, dispatch_kind_label(kind)))?;
+    Ok(Some(DispatchAttempt {
+        kind,
+        number: *network_attempt,
+    }))
 }
 
 fn selected_service_name(selected: &SelectedService) -> &str {
@@ -320,6 +470,8 @@ fn record_attempt_metrics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::etc::reqctx::INTERNAL_CONTEXT_HEADER;
+    use gate::graph::{HeaderValueNode, InternalContextNode};
     use std::collections::HashMap;
 
     // Single-upstream balancer with the given open-after threshold and a long
@@ -361,6 +513,193 @@ mod tests {
 
     fn available(balancers: &HashMap<String, DynLoadBalancer>, service: &str) -> bool {
         balancers.get(service).unwrap().select(&ctx()).is_some()
+    }
+
+    fn replay_state() -> RequestState {
+        RequestState {
+            original_path: "/orders".to_owned(),
+            path: "/orders".to_owned(),
+            query: String::new(),
+            preserve_host: false,
+            response_headers: Default::default(),
+            propagation_draft: None,
+            internal_context_runtime: None,
+        }
+    }
+
+    fn replay_request() -> ReplayRequest {
+        ReplayRequest {
+            method: ::http::Method::GET,
+            version: ::http::Version::HTTP_11,
+            headers: HeaderMap::new(),
+            body: hyper::body::Bytes::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_response_remains_local_and_has_no_internal_context() {
+        let selected = SelectedService::DirectResponse {
+            status: 202,
+            headers: vec![HeaderValueNode {
+                name: "x-direct".to_owned(),
+                value: "yes".to_owned(),
+            }],
+            body: None,
+        };
+        let state = RequestState {
+            original_path: "/direct".to_owned(),
+            path: "/direct".to_owned(),
+            query: String::new(),
+            preserve_host: false,
+            response_headers: Default::default(),
+            propagation_draft: None,
+            internal_context_runtime: None,
+        };
+        let request = Request::builder().body(Body::empty()).unwrap();
+
+        let response = execute_selected_with_request(&selected, request, &state, &HashMap::new())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 202);
+        assert_eq!(response.headers()["x-direct"], "yes");
+        assert!(response.headers().get(INTERNAL_CONTEXT_HEADER).is_none());
+    }
+
+    #[tokio::test]
+    async fn status_failover_advances_to_the_next_plan_entry() {
+        let plan = ExecutionPlan {
+            attempts: vec![
+                SelectedService::DirectResponse {
+                    status: 503,
+                    headers: Vec::new(),
+                    body: None,
+                },
+                SelectedService::DirectResponse {
+                    status: 204,
+                    headers: Vec::new(),
+                    body: None,
+                },
+            ],
+            failover_on_status: vec![503],
+            mirrors: Vec::new(),
+        };
+
+        let response = execute_plan_from_replay(
+            &plan,
+            &replay_request(),
+            &replay_state(),
+            None,
+            DispatchKind::Primary,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), 204);
+    }
+
+    #[tokio::test]
+    async fn transport_failure_advances_even_without_status_rules() {
+        let plan = ExecutionPlan {
+            attempts: vec![
+                SelectedService::Upstream {
+                    service_name: "unreachable".to_owned(),
+                    upstream_base_url: "http://[".to_owned(),
+                    internal_context: None,
+                },
+                SelectedService::DirectResponse {
+                    status: 204,
+                    headers: Vec::new(),
+                    body: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let response = execute_plan_from_replay(
+            &plan,
+            &replay_request(),
+            &replay_state(),
+            None,
+            DispatchKind::Primary,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), 204);
+    }
+
+    #[tokio::test]
+    async fn internal_context_failure_never_fails_over() {
+        let plan = ExecutionPlan {
+            attempts: vec![
+                SelectedService::Upstream {
+                    service_name: "orders".to_owned(),
+                    upstream_base_url: "http://orders.test".to_owned(),
+                    internal_context: Some(InternalContextNode {
+                        audience: "urn:stargate:service:orders".to_owned(),
+                    }),
+                },
+                SelectedService::DirectResponse {
+                    status: 204,
+                    headers: Vec::new(),
+                    body: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let error = execute_plan_from_replay(
+            &plan,
+            &replay_request(),
+            &replay_state(),
+            None,
+            DispatchKind::Primary,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code, ::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn dispatch_attempts_count_only_network_calls_and_reset_by_kind() {
+        let direct = SelectedService::DirectResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: None,
+        };
+        let upstream = SelectedService::Upstream {
+            service_name: "orders".to_owned(),
+            upstream_base_url: "http://orders.test".to_owned(),
+            internal_context: None,
+        };
+        let mut primary_counter = 0;
+        let mut shadow_counter = 0;
+
+        assert!(
+            next_dispatch_attempt(&direct, DispatchKind::Primary, &mut primary_counter)
+                .unwrap()
+                .is_none()
+        );
+        let primary_one =
+            next_dispatch_attempt(&upstream, DispatchKind::Primary, &mut primary_counter)
+                .unwrap()
+                .unwrap();
+        let primary_two =
+            next_dispatch_attempt(&upstream, DispatchKind::Primary, &mut primary_counter)
+                .unwrap()
+                .unwrap();
+        let shadow_one =
+            next_dispatch_attempt(&upstream, DispatchKind::Shadow, &mut shadow_counter)
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(primary_one.number, 1);
+        assert_eq!(primary_two.number, 2);
+        assert_eq!(shadow_one.number, 1);
+        assert_eq!(primary_one.kind, DispatchKind::Primary);
+        assert_eq!(shadow_one.kind, DispatchKind::Shadow);
     }
 
     #[test]

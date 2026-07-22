@@ -1,9 +1,10 @@
-use crate::etc::{store::use_store, telemetry};
+use crate::etc::{internal_context, store::use_store, telemetry};
 use gate::{
     Gate,
     cfg::{RuntimeConfig, Service},
 };
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     env,
@@ -54,7 +55,11 @@ pub fn get_policies_path() -> String {
 
 fn load_config() -> RuntimeConfig {
     let config_file_path = get_config_path();
-    RuntimeConfig::from_file(&config_file_path).expect("Unable to load gateway config")
+    let config =
+        RuntimeConfig::from_file(&config_file_path).expect("Unable to load gateway config");
+    internal_context::preflight_config(&config)
+        .expect("Gateway config failed internal-context preflight");
+    config
 }
 
 pub fn init() -> std::sync::Arc<Gate> {
@@ -62,6 +67,7 @@ pub fn init() -> std::sync::Arc<Gate> {
     let config = get_config();
     let config_file_path = get_config_path();
     let policies_path = get_policies_path();
+    refresh_policy_revision(&policies_path);
 
     let gate = Gate::new(Arc::new(store.clone())).build(config.as_ref(), &policies_path);
     watch_config_file(&config_file_path, &gate);
@@ -71,6 +77,7 @@ pub fn init() -> std::sync::Arc<Gate> {
 
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 static CONFIG_CACHE: OnceLock<RwLock<CachedConfig>> = OnceLock::new();
+static POLICY_REVISION: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct CachedConfig {
@@ -198,6 +205,11 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                                 continue;
                             }
                         };
+                        if let Err(error) = internal_context::preflight_config(&config) {
+                            telemetry::record_config_reload("gateway_config", "error");
+                            error!(%error, "Configuration file changed but failed internal-context preflight; keeping previous config");
+                            continue;
+                        }
                         let config_version = update_cached_config(config.clone());
                         CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
                         info!(config_version, "Configuration file changed, reloading...");
@@ -257,6 +269,24 @@ pub fn get_config_version() -> u64 {
     CONFIG_VERSION.load(Ordering::SeqCst)
 }
 
+pub fn get_policy_revision() -> Option<String> {
+    POLICY_REVISION
+        .get()
+        .and_then(|revision| revision.read().ok()?.clone())
+}
+
+fn refresh_policy_revision(path: &str) {
+    let revision = std::fs::read(path)
+        .ok()
+        .map(|content| policy_revision(&content));
+    let cache = POLICY_REVISION.get_or_init(|| RwLock::new(None));
+    *cache.write().expect("Policy revision lock poisoned") = revision;
+}
+
+fn policy_revision(content: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(content))
+}
+
 pub async fn reload_policy_engine(gate: &Gate) {
     let policies_path = get_policies_path();
     reload_policy_engine_from_path(gate, &policies_path).await;
@@ -265,6 +295,7 @@ pub async fn reload_policy_engine(gate: &Gate) {
 async fn reload_policy_engine_from_path(gate: &Gate, policies_path: &str) {
     CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
     gate.update_policy_engine(policies_path).await;
+    refresh_policy_revision(policies_path);
     telemetry::record_config_reload("policies", "success");
 }
 
@@ -414,4 +445,18 @@ fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
         .with_root_certificates(root_store)
         .with_client_auth_cert(client_certs, client_keys.remove(0).into())
         .expect("Unable to create MTLS client config")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::policy_revision;
+
+    #[test]
+    fn policy_revision_is_a_bounded_content_hash() {
+        assert_eq!(
+            policy_revision(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(policy_revision(b"ALLOW user FOR \"orders\";").len(), 71);
+    }
 }

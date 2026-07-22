@@ -16,7 +16,7 @@ stargate/
 │   ├── main.rs        # Entry: init logging/DB/services, Axum router, Hyper server (plain or TLS)
 │   ├── act/           # Stateful app flows (login guard, OTP/MFA, oauth state, signup, email verify, change password) + shutdown signal
 │   ├── api/           # Axum routers + handlers + gateway fallback service
-│   ├── aud/           # Audit service - buffered async event bus
+│   ├── aud/           # PostgreSQL-to-Redis audit outbox relay (cluster only)
 │   ├── cli/           # Admin CLI (bootstrap super-admin)
 │   ├── db/            # DB pool init (feature-gated postgres/sqlite)
 │   ├── err/           # HTTP error types -> JSON responses (axum IntoResponse)
@@ -24,6 +24,7 @@ stargate/
 │   └── fun/           # Business logic (token gen, name format, super-admin)
 ├── crates/
 │   ├── ace/           # Access Control Engine (ABAC policy evaluation)
+│   ├── ctx/           # Stargate-side signed internal context issuer and contract tests
 │   ├── db/            # DB repo traits + sqlx implementations
 │   ├── gate/          # Gateway config schema, compiler, runtime graph
 │   ├── jwt/           # JWT encode/decode
@@ -69,7 +70,7 @@ Mounted as Axum `fallback_service`. Current request flow:
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
 5. Apply selected policies in fixed runtime order: auth, access control, rate limit, quota.
 6. Build an execution plan from the selected service: load-balanced upstream, weighted split, mirror, failover, or direct response.
-7. Buffer replayable requests when mirror traffic or response-status failover requires it.
+7. Buffer replayable requests for mirror traffic and every multi-attempt failover plan.
 8. Execute HTTP, WebSocket, or direct response and apply gateway/response headers.
 
 Gateway modules:
@@ -78,6 +79,7 @@ Gateway modules:
 - `policies.rs`: auth, ACE, rate limit, quota policy execution.
 - `planner.rs`: service graph expansion into an execution plan.
 - `executor.rs`: upstream/direct-response execution, mirror dispatch, failover execution.
+- `dispatch.rs`: shared internal-context sanitization, trace injection, and per-attempt signing boundary.
 - `replay.rs`: request buffering and replay body limits.
 - `headers.rs`, `path.rs`, `responses.rs`, `limits.rs`, `types.rs`: focused helpers and shared types.
 - `http.rs`, `ws.rs`: protocol-specific proxy implementations.
@@ -152,7 +154,11 @@ Quota is independent from rate limiting. A router `quota` policy or subject
 `attrs.quota` selects a named `quota_tracker` limit. If both rate limit and
 quota are configured for a request, both checks run with separate tracker keys.
 
-Full schema notes and examples: `docs/config-v2alpha1.md`.
+Full schema notes and examples: `docs/config-v2alpha1.md`. Internal-context
+consumers follow `docs/internal-context-consumer-guide.md`; real upstream
+enablement is recorded in `docs/internal-context-upstream-inventory.md`.
+Advanced context features are not part of version 1; their reopening criteria
+are recorded in `docs/internal-context-deferred-capabilities.md`.
 
 ### Traffic Management
 
@@ -163,7 +169,7 @@ Implemented:
 - Failover on selected response status codes.
 - Direct response routes.
 - Fallback routes via low-priority catch-all routers.
-- Request replay buffering for mirror/status failover.
+- Request replay buffering for mirrors and all multi-attempt failover plans.
 - Replay body cap via `GATEWAY_REPLAY_BODY_LIMIT` (default `2MiB`).
 
 Partially implemented:
@@ -180,23 +186,28 @@ Missing:
 
 ### Audit (transactional outbox)
 
-Audit events are inserted into the `audits` table in the **same transaction** as
-the mutation they record: `crates/db` `Service` mutators take an `AuditContext`
-and write the audit row before commit, so it commits iff the mutation does. No
-in-process buffer or event bus; nothing is dropped on crash.
+Audit producers construct and validate the versioned raw-event contract, then
+store its final immutable JSON in `outbox_events` in the **same transaction** as
+the mutation. `crates/db` service mutators receive a `TrustedAuditContext`, so
+actor, request facts, and scope come from authenticated or persisted state. All
+`/admin/*` events are `control_plane`. There is no in-process event buffer.
 
-- **Edge**: the insert is terminal — rows persist and are queryable, no relay.
+- **Edge**: SQLite uses the aligned outbox schema, but starts no relay. New rows
+  remain durable and pending with `published_at = NULL`.
 - **Cluster**: one background relay per process (`src/aud/relay.rs`) ships
-  unpublished rows to Redis Streams:
-  - Claims a batch with `... WHERE published_at IS NULL ORDER BY seq LIMIT n FOR
-    UPDATE SKIP LOCKED` in an open tx (nodes drain concurrently, no double-claim).
-  - `XADD`s the batch to `AUDIT_STREAM` (pipelined, `MAXLEN ~` trim), then sets
-    `published_at` and commits. Publish-before-commit ⇒ **at-least-once**;
-    consumers dedupe on audit `id`. Redis/DB errors roll back and back off.
+  PostgreSQL rows to Redis Streams:
+  - Claims pending rows in `seq` order with `FOR UPDATE SKIP LOCKED`, allowing
+    multiple nodes to drain disjoint batches.
+  - Publishes to `AUDIT_REDIS_STREAM` (default `audit.raw`) with exactly one
+    Redis field: `payload = <stored JSON>`.
+  - Marks the claimed rows published and commits only after Redis accepts the
+    batch. Publish-before-commit gives **at-least-once** delivery; consumers
+    deduplicate using `event_id` inside the payload.
+  - Redis/DB failures roll back the claim and use exponential backoff. Relay
+    code never parses, rebuilds, substitutes, or logs the payload.
 
-`Service::record_audit(ctx, action)` writes a one-off audit (e.g. login/logout)
-in its own tx. Postgres `audits` gains `seq` (identity claim cursor) and
-`published_at` + a partial index on unpublished rows; sqlite schema unchanged.
+Login/logout audit events are not currently produced; any such coverage is a
+separately reviewed follow-up rather than part of the core outbox contract.
 
 ### Singletons / Runtime State
 
@@ -356,9 +367,15 @@ Currently implemented methods:
 
 ## Database Schema (migrations/)
 
-Tables: `organizations`, `users`, `super_admins`, `credentials`, `api_keys`, `admin_keys`, `audits`, `service_accounts`, `oauth_clients`, `oauth_consents`, `user_organizations`, `user_api_keys`, `service_account_api_keys`
+Tables include `organizations`, `users`, `super_admins`, `credentials`,
+`credential_history`, `api_keys`, `admin_keys`, `service_accounts`,
+`oauth_clients`, `oauth_consents`, `user_organizations`, `user_api_keys`,
+`service_account_api_keys`, and `outbox_events`.
 
-IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
+Entity and audit event ids are ULIDs stored as text. `outbox_events` stores the
+immutable raw JSON payload plus local `seq`, optional operation/pair metadata,
+`created_at`, and nullable `published_at`. PostgreSQL and SQLite expose the same
+logical outbox columns.
 
 ## Key Env Vars
 
@@ -374,6 +391,14 @@ IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
 | `JWT_REFRESH_EXP` | 1d | Refresh token TTL |
 | `OAUTH_BASE_URL` | issuer/localhost | Public base URL for metadata endpoint links |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
+| `INTERNAL_CONTEXT_ALGORITHM` | RS256 | Internal-context signing algorithm; version 1 accepts only RS256 |
+| `INTERNAL_CONTEXT_ISSUER` | - | Exact issuer for signed internal request contexts |
+| `INTERNAL_CONTEXT_KID` | - | Active internal-context signing key id |
+| `INTERNAL_CONTEXT_PRIVATE_KEY_PATH` | - | Dedicated internal-context RSA private key |
+| `INTERNAL_CONTEXT_JWKS_PATH` | - | Dedicated public internal-context JWKS |
+| `INTERNAL_CONTEXT_TTL_SECS` | 30 | Internal-context token lifetime |
+| `INTERNAL_CONTEXT_CLOCK_SKEW_SECS` | 5 | Consumer clock-skew allowance |
+| `INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS` | 60 | Published internal JWKS cache max-age |
 | `POSTGRES_ENDPOINT` | - | Postgres host (cluster) |
 | `POSTGRES_USERNAME` | - | Postgres user |
 | `POSTGRES_PASSWORD` | - | Postgres password |
@@ -391,14 +416,14 @@ IDs: ULID (TEXT). Audit has actor_type enum, action enum, JSON metadata.
 | `AUDIT_RELAY_ENABLED` | true | Run the audit outbox relay (cluster) |
 | `AUDIT_RELAY_BATCH` | 256 | Rows claimed per relay batch |
 | `AUDIT_RELAY_INTERVAL_MS` | 1000 | Idle poll interval when caught up |
-| `AUDIT_STREAM` | audit:events | Redis stream for audit events |
+| `AUDIT_REDIS_STREAM` | audit.raw | Redis stream receiving one unchanged `payload` field per event |
 | `AUDIT_STREAM_MAXLEN` | 100000 | Approx stream cap (`MAXLEN ~`; 0 = unbounded) |
 | `TLS_ENABLED` | false | HTTPS |
 | `TRUSTED_PROXIES` | - | IP/CIDR for client IP |
 | `CORS_ORIGINS` | - | Allowed origins |
 | `TRUSTED_ORIGINS` | - | Trusted browser origins for sensitive IAM endpoints |
 | `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
-| `GATEWAY_REPLAY_BODY_LIMIT` | 2MiB | Max buffered body for mirror/status-failover replay |
+| `GATEWAY_REPLAY_BODY_LIMIT` | 2MiB | Max buffered body for mirror/failover replay |
 | `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | Request drain timeout during shutdown |
 | `EMAIL_OTP_PEPPER` | - | Server-side HMAC pepper for email/message OTP records |
 | `EMAIL_OTP_LENGTH` | 6 | Email OTP code length |
@@ -452,7 +477,9 @@ Flags: `--password <val>`, `--password-stdin`, `--generate-password`
 
 - `GET /health` - health check
 - `GET /docs` - Swagger UI
-- `/.well-known/*` - OAuth/OIDC metadata and JWKS
+- `/.well-known/*` - OAuth/OIDC metadata and public JWKS
+- `GET /.well-known/stargate-context-jwks.json` - dedicated public
+  internal-context JWKS when the signer is configured
 - `/account/*` - login, logout, profile, account refresh tokens, credentials
 - `/account/login/otp/email`, `/account/login/mfa/challenges/*`, `/account/mfa/*` - passwordless email OTP and MFA
 - `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`, `/oauth/introspect`, `/oauth/revoke` - OAuth/OIDC provider endpoints
@@ -589,3 +616,10 @@ Following the arrows keeps each concern in exactly one place.
 - OAuth/OIDC non-redirect errors still use Stargate's generic error envelope rather than full RFC-shaped error bodies.
 - OTP/MFA API modules are intentionally thin Axum/OpenAPI bindings; workflow changes should usually go in `src/act/otp`.
 - Email OTP is currently the only wired account MFA method. TOTP/HOTP and SMS primitives exist in `crates/otp` for future account integrations.
+- Internal-context issuance exports bounded outcome, signing-duration, and
+  token-size telemetry. Operations, rotation, recovery, alerts, and the local
+  signing benchmark are documented in `docs/internal-context-operations.md`.
+- P9 is the final internal-context implementation-plan phase and is
+  documentation-only. Delegation, new transports, replay caches, JWE, and
+  other advanced capabilities remain deferred until Stargate directly needs
+  them; see `docs/internal-context-deferred-capabilities.md`.

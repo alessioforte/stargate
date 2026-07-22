@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::msg::MessageResponse;
-use crate::etc::reqctx::take_audit_context_from;
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -222,7 +222,7 @@ pub async fn get_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
 pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateApiKeyRequest = extract_json(req).await?;
 
     if payload.user_id.is_none() && payload.service_account_id.is_none() {
@@ -307,7 +307,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
 pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
     let Some(api_key) = crate::db::get_api_key_by_id(&id)
@@ -352,7 +352,7 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
 pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
     let api_key = crate::db::get_api_key_by_id(&id)
@@ -405,7 +405,7 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
 pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
 
@@ -446,7 +446,7 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
 pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
     require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
 
-    let ctx = take_audit_context_from(req.extensions_mut());
+    let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
 

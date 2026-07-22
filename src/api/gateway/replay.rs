@@ -1,5 +1,6 @@
 use super::types::ReplayRequest;
 use crate::err::{ErrorResponse, HttpError};
+use crate::etc::reqctx::INTERNAL_CONTEXT_HEADER;
 use ::http::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use axum::body::Body;
 use http_body_util::BodyExt;
@@ -67,7 +68,10 @@ pub(super) async fn buffer_request(
     req: Request<Body>,
     limit: usize,
 ) -> Result<ReplayRequest, ErrorResponse> {
-    let (parts, mut body) = req.into_parts();
+    let (mut parts, mut body) = req.into_parts();
+    // Defense in depth: replay state is always unsigned. A token is minted
+    // only after the concrete leaf, dispatch kind, and attempt are known.
+    parts.headers.remove(&INTERNAL_CONTEXT_HEADER);
     let mut bytes = Vec::new();
 
     while let Some(frame) = body.frame().await {
@@ -98,4 +102,67 @@ pub(super) async fn buffer_request(
         headers: parts.headers,
         body: Bytes::from(bytes),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn replay_buffer_never_retains_or_rebuilds_a_signed_context() {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/orders")
+            .header("stargate-context", "stale-one")
+            .header("x-request-id", "01JZ000000000000000000000R")
+            .body(Body::from("payload"))
+            .unwrap();
+        request.headers_mut().append(
+            &INTERNAL_CONTEXT_HEADER,
+            http::HeaderValue::from_static("stale-two"),
+        );
+
+        let replay = buffer_request(request, 1024).await.unwrap();
+        let rebuilt = replay.build("http://orders.test/orders").unwrap();
+
+        assert!(
+            replay
+                .headers
+                .get_all(&INTERNAL_CONTEXT_HEADER)
+                .iter()
+                .next()
+                .is_none()
+        );
+        assert!(rebuilt.headers().get(INTERNAL_CONTEXT_HEADER).is_none());
+        assert_eq!(
+            rebuilt.headers()["x-request-id"],
+            "01JZ000000000000000000000R"
+        );
+        assert_eq!(
+            rebuilt.into_body().collect().await.unwrap().to_bytes(),
+            "payload"
+        );
+    }
+
+    #[test]
+    fn transport_only_failover_requires_replay() {
+        let plan = super::super::types::ExecutionPlan {
+            attempts: vec![
+                super::super::types::SelectedService::DirectResponse {
+                    status: 502,
+                    headers: Vec::new(),
+                    body: None,
+                },
+                super::super::types::SelectedService::DirectResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(plan.requires_replay());
+        assert!(plan.needs_failover_replay());
+    }
 }

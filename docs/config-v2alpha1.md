@@ -221,6 +221,72 @@ http:
       upstream: api-v1
 ```
 
+### Internal context
+
+An upstream may declare the audience that will receive Stargate's signed
+internal request context:
+
+```yaml
+http:
+  upstreams:
+    orders:
+      targets:
+        - url: http://orders:8080
+      internal_context:
+        audience: urn:stargate:service:orders
+```
+
+`audience` is required, must not be blank, and is limited to 256 UTF-8 bytes.
+Omitting `internal_context` preserves the existing upstream behavior and emits
+no signed context.
+
+Stargate parses and compiles the block and preflights the separate signing key
+and matching public `kid` before activation. A rejected startup or hot reload
+never replaces the previous active graph. Do not enable the block for an
+upstream until its deployed consumer follows the fail-closed validation and
+ownership requirements in `docs/internal-context-consumer-guide.md`. Record
+real enablement and its external evidence in
+`docs/internal-context-upstream-inventory.md`.
+
+`stargate-context` is reserved to the gateway. It cannot be added, set, or
+removed by request/response header middleware, and cannot be returned by a
+`direct_response` service. Matching is case-insensitive.
+
+The signer is configured independently from OAuth/OIDC keys:
+
+```dotenv
+INTERNAL_CONTEXT_ALGORITHM=RS256
+INTERNAL_CONTEXT_ISSUER=https://auth.example.com/internal-context
+INTERNAL_CONTEXT_KID=stargate-internal-current
+INTERNAL_CONTEXT_PRIVATE_KEY_PATH=.stargate/internal-context/private.pem
+INTERNAL_CONTEXT_JWKS_PATH=.stargate/internal-context/jwks.json
+INTERNAL_CONTEXT_TTL_SECS=30
+INTERNAL_CONTEXT_CLOCK_SKEW_SECS=5
+INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS=60
+```
+
+Only RS256 is accepted in version 1. Stargate does not generate missing
+internal keys. The JWKS file must contain public RSA keys with unique `kid`
+values and may contain both current and retiring keys. The active `kid` must
+match the private signing key. Public keys are exposed separately at
+`/.well-known/stargate-context-jwks.json`; the OAuth/OIDC JWKS is unchanged.
+
+Rotate keys in this order:
+
+1. Roll/restart Stargate with the current signer and both public JWKs.
+2. Allow downstream caches to observe the overlapping JWKS and validate the
+   new key through unknown-`kid` refresh.
+3. Roll/restart Stargate with the new private key and
+   `INTERNAL_CONTEXT_KID`, while continuing to publish both public keys.
+4. After the last old signer stops, retain the old public key for at least the
+   token TTL, maximum clock skew, and downstream JWKS cache overlap.
+5. Remove the old public key and roll/restart again.
+
+The signer and JWKS are loaded into memory at process startup; editing the
+files alone does not rotate a running process. Metrics, alert guidance,
+permissions, drills, benchmarks, rotation, recovery, and compromise response
+are documented in `docs/internal-context-operations.md`.
+
 ### Upstream Health
 
 Each upstream target is fronted by a circuit breaker. Two independent signals

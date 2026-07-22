@@ -11,7 +11,7 @@ pub mod users;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
-use crate::etc::reqctx::take_audit_context_from;
+use crate::etc::reqctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::etc::sub::Subject;
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
@@ -98,11 +98,22 @@ async fn oauth_client_is_trusted_admin_client(client_id: &str) -> bool {
     client.enabled && oidc::consent::client_is_first_party(&client.attrs)
 }
 
-pub async fn extract_grants(mut req: Request, next: Next) -> Response {
-    let mut ctx = take_audit_context_from(req.extensions_mut());
-    let mut grants: HashSet<String> = HashSet::new();
+#[derive(Clone, Copy)]
+enum AuditRouteBoundary {
+    Application,
+    AdminControlPlane,
+}
 
-    if let Some(token) = req.get_token() {
+struct GrantResolution {
+    grants: HashSet<String>,
+    actor: Option<db::ent::TrustedAdminActor>,
+}
+
+async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> GrantResolution {
+    let mut grants: HashSet<String> = HashSet::new();
+    let mut actor = None;
+
+    if let Some(token) = token {
         let jwt = jwt_config();
         if let Ok(claims) = jwt.validate_session_access_token(&token) {
             match crate::act::token_revocation::is_revoked(&claims).await {
@@ -114,7 +125,7 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
                         && let Some(user_id) = claims.sub_id.as_deref()
                         && grant_super_admin_if_allowed(&mut grants, user_id, Some(&sid)).await
                     {
-                        ctx = ctx.with_actor(db::ent::ActorType::Admin, Some(user_id.to_string()));
+                        actor = Some(db::ent::TrustedAdminActor::admin(user_id));
                     }
                 }
                 Ok(true) => {}
@@ -131,7 +142,7 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
                         && grant_super_admin_if_allowed(&mut grants, user_id, claims.sid.as_deref())
                             .await
                     {
-                        ctx = ctx.with_actor(db::ent::ActorType::Admin, Some(user_id.to_string()));
+                        actor = Some(db::ent::TrustedAdminActor::admin(user_id));
                     }
                 }
                 Ok(true) => {}
@@ -143,20 +154,77 @@ pub async fn extract_grants(mut req: Request, next: Next) -> Response {
     }
 
     if grants.is_empty()
-        && let Some(raw_key) = req.get_api_key()
+        && let Some(raw_key) = raw_key
     {
         let hash = pw::hash_api_key(&raw_key);
         if let Ok(Some(key)) = crate::db::get_admin_key_by_hash(&hash).await
             && !key.revoked
         {
-            ctx = ctx.with_actor(db::ent::ActorType::AdminKey, Some(key.id));
+            actor = Some(db::ent::TrustedAdminActor::admin_key(key.id));
             grants = admin_key_grants(key.permissions.iter());
         }
     }
 
-    req.extensions_mut().insert(Grants(grants));
-    req.extensions_mut().insert(ctx);
+    GrantResolution { grants, actor }
+}
+
+fn install_audit_context(
+    extensions: &mut http::Extensions,
+    actor: Option<db::ent::TrustedAdminActor>,
+    boundary: AuditRouteBoundary,
+) {
+    let request = audit_request_from(extensions);
+
+    // Never inherit actor or scope from an upstream extension. Authentication
+    // above is the only source of an admin principal, while this middleware's
+    // route binding is the only source of the admin scope.
+    extensions.remove::<db::ent::TrustedAuditContext>();
+
+    let Some(actor) = actor else {
+        return;
+    };
+
+    let context = match boundary {
+        AuditRouteBoundary::Application => {
+            db::ent::TrustedAuditContext::application(actor.audit_actor(), request)
+        }
+        AuditRouteBoundary::AdminControlPlane => {
+            db::ent::TrustedAuditContext::admin_control_plane(actor, request)
+        }
+    };
+    extensions.insert(context);
+}
+
+async fn extract_grants_for(
+    mut req: Request,
+    next: Next,
+    boundary: AuditRouteBoundary,
+) -> Response {
+    let token = req.get_token();
+    let raw_key = req.get_api_key();
+    let resolution = resolve_grants(token, raw_key).await;
+    install_audit_context(req.extensions_mut(), resolution.actor, boundary);
+    req.extensions_mut().insert(Grants(resolution.grants));
     next.run(req).await
+}
+
+/// Grant extraction reused by non-admin OAuth token operations. An admin
+/// principal does not imply control-plane scope outside `/admin/*`.
+pub async fn extract_grants(req: Request, next: Next) -> Response {
+    extract_grants_for(req, next, AuditRouteBoundary::Application).await
+}
+
+/// `/admin/*` authentication and its route-owned, immutable control-plane
+/// audit boundary.
+pub async fn extract_admin_grants(req: Request, next: Next) -> Response {
+    extract_grants_for(req, next, AuditRouteBoundary::AdminControlPlane).await
+}
+
+pub fn take_admin_audit_context(
+    extensions: &mut http::Extensions,
+) -> Result<db::ent::TrustedAuditContext, ErrorResponse> {
+    take_trusted_audit_context_from(extensions)
+        .ok_or_else(|| ErrorResponse::internal("missing authenticated admin audit context"))
 }
 
 pub async fn extract_path<T>(req: &mut Request) -> Result<T, ErrorResponse>
@@ -359,12 +427,32 @@ pub fn router() -> axum::Router {
             "/admin/access-control/rules/evaluate",
             post(access_control_rules::evaluate_access_control_rules),
         )
-        .layer(from_fn(extract_grants))
+        .layer(from_fn(extract_admin_grants))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SUPER_ADMIN, admin_key_grants};
+    use chrono::Utc;
+    use db::ent::{
+        AuditScopeSelector, TrustedAdminActor, TrustedAuditActor, TrustedAuditContext,
+        TrustedAuditRequest,
+    };
+
+    use crate::etc::reqctx::RequestContext;
+
+    use super::{AuditRouteBoundary, SUPER_ADMIN, admin_key_grants, install_audit_context};
+
+    fn request_extensions() -> http::Extensions {
+        let mut extensions = http::Extensions::new();
+        extensions.insert(RequestContext::new(
+            "01JZ000000000000000000000R".to_string(),
+            Utc::now(),
+            Some("192.0.2.20".parse().expect("test IP")),
+            Some("test-agent".to_string()),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736".to_string()),
+        ));
+        extensions
+    }
 
     #[test]
     fn admin_key_grants_do_not_include_super_admin() {
@@ -378,5 +466,103 @@ mod tests {
         assert!(grants.contains("users"));
         assert!(grants.contains("organizations"));
         assert!(!grants.contains(SUPER_ADMIN));
+    }
+
+    #[test]
+    fn all_admin_resource_targets_receive_control_plane_scope() {
+        let targets = [
+            "user",
+            "organization",
+            "organization_membership",
+            "oauth_client",
+            "api_key",
+            "admin_key",
+            "service_account",
+            "configuration",
+            "access_control_rule",
+        ];
+
+        for target in targets {
+            let mut extensions = request_extensions();
+            install_audit_context(
+                &mut extensions,
+                Some(TrustedAdminActor::admin("01JZ000000000000000000000A")),
+                AuditRouteBoundary::AdminControlPlane,
+            );
+
+            let context = extensions
+                .get::<TrustedAuditContext>()
+                .unwrap_or_else(|| panic!("missing admin audit context for {target}"));
+            assert_eq!(
+                context.boundary().scope(),
+                &AuditScopeSelector::ControlPlane,
+                "unexpected scope for {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn admin_authentication_replaces_spoofed_actor_and_scope() {
+        let mut extensions = request_extensions();
+        let spoofed = TrustedAuditContext::organization(
+            TrustedAuditActor::user("forged-user"),
+            TrustedAuditRequest::from_http("forged-request", None, None, None),
+            Some("01JZ0000000000000000000001"),
+            None,
+        )
+        .expect("valid test organization");
+        extensions.insert(spoofed);
+        install_audit_context(
+            &mut extensions,
+            Some(TrustedAdminActor::admin_key("01JZ000000000000000000000K")),
+            AuditRouteBoundary::AdminControlPlane,
+        );
+
+        let context = extensions
+            .get::<TrustedAuditContext>()
+            .expect("authenticated context");
+        assert_eq!(
+            context.boundary().scope(),
+            &AuditScopeSelector::ControlPlane
+        );
+        assert_eq!(context.actor().actor_type(), "admin_key");
+        assert_eq!(context.actor().id(), Some("01JZ000000000000000000000K"));
+        assert_eq!(
+            context
+                .request()
+                .expect("request facts")
+                .raw_request()
+                .request_id,
+            "01JZ000000000000000000000R"
+        );
+    }
+
+    #[test]
+    fn admin_role_outside_admin_routes_does_not_select_control_plane() {
+        let mut extensions = request_extensions();
+        install_audit_context(
+            &mut extensions,
+            Some(TrustedAdminActor::admin("01JZ000000000000000000000A")),
+            AuditRouteBoundary::Application,
+        );
+
+        let context = extensions
+            .get::<TrustedAuditContext>()
+            .expect("authenticated context");
+        assert_eq!(context.boundary().scope(), &AuditScopeSelector::Application);
+        assert_eq!(context.actor().actor_type(), "admin");
+    }
+
+    #[test]
+    fn failed_admin_authentication_drops_any_inherited_audit_context() {
+        let mut extensions = request_extensions();
+        extensions.insert(TrustedAuditContext::application(
+            TrustedAuditActor::admin("forged-admin"),
+            TrustedAuditRequest::from_http("forged-request", None, None, None),
+        ));
+
+        install_audit_context(&mut extensions, None, AuditRouteBoundary::AdminControlPlane);
+
+        assert!(extensions.get::<TrustedAuditContext>().is_none());
     }
 }

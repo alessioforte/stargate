@@ -1,3 +1,4 @@
+mod dispatch;
 mod executor;
 mod headers;
 mod http;
@@ -19,7 +20,9 @@ use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use executor::{execute_plan_from_replay, execute_selected_with_request, spawn_mirrors};
 use gate::Gate;
-use headers::{apply_gateway_headers, apply_response_header_mutations};
+use headers::{
+    apply_gateway_headers, apply_response_header_mutations, strip_internal_context_response,
+};
 use middlewares::apply_middlewares;
 use planner::{build_execution_plan, selection_error_response};
 use policies::apply_policies;
@@ -27,7 +30,7 @@ use replay::{buffer_request, content_length_exceeds, replay_body_limit};
 use routing::router_matches;
 use std::{convert::Infallible, sync::Arc, time::Instant};
 use tracing::Instrument;
-use types::{AuthKind, RequestState, ResponseHeaderMutations};
+use types::{RequestState, ResponseHeaderMutations};
 
 async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
     let started = Instant::now();
@@ -42,23 +45,24 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             .expect("Gate extension must be configured");
 
         let auth_req = auth_request(&req);
-        let (sub, auth_kind) = async {
+        let identity = async {
             match guard::verify_api_key(&auth_req).await {
-                Some(subject) => (Some(subject), Some(AuthKind::ApiKey)),
-                None => match guard::verify_jwt(&auth_req).await {
-                    Some(subject) => (Some(subject), Some(AuthKind::Jwt)),
-                    None => (None, None),
-                },
+                Some(identity) => identity,
+                None => guard::verify_jwt(&auth_req)
+                    .await
+                    .unwrap_or_else(guard::VerifiedIdentity::anonymous),
             }
         }
         .instrument(tracing::debug_span!("gateway.authenticate"))
         .await;
+        let auth_kind = identity.auth_kind();
+        let sub = identity.subject();
         tracing::Span::current().record(
             "stargate.auth_kind",
             match auth_kind {
-                Some(AuthKind::ApiKey) => "api_key",
-                Some(AuthKind::Jwt) => "jwt",
-                None => "anonymous",
+                guard::AuthKind::ApiKey => "api_key",
+                guard::AuthKind::Jwt => "jwt",
+                guard::AuthKind::Anonymous => "anonymous",
             },
         );
 
@@ -83,11 +87,15 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             crate::etc::gate::get_config_version(),
         );
 
+        let method = req.method().clone();
         let mut state = RequestState {
+            original_path: req.uri().path().to_string(),
             path: req.uri().path().to_string(),
             query: req.uri().query().unwrap_or("").to_string(),
             preserve_host: false,
             response_headers: ResponseHeaderMutations::default(),
+            propagation_draft: None,
+            internal_context_runtime: crate::etc::internal_context::runtime().cloned(),
         };
 
         {
@@ -102,7 +110,6 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
 
         let request_id = reqctx::request_id_from(req.extensions());
         let client_ip = req.get_client_ip();
-        let method = req.method().clone();
 
         let mut response_headers = HeaderMap::new();
         response_headers.insert(
@@ -116,7 +123,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             &gate,
             &mut req,
             auth_kind,
-            sub.as_ref(),
+            sub,
             &client_ip,
             &mut response_headers,
         )
@@ -127,11 +134,36 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
         ))
         .await?;
 
+        if let Some(request_context) = req.extensions().get::<reqctx::RequestContext>() {
+            match reqctx::PropagationDraft::build(
+                &identity,
+                request_context,
+                method.as_str(),
+                &state.path,
+                &state.original_path,
+                &router.name,
+                &router.service,
+                crate::etc::gate::get_policy_revision(),
+            ) {
+                Ok(draft) => {
+                    telemetry::record_propagation_draft("created", draft.actor_label());
+                    state.propagation_draft = Some(Arc::new(draft));
+                }
+                Err(error) => {
+                    telemetry::record_propagation_draft("rejected", error.category());
+                    tracing::warn!(reason = error.category(), "Propagation draft rejected");
+                }
+            }
+        } else {
+            telemetry::record_propagation_draft("rejected", "request_context");
+            tracing::warn!(reason = "request_context", "Propagation draft rejected");
+        }
+
         let ctx = lb::RequestContext {
             client_ip: &client_ip,
             path: &state.path,
             method: method.as_str(),
-            key: sub.as_ref().map(|sub| sub.id.as_str()),
+            key: sub.map(|sub| sub.id.as_str()),
         };
 
         let balancers = gate.http_balancers.load_full();
@@ -167,8 +199,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .await?
         } else if plan.requires_replay() {
             let limit = replay_body_limit();
-            if !plan.needs_status_failover_replay() && content_length_exceeds(req.headers(), limit)
-            {
+            if !plan.needs_failover_replay() && content_length_exceeds(req.headers(), limit) {
                 tracing::warn!(
                     limit,
                     "Skipping mirror traffic because request body exceeds replay limit"
@@ -189,13 +220,19 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 let replay = buffer_request(req, limit).await?;
                 telemetry::record_gateway_replay_bytes(replay.body.len());
                 spawn_mirrors(plan.mirrors.clone(), replay.clone(), state.clone());
-                execute_plan_from_replay(&plan, &replay, &state, Some(balancers.as_ref()))
-                    .instrument(tracing::info_span!(
-                        "gateway.execute",
-                        stargate.router = %router.name,
-                        stargate.service = %router.service,
-                    ))
-                    .await?
+                execute_plan_from_replay(
+                    &plan,
+                    &replay,
+                    &state,
+                    Some(balancers.as_ref()),
+                    ctx::DispatchKind::Primary,
+                )
+                .instrument(tracing::info_span!(
+                    "gateway.execute",
+                    stargate.router = %router.name,
+                    stargate.service = %router.service,
+                ))
+                .await?
             }
         } else {
             let selected = plan.attempts.first().ok_or_else(|| {
@@ -212,6 +249,9 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .await?
         };
 
+        // This is global gateway-owned response hygiene, including upstreams
+        // without internal context and direct responses.
+        strip_internal_context_response(response.headers_mut());
         apply_response_header_mutations(response.headers_mut(), &state.response_headers);
         apply_gateway_headers(response.headers_mut(), &response_headers);
         Ok(response)

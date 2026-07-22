@@ -1,15 +1,10 @@
+use crate::etc::{internal_context::InternalContextRuntime, reqctx::PropagationDraft};
 use ::http::{HeaderMap, Method, StatusCode, Version};
-use gate::graph::{HeaderValueNode, ResponseBodyNode};
+use gate::graph::{HeaderValueNode, InternalContextNode, ResponseBodyNode};
 use hyper::body::Bytes;
 use std::sync::Arc;
 
 pub(super) type DynLoadBalancer = Arc<dyn lb::LoadBalancer + Send + Sync>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AuthKind {
-    ApiKey,
-    Jwt,
-}
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct ResponseHeaderMutations {
@@ -20,10 +15,13 @@ pub(super) struct ResponseHeaderMutations {
 
 #[derive(Debug, Clone)]
 pub(super) struct RequestState {
+    pub(super) original_path: String,
     pub(super) path: String,
     pub(super) query: String,
     pub(super) preserve_host: bool,
     pub(super) response_headers: ResponseHeaderMutations,
+    pub(super) propagation_draft: Option<Arc<PropagationDraft>>,
+    pub(super) internal_context_runtime: Option<Arc<InternalContextRuntime>>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +37,7 @@ pub(super) enum SelectedService {
     Upstream {
         service_name: String,
         upstream_base_url: String,
+        internal_context: Option<InternalContextNode>,
     },
     DirectResponse {
         status: u16,
@@ -56,11 +55,11 @@ pub(super) struct ExecutionPlan {
 
 impl ExecutionPlan {
     pub(super) fn requires_replay(&self) -> bool {
-        !self.mirrors.is_empty() || (!self.failover_on_status.is_empty() && self.attempts.len() > 1)
+        !self.mirrors.is_empty() || self.attempts.len() > 1
     }
 
-    pub(super) fn needs_status_failover_replay(&self) -> bool {
-        !self.failover_on_status.is_empty() && self.attempts.len() > 1
+    pub(super) fn needs_failover_replay(&self) -> bool {
+        self.attempts.len() > 1
     }
 
     pub(super) fn should_failover_response(&self, status: StatusCode) -> bool {

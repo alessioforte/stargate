@@ -15,6 +15,16 @@ pub const LIKE: &str = "ILIKE";
 #[cfg(feature = "sqlite")]
 pub const LIKE: &str = "LIKE";
 
+#[cfg(feature = "postgres")]
+pub const FOR_UPDATE: &str = "FOR UPDATE";
+#[cfg(feature = "sqlite")]
+pub const FOR_UPDATE: &str = "";
+
+#[cfg(feature = "postgres")]
+pub const FOR_UPDATE_API_KEY: &str = "FOR UPDATE OF ak";
+#[cfg(feature = "sqlite")]
+pub const FOR_UPDATE_API_KEY: &str = "";
+
 /// `ESCAPE` clause to append after every `LIKE`/`ILIKE $n` that binds a
 /// pattern built with [`like_contains`], so user-supplied `%` and `_` are
 /// matched literally rather than as wildcards.
@@ -35,11 +45,6 @@ pub fn like_contains(query: &str) -> String {
     pattern.push('%');
     pattern
 }
-
-#[cfg(feature = "postgres")]
-pub const MAX_BIND_PARAMETERS: usize = 65_535;
-#[cfg(feature = "sqlite")]
-pub const MAX_BIND_PARAMETERS: usize = 999;
 
 #[cfg(test)]
 mod tests {

@@ -9,7 +9,8 @@ pub use limit::{Limit, LimitSpec};
 pub use load_balancer::LoadBalancer;
 pub use mtls::MtlsConfig;
 pub use v2alpha1::{
-    AuthStrategy, Config, EnvProfile, LimitScope, OnMissingOrg, Service, UpstreamProtocol,
+    AuthStrategy, Config, EnvProfile, InternalContext, LimitScope, OnMissingOrg, Service, Upstream,
+    UpstreamProtocol,
 };
 
 use graph::CompiledConfig;

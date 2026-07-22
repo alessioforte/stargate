@@ -2,13 +2,13 @@ use crate::act::oauth_state;
 use crate::err::{ErrorResponse, HttpError};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
-use crate::etc::reqctx::take_audit_context_from;
+use crate::etc::reqctx::audit_request_from;
 use crate::fun::build_jwt_cookie;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
-use db::ent::{CredentialType, Profile};
+use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
 use http::header::SET_COOKIE;
 use idp::github::{get_github_oauth_token, get_github_user};
 use jwt::Claims;
@@ -45,8 +45,8 @@ pub struct AuthResponse {
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
     )
 )]
-pub async fn get_github(mut req: Request) -> Result<Response, ErrorResponse> {
-    let ctx = take_audit_context_from(req.extensions_mut());
+pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
+    let audit_request = audit_request_from(req.extensions());
 
     let Query(query): Query<QueryCode> = Query::try_from_uri(req.uri())
         .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
@@ -82,6 +82,10 @@ pub async fn get_github(mut req: Request) -> Result<Response, ErrorResponse> {
             "failed to retrieve user info from GitHub".to_string(),
         ))
     })?;
+    let audit_context = TrustedAuditContext::application(
+        TrustedAuditActor::external_identity(format!("github:{}", github_user.id)),
+        audit_request,
+    );
 
     let mut user = crate::db::get_user_by_username(&github_user.email)
         .await
@@ -97,14 +101,17 @@ pub async fn get_github(mut req: Request) -> Result<Response, ErrorResponse> {
 
         let value = format!("github:{}", github_user.id);
         user = Some(
-            crate::db::create_user(new_user, CredentialType::Oauth, &value, ctx.clone())
-                .await
-                .map_err(|e| {
-                    tracing::error!("Failed to create GitHub OAuth user: {}", e);
-                    ErrorResponse::from(HttpError::InternalServerError(
-                        "internal error".to_string(),
-                    ))
-                })?,
+            crate::db::create_user(
+                new_user,
+                CredentialType::Oauth,
+                &value,
+                audit_context.clone(),
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to create GitHub OAuth user: {}", e);
+                ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+            })?,
         );
     }
 
@@ -114,10 +121,12 @@ pub async fn get_github(mut req: Request) -> Result<Response, ErrorResponse> {
 
     if user.picture.is_none() {
         let updated = user.clone().picture(Some(github_user.avatar_url.clone()));
-        crate::db::update_user(updated, ctx).await.map_err(|e| {
-            tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
-            ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
-        })?;
+        crate::db::update_user(updated, audit_context)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
+                ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+            })?;
     }
 
     let given_name = user.given_name.clone().unwrap_or_default();

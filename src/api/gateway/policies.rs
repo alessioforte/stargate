@@ -1,7 +1,6 @@
 use super::limits::{OrgScopedLimit, SelectedLimitPolicies, apply_limits};
-use super::types::AuthKind;
 use crate::err::{ErrorResponse, HttpError};
-use crate::etc::{ac::access_control, reqctx, sub::Subject, telemetry};
+use crate::etc::{ac::access_control, guard::AuthKind, reqctx, sub::Subject, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::body::Body;
 use gate::{
@@ -17,7 +16,7 @@ pub async fn apply_policies(
     router: &RouterNode,
     gate: &Arc<Gate>,
     req: &mut Request<Body>,
-    auth_kind: Option<AuthKind>,
+    auth_kind: AuthKind,
     subject: Option<&Subject>,
     client_ip: &str,
     response_headers: &mut HeaderMap,
@@ -37,13 +36,13 @@ pub async fn apply_policies(
 
         match policy {
             PolicyNode::Auth { strategies } => {
-                let Some(kind) = auth_kind else {
+                if auth_kind == AuthKind::Anonymous {
                     telemetry::record_gateway_policy("auth", "denied");
                     return Err(ErrorResponse::from(HttpError::Unauthorized(
                         "Unauthorized".to_string(),
                     )));
-                };
-                if !auth_strategy_allowed(strategies, kind) {
+                }
+                if !auth_strategy_allowed(strategies, auth_kind) {
                     telemetry::record_gateway_policy("auth", "denied");
                     return Err(ErrorResponse::from(HttpError::Unauthorized(
                         "Unauthorized".to_string(),
@@ -131,5 +130,6 @@ fn auth_strategy_allowed(strategies: &[AuthStrategy], kind: AuthKind) -> bool {
     match kind {
         AuthKind::ApiKey => strategies.contains(&AuthStrategy::ApiKey),
         AuthKind::Jwt => strategies.contains(&AuthStrategy::Jwt),
+        AuthKind::Anonymous => false,
     }
 }
