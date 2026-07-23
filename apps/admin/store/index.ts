@@ -25,6 +25,7 @@ import type {
   List,
   OAuthClient,
   Organization,
+  OutboxEvent,
   ServiceAccount,
   User,
   Query,
@@ -74,6 +75,9 @@ const initialState: State = {
   users: new StoreItem<List<User>>(null),
   usersQuery: {},
   superAdminUsers: new StoreItem<List<User>>(null),
+  outboxEvents: new StoreItem<List<OutboxEvent>>(null),
+  outboxEventsQuery: {},
+  selectedOutboxEvent: new StoreItem<OutboxEvent>(null),
 };
 
 function tokenIsValid(accessToken: string | undefined): accessToken is string {
@@ -1082,6 +1086,40 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     });
 
     get().getUsers(get().usersQuery);
+  },
+
+  getOutboxEvents: async (query) => {
+    const outboxEvents = get().outboxEvents;
+    set({
+      outboxEvents: outboxEvents.setLoading(),
+      outboxEventsQuery: query ?? {},
+    });
+
+    const { data, error, message } = await Service.admin.getOutboxEvents(query);
+    if (error) {
+      set({
+        outboxEvents: outboxEvents.setError(message),
+      });
+      return;
+    }
+
+    set({ outboxEvents: outboxEvents.setSuccess(data) });
+  },
+
+  getOutboxEvent: async (eventId) => {
+    const selected = get().selectedOutboxEvent;
+    set({ selectedOutboxEvent: selected.setLoading() });
+
+    const { data, error, message } =
+      await Service.admin.getOutboxEvent(eventId);
+    if (error) {
+      set({
+        selectedOutboxEvent: selected.setError(message),
+      });
+      return;
+    }
+
+    set({ selectedOutboxEvent: selected.setSuccess(data) });
   },
 });
 

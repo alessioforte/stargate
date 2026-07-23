@@ -5,8 +5,8 @@ use db::{
     DbStore,
     ent::{
         AdminKey, ApiKey, ApiKeyAuth, Credential, CredentialHistory, CredentialType, OAuthClient,
-        OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount, SuperAdmin,
-        TrustedAuditContext, User,
+        OAuthConsent, OrgMember, OrgMembership, Organization, OutboxEventFilter, OutboxEventRow,
+        Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
     },
 };
 
@@ -135,6 +135,24 @@ pub async fn rehash_credential(
         .rehash_credential(user_id, old_value, new_value, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error rehashing credential: {:?}", e))
+}
+
+// ── Audit outbox ───────────────────────────────────────────────────────────
+
+pub async fn get_outbox_event_by_id(event_id: &str) -> Result<Option<OutboxEventRow>> {
+    service().get_outbox_event_by_id(event_id).await
+}
+
+pub async fn query_outbox_events(
+    filter: &OutboxEventFilter,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<OutboxEventRow>> {
+    service().query_outbox_events(filter, limit, offset).await
+}
+
+pub async fn count_outbox_events(filter: &OutboxEventFilter) -> Result<i64> {
+    service().count_outbox_events(filter).await
 }
 
 // ── OAuth Clients ──────────────────────────────────────────────────────────

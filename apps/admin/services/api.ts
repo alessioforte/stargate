@@ -22,9 +22,11 @@ import type {
   EvaluateAccessControlRequest,
   EvaluateAccessControlResponse,
   List,
+  ListOutboxEventsQuery,
   MessageResponse,
   OAuthClient,
   Organization,
+  OutboxEvent,
   PatchOAuthClientRequest,
   PatchUserRequest,
   Query,
@@ -478,6 +480,21 @@ export default class AdminApiService {
         `/users/${this.pathParam(id)}/organizations/${this.pathParam(orgId)}`,
       ),
       method: "DELETE",
+    });
+  }
+
+  async getOutboxEvents(query?: ListOutboxEventsQuery) {
+    return this.request<List<OutboxEvent>>({
+      url: this.url("/outbox-events"),
+      method: "GET",
+      params: query,
+    });
+  }
+
+  async getOutboxEvent(eventId: string) {
+    return this.request<OutboxEvent>({
+      url: this.url(`/outbox-events/${this.pathParam(eventId)}`),
+      method: "GET",
     });
   }
 }

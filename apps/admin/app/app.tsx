@@ -12,6 +12,7 @@ import OAuthClientsPage from "./routes/oauth-clients/oauth-clients";
 import OrganizationsPage from "./routes/organizations/organizations";
 import ServiceAccountsPage from "./routes/service-accounts/service-accounts";
 import AccessControlPoliciesPage from "./routes/access-control-policies/access-control-policies";
+import AuditsPage from "./routes/audits/audits";
 
 const router = createBrowserRouter(
   [
@@ -65,7 +66,7 @@ const router = createBrowserRouter(
         },
         {
           path: "audits",
-          element: <>audits</>,
+          element: <AuditsPage />,
         },
         {
           path: "*",

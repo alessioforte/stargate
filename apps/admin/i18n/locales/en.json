@@ -5,6 +5,7 @@
   "newAdminKey": "New Admin Key",
   "apiKeys": "API Keys",
   "newApiKey": "New API Key",
+  "audits": "Audits",
   "gatewayConfiguration": "Gateway Configuration",
   "darkMode": "Dark Mode",
   "organizations": "Organizations",
@@ -358,5 +359,12 @@
   "memberSince": "Member since",
   "noOrganizations": "Not a member of any organization",
   "organizationOptional": "Organization (optional)",
-  "orgBindingHint": "Bind the key to one of the user's organizations: it will always act in that organization"
+  "orgBindingHint": "Bind the key to one of the user's organizations: it will always act in that organization",
+  "outboxEventDetail": "Outbox Event Detail",
+  "eventId": "Event ID",
+  "operationId": "Operation ID",
+  "pairRole": "Pair Role",
+  "seq": "Seq",
+  "publishedAt": "Published At",
+  "payload": "Payload"
 }

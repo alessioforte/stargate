@@ -5,6 +5,7 @@
   "newAdminKey": "Nuova Chiave Admin",
   "apiKeys": "Chiavi API",
   "newApiKey": "Nuova chiave API",
+  "audits": "Audit",
   "gatewayConfiguration": "Configurazione Gateway",
   "organizations": "Organizzazioni",
   "organization": "Organizzazione",
@@ -357,5 +358,12 @@
   "memberSince": "Membro dal",
   "noOrganizations": "Non appartiene a nessuna organizzazione",
   "organizationOptional": "Organizzazione (opzionale)",
-  "orgBindingHint": "Associa la chiave a una delle organizzazioni dell'utente: agirà sempre in quella organizzazione"
+  "orgBindingHint": "Associa la chiave a una delle organizzazioni dell'utente: agirà sempre in quella organizzazione",
+  "outboxEventDetail": "Dettaglio Evento Outbox",
+  "eventId": "ID Evento",
+  "operationId": "ID Operazione",
+  "pairRole": "Ruolo Coppia",
+  "seq": "Seq",
+  "publishedAt": "Pubblicato Il",
+  "payload": "Payload"
 }

@@ -384,3 +384,25 @@ export interface PatchUserRequest {
 export interface UserAttrsRequest {
   attrs: JsonValue;
 }
+
+export type OutboxEventStatus = "pending" | "published";
+
+export type OutboxEventPairRole = "target" | "control_plane";
+
+export interface OutboxEvent {
+  eventId: string;
+  payload: JsonValue;
+  seq: number;
+  operationId: string | null;
+  pairRole: string | null;
+  status: OutboxEventStatus;
+  createdAt: string;
+  publishedAt: string | null;
+}
+
+export interface ListOutboxEventsQuery extends PaginationQuery {
+  eventId?: string;
+  operationId?: string;
+  pairRole?: OutboxEventPairRole;
+  status?: OutboxEventStatus;
+}

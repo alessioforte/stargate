@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-use crate::ent::{AuditId, OutboxEventRow, OutboxPairRole, ValidatedAuditEvent};
+use crate::ent::{AuditId, OutboxEventFilter, OutboxEventRow, OutboxPairRole, ValidatedAuditEvent};
 
 pub const OUTBOX_EVENT: &str = "outbox_events";
 
@@ -59,6 +59,117 @@ impl OutboxRepository {
 
         verify_row_payload_identity(&row)?;
         Ok(row)
+    }
+
+    pub async fn get_by_event_id<'c, E>(
+        &self,
+        ex: E,
+        event_id: &str,
+    ) -> Result<Option<OutboxEventRow>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let row = sqlx::query_as::<_, OutboxEventRow>(
+            r#"
+            SELECT
+                event_id,
+                payload,
+                seq,
+                operation_id,
+                pair_role,
+                created_at,
+                published_at
+            FROM outbox_events
+            WHERE event_id = $1
+            "#,
+        )
+        .bind(event_id)
+        .fetch_optional(ex)
+        .await?;
+
+        if let Some(row) = &row {
+            verify_row_payload_identity(row)?;
+        }
+        Ok(row)
+    }
+
+    pub async fn query<'c, E>(
+        &self,
+        ex: E,
+        filter: &OutboxEventFilter,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<OutboxEventRow>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        ensure!(limit > 0, "outbox query limit must be greater than zero");
+        ensure!(offset >= 0, "outbox query offset cannot be negative");
+
+        let rows = sqlx::query_as::<_, OutboxEventRow>(
+            r#"
+            SELECT
+                event_id,
+                payload,
+                seq,
+                operation_id,
+                pair_role,
+                created_at,
+                published_at
+            FROM outbox_events
+            WHERE ($1 IS NULL OR event_id = $1)
+              AND ($2 IS NULL OR operation_id = $2)
+              AND ($3 IS NULL OR pair_role = $3)
+              AND (
+                    $4 IS NULL
+                    OR ($4 = TRUE AND published_at IS NOT NULL)
+                    OR ($4 = FALSE AND published_at IS NULL)
+                  )
+            ORDER BY seq DESC
+            LIMIT $5 OFFSET $6
+            "#,
+        )
+        .bind(filter.event_id.as_deref())
+        .bind(filter.operation_id.as_deref())
+        .bind(filter.pair_role.as_deref())
+        .bind(filter.published)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(ex)
+        .await?;
+
+        for row in &rows {
+            verify_row_payload_identity(row)?;
+        }
+        Ok(rows)
+    }
+
+    pub async fn count<'c, E>(&self, ex: E, filter: &OutboxEventFilter) -> Result<i64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM outbox_events
+            WHERE ($1 IS NULL OR event_id = $1)
+              AND ($2 IS NULL OR operation_id = $2)
+              AND ($3 IS NULL OR pair_role = $3)
+              AND (
+                    $4 IS NULL
+                    OR ($4 = TRUE AND published_at IS NOT NULL)
+                    OR ($4 = FALSE AND published_at IS NULL)
+                  )
+            "#,
+        )
+        .bind(filter.event_id.as_deref())
+        .bind(filter.operation_id.as_deref())
+        .bind(filter.pair_role.as_deref())
+        .bind(filter.published)
+        .fetch_one(ex)
+        .await?;
+
+        Ok(count)
     }
 }
 
@@ -533,6 +644,102 @@ mod sqlite_tests {
         .await
         .expect("pending rows must be readable");
         assert_eq!(pending, ids);
+    }
+
+    #[tokio::test]
+    async fn audit_outbox_sqlite_admin_queries_filter_count_and_paginate_without_claiming() {
+        let pool = migrated_pool().await;
+        let repository = OutboxRepository::new();
+        let first_id = "01JZ0000000000000000000001";
+        let second_id = "01JZ0000000000000000000002";
+        let third_id = "01JZ0000000000000000000003";
+        let operation_id = "01JZ000000000000000000000X";
+        let mut tx = pool.begin().await.expect("transaction must begin");
+
+        repository
+            .insert(&mut tx, &validated_event(first_id, None), None)
+            .await
+            .expect("first event must insert");
+        repository
+            .insert(&mut tx, &validated_event(second_id, None), None)
+            .await
+            .expect("second event must insert");
+        repository
+            .insert(
+                &mut tx,
+                &validated_event(third_id, Some(operation_id)),
+                Some(OutboxPairRole::ControlPlane),
+            )
+            .await
+            .expect("paired event must insert");
+        tx.commit().await.expect("transaction must commit");
+
+        sqlx::query(
+            "UPDATE outbox_events
+             SET published_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE event_id = $1",
+        )
+        .bind(second_id)
+        .execute(&pool)
+        .await
+        .expect("second event must be marked published");
+
+        let all = repository
+            .query(&pool, &OutboxEventFilter::default(), 10, 0)
+            .await
+            .expect("events must be queryable");
+        assert_eq!(
+            all.iter()
+                .map(|row| row.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![third_id, second_id, first_id]
+        );
+
+        let published_filter = OutboxEventFilter {
+            published: Some(true),
+            ..OutboxEventFilter::default()
+        };
+        let published = repository
+            .query(&pool, &published_filter, 10, 0)
+            .await
+            .expect("published events must be queryable");
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].event_id, second_id);
+        assert_eq!(
+            repository
+                .count(&pool, &published_filter)
+                .await
+                .expect("published events must be countable"),
+            1
+        );
+
+        let paired_filter = OutboxEventFilter {
+            operation_id: Some(operation_id.to_string()),
+            pair_role: Some("control_plane".to_string()),
+            published: Some(false),
+            ..OutboxEventFilter::default()
+        };
+        let paired = repository
+            .query(&pool, &paired_filter, 10, 0)
+            .await
+            .expect("paired pending events must be queryable");
+        assert_eq!(paired.len(), 1);
+        assert_eq!(paired[0].event_id, third_id);
+
+        let page = repository
+            .query(&pool, &OutboxEventFilter::default(), 1, 1)
+            .await
+            .expect("events must support offset pagination");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].event_id, second_id);
+
+        let by_id = repository
+            .get_by_event_id(&pool, first_id)
+            .await
+            .expect("event lookup must succeed")
+            .expect("event must exist");
+        assert_eq!(by_id.event_id, first_id);
+        assert_eq!(by_id.published_at, None);
     }
 
     #[tokio::test]

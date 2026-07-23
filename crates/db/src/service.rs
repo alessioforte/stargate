@@ -8,8 +8,8 @@ use crate::db::DbStore;
 use crate::ent::{
     AdminKey, ApiKey, ApiKeyAuth, AuditOperation, AuditResource, AuditScopeSelector, Credential,
     CredentialHistory, CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership,
-    Organization, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
-    ValidatedAuditEvent,
+    Organization, OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount, SuperAdmin,
+    TrustedAuditContext, User, ValidatedAuditEvent,
 };
 use crate::repo::ApiKeyAuditRecord;
 use anyhow::{Context, Result, bail, ensure};
@@ -410,6 +410,25 @@ fn service_account_changed_fields(
         fields.push("description");
     }
     fields
+}
+
+impl Service {
+    pub async fn get_outbox_event_by_id(&self, event_id: &str) -> Result<Option<OutboxEventRow>> {
+        self.outbox.get_by_event_id(&self.pool, event_id).await
+    }
+
+    pub async fn query_outbox_events(
+        &self,
+        filter: &OutboxEventFilter,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<OutboxEventRow>> {
+        self.outbox.query(&self.pool, filter, limit, offset).await
+    }
+
+    pub async fn count_outbox_events(&self, filter: &OutboxEventFilter) -> Result<i64> {
+        self.outbox.count(&self.pool, filter).await
+    }
 }
 
 /// A batch of audit outbox rows claimed for relaying, holding the open

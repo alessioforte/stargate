@@ -12,10 +12,12 @@ import type {
   CreateOAuthClientRequest,
   CreateOAuthClientResponse,
   List,
+  ListOutboxEventsQuery,
   OAuthClient,
   Organization,
   CreateOrganizationRequest,
   UpdateOrganizationRequest,
+  OutboxEvent,
   UpdateAdminKeyPermissionsRequest,
   RotateOAuthClientSecretResponse,
   ServiceAccount,
@@ -76,6 +78,9 @@ export interface State {
   users: StoreItem<List<User>>;
   usersQuery: Query;
   superAdminUsers: StoreItem<List<User>>;
+  outboxEvents: StoreItem<List<OutboxEvent>>;
+  outboxEventsQuery: ListOutboxEventsQuery;
+  selectedOutboxEvent: StoreItem<OutboxEvent>;
 }
 
 export interface Actions {
@@ -158,4 +163,7 @@ export interface Actions {
   updateUser: (id: string, user: UpdateUserRequest) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
   updateUserAttrs: (id: string, attrs: JsonValue) => Promise<void>;
+
+  getOutboxEvents: (query?: ListOutboxEventsQuery) => Promise<void>;
+  getOutboxEvent: (eventId: string) => Promise<void>;
 }

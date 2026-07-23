@@ -69,6 +69,8 @@ use utoipa::OpenApi;
         crate::api::admin::organizations::create_organization,
         crate::api::admin::organizations::update_organization,
         crate::api::admin::organizations::delete_organization,
+        crate::api::admin::outbox_events::get_outbox_events,
+        crate::api::admin::outbox_events::get_outbox_event,
         crate::api::admin::api_keys::get_api_keys,
         crate::api::admin::api_keys::get_api_key,
         crate::api::admin::api_keys::create_api_key,
@@ -320,6 +322,8 @@ mod tests {
         assert!(json["paths"]["/admin/users/organizations/{org_id}"].is_object());
         assert!(json["paths"]["/admin/organizations"].is_object());
         assert!(json["paths"]["/admin/organizations/{id}"].is_object());
+        assert!(json["paths"]["/admin/outbox-events"].is_object());
+        assert!(json["paths"]["/admin/outbox-events/{event_id}"].is_object());
         assert!(json["paths"]["/admin/api-keys"].is_object());
         assert!(json["paths"]["/admin/api-keys/{id}"].is_object());
         assert!(json["paths"]["/admin/api-keys/{id}/revoke"].is_object());
@@ -387,6 +391,18 @@ mod tests {
     #[tokio::test]
     async fn admin_organization_by_id_missing_grant_forbidden() {
         let resp = send("/admin/organizations/abc").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_outbox_events_missing_grant_forbidden() {
+        let resp = send("/admin/outbox-events").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_outbox_event_by_id_missing_grant_forbidden() {
+        let resp = send("/admin/outbox-events/01JZ0000000000000000000001").await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

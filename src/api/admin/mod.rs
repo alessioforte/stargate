@@ -5,6 +5,7 @@ pub mod configurations;
 pub mod health;
 pub mod oauth_clients;
 pub mod organizations;
+pub mod outbox_events;
 pub mod service_accounts;
 pub mod users;
 
@@ -346,6 +347,14 @@ pub fn router() -> axum::Router {
             get(organizations::get_organization)
                 .put(organizations::update_organization)
                 .delete(organizations::delete_organization),
+        )
+        .route(
+            "/admin/outbox-events",
+            get(outbox_events::get_outbox_events),
+        )
+        .route(
+            "/admin/outbox-events/{event_id}",
+            get(outbox_events::get_outbox_event),
         )
         .route(
             "/admin/api-keys",

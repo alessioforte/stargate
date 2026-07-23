@@ -190,6 +190,12 @@ the mutation. `crates/db` service mutators receive a `TrustedAuditContext`, so
 actor, request facts, and scope come from authenticated or persisted state. All
 `/admin/*` events are `control_plane`. There is no in-process event buffer.
 
+Super-admins can inspect delivery state through the read-only
+`GET /admin/outbox-events` and `GET /admin/outbox-events/{event_id}` endpoints.
+The list endpoint supports exact event/operation/pair-role filters, pending or
+published status, and limit/offset pagination. These reads never claim, lock,
+publish, or otherwise mutate outbox rows.
+
 - **Edge**: SQLite uses the aligned outbox schema, but starts no relay. New rows
   remain durable and pending with `published_at = NULL`.
 - **Cluster**: one background relay per process (`src/aud/relay.rs`) ships
@@ -483,7 +489,7 @@ Flags: `--password <val>`, `--password-stdin`, `--generate-password`
 - `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`, `/oauth/introspect`, `/oauth/revoke` - OAuth/OIDC provider endpoints
 - `/oauth/state`, `/oauth/github`, `/oauth/google` - Google/GitHub consumer login endpoints
 - `/signup/*` - registration + email verification
-- `/admin/*` - users, orgs, API keys, OAuth clients, service accounts, config, access-control rules (super-admin)
+- `/admin/*` - users, orgs, API keys, OAuth clients, service accounts, audit outbox events, config, access-control rules (super-admin)
 
 ## Error Response Format
 
