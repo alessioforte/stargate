@@ -4,16 +4,13 @@ Status: Stargate version 1 operations and release runbook.
 
 This runbook covers functionality owned by Stargate. Microservice integration
 is documented in
-[`internal-context-consumer-guide.md`](internal-context-consumer-guide.md), and
-real upstream state is recorded in
-[`internal-context-upstream-inventory.md`](internal-context-upstream-inventory.md).
-External dashboards and consumer telemetry are not provisioned by this
-repository.
+[`internal-context-consumer-guide.md`](internal-context-consumer-guide.md).
+Real upstream state and enablement evidence belong to the responsible
+deployment or release system. External dashboards and consumer telemetry are
+not provisioned by this repository.
 
-Delegation, replay caches, JWE, new transports, and other advanced capabilities
-are not operational features of version 1. Their reopening conditions are
-recorded in
-[`internal-context-deferred-capabilities.md`](internal-context-deferred-capabilities.md).
+Delegation, replay caches, JWE, and new transports are not operational features
+of version 1.
 
 ## Runtime prerequisites
 

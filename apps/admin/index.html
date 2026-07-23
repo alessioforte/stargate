@@ -11,8 +11,13 @@
         text-rendering: optimizeLegibility;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
-
         --mantine-color-body: var(--mantine-color-gray-3) !important;
+        --mono:
+          "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+          monospace;
+        --body:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
       }
       [data-mantine-color-scheme="dark"] {
         --mantine-color-body: var(--mantine-color-dark-9) !important;
@@ -29,9 +34,10 @@
         padding: 0;
         min-height: 100vh;
         transition: background-color 0.3s ease;
-        font-family:
+        /*font-family:
           ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-          "Liberation Mono", "Courier New", monospace;
+          "Liberation Mono", "Courier New", monospace;*/
+        font-family: var(--mono);
         line-height: 1.5;
         overscroll-behavior: none;
       }

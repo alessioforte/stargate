@@ -155,10 +155,8 @@ Quota is independent from rate limiting. A router `quota` policy or subject
 quota are configured for a request, both checks run with separate tracker keys.
 
 Full schema notes and examples: `docs/config-v2alpha1.md`. Internal-context
-consumers follow `docs/internal-context-consumer-guide.md`; real upstream
-enablement is recorded in `docs/internal-context-upstream-inventory.md`.
-Advanced context features are not part of version 1; their reopening criteria
-are recorded in `docs/internal-context-deferred-capabilities.md`.
+consumers follow `docs/internal-context-consumer-guide.md`; the protocol is
+defined in `docs/internal-context-contract-v1.md`.
 
 ### Traffic Management
 
@@ -619,7 +617,3 @@ Following the arrows keeps each concern in exactly one place.
 - Internal-context issuance exports bounded outcome, signing-duration, and
   token-size telemetry. Operations, rotation, recovery, alerts, and the local
   signing benchmark are documented in `docs/internal-context-operations.md`.
-- P9 is the final internal-context implementation-plan phase and is
-  documentation-only. Delegation, new transports, replay caches, JWE, and
-  other advanced capabilities remain deferred until Stargate directly needs
-  them; see `docs/internal-context-deferred-capabilities.md`.

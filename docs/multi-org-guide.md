@@ -5,7 +5,6 @@ Users can belong to multiple organizations, each membership with a role
 most **one** organization at a time — its *org context* — which drives
 per-org access control and org-level rate limits/quotas at the gateway.
 
-Design background: [`multi-org-design.md`](multi-org-design.md).
 Gateway configuration for org-scoped limits:
 [`config-v2alpha1.md`](config-v2alpha1.md) ("Org-scoped limits").
 

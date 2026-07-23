@@ -1,6 +1,6 @@
 # Internal Context Consumer Integration Guide
 
-Status: integration guide for contract version 1. This repository does not
+Status: integration guide for protocol version 1. This repository does not
 implement or deploy any external microservice. A Stargate upstream is enabled
 only after its owner supplies the evidence described below.
 
@@ -230,13 +230,17 @@ recognized authentication query token, baggage, or client-authored internal
 context. Unrelated well-formed cookies and non-auth query pairs must retain
 their intended semantics.
 
-## 8. Enable without a `dual` mode
+## 8. Enable an upstream safely
+
+`internal_context` has no `mode` field. Omitting the block emits no signed
+context; adding the block with an `audience` activates the complete signed
+context and credential-isolation behavior.
 
 The safest zero-downtime rollout is a new protected listener, port, or service
 revision:
 
-1. Choose one audience and add a pending entry to
-   [`internal-context-upstream-inventory.md`](internal-context-upstream-inventory.md).
+1. Choose one exact audience and record it with the upstream owner in the
+   deployment or release change.
 2. Deploy the new consumer boundary so it requires valid context from its first
    reachable request. Keep it inaccessible to untrusted networks.
 3. Run the tests above directly against that boundary and record the consumer
@@ -256,7 +260,7 @@ revision:
 
 5. Verify normal traffic, credential removal, correlation, authorization,
    audit, failover, mirror, and WebSocket shapes that the upstream actually
-   uses. Mark the inventory entry enabled only after the checks pass.
+   uses. Complete the rollout only after the checks pass.
 
 If a separate protected revision is impossible, coordinate the consumer and
 Stargate changes in a maintenance window. Never enable Stargate first against
@@ -278,6 +282,6 @@ consumer check or forwarding original credentials is not a valid rollback.
 5. Exercise fetch failure and unknown-key rejection; neither may use an edge
    credential or an expired cached key.
 
-Every enabled upstream needs its own completed inventory entry. Test fixtures,
-example YAML, and the repository loopback reference do not count as evidence
-that an external microservice is deployed.
+Every enabled upstream needs deployment evidence owned by the responsible
+service or platform team. Test fixtures, example YAML, and repository tests do
+not count as evidence that an external microservice is deployed.

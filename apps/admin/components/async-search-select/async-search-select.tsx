@@ -42,7 +42,6 @@ export default function AsyncSearchSelect({
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState<AsyncSearchSelectOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedLabel, setSelectedLabel] = useState("");
   const selectedLabelRef = useRef("");
 
   const combobox = useCombobox({
@@ -100,7 +99,6 @@ export default function AsyncSearchSelect({
   const handleOptionSubmit = (val: string) => {
     const option = options.find((o) => o.value === val);
     if (option) {
-      setSelectedLabel(option.label);
       selectedLabelRef.current = option.label;
       setSearch(option.label);
     }
@@ -110,7 +108,6 @@ export default function AsyncSearchSelect({
 
   const handleClear = () => {
     setSearch("");
-    setSelectedLabel("");
     selectedLabelRef.current = "";
     setOptions([]);
     onChange(null);

@@ -244,9 +244,8 @@ Stargate parses and compiles the block and preflights the separate signing key
 and matching public `kid` before activation. A rejected startup or hot reload
 never replaces the previous active graph. Do not enable the block for an
 upstream until its deployed consumer follows the fail-closed validation and
-ownership requirements in `docs/internal-context-consumer-guide.md`. Record
-real enablement and its external evidence in
-`docs/internal-context-upstream-inventory.md`.
+ownership requirements in `docs/internal-context-consumer-guide.md`. Keep real
+enablement evidence with the responsible deployment or release record.
 
 `stargate-context` is reserved to the gateway. It cannot be added, set, or
 removed by request/response header middleware, and cannot be returned by a
