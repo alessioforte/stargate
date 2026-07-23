@@ -75,12 +75,14 @@ function upstreamSummary(value: JsonValue) {
   const transport = isRecord(record.transport) ? "transport" : "";
   const probe = isRecord(loadBalancer.liveness_probe) ? "probe" : "";
   const breaker = isRecord(loadBalancer.circuit_breaker) ? "breaker" : "";
+  const context = isRecord(record.internal_context) ? "context" : "";
 
   return [
     `${targetCount} ${targetCount === 1 ? "target" : "targets"}`,
     probe,
     breaker,
     transport,
+    context,
   ]
     .filter(Boolean)
     .join(", ");

@@ -53,6 +53,8 @@ interface FormValues {
   transportEnabled: boolean;
   connectTimeout: string;
   protocols: UpstreamProtocol[];
+  internalContextEnabled: boolean;
+  audience: string;
 }
 
 interface BuildResult {
@@ -77,6 +79,8 @@ const defaultValues: FormValues = {
   transportEnabled: false,
   connectTimeout: "",
   protocols: [],
+  internalContextEnabled: false,
+  audience: "",
 };
 
 function createTarget(
@@ -135,6 +139,10 @@ function upstreamToFormValues(
       })
     : [];
 
+  const internalContext = isRecord(selectedValue.internal_context)
+    ? selectedValue.internal_context
+    : null;
+
   return {
     ...defaultValues,
     name: selectedName,
@@ -168,6 +176,10 @@ function upstreamToFormValues(
       transport && Array.isArray(transport.protocols)
         ? transport.protocols.filter(isUpstreamProtocol)
         : defaultValues.protocols,
+    internalContextEnabled: Boolean(internalContext),
+    audience: internalContext
+      ? getString(internalContext.audience)
+      : defaultValues.audience,
   };
 }
 
@@ -246,6 +258,12 @@ function formValuesToUpstream(values: FormValues): BuildResult {
     const connectTimeout = values.connectTimeout.trim();
     if (connectTimeout) transport.connect_timeout = connectTimeout;
     upstream.transport = transport;
+  }
+
+  if (values.internalContextEnabled) {
+    const audience = values.audience.trim();
+    if (!audience) return { errorKey: "audienceRequired", value: null };
+    upstream.internal_context = { audience };
   }
 
   return { errorKey: null, value: upstream };
@@ -536,6 +554,29 @@ const UpstreamForm: React.FC<GatewayNamedFormProps> = ({
               </Group>
             </Checkbox.Group>
           </>
+        )}
+      </Stack>
+
+      <Divider size={3} />
+
+      <Stack p="xs" gap="xs">
+        <Switch
+          label={t("enableInternalContext")}
+          checked={values.internalContextEnabled}
+          onChange={(event) =>
+            setField("internalContextEnabled", event.currentTarget.checked)
+          }
+        />
+        {values.internalContextEnabled && (
+          <TextInput
+            variant="filled"
+            label={t("audience")}
+            placeholder="urn:stargate:service:orders"
+            value={values.audience}
+            onChange={(event) =>
+              setField("audience", event.currentTarget.value)
+            }
+          />
         )}
       </Stack>
     </GatewayEntityForm>
