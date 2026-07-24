@@ -1,7 +1,7 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
-use crate::etc::msg::MessageResponse;
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::etc::store::use_store;
 use axum::Json;
 use axum::extract::Request;
@@ -20,13 +20,13 @@ use store::Store;
     )
 )]
 pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
-    let token = req.get_token().ok_or_else(|| {
-        ErrorResponse::from(HttpError::Unauthorized("Token not found".to_string()))
-    })?;
+    let token = req
+        .get_token()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenMissing))?;
 
     let claims = jwt_config()
         .validate_session_access_token(&token)
-        .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+        .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let sid = claims.sid.clone().unwrap_or_default();
     crate::act::token_revocation::revoke_claims(&claims)
@@ -42,10 +42,7 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         crate::act::sessions::forget_session(user_id, &sid).await;
     }
 
-    Ok(Json(MessageResponse::new(
-        "User logged out successfully",
-        "logout_success",
-    )))
+    Ok(Json(MessageResponse::new(MessageCode::LogoutCompleted)))
 }
 
 #[utoipa::path(
@@ -71,7 +68,6 @@ pub async fn post_logout_all(req: Request) -> Result<Json<MessageResponse>, Erro
     tracing::info!(user_id = %session.user.id, revoked, "user logged out everywhere");
 
     Ok(Json(MessageResponse::new(
-        "All sessions logged out successfully",
-        "logout_all_success",
+        MessageCode::AllSessionsLoggedOut,
     )))
 }

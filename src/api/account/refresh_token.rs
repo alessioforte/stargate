@@ -1,5 +1,5 @@
 use super::{AuthResponse, RefreshTokenRequestBody};
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{self, jwt::jwt_config, sub::Subject};
 use crate::fun::build_jwt_cookie;
 use axum::Json;
@@ -25,27 +25,25 @@ pub async fn put_refresh_token(
 ) -> Result<Response, ErrorResponse> {
     let claims = jwt_config()
         .validate_session_refresh_token(&body.refresh_token)
-        .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+        .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     if crate::act::token_revocation::is_revoked(&claims)
         .await
         .map_err(ErrorResponse::internal)?
     {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid Token".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
     let sid = claims
         .sid
         .clone()
-        .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let store = etc::store::use_store();
     let session = store
         .get::<Subject>(&sid)
         .await
-        .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+        .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let old_subject = match session {
         Some(subject) => {
@@ -53,16 +51,14 @@ pub async fn put_refresh_token(
             subject
         }
         None => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid Token".to_string(),
-            )));
+            return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
         }
     };
 
     let user = crate::db::get_user_by_username(&claims.sub)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     crate::act::sessions::forget_session(&user.id, &sid).await;
 
@@ -74,9 +70,7 @@ pub async fn put_refresh_token(
             let membership = crate::db::get_user_organization(&user.id, org_id)
                 .await
                 .map_err(ErrorResponse::internal)?
-                .ok_or_else(|| {
-                    ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string()))
-                })?;
+                .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
             Some(crate::act::sessions::OrgContext::from(&membership))
         }
         None => None,
@@ -88,7 +82,7 @@ pub async fn put_refresh_token(
 
     let auth_time = claims
         .auth_time
-        .ok_or_else(|| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
     let new_sid = ulid::Ulid::new().to_string();
     let mut new_claims = jwt::Claims::default()
         .subject(user.email.to_owned())

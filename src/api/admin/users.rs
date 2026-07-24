@@ -1,8 +1,8 @@
 use super::{SUPER_ADMIN, extract_json, extract_optional_json, extract_path, extract_query};
 use crate::act::PendingSignupProfile;
 use crate::api::admin::take_admin_audit_context;
-use crate::err::{ErrorResponse, HttpError};
-use crate::etc::msg::MessageResponse;
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -81,14 +81,11 @@ fn normalize_membership_role(role: Option<String>) -> Result<String, ErrorRespon
     };
     let role = role.trim();
     if role.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "role must not be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::MembershipRoleRequired));
     }
     if role.len() > MAX_MEMBERSHIP_ROLE_LEN {
-        return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-            "role must be at most {MAX_MEMBERSHIP_ROLE_LEN} characters"
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::MembershipRoleTooLong)
+            .with_param("maxLength", MAX_MEMBERSHIP_ROLE_LEN));
     }
     Ok(role.to_string())
 }
@@ -288,12 +285,7 @@ pub async fn get_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let user = crate::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "User with id '{}' not found",
-                id
-            )))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     Ok(Json(user).into_response())
 }
@@ -319,10 +311,8 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let payload: CreateUserRequest = extract_json(req).await?;
 
     if let Ok(Some(_)) = crate::db::get_user_by_username(&payload.email).await {
-        return Err(ErrorResponse::from(HttpError::Conflict(format!(
-            "User with email '{}' already exists",
-            payload.email
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::UserEmailAlreadyExists)
+            .with_param("email", payload.email.clone()));
     }
 
     let nickname = payload
@@ -335,7 +325,9 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         Some(&nickname),
         Some(&payload.email),
     )
-    .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
+    .map_err(|message| {
+        ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
+    })?;
 
     let hashed = crate::etc::pw::hash_password(payload.password.clone())
         .await
@@ -378,10 +370,8 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
         .map_err(ErrorResponse::internal)?
         .is_some()
     {
-        return Err(ErrorResponse::from(HttpError::Conflict(format!(
-            "User with email '{}' already exists",
-            payload.email
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::UserEmailAlreadyExists)
+            .with_param("email", payload.email.clone()));
     }
 
     if let Some(nickname) = payload
@@ -393,10 +383,8 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
             .map_err(ErrorResponse::internal)?
             .is_some()
     {
-        return Err(ErrorResponse::from(HttpError::Conflict(format!(
-            "User with nickname '{}' already exists",
-            nickname
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::UserNicknameAlreadyExists)
+            .with_param("nickname", nickname));
     }
 
     let profile = PendingSignupProfile {
@@ -412,10 +400,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(MessageResponse::new(
-            "User invitation sent successfully",
-            "user_invitation_sent",
-        )),
+        Json(MessageResponse::new(MessageCode::UserInvitationSent)),
     )
         .into_response())
 }
@@ -445,12 +430,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let existing = crate::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "User with id '{}' not found",
-                id
-            )))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     let mut updated = db::ent::User::new(
         payload.email.clone(),
@@ -498,12 +478,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let mut existing = crate::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "User with id '{}' not found",
-                id
-            )))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     if let Some(email) = &payload.email {
         existing.email = email.clone();
@@ -556,12 +531,7 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
     let mut existing = crate::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "User with id '{}' not found",
-                id
-            )))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     existing.attrs = payload.attrs.clone();
 
@@ -597,12 +567,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
     let mut existing = crate::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "User with id '{}' not found",
-                id
-            )))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     existing.attrs = match (&existing.attrs, &payload.attrs) {
         (Value::Object(existing_map), Value::Object(new_map)) => {
@@ -644,20 +609,13 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let user = crate::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "User with id '{}' not found",
-                id
-            )))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     let is_super = crate::db::is_super_admin_user_id(&user.id)
         .await
         .map_err(ErrorResponse::internal)?;
     if is_super {
-        return Err(ErrorResponse::from(HttpError::Forbidden(
-            "cannot delete super admin user".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::UserSuperAdminDeleteForbidden));
     }
 
     let revoked_key_hashes = crate::db::delete_user(&id, ctx)
@@ -671,11 +629,7 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
         tracing::error!(user_id = %id, "failed to revoke sessions after user delete: {error}");
     }
 
-    Ok(Json(MessageResponse::new(
-        "User deleted successfully",
-        "user_deleted",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::UserDeleted).with_param("id", id)).into_response())
 }
 
 #[utoipa::path(
@@ -700,10 +654,7 @@ pub async fn get_user_organizations(mut req: Request) -> Result<Response, ErrorR
         .await
         .map_err(ErrorResponse::internal)?;
     if exists.is_none() {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "User with id '{}' not found",
-            id
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()));
     }
 
     let orgs = crate::db::get_user_organizations(&id)
@@ -743,10 +694,9 @@ pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorR
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Organization with id '{}' not found",
-            org_id
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::OrganizationNotFound).with_param("id", org_id.clone())
+        );
     }
 
     let users = crate::db::get_organization_users_paginated(&org_id, limit, offset)
@@ -796,31 +746,23 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "User with id '{}' not found",
-            user_id
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", user_id.clone()));
     }
     if crate::db::get_organization_by_id(&org_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Organization with id '{}' not found",
-            org_id
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::OrganizationNotFound).with_param("id", org_id.clone())
+        );
     }
 
     crate::db::add_user_to_organization(&user_id, &org_id, &role, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
-    Ok(Json(MessageResponse::new(
-        "User added to organization successfully",
-        "user_added_to_organization",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::UserAddedToOrganization)).into_response())
 }
 
 #[utoipa::path(
@@ -850,20 +792,16 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "User with id '{}' not found",
-            user_id
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", user_id.clone()));
     }
     if crate::db::get_organization_by_id(&org_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Organization with id '{}' not found",
-            org_id
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::OrganizationNotFound).with_param("id", org_id.clone())
+        );
     }
 
     let revoked_key_hashes = crate::db::remove_user_from_organization(&user_id, &org_id, ctx)
@@ -883,8 +821,7 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
     }
 
     Ok(Json(MessageResponse::new(
-        "User removed from organization successfully",
-        "user_removed_from_organization",
+        MessageCode::UserRemovedFromOrganization,
     ))
     .into_response())
 }

@@ -1,8 +1,8 @@
 use super::ChangePasswordRequestBody;
 use crate::act;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
-use crate::etc::msg::MessageResponse;
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::etc::reqctx::audit_request_from;
 use crate::fun::format_name;
 use axum::Json;
@@ -30,18 +30,19 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
 
     let Json(body) = Json::<ChangePasswordRequestBody>::from_request(req, &())
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
+        })?;
 
     let token = body.token.clone();
     let claims = etc::jwt::jwt_config()
         .validate_token(&token)
-        .map_err(|_| ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string())))?;
+        .map_err(|_| ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid))?;
 
-    let email = claims.email.clone().ok_or_else(|| {
-        ErrorResponse::from(HttpError::BadRequest(
-            "Token missing email claim".to_string(),
-        ))
-    })?;
+    let email = claims
+        .email
+        .clone()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid))?;
     let token_sid = claims.sid.clone().unwrap_or_default();
 
     let stored_sid = act::get_change_password_request(&email)
@@ -49,21 +50,19 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         .map_err(ErrorResponse::internal)?;
 
     if stored_sid.as_deref() != Some(&token_sid) {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid or expired password reset request".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::PasswordResetRequestInvalid));
     }
 
     let user = crate::db::get_user_by_username(&email)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::DocumentNotFound("User not found".to_string()))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
 
     act::password_policy::validate_for_user(&user, &body.password)
         .await
-        .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
+        .map_err(|message| {
+            ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
+        })?;
 
     let password = crate::etc::pw::hash_password(body.password.clone())
         .await
@@ -77,9 +76,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         .await
         .map_err(|e| {
             error!("Could not update password: {:?}", e);
-            ErrorResponse::from(HttpError::InternalServerError(
-                "Could not update password".to_string(),
-            ))
+            ErrorResponse::new(ErrorCode::PasswordUpdateFailed)
         })?;
 
     let _ = act::delete_change_password_request(&email).await;
@@ -97,8 +94,5 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         error!("Could not send email: {:?}", e);
     }
 
-    Ok(Json(MessageResponse::new(
-        "Password changed successfully",
-        "password_changed",
-    )))
+    Ok(Json(MessageResponse::new(MessageCode::PasswordChanged)))
 }

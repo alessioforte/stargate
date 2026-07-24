@@ -5,7 +5,7 @@ use super::{
     types::{DynLoadBalancer, ExecutionPlan, ReplayRequest, RequestState, SelectedService},
     ws,
 };
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{ext::RequestExt, gate::get_client, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::{body::Body, response::Response};
@@ -148,11 +148,8 @@ pub(super) async fn execute_selected_with_request(
                 return result;
             }
 
-            let client = get_client(service_name).ok_or_else(|| {
-                ErrorResponse::from(HttpError::InternalServerError(
-                    "HTTP client not found".to_string(),
-                ))
-            })?;
+            let client = get_client(service_name)
+                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
             let empty_headers = HeaderMap::new();
             let result = http::handler(
                 req,
@@ -224,11 +221,8 @@ async fn execute_selected_from_replay(
                     )
                 })
                 .transpose()?;
-            let client = get_client(service_name).ok_or_else(|| {
-                ErrorResponse::from(HttpError::InternalServerError(
-                    "HTTP client not found".to_string(),
-                ))
-            })?;
+            let client = get_client(service_name)
+                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
 
             let span = tracing::info_span!(
                 "gateway.upstream",
@@ -296,7 +290,7 @@ pub(super) async fn execute_plan_from_replay(
                 .await;
         let response = match result {
             Ok(response) => response,
-            Err(error) if idx < last_idx && error.code == ::http::StatusCode::BAD_GATEWAY => {
+            Err(error) if idx < last_idx && error.status == ::http::StatusCode::BAD_GATEWAY => {
                 telemetry::record_gateway_failover("transport", None);
                 tracing::warn!(
                     plan_index = idx + 1,
@@ -324,9 +318,7 @@ pub(super) async fn execute_plan_from_replay(
         return Ok(response);
     }
 
-    Err(ErrorResponse::from(HttpError::ServiceUnavailable(
-        "No healthy upstream available".to_string(),
-    )))
+    Err(ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))
 }
 
 pub(super) fn spawn_mirrors(
@@ -389,9 +381,7 @@ fn attempt_limit_failure(service: &str, dispatch_kind: &'static str) -> ErrorRes
         stargate.reason = "attempt",
         "Internal-context dispatch attempt limit exceeded"
     );
-    ErrorResponse::from(HttpError::InternalServerError(
-        "Internal upstream request preparation failed".to_string(),
-    ))
+    ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
 }
 
 fn next_dispatch_attempt(
@@ -428,7 +418,7 @@ fn selected_target_kind(selected: &SelectedService) -> &str {
 fn result_status(result: &Result<Response, ErrorResponse>) -> Option<u16> {
     match result {
         Ok(response) => Some(response.status().as_u16()),
-        Err(error) => Some(error.code.as_u16()),
+        Err(error) => Some(error.status.as_u16()),
     }
 }
 
@@ -506,9 +496,7 @@ mod tests {
     }
 
     fn transport_error() -> Result<Response, ErrorResponse> {
-        Err(ErrorResponse::from(HttpError::BadGateway(
-            "boom".to_string(),
-        )))
+        Err(ErrorResponse::new(ErrorCode::UpstreamConnectionFailed))
     }
 
     fn available(balancers: &HashMap<String, DynLoadBalancer>, service: &str) -> bool {
@@ -659,7 +647,7 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert_eq!(error.code, ::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.status, ::http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]

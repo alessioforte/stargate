@@ -1,5 +1,5 @@
 use super::headers::insert_header;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use ::http::{StatusCode, header::CONTENT_TYPE};
 use axum::{body::Body, response::Response};
 use gate::graph::{HeaderValueNode, ResponseBodyNode};
@@ -9,11 +9,8 @@ pub(super) fn build_direct_response(
     headers: &[HeaderValueNode],
     body: Option<&ResponseBodyNode>,
 ) -> Result<Response, ErrorResponse> {
-    let status = StatusCode::from_u16(status).map_err(|_| {
-        ErrorResponse::from(HttpError::InternalServerError(
-            "Invalid direct response status".to_string(),
-        ))
-    })?;
+    let status = StatusCode::from_u16(status)
+        .map_err(|_| ErrorResponse::new(ErrorCode::GatewayDirectResponseStatusInvalid))?;
 
     let mut response = Response::new(Body::empty());
     *response.status_mut() = status;

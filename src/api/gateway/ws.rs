@@ -1,5 +1,5 @@
 use super::dispatch::InternalDispatch;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
 use futures_util::{SinkExt, StreamExt};
@@ -21,9 +21,9 @@ pub async fn handler(
     internal_dispatch: Option<&InternalDispatch>,
 ) -> Result<Response, ErrorResponse> {
     if !hyper_tungstenite::is_upgrade_request(&req) {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Invalid websocket upgrade request".to_string(),
-        )));
+        return Err(ErrorResponse::new(
+            ErrorCode::GatewayWebsocketUpgradeInvalid,
+        ));
     }
 
     let upstream_request =
@@ -31,17 +31,13 @@ pub async fn handler(
     let (upstream_ws, upstream_response) =
         connect_async(upstream_request).await.map_err(|error| {
             tracing::error!(%uri, %error, "WebSocket upstream connect failed");
-            ErrorResponse::from(HttpError::BadGateway(
-                "Failed to connect to backend websocket".to_string(),
-            ))
+            ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
         })?;
 
     let (mut response, websocket) =
         hyper_tungstenite::upgrade(&mut req, None).map_err(|error| {
             tracing::error!(%error, "WebSocket upgrade failed");
-            ErrorResponse::from(HttpError::BadRequest(
-                "Invalid websocket upgrade request".to_string(),
-            ))
+            ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid)
         })?;
 
     if let Some(protocol) = upstream_response.headers().get(SEC_WEBSOCKET_PROTOCOL) {
@@ -70,9 +66,7 @@ fn build_upstream_request(
 ) -> Result<http::Request<()>, ErrorResponse> {
     let mut request = uri.into_client_request().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid WebSocket upstream URI");
-        ErrorResponse::from(HttpError::BadGateway(
-            "Failed to connect to backend websocket".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
     })?;
 
     copy_forwarded_headers(request.headers_mut(), incoming_headers, preserve_host);

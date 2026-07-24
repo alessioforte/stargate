@@ -1,5 +1,5 @@
 use super::{SUPER_ADMIN, extract_json, extract_query};
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -39,9 +39,8 @@ pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse>
     let config_filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
     let path = format!("{}/{}", config_path, config_filename);
 
-    let content = fs::read_to_string(&path).map_err(|_| {
-        ErrorResponse::from(HttpError::NotFound("Config file not found".to_string()))
-    })?;
+    let content = fs::read_to_string(&path)
+        .map_err(|_| ErrorResponse::new(ErrorCode::ConfigurationNotFound))?;
 
     match format.as_str() {
         "yaml" => Ok(http::Response::builder()
@@ -51,12 +50,7 @@ pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse>
             .unwrap()
             .into_response()),
         _ => {
-            let config = RuntimeConfig::from_yaml_str(&content).map_err(|e| {
-                ErrorResponse::from(HttpError::InternalServerError(format!(
-                    "Failed to parse config file: {}",
-                    e
-                )))
-            })?;
+            let config = RuntimeConfig::from_yaml_str(&content).map_err(ErrorResponse::internal)?;
             Ok(Json(config.raw).into_response())
         }
     }
@@ -78,11 +72,8 @@ pub async fn update_configurations(req: Request) -> Result<Response, ErrorRespon
     require_grants!(req, SUPER_ADMIN, CONFIG_GRANT);
 
     let config: Config = extract_json(req).await?;
-    RuntimeConfig::from_raw(config.clone()).map_err(|e| {
-        ErrorResponse::from(HttpError::BadRequest(format!(
-            "Invalid gateway config: {}",
-            e
-        )))
+    RuntimeConfig::from_raw(config.clone()).map_err(|error| {
+        ErrorResponse::new(ErrorCode::ConfigurationInvalid).with_message(error.to_string())
     })?;
 
     let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());

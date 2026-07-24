@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use store::Store;
 
 use super::auth::authenticated_user;
@@ -118,9 +118,7 @@ pub(crate) async fn maybe_start_login_mfa(
 
     let method = policy.preferred_method.ok_or_else(|| {
         tracing::error!(user_id = %user.id, "MFA is required but no method is available");
-        ErrorResponse::from(HttpError::ServiceUnavailable(
-            "MFA temporarily unavailable".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::MfaUnavailable)
     })?;
     ensure_method_allowed(&policy, method)?;
     check_and_record_otp_request(client_ip, &format!("mfa-login:{}", user.id)).await?;

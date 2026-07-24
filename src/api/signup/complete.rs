@@ -1,7 +1,7 @@
 use super::SignupCompleteRequestBody;
 use crate::act;
-use crate::err::{ErrorResponse, HttpError};
-use crate::etc::msg::MessageResponse;
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::etc::reqctx::audit_request_from;
 use crate::fun::format_name;
 use axum::Json;
@@ -28,37 +28,33 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
 
     let Json(body) = Json::<SignupCompleteRequestBody>::from_request(req, &())
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
+        })?;
 
     let jwt_cfg = crate::etc::jwt::jwt_config();
-    let claim = jwt_cfg
-        .validate_token(&body.token)
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+    let claim = jwt_cfg.validate_token(&body.token).map_err(|error| {
+        ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
+    })?;
 
     if claim.sub != "signup" {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Invalid token".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SignupTokenInvalid));
     }
 
     let sid = claim
         .sub_id
         .clone()
-        .ok_or_else(|| ErrorResponse::from(HttpError::BadRequest("Invalid token".to_string())))?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupTokenInvalid))?;
 
     let signup = act::get_signup_request(&sid)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound("Signup request not found".to_string()))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupRequestNotFound))?;
 
     if let Some(ref claim_email) = claim.email
         && &signup.email != claim_email
     {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Email does not match".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SignupEmailMismatch));
     }
 
     if crate::db::get_user_by_username(&signup.email)
@@ -66,9 +62,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         .map_err(ErrorResponse::internal)?
         .is_some()
     {
-        return Err(ErrorResponse::from(HttpError::Conflict(
-            "User already exists".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SignupUserAlreadyExists));
     }
 
     let nickname = if body.nickname.trim().is_empty() {
@@ -82,13 +76,13 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         .map_err(ErrorResponse::internal)?
         .is_some()
     {
-        return Err(ErrorResponse::from(HttpError::Conflict(
-            "Nickname already exists".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::UserNicknameAlreadyExists));
     }
 
     act::password_policy::validate_global(&body.password, Some(&nickname), Some(&signup.email))
-        .map_err(|m| ErrorResponse::from(HttpError::BadRequest(m)))?;
+        .map_err(|message| {
+            ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
+        })?;
 
     let profile = Profile::new(signup.email.clone(), nickname)
         .given_name(optional_nonempty(&body.given_name))
@@ -122,10 +116,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         error!("Could not send email: {:?}", e);
     }
 
-    Ok(Json(MessageResponse::new(
-        "User created successfully",
-        "signup_completed",
-    )))
+    Ok(Json(MessageResponse::new(MessageCode::SignupCompleted)))
 }
 
 fn optional_nonempty(value: &str) -> Option<String> {

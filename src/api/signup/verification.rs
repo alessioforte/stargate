@@ -1,6 +1,6 @@
 use super::{EmailVerificationResponse, SignupVerificationParams};
 use crate::act;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use axum::Json;
 use axum::extract::Query;
 
@@ -20,34 +20,28 @@ pub async fn get_signup(
     Query(query): Query<SignupVerificationParams>,
 ) -> Result<Json<EmailVerificationResponse>, ErrorResponse> {
     let jwt_cfg = crate::etc::jwt::jwt_config();
-    let claim = jwt_cfg
-        .validate_token(&query.token)
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+    let claim = jwt_cfg.validate_token(&query.token).map_err(|error| {
+        ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
+    })?;
 
     if claim.sub != "signup_request" {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Invalid token".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SignupTokenInvalid));
     }
 
     let sid = claim
         .sid
         .clone()
-        .ok_or_else(|| ErrorResponse::from(HttpError::BadRequest("Invalid token".to_string())))?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupTokenInvalid))?;
 
     let request = act::get_email_verification_request(&sid)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound("Signup request not found".to_string()))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupRequestNotFound))?;
 
     if let Some(ref claim_email) = claim.email
         && &request.email != claim_email
     {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Email does not match".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SignupEmailMismatch));
     }
 
     if act::get_signup_request(&sid)

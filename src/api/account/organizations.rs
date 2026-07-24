@@ -1,5 +1,5 @@
 use crate::act::sessions::authenticated_session;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::ext::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
@@ -91,7 +91,9 @@ pub async fn put_session_organization(req: Request) -> Result<Response, ErrorRes
     let token = req.get_token();
     let Json(body) = Json::<SwitchOrganizationRequest>::from_request(req, &())
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
+        })?;
 
     let session = authenticated_session(token).await?;
 

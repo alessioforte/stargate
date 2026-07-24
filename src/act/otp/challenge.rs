@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use store::Store;
 
 use super::types::{
@@ -70,9 +70,7 @@ pub(crate) async fn verify_pending_login(
         };
     }
 
-    Err(ErrorResponse::from(HttpError::Conflict(
-        "OTP challenge changed, retry verification".to_string(),
-    )))
+    Err(ErrorResponse::new(ErrorCode::OtpChallengeChanged))
 }
 
 pub(crate) async fn verify_stored_challenge(
@@ -138,9 +136,7 @@ pub(crate) async fn verify_stored_challenge(
         };
     }
 
-    Err(ErrorResponse::from(HttpError::Conflict(
-        "OTP challenge changed, retry verification".to_string(),
-    )))
+    Err(ErrorResponse::new(ErrorCode::OtpChallengeChanged))
 }
 
 pub(crate) async fn store_mfa_verified_marker(

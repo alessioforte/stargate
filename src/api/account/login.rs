@@ -3,7 +3,7 @@ use crate::act::login_guard;
 use crate::api::account::credentials::expired::maybe_password_expired_response;
 use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
 use crate::api::account::session::issue_user_session;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::ext::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
@@ -31,7 +31,9 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
 
     let Json(credentials) = Json::<UserCredentials>::from_request(req, &())
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
+        })?;
 
     let login_identifier = credentials.username.trim();
 
@@ -49,9 +51,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         .map_err(login_guard_unavailable)?;
 
     if !allowed {
-        let mut err = ErrorResponse::from(HttpError::TooManyRequests(
-            "too many failed login attempts, try again later".to_string(),
-        ));
+        let mut err = ErrorResponse::new(ErrorCode::AuthLoginRateLimited);
         err.insert_header("Retry-After", &login_guard::lockout_seconds().to_string());
         return Err(err);
     }
@@ -68,9 +68,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid credentials".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
     };
 
     let user_credential = crate::db::get_credential(&user.id, CredentialType::Password)
@@ -86,9 +84,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid credentials".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
     };
 
     let password_check =
@@ -98,9 +94,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid credentials".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
     }
 
     if let Err(error) = login_guard::clear_subject_attempts(&throttle).await {
@@ -161,7 +155,5 @@ fn spawn_credential_rehash(user_id: String, password: String, old_hash: String) 
 
 fn login_guard_unavailable(error: store::StoreError) -> ErrorResponse {
     tracing::error!("Login guard unavailable: {}", error);
-    ErrorResponse::from(HttpError::ServiceUnavailable(
-        "login temporarily unavailable".to_string(),
-    ))
+    ErrorResponse::new(ErrorCode::AuthLoginUnavailable)
 }

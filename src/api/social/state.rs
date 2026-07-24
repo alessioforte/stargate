@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use axum::Json;
 use serde::Serialize;
 
@@ -21,9 +21,7 @@ pub async fn post_state() -> Result<Json<StateResponse>, ErrorResponse> {
         .await
         .map_err(|e| {
             tracing::error!("Failed to create OAuth state: {}", e);
-            ErrorResponse::from(HttpError::InternalServerError(
-                "failed to generate oauth state".to_string(),
-            ))
+            ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
         })?;
     Ok(Json(StateResponse { state }))
 }

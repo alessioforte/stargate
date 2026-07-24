@@ -13,7 +13,7 @@ mod routing;
 mod types;
 mod ws;
 
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{ext::RequestExt, guard, reqctx, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue, Request};
 use axum::body::Body;
@@ -74,9 +74,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .routers
                 .iter()
                 .find(|router| router_matches(router, &req))
-                .ok_or_else(|| {
-                    ErrorResponse::from(HttpError::NotFound("Route not found".to_string()))
-                })?
+                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayRouteNotFound))?
         };
         router_name = router.name.clone();
         service_name = router.service.clone();
@@ -185,11 +183,10 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
         };
 
         let mut response = if req.get_protocol() == "ws" {
-            let selected = plan.attempts.first().ok_or_else(|| {
-                ErrorResponse::from(HttpError::ServiceUnavailable(
-                    "No healthy upstream available".to_string(),
-                ))
-            })?;
+            let selected = plan
+                .attempts
+                .first()
+                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
             execute_selected_with_request(selected, req, &state, balancers.as_ref())
                 .instrument(tracing::info_span!(
                     "gateway.execute",
@@ -204,11 +201,10 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                     limit,
                     "Skipping mirror traffic because request body exceeds replay limit"
                 );
-                let selected = plan.attempts.first().ok_or_else(|| {
-                    ErrorResponse::from(HttpError::ServiceUnavailable(
-                        "No healthy upstream available".to_string(),
-                    ))
-                })?;
+                let selected = plan
+                    .attempts
+                    .first()
+                    .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
                 execute_selected_with_request(selected, req, &state, balancers.as_ref())
                     .instrument(tracing::info_span!(
                         "gateway.execute",
@@ -235,11 +231,10 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .await?
             }
         } else {
-            let selected = plan.attempts.first().ok_or_else(|| {
-                ErrorResponse::from(HttpError::ServiceUnavailable(
-                    "No healthy upstream available".to_string(),
-                ))
-            })?;
+            let selected = plan
+                .attempts
+                .first()
+                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
             execute_selected_with_request(selected, req, &state, balancers.as_ref())
                 .instrument(tracing::info_span!(
                     "gateway.execute",
@@ -260,7 +255,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
 
     let status = match &result {
         Ok(response) => response.status().as_u16(),
-        Err(error) => error.code.as_u16(),
+        Err(error) => error.status.as_u16(),
     };
     telemetry::record_gateway_request(&router_name, &service_name, status, started.elapsed());
     if status >= 500 {
@@ -336,7 +331,7 @@ mod tests {
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["code"], "not_found");
-        assert_eq!(json["message"], "Route not found");
+        assert_eq!(json["code"], "gateway.route_not_found");
+        assert_eq!(json["message"], "Gateway route not found");
     }
 }

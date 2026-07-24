@@ -1,5 +1,5 @@
 use super::shared::{SCOPE_EMAIL, SCOPE_OPENID, SCOPE_PROFILE, parse_space_delimited};
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use axum::Json;
 use axum::extract::Request;
 use http::header::AUTHORIZATION;
@@ -22,7 +22,7 @@ pub struct UserInfoResponse {
 }
 
 fn bearer_unauthorized(message: impl Into<String>) -> ErrorResponse {
-    let mut err = ErrorResponse::from(HttpError::Unauthorized(message.into()));
+    let mut err = ErrorResponse::new(ErrorCode::AuthTokenInvalid).with_message(message);
     err.insert_header("WWW-Authenticate", "Bearer");
     err
 }
@@ -48,7 +48,7 @@ fn bearer_token(req: &Request) -> Result<String, ErrorResponse> {
 }
 
 fn insufficient_scope() -> ErrorResponse {
-    let mut err = ErrorResponse::from(HttpError::Forbidden("openid scope is required".to_string()));
+    let mut err = ErrorResponse::new(ErrorCode::AuthOpenidScopeRequired);
     err.insert_header(
         "WWW-Authenticate",
         "Bearer error=\"insufficient_scope\", scope=\"openid\"",

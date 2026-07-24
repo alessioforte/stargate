@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
 use crate::api::admin::take_admin_audit_context;
-use crate::err::{ErrorResponse, HttpError};
-use crate::etc::msg::MessageResponse;
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -132,10 +132,7 @@ pub async fn get_service_account(mut req: Request) -> Result<Response, ErrorResp
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "Service account with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::ServiceAccountNotFound).with_param("id", id.clone())
         })?;
 
     Ok(Json(account).into_response())
@@ -161,9 +158,7 @@ pub async fn create_service_account(mut req: Request) -> Result<Response, ErrorR
     let payload: CreateServiceAccountRequest = extract_json(req).await?;
 
     if payload.name.trim().is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Name cannot be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::ServiceAccountNameRequired));
     }
 
     let account = crate::db::create_service_account(
@@ -201,9 +196,7 @@ pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorR
     let payload: UpdateServiceAccountRequest = extract_json(req).await?;
 
     if payload.name.trim().is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Name cannot be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::ServiceAccountNameRequired));
     }
 
     if crate::db::get_service_account_by_id(&id)
@@ -211,10 +204,9 @@ pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorR
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Service account with id '{}' not found",
-            id
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::ServiceAccountNotFound).with_param("id", id.clone())
+        );
     }
 
     let account =
@@ -249,10 +241,9 @@ pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorR
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Service account with id '{}' not found",
-            id
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::ServiceAccountNotFound).with_param("id", id.clone())
+        );
     }
 
     let revoked_key_hashes = crate::db::delete_service_account(&id, ctx)
@@ -260,9 +251,5 @@ pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorR
         .map_err(ErrorResponse::internal)?;
     crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
 
-    Ok(Json(MessageResponse::new(
-        "Service account deleted successfully",
-        "service_account_deleted",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::ServiceAccountDeleted)).into_response())
 }

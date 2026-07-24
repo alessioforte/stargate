@@ -1,5 +1,5 @@
 use super::headers::sanitize_internal_request_headers;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{
     internal_context::InternalContextRuntime,
     reqctx::{INTERNAL_CONTEXT_HEADER, PropagationDraft},
@@ -194,9 +194,7 @@ fn internal_failure(
             "Internal upstream request preparation failed"
         );
     }
-    ErrorResponse::from(HttpError::InternalServerError(
-        "Internal upstream request preparation failed".to_string(),
-    ))
+    ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

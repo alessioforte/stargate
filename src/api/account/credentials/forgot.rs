@@ -1,7 +1,7 @@
 use crate::act;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
-use crate::etc::msg::MessageResponse;
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::fun::format_name;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -32,14 +32,11 @@ pub async fn post_credentials(
     let user = crate::db::get_user_by_username(&body.email)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::DocumentNotFound("User not found".to_string()))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
 
     if let Ok(Some(_)) = act::get_change_password_request(&user.email).await {
         return Ok(Json(MessageResponse::new(
-            "A password reset request has already been sent to this email. Please check your email for the password reset link.",
-            "password_reset_existing",
+            MessageCode::PasswordResetAlreadyRequested,
         )));
     }
 
@@ -70,7 +67,6 @@ pub async fn post_credentials(
         .map_err(ErrorResponse::internal)?;
 
     Ok(Json(MessageResponse::new(
-        "Password reset request sent. Please check your email for the password reset link.",
-        "password_reset",
+        MessageCode::PasswordResetRequested,
     )))
 }

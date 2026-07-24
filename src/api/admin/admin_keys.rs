@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
 use crate::api::admin::take_admin_audit_context;
-use crate::err::{ErrorResponse, HttpError};
-use crate::etc::msg::MessageResponse;
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -108,9 +108,7 @@ fn admin_key_permissions_to_strings(permissions: &[AdminKeyPermission]) -> Vec<S
 
 fn validate_admin_key_permissions(permissions: &[AdminKeyPermission]) -> Result<(), ErrorResponse> {
     if permissions.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Permissions list cannot be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AdminKeyPermissionsRequired));
     }
 
     Ok(())
@@ -173,10 +171,7 @@ pub async fn get_admin_key(mut req: Request) -> Result<Response, ErrorResponse> 
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "Admin key with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::AdminKeyNotFound).with_param("id", id.clone())
         })?;
 
     Ok(Json(key).into_response())
@@ -253,16 +248,11 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "Admin key with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::AdminKeyNotFound).with_param("id", id.clone())
         })?;
 
     if existing.revoked {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Cannot update a revoked admin key".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AdminKeyRevoked));
     }
 
     existing.set_permissions(permissions);
@@ -297,27 +287,18 @@ pub async fn revoke_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "Admin key with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::AdminKeyNotFound).with_param("id", id.clone())
         })?;
 
     if key.revoked {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Admin key is already revoked".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AdminKeyAlreadyRevoked));
     }
 
     crate::db::revoke_admin_key(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
-    Ok(Json(MessageResponse::new(
-        "Admin key revoked successfully",
-        "admin_key_revoked",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::AdminKeyRevoked)).into_response())
 }
 
 #[utoipa::path(
@@ -344,21 +325,14 @@ pub async fn delete_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Admin key with id '{}' not found",
-            id
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::AdminKeyNotFound).with_param("id", id));
     }
 
     crate::db::delete_admin_key(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
-    Ok(Json(MessageResponse::new(
-        "Admin key deleted successfully",
-        "admin_key_deleted",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::AdminKeyDeleted)).into_response())
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@
 //! refresh flow requires the sid record to rotate — a cryptographically
 //! valid JWT with no session behind it is rejected everywhere.
 
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::jwt::jwt_config;
 use crate::etc::store::use_store;
 use crate::etc::sub::{Subject, SubjectType};
@@ -116,11 +116,9 @@ pub struct AuthenticatedSession {
 pub async fn authenticated_session(
     token: Option<String>,
 ) -> Result<AuthenticatedSession, ErrorResponse> {
-    let invalid = || ErrorResponse::from(HttpError::Unauthorized("Invalid Token".to_string()));
+    let invalid = || ErrorResponse::new(ErrorCode::AuthTokenInvalid);
 
-    let token = token.ok_or_else(|| {
-        ErrorResponse::from(HttpError::Unauthorized("Token not found".to_string()))
-    })?;
+    let token = token.ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenMissing))?;
 
     let claims = jwt_config()
         .validate_session_access_token(&token)
@@ -141,9 +139,7 @@ pub async fn authenticated_session(
         .ok_or_else(invalid)?;
 
     if subject.sub_type != SubjectType::User {
-        return Err(ErrorResponse::from(HttpError::Forbidden(
-            "only available for user sessions".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AuthUserSessionRequired));
     }
 
     if claims.sub_id.as_deref() != Some(&subject.id) {
@@ -202,11 +198,7 @@ pub async fn resolve_org_context(
 
     select_org(&memberships, requested_org_id, default_org)
         .map(|selected| selected.map(OrgContext::from))
-        .map_err(|_| {
-            ErrorResponse::from(HttpError::BadRequest(
-                "not a member of the requested organization".to_string(),
-            ))
-        })
+        .map_err(|_| ErrorResponse::new(ErrorCode::SessionOrganizationMembershipRequired))
 }
 
 #[derive(Debug)]

@@ -493,6 +493,8 @@ server startup validates but never generates missing internal-context keys.
 
 - `GET /health` - health check
 - `GET /docs` - Swagger UI
+- `GET /docs/errors` - machine-readable error catalog used by documentation UIs
+- `GET /i18n/{locale}` - versioned API error/success message catalog (`en`, `it`)
 - `/.well-known/*` - OAuth/OIDC metadata and public JWKS
 - `GET /.well-known/stargate-context-jwks.json` - dedicated public
   internal-context JWKS when the signer is configured
@@ -511,12 +513,28 @@ Typical body shape:
 
 ```json
 {
-  "message": "...",
-  "code": "not_found",
-  "type": "invalid_request",
-  "link": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404"
+  "message": "User not found",
+  "code": "user.not_found",
+  "type": "not_found",
+  "link": "https://docs.example.com/errors/user.not_found",
+  "params": {
+    "id": "01J..."
+  }
 }
 ```
+
+`code` is the stable, domain-specific API contract and the i18n lookup key.
+`message` is the English fallback, while `params` contains safe interpolation
+values for localized clients. `type` is the broad error category; it must not
+be used in place of `code` for application behavior. `link` points to the
+future error documentation page for that exact code.
+
+The English catalog is generated from the Rust error/message definitions.
+Locale files contain overrides and fall back to English, so every published
+catalog always contains every code. Catalog responses include `ETag`,
+`Content-Language`, a short cache lifetime, and a content-derived `version`.
+OAuth protocol error responses retain their RFC-defined envelope where
+required.
 
 HTTP codes currently used include: 400, 401, 403, 404, 409, 413, 429, 500, 502, 503.
 

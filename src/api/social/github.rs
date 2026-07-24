@@ -1,5 +1,5 @@
 use crate::act::oauth_state;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
 use crate::etc::jwt::jwt_config;
 use crate::etc::reqctx::audit_request_from;
@@ -48,39 +48,34 @@ pub struct AuthResponse {
 pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
     let audit_request = audit_request_from(req.extensions());
 
-    let Query(query): Query<QueryCode> = Query::try_from_uri(req.uri())
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+    let Query(query): Query<QueryCode> = Query::try_from_uri(req.uri()).map_err(|error| {
+        ErrorResponse::new(ErrorCode::RequestInvalidQuery).with_message(error.body_text())
+    })?;
 
     let code = &query.code;
     let state = &query.state;
 
     if code.is_empty() {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "code is required".to_string(),
-        )));
+        return Err(ErrorResponse::new(
+            ErrorCode::SocialAuthorizationCodeMissing,
+        ));
     }
 
     let valid_state = oauth_state::validate_oauth_state(state)
         .await
         .unwrap_or(false);
     if !valid_state {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "invalid or expired oauth state".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SocialStateInvalid));
     }
 
     let token = get_github_oauth_token(code).await.map_err(|e| {
         tracing::error!("GitHub OAuth token error: {}", e);
-        ErrorResponse::from(HttpError::BadGateway(
-            "failed to retrieve access token from GitHub".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::SocialTokenExchangeFailed).with_param("provider", "GitHub")
     })?;
 
     let github_user = get_github_user(&token.access_token).await.map_err(|e| {
         tracing::error!("GitHub user info error: {}", e);
-        ErrorResponse::from(HttpError::BadGateway(
-            "failed to retrieve user info from GitHub".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::SocialUserInfoFailed).with_param("provider", "GitHub")
     })?;
     let audit_context = TrustedAuditContext::application(
         TrustedAuditActor::external_identity(format!("github:{}", github_user.id)),
@@ -91,7 +86,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
         .await
         .map_err(|e| {
             tracing::error!("Database error during GitHub OAuth: {}", e);
-            ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+            ErrorResponse::new(ErrorCode::SystemInternal)
         })?;
 
     if user.is_none() {
@@ -110,14 +105,12 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
             .await
             .map_err(|e| {
                 tracing::error!("Failed to create GitHub OAuth user: {}", e);
-                ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+                ErrorResponse::new(ErrorCode::SystemInternal)
             })?,
         );
     }
 
-    let user = user.ok_or_else(|| {
-        ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
-    })?;
+    let user = user.ok_or_else(|| ErrorResponse::new(ErrorCode::SystemInternal))?;
 
     if user.picture.is_none() {
         let updated = user.clone().picture(Some(github_user.avatar_url.clone()));
@@ -125,7 +118,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
             .await
             .map_err(|e| {
                 tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
-                ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+                ErrorResponse::new(ErrorCode::SystemInternal)
             })?;
     }
 
@@ -157,7 +150,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
 
     let (access_token, refresh_token) = crate::fun::generate_tokens(claims).map_err(|e| {
         tracing::error!("Token generation error: {}", e);
-        ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+        ErrorResponse::new(ErrorCode::SystemInternal)
     })?;
 
     let store = etc::store::use_store();
@@ -171,7 +164,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
 
     store.set(&sid, &subject, Some(sttl)).await.map_err(|e| {
         tracing::error!("Failed to store OAuth session: {}", e);
-        ErrorResponse::from(HttpError::InternalServerError("internal error".to_string()))
+        ErrorResponse::new(ErrorCode::SystemInternal)
     })?;
     crate::act::sessions::register_session(&user.id, &sid, subject.org_id.as_deref(), sttl).await;
 

@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{sub::Subject, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::Gate;
@@ -186,9 +186,9 @@ fn org_target<'a>(
             OnMissingOrg::IpFallback => Ok(Some(OrgTarget::Ip)),
             OnMissingOrg::Deny => {
                 telemetry::record_gateway_policy(policy_kind, "denied");
-                Err(ErrorResponse::from(HttpError::Forbidden(
-                    "organization context required".to_string(),
-                )))
+                Err(ErrorResponse::new(
+                    ErrorCode::GatewayOrganizationContextRequired,
+                ))
             }
         },
     }
@@ -204,9 +204,7 @@ async fn run_check(
     limiter.check(name, key, cost).await.map_err(|error| {
         telemetry::record_gateway_policy(policy_kind, "error");
         tracing::error!("{policy_kind} limiter error: {error}");
-        ErrorResponse::from(HttpError::InternalServerError(
-            "Rate limiter error".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::GatewayLimiterUnavailable)
     })
 }
 
@@ -220,7 +218,7 @@ fn push_rate_check(
         return Err(limited_response(
             &decision,
             scope,
-            "Too Many Requests",
+            ErrorCode::GatewayRateLimitExceeded,
             "x-ratelimit",
         ));
     }
@@ -239,7 +237,7 @@ fn push_quota_check(
         return Err(limited_response(
             &decision,
             scope,
-            "Quota limit exceeded",
+            ErrorCode::GatewayQuotaExceeded,
             "x-quota",
         ));
     }
@@ -251,14 +249,14 @@ fn push_quota_check(
 fn limited_response(
     decision: &RateLimitDecision,
     scope: &'static str,
-    message: &str,
+    code: ErrorCode,
     header_prefix: &str,
 ) -> ErrorResponse {
     let retry_after = decision
         .retry_after
         .unwrap_or(std::time::Duration::from_secs(60));
     let retry_after = retry_after_header_value(retry_after);
-    let mut response = ErrorResponse::from(HttpError::TooManyRequests(message.to_string()));
+    let mut response = ErrorResponse::new(code);
     response
         .insert_header("retry-after", &retry_after)
         .insert_header(

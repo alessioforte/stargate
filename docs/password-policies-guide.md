@@ -27,9 +27,9 @@ message:
 ```json
 {
   "message": "Password must be at least 12 characters long. Password must contain at least one digit",
-  "code": "bad_request",
-  "type": "invalid_request",
-  "link": "https://docs.stargate.dev/errors#bad_request"
+  "code": "password.policy_violation",
+  "type": "validation",
+  "link": "https://docs.stargate.dev/errors/password.policy_violation"
 }
 ```
 

@@ -1,5 +1,5 @@
 use super::types::ReplayRequest;
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::reqctx::INTERNAL_CONTEXT_HEADER;
 use ::http::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
 use axum::body::Body;
@@ -50,9 +50,7 @@ impl ReplayRequest {
     pub(super) fn build(&self, uri: &str) -> Result<Request<Body>, ErrorResponse> {
         let uri = uri.parse::<Uri>().map_err(|error| {
             tracing::error!(%uri, %error, "Invalid upstream URI");
-            ErrorResponse::from(HttpError::BadGateway(
-                "Failed to connect to backend service".to_string(),
-            ))
+            ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
         })?;
 
         let mut req = Request::new(Body::from(self.body.clone()));
@@ -77,9 +75,7 @@ pub(super) async fn buffer_request(
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|error| {
             tracing::error!(%error, "Failed to buffer request body for replay");
-            ErrorResponse::from(HttpError::BadRequest(
-                "Failed to buffer request body".to_string(),
-            ))
+            ErrorResponse::new(ErrorCode::GatewayReplayBufferFailed)
         })?;
 
         let Ok(data) = frame.into_data() else {
@@ -88,10 +84,8 @@ pub(super) async fn buffer_request(
 
         let next_len = bytes.len().saturating_add(data.len());
         if next_len > limit {
-            return Err(ErrorResponse::from(HttpError::PayloadTooLarge(format!(
-                "Replay body limit exceeded: {} bytes",
-                limit
-            ))));
+            return Err(ErrorResponse::new(ErrorCode::GatewayReplayPayloadTooLarge)
+                .with_param("limitBytes", limit));
         }
         bytes.extend_from_slice(&data);
     }

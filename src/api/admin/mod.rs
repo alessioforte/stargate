@@ -9,7 +9,7 @@ pub mod outbox_events;
 pub mod service_accounts;
 pub mod users;
 
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
 use crate::etc::reqctx::{audit_request_from, take_trusted_audit_context_from};
@@ -236,7 +236,9 @@ where
         std::mem::replace(req, Request::new(axum::body::Body::empty())).into_parts();
     let Path(value) = Path::<T>::from_request_parts(&mut parts, &())
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::RequestInvalid).with_message(error.to_string())
+        })?;
     *req = Request::from_parts(parts, body);
     Ok(value)
 }
@@ -245,8 +247,9 @@ pub fn extract_query<T>(req: &Request) -> Result<T, ErrorResponse>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
-    let Query(value) = Query::<T>::try_from_uri(req.uri())
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+    let Query(value) = Query::<T>::try_from_uri(req.uri()).map_err(|error| {
+        ErrorResponse::new(ErrorCode::RequestInvalidQuery).with_message(error.to_string())
+    })?;
     Ok(value)
 }
 
@@ -254,9 +257,9 @@ pub async fn extract_json<T>(req: Request) -> Result<T, ErrorResponse>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
-    let Json(value) = Json::<T>::from_request(req, &())
-        .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.body_text())))?;
+    let Json(value) = Json::<T>::from_request(req, &()).await.map_err(|error| {
+        ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
+    })?;
     Ok(value)
 }
 
@@ -270,12 +273,15 @@ where
 
     let bytes = axum::body::to_bytes(req.into_body(), MAX_OPTIONAL_BODY_BYTES)
         .await
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::RequestInvalid).with_message(error.to_string())
+        })?;
     if bytes.is_empty() {
         return Ok(None);
     }
-    let value = serde_json::from_slice(&bytes)
-        .map_err(|e| ErrorResponse::from(HttpError::BadRequest(e.to_string())))?;
+    let value = serde_json::from_slice(&bytes).map_err(|error| {
+        ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.to_string())
+    })?;
     Ok(Some(value))
 }
 
@@ -288,10 +294,8 @@ macro_rules! require_grants {
             .cloned()
             .unwrap_or_default();
         if !grants.has_any(&[$($grant),+]) {
-            return Err($crate::err::ErrorResponse::from(
-                $crate::err::HttpError::Forbidden(
-                    "Insufficient permissions".to_string(),
-                ),
+            return Err($crate::err::ErrorResponse::new(
+                $crate::err::ErrorCode::AuthInsufficientPermissions,
             ));
         }
     }};

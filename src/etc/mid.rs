@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::ext::RequestExt;
 use axum::extract::Request;
 use axum::middleware::Next;
@@ -23,10 +23,7 @@ pub async fn rate_limit_middleware(req: Request, next: Next) -> Response {
         Ok(d) => d,
         Err(e) => {
             tracing::error!("Rate limiter error: {}", e);
-            return ErrorResponse::from(HttpError::InternalServerError(
-                "Rate limiter error".to_string(),
-            ))
-            .into_response();
+            return ErrorResponse::new(ErrorCode::GatewayLimiterUnavailable).into_response();
         }
     };
 
@@ -52,8 +49,7 @@ pub async fn rate_limit_middleware(req: Request, next: Next) -> Response {
         let retry_after = chrono::Duration::from_std(retry_after).unwrap();
         let retry_after_str = tools::duration_to_string(&retry_after);
 
-        let mut err =
-            ErrorResponse::from(HttpError::TooManyRequests("Too Many Requests".to_string()));
+        let mut err = ErrorResponse::new(ErrorCode::GatewayRateLimitExceeded);
         err.insert_header("Retry-After", &retry_after_str)
             .insert_header("X-RateLimit-Limit", &limit)
             .insert_header("X-RateLimit-Remaining", &remaining);

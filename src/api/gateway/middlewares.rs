@@ -3,7 +3,7 @@ use super::{
     path::{add_prefix, normalize_path, path_prefix_matches, strip_prefix},
     types::RequestState,
 };
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use ::http::Request;
 use axum::body::Body;
 use gate::graph::{HttpGraph, MiddlewareNode, RouterNode};
@@ -16,10 +16,8 @@ pub fn apply_middlewares(
 ) -> Result<(), ErrorResponse> {
     for middleware_name in &router.middlewares {
         let middleware = graph.middlewares.get(middleware_name).ok_or_else(|| {
-            ErrorResponse::from(HttpError::InternalServerError(format!(
-                "Middleware '{}' not found",
-                middleware_name
-            )))
+            ErrorResponse::new(ErrorCode::GatewayMiddlewareNotFound)
+                .with_param("middleware", middleware_name.clone())
         })?;
 
         match middleware {

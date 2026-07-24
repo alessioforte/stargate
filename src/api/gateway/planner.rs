@@ -1,5 +1,5 @@
 use super::types::{DynLoadBalancer, ExecutionPlan, SelectedService, ServiceSelectionError};
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use gate::graph::{HttpGraph, ServiceNode, WeightedServiceNode};
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},
@@ -166,12 +166,10 @@ fn choose_weighted_service<'a>(services: &'a [WeightedServiceNode], seed: &str) 
 
 pub(super) fn selection_error_response(error: ServiceSelectionError) -> ErrorResponse {
     match error {
-        ServiceSelectionError::NoHealthyUpstream => ErrorResponse::from(
-            HttpError::ServiceUnavailable("No healthy upstream available".to_string()),
-        ),
-        ServiceSelectionError::Internal(message) => {
-            ErrorResponse::from(HttpError::InternalServerError(message))
+        ServiceSelectionError::NoHealthyUpstream => {
+            ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream)
         }
+        ServiceSelectionError::Internal(message) => ErrorResponse::internal(message),
     }
 }
 

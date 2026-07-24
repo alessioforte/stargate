@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use serde_json::Value;
 
 use super::DEFAULT_MFA_STEP_UP_TTL_SECS;
@@ -14,9 +14,7 @@ pub(crate) async fn ensure_passwordless_session_allowed(
 ) -> Result<(), ErrorResponse> {
     let policy = mfa_policy_for_user(user).await?;
     if policy.required {
-        return Err(ErrorResponse::from(HttpError::Forbidden(
-            "Passwordless login is not available when MFA is required".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::PasswordlessMfaRequired));
     }
 
     Ok(())
@@ -65,15 +63,11 @@ pub(crate) fn ensure_method_allowed(
     method: OtpMethod,
 ) -> Result<(), ErrorResponse> {
     if policy.mode == MfaMode::Off && policy.methods.is_empty() {
-        return Err(ErrorResponse::from(HttpError::Forbidden(
-            "MFA is disabled".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::MfaDisabled));
     }
 
     if !policy.methods.contains(&method) {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "MFA method is not available".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::MfaMethodUnavailable));
     }
 
     Ok(())
@@ -83,9 +77,7 @@ pub(crate) fn mfa_step_up_ttl_secs() -> Result<u64, ErrorResponse> {
     let ttl = otp_env("MFA_STEP_UP_TTL_SECS", DEFAULT_MFA_STEP_UP_TTL_SECS)?;
     if ttl == 0 {
         tracing::error!("MFA_STEP_UP_TTL_SECS must be greater than zero");
-        return Err(ErrorResponse::from(HttpError::ServiceUnavailable(
-            "MFA temporarily unavailable".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::MfaUnavailable));
     }
     Ok(ttl)
 }
@@ -101,9 +93,7 @@ fn mfa_mode() -> Result<MfaMode, ErrorResponse> {
         "required" => Ok(MfaMode::Required),
         other => {
             tracing::error!(value = other, "invalid MFA_MODE");
-            Err(ErrorResponse::from(HttpError::ServiceUnavailable(
-                "MFA temporarily unavailable".to_string(),
-            )))
+            Err(ErrorResponse::new(ErrorCode::MfaUnavailable))
         }
     }
 }

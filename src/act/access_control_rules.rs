@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use ace::{Policy, PolicyAction, PolicyEngine, ResourceAction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -140,18 +140,14 @@ pub fn update_rules(
     let current = read_policy_file(&path)?;
     let current_revision = revision_for(&current);
     if request.revision != current_revision {
-        return Err(ErrorResponse::from(HttpError::Conflict(format!(
-            "Access control policies changed since revision '{}'",
-            request.revision
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::AccessControlRevisionConflict)
+            .with_param("revision", request.revision));
     }
 
     let parsed = parse_policy_document(&request.content);
     if !parsed.diagnostics.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-            "Invalid access control policies: {}",
-            format_diagnostics(&parsed.diagnostics)
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::AccessControlPoliciesInvalid)
+            .with_param("diagnostics", format_diagnostics(&parsed.diagnostics)));
     }
 
     atomic_write(&path, request.content.as_bytes()).map_err(ErrorResponse::internal)?;
@@ -172,10 +168,10 @@ pub fn evaluate_rules(
     let content = read_policy_file(&path)?;
     let parsed = parse_policy_document(&content);
     if !parsed.diagnostics.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-            "Cannot evaluate invalid access control policies: {}",
-            format_diagnostics(&parsed.diagnostics)
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::AccessControlEvaluationUnavailable)
+                .with_param("diagnostics", format_diagnostics(&parsed.diagnostics)),
+        );
     }
 
     let mut engine = PolicyEngine::new();
@@ -208,12 +204,7 @@ pub fn evaluate_rules(
 }
 
 fn read_policy_file(path: &str) -> Result<String, ErrorResponse> {
-    fs::read_to_string(path).map_err(|error| {
-        ErrorResponse::from(HttpError::InternalServerError(format!(
-            "Failed to read access control policies: {}",
-            error
-        )))
-    })
+    fs::read_to_string(path).map_err(ErrorResponse::internal)
 }
 
 fn parse_policy_document(content: &str) -> ParsedDocument {
@@ -349,9 +340,7 @@ fn resolve_requested_action(
     if let Some(from_resource) = from_resource
         && explicit != from_resource
     {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Resource action conflicts with explicit action".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AccessControlActionConflict));
     }
 
     Ok(Some(explicit))
@@ -359,10 +348,7 @@ fn resolve_requested_action(
 
 fn parse_resource_action(action: &str) -> Result<ResourceAction, ErrorResponse> {
     ResourceAction::parse(action).ok_or_else(|| {
-        ErrorResponse::from(HttpError::BadRequest(format!(
-            "Invalid resource action '{}'",
-            action
-        )))
+        ErrorResponse::new(ErrorCode::AccessControlActionInvalid).with_param("action", action)
     })
 }
 
@@ -493,6 +479,6 @@ ALLOW user FOR "reports";
     fn validates_resource_action_conflicts() {
         let err = resolve_requested_action(Some("WRITE"), Some(ResourceAction::Read)).unwrap_err();
 
-        assert_eq!(err.code, http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status, http::StatusCode::BAD_REQUEST);
     }
 }

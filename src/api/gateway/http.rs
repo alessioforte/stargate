@@ -1,5 +1,5 @@
 use super::{dispatch::InternalDispatch, headers::strip_internal_context_response};
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
 use http::header::{
@@ -17,9 +17,7 @@ pub async fn handler(
 ) -> Result<Response, ErrorResponse> {
     let upstream_uri = uri.parse::<http::Uri>().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid upstream URI");
-        ErrorResponse::from(HttpError::BadGateway(
-            "Failed to connect to backend service".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
     })?;
     *req.uri_mut() = upstream_uri;
     strip_hop_by_hop_headers(req.headers_mut());
@@ -34,9 +32,7 @@ pub async fn handler(
 
     let response = client.request(req).await.map_err(|error| {
         tracing::error!("Error forwarding request to backend: {}", error);
-        ErrorResponse::from(HttpError::BadGateway(
-            "Failed to connect to backend service".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
     })?;
 
     let (parts, body) = response.into_parts();
@@ -414,7 +410,7 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert_eq!(error.code, http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.status, http::StatusCode::INTERNAL_SERVER_ERROR);
         assert!(matches!(
             captured.try_recv(),
             Err(tokio::sync::oneshot::error::TryRecvError::Empty)

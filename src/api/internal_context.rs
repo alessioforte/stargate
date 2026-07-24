@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::internal_context;
 use axum::Json;
 use axum::response::IntoResponse;
@@ -15,11 +15,8 @@ use http::header::CACHE_CONTROL;
     )
 )]
 pub async fn get_internal_context_jwks() -> Result<impl IntoResponse, ErrorResponse> {
-    let runtime = internal_context::runtime().ok_or_else(|| {
-        ErrorResponse::from(HttpError::ServiceUnavailable(
-            "Internal-context signing is not configured".to_owned(),
-        ))
-    })?;
+    let runtime = internal_context::runtime()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::InternalContextUnavailable))?;
     let mut headers = HeaderMap::new();
     headers.insert(
         CACHE_CONTROL,

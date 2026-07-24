@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -160,8 +160,7 @@ pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
     match origin_decision(req.method(), req.headers(), trusted) {
         OriginDecision::Allowed => next.run(req).await,
         OriginDecision::Denied => {
-            ErrorResponse::from(HttpError::Forbidden("untrusted origin".to_string()))
-                .into_response()
+            ErrorResponse::new(ErrorCode::AuthUntrustedOrigin).into_response()
         }
     }
 }

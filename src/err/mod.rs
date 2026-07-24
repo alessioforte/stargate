@@ -1,131 +1,62 @@
 pub mod types;
 
+pub use types::{ErrorCode, ErrorType};
+
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fmt;
-use types::{Code, ErrorCode};
 use utoipa::ToSchema;
 
-#[allow(dead_code)]
-#[derive(Debug, thiserror::Error)]
-pub enum HttpError {
-    #[error("A Content-Type header is missing. Accepted values for the Content-Type header are: {}",
-                .0.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", "))]
-    MissingContentType(Vec<String>),
-    #[error(
-            "The Content-Type `{0}` is invalid. Accepted values for the Content-Type header are: {x}",
-            x = .1.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", ")
-        )]
-    InvalidContentType(String, Vec<String>),
-    #[error("Document `{0}` not found.")]
-    DocumentNotFound(String),
-    #[error("A {0} payload is missing.")]
-    MissingPayload(String),
-    #[error(transparent)]
-    Payload(#[from] PayloadError),
-    #[error("DB ERROR: {0}")]
-    Db(String),
-    #[error("{0}")]
-    Unauthorized(String),
-    #[error("{0}")]
-    Forbidden(String),
-    #[error("{0}")]
-    BadRequest(String),
-    #[error("{0}")]
-    PayloadTooLarge(String),
-    #[error("{0}")]
-    InternalServerError(String),
-    #[error("{0}")]
-    NotFound(String),
-    #[error("{0}")]
-    Conflict(String),
-    #[error("{0}")]
-    BadGateway(String),
-    #[error("{0}")]
-    TooManyRequests(String),
-    #[error("{0}")]
-    ServiceUnavailable(String),
-    #[error("{0}")]
-    MethodNotAllowed(String),
-}
-
-impl ErrorCode for HttpError {
-    fn error_code(&self) -> Code {
-        match self {
-            HttpError::MissingContentType(_) => Code::MissingContentType,
-            HttpError::InvalidContentType(_, _) => Code::InvalidContentType,
-            HttpError::DocumentNotFound(_) => Code::DocumentNotFound,
-            HttpError::MissingPayload(_) => Code::MissingPayload,
-            HttpError::Payload(e) => e.error_code(),
-            HttpError::Db(_) => Code::DBError,
-            HttpError::Unauthorized(_) => Code::Unauthorized,
-            HttpError::Forbidden(_) => Code::Forbidden,
-            HttpError::InternalServerError(_) => Code::InternalServerError,
-            HttpError::NotFound(_) => Code::NotFound,
-            HttpError::Conflict(_) => Code::Conflict,
-            HttpError::BadRequest(_) => Code::BadRequest,
-            HttpError::PayloadTooLarge(_) => Code::PayloadTooLarge,
-            HttpError::BadGateway(_) => Code::BadGateway,
-            HttpError::TooManyRequests(_) => Code::TooManyRequests,
-            HttpError::ServiceUnavailable(_) => Code::ServiceUnavailable,
-            HttpError::MethodNotAllowed(_) => Code::MethodNotAllowed,
-        }
-    }
-}
-
-#[allow(dead_code, clippy::enum_variant_names)]
-#[derive(Debug, thiserror::Error)]
-pub enum PayloadError {
-    #[error("The json payload provided is malformed. `{0}`.")]
-    MalformedPayload(serde_json::error::Error),
-    #[error("A json payload is missing.")]
-    MissingPayload,
-    #[error("Error while receiving the playload. `{0}`.")]
-    ReceivePayload(Box<dyn std::error::Error + Send + Sync + 'static>),
-}
-
-impl ErrorCode for PayloadError {
-    fn error_code(&self) -> Code {
-        match self {
-            PayloadError::MissingPayload => Code::MissingPayload,
-            PayloadError::MalformedPayload(_) => Code::MalformedPayload,
-            PayloadError::ReceivePayload(_) => Code::Internal,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Clone, ToSchema)]
 pub struct ErrorResponse {
     #[serde(skip)]
-    pub code: StatusCode,
+    #[schema(ignore)]
+    pub status: StatusCode,
     #[serde(skip)]
-    pub headers: Vec<(String, String)>,
+    #[schema(ignore)]
+    headers: Vec<(String, String)>,
+    #[schema(example = "User not found")]
     pub message: String,
-    #[serde(rename = "code")]
-    error_code: Box<str>,
+    #[schema(value_type = String, example = "user.not_found")]
+    pub code: ErrorCode,
     #[serde(rename = "type")]
-    error_type: Box<str>,
-    #[serde(rename = "link")]
-    error_link: Box<str>,
+    pub error_type: ErrorType,
+    #[schema(example = "https://docs.stargate.dev/errors/user.not_found")]
+    pub link: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, Value>,
 }
 
 impl ErrorResponse {
-    pub fn from_msg(message: String, code: Code) -> Self {
-        tracing::error!("{}: {}", code.name(), message);
+    pub fn new(code: ErrorCode) -> Self {
         Self {
-            code: code.http(),
-            message,
+            status: code.status(),
             headers: Vec::new(),
-            error_code: code.name().into(),
-            error_type: code.type_().into(),
-            error_link: code.url().into(),
+            message: code.message().to_string(),
+            code,
+            error_type: code.error_type(),
+            link: code.url(),
+            params: BTreeMap::new(),
         }
     }
 
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        if !self.status.is_server_error() {
+            self.message = message.into();
+        }
+        self
+    }
+
+    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.params.insert(key.into(), value.into());
+        self
+    }
+
     pub fn internal(error: impl fmt::Display) -> Self {
-        tracing::error!("internal_server_error: {}", error);
-        Self::from_msg("internal error".to_string(), Code::InternalServerError)
+        tracing::error!(error = %error, "internal request failure");
+        Self::new(ErrorCode::SystemInternal)
     }
 
     pub fn insert_header(&mut self, key: &str, value: &str) -> &mut Self {
@@ -135,15 +66,20 @@ impl ErrorResponse {
 
     fn body_json(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_else(|_| {
-            br#"{"message":"internal error","code":"internal_server_error","type":"internal"}"#
-                .to_vec()
+            br#"{"message":"Internal server error","code":"system.internal","type":"internal","link":"https://docs.stargate.dev/errors/system.internal"}"#.to_vec()
         })
     }
 }
 
+impl From<ErrorCode> for ErrorResponse {
+    fn from(code: ErrorCode) -> Self {
+        Self::new(code)
+    }
+}
+
 impl fmt::Display for ErrorResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.message.fmt(f)
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(formatter)
     }
 }
 
@@ -152,9 +88,11 @@ impl std::error::Error for ErrorResponse {}
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct OAuthErrorResponse {
     #[serde(skip)]
-    pub code: StatusCode,
+    #[schema(ignore)]
+    pub status: StatusCode,
     #[serde(skip)]
-    pub headers: Vec<(String, String)>,
+    #[schema(ignore)]
+    headers: Vec<(String, String)>,
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_description: Option<String>,
@@ -165,7 +103,7 @@ pub struct OAuthErrorResponse {
 impl OAuthErrorResponse {
     pub fn from_oauth_error(status: StatusCode, error: oidc::OAuthError) -> Self {
         Self {
-            code: status,
+            status,
             headers: Vec::new(),
             error: error.code.as_str().to_string(),
             error_description: Some(error.description),
@@ -189,12 +127,12 @@ impl OAuthErrorResponse {
     }
 
     pub fn invalid_client(description: impl Into<String>) -> Self {
-        let mut err = Self::from_oauth_error(
+        let mut error = Self::from_oauth_error(
             StatusCode::UNAUTHORIZED,
             oidc::OAuthError::invalid_client(description),
         );
-        err.insert_header("WWW-Authenticate", "Basic realm=\"stargate-oauth-token\"");
-        err
+        error.insert_header("WWW-Authenticate", "Basic realm=\"stargate-oauth-token\"");
+        error
     }
 
     pub fn invalid_grant(description: impl Into<String>) -> Self {
@@ -220,10 +158,10 @@ impl OAuthErrorResponse {
     }
 
     pub fn internal(error: impl fmt::Display) -> Self {
-        tracing::error!("oauth server_error: {}", error);
+        tracing::error!(error = %error, "OAuth request failure");
         Self::from_oauth_error(
             StatusCode::INTERNAL_SERVER_ERROR,
-            oidc::OAuthError::server_error(error),
+            oidc::OAuthError::server_error("Internal server error"),
         )
     }
 
@@ -246,8 +184,8 @@ impl OAuthErrorResponse {
 }
 
 impl fmt::Display for OAuthErrorResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.description())
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.description())
     }
 }
 
@@ -274,15 +212,13 @@ impl From<oidc::OAuthError> for OAuthErrorResponse {
 
 impl From<OAuthErrorResponse> for ErrorResponse {
     fn from(error: OAuthErrorResponse) -> Self {
-        let message = error.description().to_string();
-        let mut response = match error.code {
-            StatusCode::UNAUTHORIZED => ErrorResponse::from(HttpError::Unauthorized(message)),
-            StatusCode::FORBIDDEN => ErrorResponse::from(HttpError::Forbidden(message)),
-            StatusCode::INTERNAL_SERVER_ERROR => {
-                ErrorResponse::from(HttpError::InternalServerError(message))
-            }
-            _ => ErrorResponse::from(HttpError::BadRequest(message)),
+        let code = match error.status {
+            StatusCode::UNAUTHORIZED => ErrorCode::AuthTokenInvalid,
+            StatusCode::FORBIDDEN => ErrorCode::AuthInsufficientPermissions,
+            StatusCode::INTERNAL_SERVER_ERROR => ErrorCode::SystemInternal,
+            _ => ErrorCode::RequestInvalid,
         };
+        let mut response = Self::new(code).with_message(error.description());
         for (key, value) in error.headers {
             response.insert_header(&key, &value);
         }
@@ -296,44 +232,45 @@ impl From<oidc::OAuthError> for ErrorResponse {
     }
 }
 
-impl<T> From<T> for ErrorResponse
-where
-    T: std::error::Error + ErrorCode,
-{
-    fn from(other: T) -> Self {
-        Self::from_msg(other.to_string(), other.error_code())
-    }
-}
-
 impl axum::response::IntoResponse for ErrorResponse {
     fn into_response(self) -> axum::response::Response {
         use http::header::{CONTENT_TYPE, HeaderName, HeaderValue, RETRY_AFTER};
 
-        let json = self.body_json();
+        if self.status.is_server_error() {
+            tracing::error!(code = %self.code, message = %self.message, "request failed");
+        } else {
+            tracing::debug!(code = %self.code, message = %self.message, "request rejected");
+        }
+
+        let body = self.body_json();
         let mut builder = http::Response::builder()
-            .status(self.code)
+            .status(self.status)
             .header(CONTENT_TYPE, "application/json");
 
-        if self.code == StatusCode::SERVICE_UNAVAILABLE {
+        if self.status == StatusCode::SERVICE_UNAVAILABLE {
             builder = builder.header(RETRY_AFTER, "10");
         }
 
         for (key, value) in &self.headers {
-            if let (Ok(name), Ok(val)) = (
+            if let (Ok(name), Ok(value)) = (
                 HeaderName::from_bytes(key.as_bytes()),
                 HeaderValue::from_str(value),
             ) {
-                builder = builder.header(name, val);
+                builder = builder.header(name, value);
             }
         }
 
         builder
-            .body(axum::body::Body::from(json))
+            .body(axum::body::Body::from(body))
             .unwrap_or_else(|_| {
-                axum::response::Response::new(axum::body::Body::from(
-                    br#"{"message":"internal error","code":"internal_server_error","type":"internal"}"#
-                        .as_slice(),
-                ))
+                let mut response = axum::response::Response::new(axum::body::Body::from(
+                    br#"{"message":"Internal server error","code":"system.internal","type":"internal","link":"https://docs.stargate.dev/errors/system.internal"}"#.as_slice(),
+                ));
+                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                response
+                    .headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                response
             })
     }
 }
@@ -342,26 +279,87 @@ impl axum::response::IntoResponse for OAuthErrorResponse {
     fn into_response(self) -> axum::response::Response {
         use http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 
-        let json = self.body_json();
+        let body = self.body_json();
         let mut builder = http::Response::builder()
-            .status(self.code)
+            .status(self.status)
             .header(CONTENT_TYPE, "application/json");
 
         for (key, value) in &self.headers {
-            if let (Ok(name), Ok(val)) = (
+            if let (Ok(name), Ok(value)) = (
                 HeaderName::from_bytes(key.as_bytes()),
                 HeaderValue::from_str(value),
             ) {
-                builder = builder.header(name, val);
+                builder = builder.header(name, value);
             }
         }
 
         builder
-            .body(axum::body::Body::from(json))
+            .body(axum::body::Body::from(body))
             .unwrap_or_else(|_| {
-                axum::response::Response::new(axum::body::Body::from(
+                let mut response = axum::response::Response::new(axum::body::Body::from(
                     br#"{"error":"server_error","error_description":"server error"}"#.as_slice(),
-                ))
+                ));
+                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                response
+                    .headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                response
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn error_codes_are_unique_and_complete() {
+        assert_eq!(ErrorCode::ALL.len(), ErrorCode::SystemInternal as usize + 1);
+        let mut names = HashSet::new();
+        for code in ErrorCode::ALL {
+            assert!(names.insert(code.as_str()), "duplicate code: {code}");
+            assert!(!code.message().is_empty(), "missing message: {code}");
+        }
+    }
+
+    #[test]
+    fn error_response_uses_code_metadata() {
+        let response = ErrorResponse::new(ErrorCode::UserNotFound)
+            .with_param("id", "usr_123")
+            .with_message("User 'usr_123' not found");
+        let json = serde_json::to_value(response).unwrap();
+
+        assert_eq!(json["code"], "user.not_found");
+        assert_eq!(json["type"], "not_found");
+        assert_eq!(json["message"], "User 'usr_123' not found");
+        assert_eq!(json["params"]["id"], "usr_123");
+        assert!(
+            json["link"]
+                .as_str()
+                .unwrap()
+                .ends_with("/errors/user.not_found")
+        );
+    }
+
+    #[test]
+    fn internal_errors_do_not_expose_the_cause() {
+        let response = ErrorResponse::internal("database password leaked")
+            .with_message("database password leaked");
+        let json = serde_json::to_value(response).unwrap();
+
+        assert_eq!(json["code"], "system.internal");
+        assert_eq!(json["message"], "Internal server error");
+        assert!(!json.to_string().contains("database password leaked"));
+    }
+
+    #[test]
+    fn oauth_internal_errors_do_not_expose_the_cause() {
+        let response = OAuthErrorResponse::internal("database password leaked");
+        let json = serde_json::to_value(response).unwrap();
+
+        assert_eq!(json["error"], "server_error");
+        assert_eq!(json["error_description"], "server error");
+        assert!(!json.to_string().contains("database password leaked"));
     }
 }

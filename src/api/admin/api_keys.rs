@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
 use crate::api::admin::take_admin_audit_context;
-use crate::err::{ErrorResponse, HttpError};
-use crate::etc::msg::MessageResponse;
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -149,9 +149,7 @@ pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
                         (keys, total)
                     }
                     _ => {
-                        return Err(ErrorResponse::from(HttpError::BadRequest(
-                            "Invalid owner_type: must be 'user' or 'service_account'".to_string(),
-                        )));
+                        return Err(ErrorResponse::new(ErrorCode::ApiKeyOwnerTypeInvalid));
                     }
                 }
             } else {
@@ -197,10 +195,7 @@ pub async fn get_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "API key with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::ApiKeyNotFound).with_param("id", id.clone())
         })?;
 
     Ok(Json(key).into_response())
@@ -226,15 +221,11 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     let payload: CreateApiKeyRequest = extract_json(req).await?;
 
     if payload.user_id.is_none() && payload.service_account_id.is_none() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Either user_id or service_account_id must be provided".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::ApiKeyOwnerRequired));
     }
 
     if payload.org_id.is_some() && payload.user_id.is_none() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "org_id is only supported for user API keys; service account keys inherit the service account's organization".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::ApiKeyOrganizationUnsupported));
     }
 
     if let (Some(user_id), Some(org_id)) = (&payload.user_id, &payload.org_id) {
@@ -242,9 +233,9 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
             .await
             .map_err(ErrorResponse::internal)?;
         if membership.is_none() {
-            return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-                "User '{user_id}' is not a member of organization '{org_id}'"
-            ))));
+            return Err(ErrorResponse::new(ErrorCode::ApiKeyOwnerNotMember)
+                .with_param("userId", user_id.clone())
+                .with_param("organizationId", org_id.clone()));
         }
     }
 
@@ -273,9 +264,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?
     } else {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Either user_id or service_account_id must be provided".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::ApiKeyOwnerRequired));
     };
 
     let response = CreateApiKeyResponse {
@@ -314,10 +303,7 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?
     else {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "API key with id '{}' not found",
-            id
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::ApiKeyNotFound).with_param("id", id));
     };
 
     crate::db::delete_api_key(&id, ctx)
@@ -329,11 +315,7 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?;
 
-    Ok(Json(MessageResponse::new(
-        "API key revoked successfully",
-        "api_key_revoked",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::ApiKeyDeleted)).into_response())
 }
 
 #[utoipa::path(
@@ -359,16 +341,11 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "API key with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::ApiKeyNotFound).with_param("id", id.clone())
         })?;
 
     if api_key.revoked {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "API key is already revoked".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::ApiKeyAlreadyRevoked));
     }
 
     crate::db::revoke_api_key(&id, ctx)
@@ -380,11 +357,7 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?;
 
-    Ok(Json(MessageResponse::new(
-        "API key revoked successfully",
-        "api_key_revoked",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::ApiKeyRevoked)).into_response())
 }
 
 #[utoipa::path(
@@ -413,10 +386,7 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "API key with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::ApiKeyNotFound).with_param("id", id.clone())
         })?;
 
     existing.attrs = payload.attrs.clone();
@@ -454,10 +424,7 @@ pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResp
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "API key with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::ApiKeyNotFound).with_param("id", id.clone())
         })?;
 
     existing.attrs = match (&existing.attrs, &payload.attrs) {

@@ -4,7 +4,7 @@ use crate::act::access_control_rules::{
     UpdateAccessControlRulesRequest, ValidateAccessControlRulesRequest,
     ValidateAccessControlRulesResponse, evaluate_rules, read_rules, update_rules, validate_rules,
 };
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -98,9 +98,8 @@ pub async fn evaluate_access_control_rules(req: Request) -> Result<Response, Err
 }
 
 fn gate_from_request(req: &Request) -> Result<Arc<Gate>, ErrorResponse> {
-    req.extensions().get::<Arc<Gate>>().cloned().ok_or_else(|| {
-        ErrorResponse::from(HttpError::InternalServerError(
-            "Gateway runtime is not available".to_string(),
-        ))
-    })
+    req.extensions()
+        .get::<Arc<Gate>>()
+        .cloned()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AccessControlRuntimeUnavailable))
 }

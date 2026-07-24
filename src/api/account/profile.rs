@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
 use crate::etc::ext::RequestExt;
 use crate::etc::jwt::jwt_config;
@@ -48,16 +48,14 @@ impl From<db::ent::User> for UserSchema {
     )
 )]
 pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse> {
-    let token = req.get_token().ok_or_else(|| {
-        ErrorResponse::from(HttpError::Unauthorized("Token not found".to_string()))
-    })?;
+    let token = req
+        .get_token()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenMissing))?;
 
     let claims = match jwt_config().validate_session_access_token(&token) {
         Ok(c) => c,
         _ => {
-            return Err(ErrorResponse::from(HttpError::Unauthorized(
-                "Invalid Token".to_string(),
-            )));
+            return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
         }
     };
 
@@ -65,9 +63,7 @@ pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
         .await
         .map_err(ErrorResponse::internal)?
     {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid Token".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
     let sid = claims.sid.clone().unwrap_or_default();
@@ -76,17 +72,13 @@ pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
         .await
         .unwrap_or(None);
     if session.is_none() {
-        return Err(ErrorResponse::from(HttpError::Unauthorized(
-            "Invalid Token".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
     let user = crate::db::get_user_by_username(&claims.sub)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| {
-            ErrorResponse::from(HttpError::DocumentNotFound("User not found".to_string()))
-        })?;
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
 
     Ok(Json(user.into()))
 }

@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use store::AtomicStore;
 
 use super::util::otp_unavailable;
@@ -31,9 +31,7 @@ pub(crate) async fn check_and_record_otp_request(
     if source_attempts > i64::from(MAX_OTP_SOURCE_REQUESTS)
         || subject_attempts > i64::from(MAX_OTP_SUBJECT_REQUESTS)
     {
-        let mut err = ErrorResponse::from(HttpError::TooManyRequests(
-            "too many OTP requests, try again later".to_string(),
-        ));
+        let mut err = ErrorResponse::new(ErrorCode::OtpRequestRateLimited);
         err.insert_header("Retry-After", &OTP_REQUEST_LOCKOUT_SECS.to_string());
         return Err(err);
     }

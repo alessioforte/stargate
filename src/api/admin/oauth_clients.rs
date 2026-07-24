@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
 use crate::api::admin::take_admin_audit_context;
-use crate::err::{ErrorResponse, HttpError};
-use crate::etc::msg::MessageResponse;
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -186,18 +186,14 @@ fn generate_client_id() -> String {
 fn validate_client_id(client_id: &str) -> Result<(), ErrorResponse> {
     let trimmed = client_id.trim();
     if trimmed.is_empty() || trimmed.len() > 128 || trimmed != client_id {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "client_id must be non-empty, trimmed, and at most 128 characters".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OAuthClientIdInvalid));
     }
 
     if !trimmed
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
     {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "client_id may only contain letters, digits, '.', '-' and '_'".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OAuthClientIdInvalid));
     }
 
     Ok(())
@@ -206,14 +202,12 @@ fn validate_client_id(client_id: &str) -> Result<(), ErrorResponse> {
 fn normalize_name(name: String) -> Result<String, ErrorResponse> {
     let name = name.trim().to_string();
     if name.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "name cannot be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OAuthClientNameRequired));
     }
     if name.len() > 100 {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "name cannot exceed 100 characters".to_string(),
-        )));
+        return Err(
+            ErrorResponse::new(ErrorCode::OAuthClientNameTooLong).with_param("maxLength", 100)
+        );
     }
     Ok(name)
 }
@@ -230,9 +224,9 @@ fn normalize_list(values: Vec<String>, field: &str) -> Result<Vec<String>, Error
     for value in values {
         let value = value.trim().to_string();
         if value.is_empty() {
-            return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-                "{field} cannot contain empty values"
-            ))));
+            return Err(
+                ErrorResponse::new(ErrorCode::OAuthClientListValueEmpty).with_param("field", field)
+            );
         }
         if seen.insert(value.clone()) {
             out.push(value);
@@ -248,9 +242,9 @@ fn validate_allowed_values(
 ) -> Result<(), ErrorResponse> {
     for value in values {
         if !allowed.contains(&value.as_str()) {
-            return Err(ErrorResponse::from(HttpError::BadRequest(format!(
-                "unsupported {field} value '{value}'"
-            ))));
+            return Err(ErrorResponse::new(ErrorCode::OAuthClientValueUnsupported)
+                .with_param("field", field)
+                .with_param("value", value.clone()));
         }
     }
     Ok(())
@@ -261,34 +255,33 @@ fn validate_auth_method(method: &str) -> Result<(), ErrorResponse> {
         AUTH_METHOD_NONE | AUTH_METHOD_CLIENT_SECRET_BASIC | AUTH_METHOD_CLIENT_SECRET_POST => {
             Ok(())
         }
-        _ => Err(ErrorResponse::from(HttpError::BadRequest(format!(
-            "unsupported token_endpoint_auth_method '{method}'"
-        )))),
+        _ => Err(
+            ErrorResponse::new(ErrorCode::OAuthClientAuthMethodUnsupported)
+                .with_param("method", method),
+        ),
     }
 }
 
 fn validate_redirect_uris(redirect_uris: &[String]) -> Result<(), ErrorResponse> {
     for uri in redirect_uris {
         if uri.contains('*') || uri.contains('#') || uri.chars().any(char::is_whitespace) {
-            return Err(ErrorResponse::from(HttpError::BadRequest(
-                "redirect_uris cannot contain wildcards, fragments, or whitespace".to_string(),
-            )));
+            return Err(ErrorResponse::new(ErrorCode::OAuthClientRedirectUriInvalid)
+                .with_param("uri", uri.clone()));
         }
 
         let parsed = url::Url::parse(uri).map_err(|_| {
-            ErrorResponse::from(HttpError::BadRequest(
-                "redirect_uris must be absolute URIs".to_string(),
-            ))
+            ErrorResponse::new(ErrorCode::OAuthClientRedirectUriInvalid)
+                .with_param("uri", uri.clone())
         })?;
 
         match parsed.scheme() {
             "https" => {}
             "http" if is_loopback_redirect_host(parsed.host_str()) => {}
             _ => {
-                return Err(ErrorResponse::from(HttpError::BadRequest(
-                    "redirect_uris must use https, except http loopback redirects for local clients"
-                        .to_string(),
-                )));
+                return Err(
+                    ErrorResponse::new(ErrorCode::OAuthClientRedirectUriInsecure)
+                        .with_param("uri", uri.clone()),
+                );
             }
         }
     }
@@ -314,9 +307,7 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
     validate_redirect_uris(&input.redirect_uris)?;
 
     if input.grant_types.is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "grant_types cannot be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OAuthClientGrantTypesRequired));
     }
 
     let grants = input
@@ -333,34 +324,34 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
     if grants.contains(GRANT_CLIENT_CREDENTIALS)
         && input.token_endpoint_auth_method == AUTH_METHOD_NONE
     {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "client_credentials requires a confidential client".to_string(),
-        )));
+        return Err(ErrorResponse::new(
+            ErrorCode::OAuthClientConfidentialRequired,
+        ));
     }
 
     if grants.contains(GRANT_AUTHORIZATION_CODE) {
         if !responses.contains(RESPONSE_CODE) {
-            return Err(ErrorResponse::from(HttpError::BadRequest(
-                "authorization_code clients must support response type 'code'".to_string(),
-            )));
+            return Err(ErrorResponse::new(
+                ErrorCode::OAuthClientCodeResponseTypeRequired,
+            ));
         }
         if input.redirect_uris.is_empty() {
-            return Err(ErrorResponse::from(HttpError::BadRequest(
-                "authorization_code clients must register at least one redirect_uri".to_string(),
-            )));
+            return Err(ErrorResponse::new(
+                ErrorCode::OAuthClientRedirectUriRequired,
+            ));
         }
     }
 
     if responses.contains(RESPONSE_CODE) && !grants.contains(GRANT_AUTHORIZATION_CODE) {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "response type 'code' requires authorization_code grant".to_string(),
-        )));
+        return Err(ErrorResponse::new(
+            ErrorCode::OAuthClientAuthorizationCodeGrantRequired,
+        ));
     }
 
     if grants.contains(GRANT_REFRESH_TOKEN) && !grants.contains(GRANT_AUTHORIZATION_CODE) {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "refresh_token requires authorization_code grant".to_string(),
-        )));
+        return Err(ErrorResponse::new(
+            ErrorCode::OAuthClientRefreshTokenGrantInvalid,
+        ));
     }
 
     if input
@@ -369,9 +360,9 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
         .any(|scope| scope == SCOPE_OFFLINE_ACCESS)
         && !grants.contains(GRANT_REFRESH_TOKEN)
     {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "offline_access scope requires refresh_token grant".to_string(),
-        )));
+        return Err(ErrorResponse::new(
+            ErrorCode::OAuthClientOfflineAccessGrantInvalid,
+        ));
     }
 
     Ok(())
@@ -472,9 +463,9 @@ fn apply_input(
     input: NormalizedClientInput,
 ) -> Result<(), ErrorResponse> {
     if is_confidential(&input.token_endpoint_auth_method) && existing.client_secret_hash.is_none() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "public clients cannot be converted to confidential clients in place".to_string(),
-        )));
+        return Err(ErrorResponse::new(
+            ErrorCode::OAuthClientTypeChangeForbidden,
+        ));
     }
 
     existing.name = input.name;
@@ -499,9 +490,7 @@ async fn load_client(client_id: &str) -> Result<OAuthClient, ErrorResponse> {
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "OAuth client with id '{client_id}' not found"
-            )))
+            ErrorResponse::new(ErrorCode::OAuthClientNotFound).with_param("clientId", client_id)
         })
 }
 
@@ -604,9 +593,8 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
         .map_err(ErrorResponse::internal)?
         .is_some()
     {
-        return Err(ErrorResponse::from(HttpError::Conflict(format!(
-            "OAuth client with id '{client_id}' already exists"
-        ))));
+        return Err(ErrorResponse::new(ErrorCode::OAuthClientAlreadyExists)
+            .with_param("clientId", client_id.clone()));
     }
 
     let client_secret =
@@ -774,9 +762,7 @@ pub async fn rotate_oauth_client_secret(mut req: Request) -> Result<Response, Er
     let client_id: String = extract_path(&mut req).await?;
     let client = load_client(&client_id).await?;
     if !is_confidential(&client.token_endpoint_auth_method) {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "public clients do not use client secrets".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OAuthClientSecretUnsupported));
     }
 
     let client_secret = pw::generate_api_key();
@@ -817,11 +803,7 @@ pub async fn delete_oauth_client(mut req: Request) -> Result<Response, ErrorResp
         .await
         .map_err(ErrorResponse::internal)?;
 
-    Ok(Json(MessageResponse::new(
-        "OAuth client deleted successfully",
-        "oauth_client_deleted",
-    ))
-    .into_response())
+    Ok(Json(MessageResponse::new(MessageCode::OAuthClientDeleted)).into_response())
 }
 
 #[cfg(test)]

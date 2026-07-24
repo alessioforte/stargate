@@ -1,5 +1,5 @@
 use super::{SUPER_ADMIN, extract_path, extract_query};
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -189,10 +189,7 @@ pub async fn get_outbox_event(mut req: Request) -> Result<Response, ErrorRespons
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "Outbox event with id '{}' not found",
-                event_id
-            )))
+            ErrorResponse::new(ErrorCode::OutboxEventNotFound).with_param("id", event_id.clone())
         })?;
     let response = OutboxEventSchema::try_from(row).map_err(ErrorResponse::internal)?;
 

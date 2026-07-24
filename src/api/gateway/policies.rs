@@ -1,5 +1,5 @@
 use super::limits::{OrgScopedLimit, SelectedLimitPolicies, apply_limits};
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{ac::access_control, guard::AuthKind, reqctx, sub::Subject, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::body::Body;
@@ -28,34 +28,26 @@ pub async fn apply_policies(
 
     for policy_name in &router.policies {
         let policy = graph.policies.get(policy_name).ok_or_else(|| {
-            ErrorResponse::from(HttpError::InternalServerError(format!(
-                "Policy '{}' not found",
-                policy_name
-            )))
+            ErrorResponse::new(ErrorCode::GatewayPolicyNotFound)
+                .with_param("policy", policy_name.clone())
         })?;
 
         match policy {
             PolicyNode::Auth { strategies } => {
                 if auth_kind == AuthKind::Anonymous {
                     telemetry::record_gateway_policy("auth", "denied");
-                    return Err(ErrorResponse::from(HttpError::Unauthorized(
-                        "Unauthorized".to_string(),
-                    )));
+                    return Err(ErrorResponse::new(ErrorCode::GatewayUnauthorized));
                 }
                 if !auth_strategy_allowed(strategies, auth_kind) {
                     telemetry::record_gateway_policy("auth", "denied");
-                    return Err(ErrorResponse::from(HttpError::Unauthorized(
-                        "Unauthorized".to_string(),
-                    )));
+                    return Err(ErrorResponse::new(ErrorCode::GatewayUnauthorized));
                 }
                 telemetry::record_gateway_policy("auth", "allowed");
             }
             PolicyNode::AccessControl { resource, env } => {
                 let Some(subject) = subject else {
                     telemetry::record_gateway_policy("access_control", "denied");
-                    return Err(ErrorResponse::from(HttpError::Unauthorized(
-                        "Unauthorized".to_string(),
-                    )));
+                    return Err(ErrorResponse::new(ErrorCode::GatewayUnauthorized));
                 };
 
                 let profile = env.unwrap_or(EnvProfile::Geo);
@@ -65,9 +57,7 @@ pub async fn apply_policies(
 
                 if !allowed {
                     telemetry::record_gateway_policy("access_control", "denied");
-                    return Err(ErrorResponse::from(HttpError::Forbidden(
-                        "Forbidden".to_string(),
-                    )));
+                    return Err(ErrorResponse::new(ErrorCode::GatewayAccessDenied));
                 }
                 telemetry::record_gateway_policy("access_control", "allowed");
             }
@@ -90,10 +80,10 @@ pub async fn apply_policies(
                         .is_some(),
                 };
                 if duplicate {
-                    return Err(ErrorResponse::from(HttpError::InternalServerError(
-                        "Multiple rate_limit policies for the same scope are not supported"
-                            .to_string(),
-                    )));
+                    return Err(
+                        ErrorResponse::new(ErrorCode::GatewayPolicyConfigurationInvalid)
+                            .with_param("policyType", "rate_limit"),
+                    );
                 }
             }
             PolicyNode::Quota {
@@ -115,9 +105,10 @@ pub async fn apply_policies(
                         .is_some(),
                 };
                 if duplicate {
-                    return Err(ErrorResponse::from(HttpError::InternalServerError(
-                        "Multiple quota policies for the same scope are not supported".to_string(),
-                    )));
+                    return Err(
+                        ErrorResponse::new(ErrorCode::GatewayPolicyConfigurationInvalid)
+                            .with_param("policyType", "quota"),
+                    );
                 }
             }
         }

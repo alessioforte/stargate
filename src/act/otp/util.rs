@@ -1,4 +1,4 @@
-use crate::err::{ErrorResponse, HttpError};
+use crate::err::{ErrorCode, ErrorResponse};
 
 use super::{
     DEFAULT_EMAIL_OTP_LENGTH, DEFAULT_EMAIL_OTP_MAX_ATTEMPTS, DEFAULT_EMAIL_OTP_TTL_SECS,
@@ -32,9 +32,7 @@ pub(crate) fn normalize_purpose(
 
 pub(crate) fn validate_challenge_id(challenge_id: &str) -> Result<(), ErrorResponse> {
     if !crate::etc::input::is_fixed_len_ascii_hex(challenge_id, 32) {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "challengeId is invalid".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OtpChallengeIdInvalid));
     }
 
     Ok(())
@@ -52,16 +50,12 @@ pub(crate) fn email_otp_config() -> Result<::otp::MessageOtpConfig, ErrorRespons
 pub(crate) fn email_otp_pepper() -> Result<String, ErrorResponse> {
     let value = std::env::var("EMAIL_OTP_PEPPER").map_err(|_| {
         tracing::error!("EMAIL_OTP_PEPPER is not configured");
-        ErrorResponse::from(HttpError::ServiceUnavailable(
-            "email OTP temporarily unavailable".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::EmailOtpUnavailable)
     })?;
 
     if value.trim().is_empty() {
         tracing::error!("EMAIL_OTP_PEPPER is empty");
-        return Err(ErrorResponse::from(HttpError::ServiceUnavailable(
-            "email OTP temporarily unavailable".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::EmailOtpUnavailable));
     }
 
     Ok(value)
@@ -74,9 +68,7 @@ where
 {
     crate::etc::env::parse_or(name, default).map_err(|error| {
         tracing::error!(%error, "invalid OTP environment variable");
-        ErrorResponse::from(HttpError::ServiceUnavailable(
-            "OTP temporarily unavailable".to_string(),
-        ))
+        ErrorResponse::new(ErrorCode::OtpUnavailable)
     })
 }
 
@@ -145,9 +137,7 @@ pub(crate) fn hex_encode(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn invalid_or_expired_code() -> ErrorResponse {
-    ErrorResponse::from(HttpError::Unauthorized(
-        "Invalid or expired code".to_string(),
-    ))
+    ErrorResponse::new(ErrorCode::OtpCodeInvalidOrExpired)
 }
 
 pub(crate) fn verification_error(result: ::otp::MessageOtpVerification) -> ErrorResponse {
@@ -156,33 +146,28 @@ pub(crate) fn verification_error(result: ::otp::MessageOtpVerification) -> Error
             ErrorResponse::internal("unexpected valid OTP state")
         }
         ::otp::MessageOtpVerification::Invalid { attempts_remaining } => {
-            ErrorResponse::from(HttpError::Unauthorized(format!(
-                "Invalid code. {attempts_remaining} attempt(s) remaining"
-            )))
+            ErrorResponse::new(ErrorCode::OtpCodeInvalid)
+                .with_param("attemptsRemaining", attempts_remaining)
         }
         ::otp::MessageOtpVerification::Expired | ::otp::MessageOtpVerification::AlreadyUsed => {
             invalid_or_expired_code()
         }
-        ::otp::MessageOtpVerification::AttemptsExceeded => ErrorResponse::from(
-            HttpError::TooManyRequests("Too many invalid OTP attempts".to_string()),
-        ),
+        ::otp::MessageOtpVerification::AttemptsExceeded => {
+            ErrorResponse::new(ErrorCode::OtpAttemptsExceeded)
+        }
     }
 }
 
 pub(crate) fn email_otp_internal(error: impl std::fmt::Display) -> ErrorResponse {
     tracing::error!("email OTP error: {}", error);
-    ErrorResponse::from(HttpError::ServiceUnavailable(
-        "email OTP temporarily unavailable".to_string(),
-    ))
+    ErrorResponse::new(ErrorCode::EmailOtpUnavailable)
 }
 
 pub(crate) fn otp_unavailable(error: store::StoreError) -> ErrorResponse {
     tracing::error!("OTP request guard unavailable: {}", error);
-    ErrorResponse::from(HttpError::ServiceUnavailable(
-        "OTP temporarily unavailable".to_string(),
-    ))
+    ErrorResponse::new(ErrorCode::OtpUnavailable)
 }
 
 fn input_bad_request(error: crate::etc::input::InputError) -> ErrorResponse {
-    ErrorResponse::from(HttpError::BadRequest(error.to_string()))
+    ErrorResponse::new(ErrorCode::RequestInvalid).with_message(error.to_string())
 }

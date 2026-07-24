@@ -5,6 +5,7 @@ pub mod auth_app;
 pub mod docs;
 pub mod gateway;
 pub mod health;
+pub mod i18n;
 pub mod internal_context;
 pub mod oidc;
 pub mod signup;
@@ -21,6 +22,8 @@ use utoipa::OpenApi;
         crate::api::oidc::well_known::get_oauth_metadata,
         crate::api::oidc::well_known::get_openid_configuration,
         crate::api::docs::get_api_doc,
+        crate::api::docs::get_error_catalog,
+        crate::api::i18n::get_api_messages,
         crate::api::signup::request::post_signup,
         crate::api::signup::verification::get_signup,
         crate::api::signup::complete::put_signup,
@@ -122,6 +125,8 @@ pub fn router() -> axum::Router {
             get(internal_context::get_internal_context_jwks),
         )
         .route("/docs", get(docs::get_api_doc))
+        .route("/docs/errors", get(docs::get_error_catalog))
+        .route("/i18n/{locale}", get(i18n::get_api_messages))
         .merge(signup::router())
         .merge(oidc::router())
         .merge(social::router())
@@ -137,7 +142,7 @@ mod tests {
     use axum::body::Body;
     use http::{
         Method, Request, StatusCode,
-        header::{CACHE_CONTROL, CONTENT_TYPE},
+        header::{CACHE_CONTROL, CONTENT_LANGUAGE, CONTENT_TYPE, ETAG, IF_NONE_MATCH},
     };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
@@ -195,6 +200,59 @@ mod tests {
             resp.headers().get(CONTENT_TYPE).unwrap(),
             "application/json"
         );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], "internal_context.unavailable");
+    }
+
+    #[tokio::test]
+    async fn i18n_catalog_is_versioned_and_cacheable() {
+        let resp = send("/i18n/it").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get(CONTENT_LANGUAGE).unwrap(), "it");
+        let etag = resp.headers().get(ETAG).unwrap().clone();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["schema"], "stargate/i18n/v1");
+        assert_eq!(json["locale"], "it");
+        assert_eq!(
+            json["messages"]["errors"]["auth.invalid_credentials"],
+            "Nome utente o password non validi"
+        );
+
+        let req = Request::builder()
+            .uri("/i18n/it")
+            .header(IF_NONE_MATCH, etag)
+            .body(Body::empty())
+            .unwrap();
+        let cached = send_req(req).await;
+        assert_eq!(cached.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn unsupported_i18n_locale_returns_a_specific_code() {
+        let resp = send("/i18n/fr").await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], "i18n.locale_not_supported");
+        assert_eq!(json["params"]["locale"], "fr");
+    }
+
+    #[tokio::test]
+    async fn error_catalog_contains_published_metadata() {
+        let resp = send("/docs/errors").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let user_not_found = json
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["code"] == "user.not_found")
+            .unwrap();
+        assert_eq!(user_not_found["status"], 404);
+        assert_eq!(user_not_found["type"], "not_found");
     }
 
     #[tokio::test]
@@ -294,6 +352,8 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["openapi"].is_string());
         assert!(json["paths"]["/health"].is_object());
+        assert!(json["paths"]["/docs/errors"].is_object());
+        assert!(json["paths"]["/i18n/{locale}"].is_object());
         assert!(json["paths"]["/.well-known/jwks.json"].is_object());
         assert!(json["paths"]["/.well-known/oauth-authorization-server"].is_object());
         assert!(json["paths"]["/.well-known/openid-configuration"].is_object());

@@ -2,8 +2,8 @@ use super::SignupRequestBody;
 use crate::{
     act,
     act::PendingSignupProfile,
-    err::{ErrorResponse, HttpError},
-    etc::msg::MessageResponse,
+    err::{ErrorCode, ErrorResponse},
+    etc::msg::{MessageCode, MessageResponse},
     fun::signup_url,
 };
 use axum::Json;
@@ -26,10 +26,7 @@ pub async fn post_signup(
 ) -> Result<Json<MessageResponse>, ErrorResponse> {
     send_signup_request(PendingSignupProfile::email_only(body.email)).await?;
 
-    Ok(Json(MessageResponse::new(
-        "A signup request has been sent to your email. Please check your inbox.",
-        "signup_request",
-    )))
+    Ok(Json(MessageResponse::new(MessageCode::SignupRequested)))
 }
 
 pub(crate) async fn send_signup_request(
@@ -39,18 +36,14 @@ pub(crate) async fn send_signup_request(
         .await
         .map_err(ErrorResponse::internal)?;
     if user.is_some() {
-        return Err(ErrorResponse::from(HttpError::Conflict(
-            "User already exists".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SignupUserAlreadyExists));
     }
 
     let pending = act::check_email_verification_request(&profile.email)
         .await
         .map_err(ErrorResponse::internal)?;
     if pending.is_some() {
-        return Err(ErrorResponse::from(HttpError::Conflict(
-            "Signup request already exists".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::SignupRequestAlreadyExists));
     }
 
     let sid = act::create_email_verification_request(&profile)

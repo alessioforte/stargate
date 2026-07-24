@@ -1,7 +1,7 @@
 use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
 use crate::api::admin::take_admin_audit_context;
-use crate::err::{ErrorResponse, HttpError};
-use crate::etc::msg::MessageResponse;
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::msg::{MessageCode, MessageResponse};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
@@ -133,10 +133,7 @@ pub async fn get_organization(mut req: Request) -> Result<Response, ErrorRespons
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
-            ErrorResponse::from(HttpError::NotFound(format!(
-                "Organization with id '{}' not found",
-                id
-            )))
+            ErrorResponse::new(ErrorCode::OrganizationNotFound).with_param("id", id.clone())
         })?;
 
     Ok(Json(org).into_response())
@@ -162,9 +159,7 @@ pub async fn create_organization(mut req: Request) -> Result<Response, ErrorResp
     let payload: CreateOrganizationRequest = extract_json(req).await?;
 
     if payload.name.trim().is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Name cannot be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OrganizationNameRequired));
     }
 
     let org = crate::db::create_organization(
@@ -202,9 +197,7 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
     let payload: UpdateOrganizationRequest = extract_json(req).await?;
 
     if payload.name.trim().is_empty() {
-        return Err(ErrorResponse::from(HttpError::BadRequest(
-            "Name cannot be empty".to_string(),
-        )));
+        return Err(ErrorResponse::new(ErrorCode::OrganizationNameRequired));
     }
 
     if crate::db::get_organization_by_id(&id)
@@ -212,10 +205,9 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Organization with id '{}' not found",
-            id
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::OrganizationNotFound).with_param("id", id.clone())
+        );
     }
 
     let org = crate::db::update_organization(
@@ -259,10 +251,9 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        return Err(ErrorResponse::from(HttpError::NotFound(format!(
-            "Organization with id '{}' not found",
-            id
-        ))));
+        return Err(
+            ErrorResponse::new(ErrorCode::OrganizationNotFound).with_param("id", id.clone())
+        );
     }
 
     // Snapshot the member list first: after the delete the membership rows
@@ -289,10 +280,7 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
 
     Ok((
         StatusCode::NO_CONTENT,
-        Json(MessageResponse::new(
-            "Organization deleted successfully",
-            "organization_deleted",
-        )),
+        Json(MessageResponse::new(MessageCode::OrganizationDeleted)),
     )
         .into_response())
 }
