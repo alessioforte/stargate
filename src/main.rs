@@ -34,15 +34,21 @@ pub async fn run() -> std::io::Result<()> {
 
     dotenv().ok();
     tls::install_crypto_provider();
-    let guard = log::init();
-    etc::pw::init();
 
     let cli = cli::parse();
     if let Some(command) = cli.command {
+        if command.is_standalone() {
+            return cli::run_cli_command(command).await;
+        }
+        let guard = log::init();
+        etc::pw::init();
         let result = cli::run_cli_command(command).await;
         guard.shutdown();
         return result;
     }
+
+    let guard = log::init();
+    etc::pw::init();
 
     let version = env!("CARGO_PKG_VERSION");
     let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());

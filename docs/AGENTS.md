@@ -477,6 +477,18 @@ cargo run -- admin bootstrap \
 
 Flags: `--password <val>`, `--password-stdin`, `--generate-password`
 
+## CLI: Generate Internal-Context Key Material
+
+```bash
+cargo run --features edge -- internal-context generate-key \
+  --output-dir .stargate/internal-context \
+  --kid stargate-internal-current
+```
+
+This explicit provisioning command creates `private.pem` and a matching
+public-only `jwks.json`. It refuses to overwrite existing files. Stargate
+server startup validates but never generates missing internal-context keys.
+
 ## API Overview
 
 - `GET /health` - health check

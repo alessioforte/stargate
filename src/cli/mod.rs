@@ -1,5 +1,8 @@
+mod internal_context;
+
 use crate::db;
 use clap::{Args, Parser, Subcommand};
+use internal_context::InternalContextArgs;
 use std::io::{self, Read};
 
 #[derive(Debug, Parser)]
@@ -13,6 +16,13 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Admin(AdminArgs),
+    InternalContext(InternalContextArgs),
+}
+
+impl Command {
+    pub const fn is_standalone(&self) -> bool {
+        matches!(self, Self::InternalContext(_))
+    }
 }
 
 #[derive(Debug, Args)]
@@ -146,5 +156,29 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
                 }
             }
         },
+        Command::InternalContext(args) => internal_context::run(args),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_internal_context_key_generation_command() {
+        let cli = Cli::try_parse_from([
+            "stargate",
+            "internal-context",
+            "generate-key",
+            "--output-dir",
+            ".stargate/internal-context",
+            "--kid",
+            "stargate-internal-current",
+            "--bits",
+            "3072",
+        ])
+        .unwrap();
+
+        assert!(matches!(cli.command, Some(Command::InternalContext(_))));
     }
 }

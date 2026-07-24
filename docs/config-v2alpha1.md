@@ -253,6 +253,16 @@ removed by request/response header middleware, and cannot be returned by a
 
 The signer is configured independently from OAuth/OIDC keys:
 
+```bash
+cargo run --features edge -- internal-context generate-key \
+  --output-dir .stargate/internal-context \
+  --kid stargate-internal-current
+```
+
+The command creates `private.pem` and a matching public-only `jwks.json`, sets
+restrictive Unix permissions, and refuses to overwrite either file. RSA keys
+default to 2,048 bits; `--bits` accepts values from 2,048 through 8,192.
+
 ```dotenv
 INTERNAL_CONTEXT_ALGORITHM=RS256
 INTERNAL_CONTEXT_ISSUER=https://auth.example.com/internal-context
@@ -264,11 +274,12 @@ INTERNAL_CONTEXT_CLOCK_SKEW_SECS=5
 INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS=60
 ```
 
-Only RS256 is accepted in version 1. Stargate does not generate missing
-internal keys. The JWKS file must contain public RSA keys with unique `kid`
-values and may contain both current and retiring keys. The active `kid` must
-match the private signing key. Public keys are exposed separately at
-`/.well-known/stargate-context-jwks.json`; the OAuth/OIDC JWKS is unchanged.
+Only RS256 is accepted in version 1. Server startup does not generate missing
+internal keys; generation is an explicit CLI action. The JWKS file must contain
+public RSA keys with unique `kid` values and may contain both current and
+retiring keys. The active `kid` must match the private signing key. Public keys
+are exposed separately at `/.well-known/stargate-context-jwks.json`; the
+OAuth/OIDC JWKS is unchanged.
 
 Rotate keys in this order:
 

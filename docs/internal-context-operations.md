@@ -31,6 +31,25 @@ signer is available.
 | `INTERNAL_CONTEXT_CLOCK_SKEW_SECS` | Normally 5; maximum 30 |
 | `INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS` | Published JWKS cache age; normally 60 |
 
+## Initial key generation
+
+Generate the initial private key and matching public JWKS explicitly:
+
+```bash
+cargo run --features edge -- internal-context generate-key \
+  --output-dir .stargate/internal-context \
+  --kid stargate-internal-current
+```
+
+The command uses operating-system randomness and creates a 2,048-bit RSA
+private key in PKCS#8 PEM plus a public-only RS256 `jwks.json`. It refuses to
+overwrite either output. Use `--bits 3072` or `--bits 4096` when the deployment
+policy requires a larger modulus; accepted values are 2,048 through 8,192.
+
+The command prints the matching `INTERNAL_CONTEXT_*` paths but never prints the
+private key. Server startup only loads and validates provisioned material; it
+does not invoke this command or silently replace a missing key.
+
 Use UTC clock synchronization on Stargate and every consumer. Alert on failed
 NTP synchronization or material drift greater than the configured skew. Do not
 increase skew to hide an unhealthy clock.
@@ -124,9 +143,16 @@ Key files are process-start snapshots. Changing files or environment variables
 does not replace the active in-memory signer. Use a process restart or rolling
 deployment for each stage.
 
-1. Generate a new RSA key of at least 2,048 bits under a restrictive `umask`.
-   Store the private key in the deployment secret system and construct a
-   public-only RS256 JWK with a new unique `kid`.
+1. Generate a new RSA key and public JWK under a separate output directory:
+
+   ```bash
+   cargo run --features edge -- internal-context generate-key \
+     --output-dir .stargate/internal-context/next \
+     --kid stargate-internal-next
+   ```
+
+   Store the new private key in the deployment secret system. The generator
+   does not modify the active JWKS.
 2. Build a JWKS containing both the current and new public JWK. Validate that
    the current `INTERNAL_CONTEXT_KID` still matches the current private key.
 3. Deploy or restart every Stargate replica with the current signer and the
