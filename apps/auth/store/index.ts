@@ -14,10 +14,16 @@ import type {
   AuthActionResult,
   ChallengeActionResult,
   MessageActionResult,
+  OrganizationsLoadResult,
   SignupLoadResult,
 } from "./types";
+import {
+  registerApiMessageCatalog,
+  resolveApiMessage,
+} from "@/i18n/api-messages";
 
 const initialState: State = {
+  accountOrganizations: null,
   message: null,
   loading: false,
   authStatus: "idle",
@@ -26,6 +32,8 @@ const initialState: State = {
   signup: null,
   tokens: null,
   error: null,
+  organizationError: null,
+  organizationSwitchingId: null,
   language: "en",
 };
 
@@ -63,9 +71,26 @@ function signupFailure(message: string): SignupLoadResult {
   };
 }
 
-export const store: StateCreator<State & Actions> = (set) => ({
+function organizationsFailure(message: string): OrganizationsLoadResult {
+  return {
+    status: "error",
+    message,
+  };
+}
+
+export const store: StateCreator<State & Actions> = (set, get) => ({
   ...initialState,
-  setLanguage: (lang: "en" | "it") => set({ language: lang }),
+  setLanguage: (lang: "en" | "it") => {
+    set({ language: lang });
+  },
+  loadApiMessages: async (locale) => {
+    const response = await services.auth.getApiMessages(
+      locale ?? get().language,
+    );
+    if (!response.error && response.data) {
+      registerApiMessageCatalog(response.data);
+    }
+  },
   clearAuthError: () => set({ error: null, message: null }),
   login: async (credentials) => {
     set({
@@ -78,7 +103,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     const response = await services.auth.login(credentials);
 
     if (response.error || !response.data) {
-      const message = response.message ?? "Login failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Login failed",
+      );
       set({
         loading: false,
         authStatus: "error",
@@ -144,7 +174,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     const response = await services.auth.verifyMFAChallenge(challengeId, code);
 
     if (response.error || !response.data) {
-      const message = response.message ?? "MFA verification failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "MFA verification failed",
+      );
       set({
         loading: false,
         authStatus: "error",
@@ -180,7 +215,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     const response = await services.auth.passwordlessLogin(email);
 
     if (response.error || !response.data) {
-      const message = response.message ?? "Passwordless login failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Passwordless login failed",
+      );
       set({
         loading: false,
         authStatus: "error",
@@ -226,7 +266,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     );
 
     if (response.error || !response.data) {
-      const message = response.message ?? "Passwordless verification failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Passwordless verification failed",
+      );
       set({
         loading: false,
         authStatus: "error",
@@ -263,7 +308,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     const response = await services.auth.forgotPassword(email);
 
     if (response.error || !response.data) {
-      const message = response.message ?? "Password reset request failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Password reset request failed",
+      );
       set({
         loading: false,
         error: message,
@@ -272,15 +322,21 @@ export const store: StateCreator<State & Actions> = (set) => ({
       return messageFailure(message);
     }
 
+    const message = resolveApiMessage(
+      get().language,
+      "messages",
+      response.data,
+      response.data.message,
+    );
     set({
       loading: false,
       error: null,
-      message: { type: "success", text: response.data.message },
+      message: { type: "success", text: message },
     });
 
     return {
       status: "success",
-      message: response.data.message,
+      message,
     };
   },
   changePassword: async (password, token) => {
@@ -293,7 +349,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     const response = await services.auth.changePassword(password, token);
 
     if (response.error || !response.data) {
-      const message = response.message ?? "Password change failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Password change failed",
+      );
       set({
         loading: false,
         error: message,
@@ -302,15 +363,21 @@ export const store: StateCreator<State & Actions> = (set) => ({
       return messageFailure(message);
     }
 
+    const message = resolveApiMessage(
+      get().language,
+      "messages",
+      response.data,
+      response.data.message,
+    );
     set({
       loading: false,
       error: null,
-      message: { type: "success", text: response.data.message },
+      message: { type: "success", text: message },
     });
 
     return {
       status: "success",
-      message: response.data.message,
+      message,
     };
   },
   loadSignup: async (token) => {
@@ -324,7 +391,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     const response = await services.auth.getSignup(token);
 
     if (response.error || !response.data) {
-      const message = response.message ?? "Signup token verification failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Signup token verification failed",
+      );
       set({
         loading: false,
         error: message,
@@ -356,7 +428,12 @@ export const store: StateCreator<State & Actions> = (set) => ({
     const response = await services.auth.completeSignup(payload);
 
     if (response.error || !response.data) {
-      const message = response.message ?? "Signup failed";
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Signup failed",
+      );
       set({
         loading: false,
         error: message,
@@ -365,15 +442,78 @@ export const store: StateCreator<State & Actions> = (set) => ({
       return messageFailure(message);
     }
 
+    const message = resolveApiMessage(
+      get().language,
+      "messages",
+      response.data,
+      response.data.message,
+    );
     set({
       loading: false,
       error: null,
-      message: { type: "success", text: response.data.message },
+      message: { type: "success", text: message },
     });
 
     return {
       status: "success",
-      message: response.data.message,
+      message,
+    };
+  },
+  loadAccountOrganizations: async () => {
+    set({
+      accountOrganizations: null,
+      organizationError: null,
+    });
+
+    const response = await services.auth.getOrganizations();
+    if (response.error || !response.data) {
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Failed to load organizations",
+      );
+      set({ organizationError: message });
+      return organizationsFailure(message);
+    }
+
+    set({
+      accountOrganizations: response.data.organizations,
+      organizationError: null,
+    });
+    return {
+      status: "success",
+      organizations: response.data.organizations,
+    };
+  },
+  switchOrganization: async (orgId) => {
+    set({
+      organizationError: null,
+      organizationSwitchingId: orgId,
+    });
+
+    const response = await services.auth.switchOrganization(orgId);
+    if (response.error) {
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Failed to switch organization",
+      );
+      set({
+        organizationError: message,
+        organizationSwitchingId: null,
+      });
+      return messageFailure(message);
+    }
+
+    set({
+      organizationError: null,
+      organizationSwitchingId: null,
+    });
+    return {
+      status: "success",
+      message: response.message ?? "Organization selected",
     };
   },
 });

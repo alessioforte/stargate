@@ -1,15 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Alert, Button, Center, Stack, Text } from "@mantine/core";
-import {
-  clearOAuthRequest,
-  clearTokens,
-  exchangeAuthorizationCode,
-  getOAuthRequest,
-  redirectToHostedLogin,
-  storeTokens,
-} from "@/lib/oauth";
-import services from "@/services";
+import useStore from "@/store";
 
 type CallbackState =
   | { status: "loading"; message: string }
@@ -18,6 +10,10 @@ type CallbackState =
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const completeOAuthCallback = useStore(
+    (store) => store.completeOAuthCallback,
+  );
+  const signIn = useStore((store) => store.signIn);
   const [state, setState] = useState<CallbackState>({
     status: "loading",
     message: "Completing sign in",
@@ -29,13 +25,11 @@ export default function AuthCallbackPage() {
       message: "Redirecting to sign in",
     });
 
-    try {
-      await redirectToHostedLogin("/");
-    } catch (error: unknown) {
+    const result = await signIn("/");
+    if (result.status === "error") {
       setState({
         status: "error",
-        message:
-          error instanceof Error ? error.message : "Unable to restart sign in.",
+        message: result.message,
       });
     }
   }
@@ -43,76 +37,33 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function completeCallback() {
-      const request = getOAuthRequest();
-      const returnedState = searchParams.get("state");
-
-      if (!request || !returnedState || request.state !== returnedState) {
-        clearTokens();
-        clearOAuthRequest();
-        setState({
-          status: "error",
-          message: "Invalid OAuth state. Start sign in again.",
-        });
-        return;
-      }
-
-      const error = searchParams.get("error");
-      if (error) {
-        if (error === "login_required") {
-          setState({
-            status: "loading",
-            message: "Redirecting to sign in",
-          });
-          await redirectToHostedLogin(request.returnPath);
-          return;
-        }
-
-        clearOAuthRequest();
-        setState({
-          status: "error",
-          message:
-            searchParams.get("error_description") ??
-            `OAuth authorization failed: ${error}`,
-        });
-        return;
-      }
-
-      const code = searchParams.get("code");
-      if (!code) {
-        setState({
-          status: "error",
-          message: "Missing OAuth authorization code.",
-        });
-        return;
-      }
-
-      const tokens = await exchangeAuthorizationCode(
-        code,
-        request.codeVerifier,
-      );
+    void completeOAuthCallback({
+      code: searchParams.get("code"),
+      error: searchParams.get("error"),
+      errorDescription: searchParams.get("error_description"),
+      state: searchParams.get("state"),
+    }).then((result) => {
       if (cancelled) return;
 
-      storeTokens(tokens);
-      services.storeTokens(tokens);
-      clearOAuthRequest();
-      navigate(request.returnPath || "/", { replace: true });
-    }
-
-    completeCallback().catch((error: unknown) => {
-      if (cancelled) return;
-      clearTokens();
-      setState({
-        status: "error",
-        message:
-          error instanceof Error ? error.message : "OAuth callback failed.",
-      });
+      if (result.status === "success") {
+        navigate(result.returnPath, { replace: true });
+      } else if (result.status === "redirecting") {
+        setState({
+          status: "loading",
+          message: "Redirecting to sign in",
+        });
+      } else {
+        setState({
+          status: "error",
+          message: result.message,
+        });
+      }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [navigate, searchParams]);
+  }, [completeOAuthCallback, navigate, searchParams]);
 
   if (state.status === "error") {
     return (

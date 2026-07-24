@@ -4,6 +4,21 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+export type ApiMessageParams = Record<string, string | number | boolean | null>;
+
+export interface ApiMessages {
+  errors: Record<string, string>;
+  messages: Record<string, string>;
+}
+
+export interface ApiMessageCatalog {
+  schema: "stargate/i18n/v1";
+  locale: string;
+  fallbackLocale: string;
+  version: string;
+  messages: ApiMessages;
+}
+
 export interface List<T> {
   data: T[];
   limit: number;
@@ -23,6 +38,7 @@ export interface Query extends PaginationQuery {
 export interface MessageResponse {
   code: string;
   message: string;
+  params?: ApiMessageParams;
 }
 
 export interface ComponentStatus {

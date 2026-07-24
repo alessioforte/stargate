@@ -1,29 +1,37 @@
 import { Group, Text } from "@mantine/core";
-import useStore from "@/store";
 import styles from "./shell.module.css";
 
-const Footer = () => {
-  const adminStatus = useStore((state) => state.adminStatus);
+export interface FooterStatus {
+  databaseStatus: string;
+  status: string;
+  storeStatus: string;
+  version: string;
+}
 
+interface Props {
+  status: FooterStatus | null;
+}
+
+const Footer: React.FC<Props> = ({ status }) => {
   const statusColor =
-    adminStatus?.status === "healthy"
+    status?.status === "healthy"
       ? "var(--mantine-color-green-6)"
-      : adminStatus?.status === "degraded"
+      : status?.status === "degraded"
         ? "var(--mantine-color-yellow-6)"
         : "var(--mantine-color-red-6)";
 
   return (
     <div className={styles.footer}>
       <div className={styles.footerInner}>
-        {adminStatus ? (
+        {status ? (
           <Group className={styles.footerItems} justify="space-between">
             <Text size="xs" c="dimmed">
-              v{adminStatus.version}
+              v{status.version}
             </Text>
 
             <Group gap="xs" className={styles.footerItems} justify="flex-end">
               <Text size="xs" c="dimmed">
-                db: {adminStatus.databaseStatus}
+                db: {status.databaseStatus}
               </Text>
 
               <Text size="xs" c="dimmed" className={styles.footerSeparator}>
@@ -31,7 +39,7 @@ const Footer = () => {
               </Text>
 
               <Text size="xs" c="dimmed">
-                store: {adminStatus.storeStatus}
+                store: {status.storeStatus}
               </Text>
 
               <Text size="xs" c="dimmed" className={styles.footerSeparator}>
@@ -40,7 +48,7 @@ const Footer = () => {
 
               <Group>
                 <Text size="xs" c="dimmed">
-                  {adminStatus.status}
+                  {status.status}
                 </Text>
                 <span
                   className={styles.statusDot}

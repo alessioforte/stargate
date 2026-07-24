@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Badge,
   ActionIcon,
@@ -17,9 +17,8 @@ import {
 } from "react-icons/ai";
 import { FiEdit2 } from "react-icons/fi";
 import { useTranslations } from "@/i18n";
-import services from "@/services";
-import type { Organization, UserOrganization } from "@/services/types";
-import { AsyncSearchSelect, showNotification } from "@/components";
+import useStore from "@/store";
+import { AsyncSearchSelect } from "@/components";
 import type { AsyncSearchSelectOption } from "@/components/async-search-select/async-search-select";
 
 const ROLE_OPTIONS = ["owner", "admin", "member"];
@@ -59,81 +58,58 @@ interface Props {
 
 const UserOrganizations: React.FC<Props> = ({ userId }) => {
   const t = useTranslations();
-  const [memberships, setMemberships] = useState<UserOrganization[] | null>(
-    null,
-  );
+  const {
+    userOrganizations,
+    getUserOrganizations,
+    upsertUserOrganization,
+    removeUserOrganization,
+    searchOrganizationOptions,
+  } = useStore();
   const [newOrgId, setNewOrgId] = useState<string | null>(null);
   const [newRole, setNewRole] = useState<string>(DEFAULT_ROLE);
-  const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingRole, setEditingRole] = useState<string>("");
   const [isAdding, setIsAdding] = useState(false);
 
-  const refresh = useCallback(async () => {
-    const res = await services.admin.getUserOrganizations(userId);
-    if (res.error) {
-      showNotification({ type: "error", message: res.message });
-      return;
-    }
-    setMemberships(res.data ?? []);
-  }, [userId]);
+  const memberships = useMemo(
+    () =>
+      userOrganizations.meta === userId ? (userOrganizations.data ?? []) : null,
+    [userId, userOrganizations.data, userOrganizations.meta],
+  );
+  const saving = userOrganizations.isLoading();
 
   useEffect(() => {
-    setMemberships(null);
-    refresh();
-  }, [refresh]);
+    void getUserOrganizations(userId);
+  }, [getUserOrganizations, userId]);
 
   const upsertMembership = async (orgId: string, role: string) => {
-    setSaving(true);
-    const res = await services.admin.addUserToOrganization(userId, orgId, {
-      role,
-    });
-    setSaving(false);
-    if (res.error) {
-      showNotification({ type: "error", message: res.message });
-      return false;
-    }
-    await refresh();
-    return true;
+    return upsertUserOrganization(userId, orgId, role);
   };
 
   const handleAdd = async () => {
-    if (!newOrgId) return;
+    if (!newOrgId) return false;
     if (await upsertMembership(newOrgId, newRole)) {
       setNewOrgId(null);
       setNewRole(DEFAULT_ROLE);
+      return true;
     }
+    return false;
   };
 
   const handleRemove = async (orgId: string) => {
-    setSaving(true);
-    const res = await services.admin.removeUserFromOrganization(userId, orgId);
-    setSaving(false);
-    if (res.error) {
-      showNotification({ type: "error", message: res.message });
-      return;
-    }
     // Removal also revokes the user's org-bound API keys and kills their
     // sessions acting in this org.
-    showNotification({ type: "success", message: res.data?.message });
-    await refresh();
+    await removeUserOrganization(userId, orgId);
   };
 
-  const fetchOrganizations = async (
-    query: string,
-  ): Promise<AsyncSearchSelectOption[]> => {
-    const res = await services.admin.getOrganizations({
-      q: query || undefined,
-      limit: 20,
-    });
-    const memberOf = new Set((memberships ?? []).map((m) => m.id));
-    return (res.data?.data ?? [])
-      .filter((org: Organization) => !memberOf.has(org.id))
-      .map((org: Organization) => ({
-        value: org.id,
-        label: org.name,
-      }));
-  };
+  const fetchOrganizations = useCallback(
+    (query: string): Promise<AsyncSearchSelectOption[]> =>
+      searchOrganizationOptions(
+        query,
+        (memberships ?? []).map((membership) => membership.id),
+      ),
+    [memberships, searchOrganizationOptions],
+  );
 
   return (
     <Stack p="sm" gap="sm">
@@ -179,7 +155,11 @@ const UserOrganizations: React.FC<Props> = ({ userId }) => {
                   disabled={saving}
                   onSave={async () => {
                     if (editingRole !== membership.role) {
-                      await upsertMembership(membership.id, editingRole);
+                      if (
+                        !(await upsertMembership(membership.id, editingRole))
+                      ) {
+                        return;
+                      }
                     }
                     setEditingId(null);
                   }}
@@ -243,8 +223,9 @@ const UserOrganizations: React.FC<Props> = ({ userId }) => {
         <InlineEditor
           disabled={saving || !newOrgId}
           onSave={async () => {
-            await handleAdd();
-            setIsAdding(false);
+            if (await handleAdd()) {
+              setIsAdding(false);
+            }
           }}
           onCancel={() => {
             setNewOrgId(null);

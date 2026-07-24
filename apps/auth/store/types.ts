@@ -1,4 +1,5 @@
 import type {
+  AccountOrganization,
   LoginMFAResponse,
   LoginRequest,
   LoginResponse,
@@ -64,7 +65,18 @@ export type SignupLoadResult =
       message: string;
     };
 
+export type OrganizationsLoadResult =
+  | {
+      status: "success";
+      organizations: AccountOrganization[];
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
 export interface State {
+  accountOrganizations: AccountOrganization[] | null;
   message: AppMessage | null;
   loading: boolean;
   authStatus: AuthStatus;
@@ -73,11 +85,14 @@ export interface State {
   signup: SignupVerificationResponse | null;
   tokens: LoginResponse | null;
   error: string | null;
+  organizationError: string | null;
+  organizationSwitchingId: string | null;
   language: string;
 }
 
 export interface Actions {
   setLanguage: (lang: "en" | "it") => void;
+  loadApiMessages: (locale?: "en" | "it") => Promise<void>;
   login: (credentials: LoginRequest) => Promise<AuthActionResult>;
   verifyMFAChallenge: (
     challengeId: string,
@@ -97,5 +112,7 @@ export interface Actions {
   completeSignup: (
     payload: SignupCompleteRequest,
   ) => Promise<MessageActionResult>;
+  loadAccountOrganizations: () => Promise<OrganizationsLoadResult>;
+  switchOrganization: (orgId: string) => Promise<MessageActionResult>;
   clearAuthError: () => void;
 }

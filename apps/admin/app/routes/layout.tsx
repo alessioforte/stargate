@@ -12,6 +12,7 @@ import { GrGateway } from "react-icons/gr";
 import { BsFillJournalBookmarkFill } from "react-icons/bs";
 import { MdLocalPolice } from "react-icons/md";
 import { Shell, Loader } from "@/components";
+import { TranslationProvider } from "@/i18n";
 import useStore from "@/store";
 
 function currentReturnPath(pathname: string, query: string) {
@@ -68,8 +69,17 @@ const Layout = () => {
   const navigate = useNavigate();
   const returnPath = currentReturnPath(location.pathname, location.search);
   const adminSessionStatus = useStore((state) => state.adminSessionStatus);
+  const adminStatus = useStore((state) => state.adminStatus);
   const ensureAdminSession = useStore((state) => state.ensureAdminSession);
+  const language = useStore((state) => state.language);
+  const loadApiMessages = useStore((state) => state.loadApiMessages);
   const loading = useStore((state) => state.loading);
+  const logout = useStore((state) => state.logout);
+  const setLanguage = useStore((state) => state.setLanguage);
+
+  useEffect(() => {
+    void loadApiMessages(language === "it" ? "it" : "en");
+  }, [language, loadApiMessages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,10 +113,18 @@ const Layout = () => {
   }
 
   return (
-    <Shell sidebarItems={sidebarItems}>
-      {loading && <Loader />}
-      {!loading && <Outlet />}
-    </Shell>
+    <TranslationProvider language={language}>
+      <Shell
+        adminStatus={adminStatus}
+        language={language}
+        onLanguageChange={setLanguage}
+        onLogout={() => void logout(returnPath)}
+        sidebarItems={sidebarItems}
+      >
+        {loading && <Loader />}
+        {!loading && <Outlet />}
+      </Shell>
+    </TranslationProvider>
   );
 };
 

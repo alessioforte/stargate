@@ -1,7 +1,12 @@
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  type ReactNode,
+} from "react";
 import en from "./locales/en.json";
 import it from "./locales/it.json";
-import useStore from "@/store";
-import Settings from "@/store/settings";
 
 const messages = {
   en,
@@ -10,6 +15,8 @@ const messages = {
 
 type Locale = keyof typeof messages;
 type TranslationValues = Record<string, string | number>;
+const LanguageContext = createContext<Locale>("en");
+let activeLanguage: Locale = "en";
 
 function normalizeLocale(locale: string): Locale {
   return locale === "it" ? "it" : "en";
@@ -48,18 +55,36 @@ export function translate(
 }
 
 export function useTranslations() {
-  const language = useStore((state) => state.language);
+  const language = useContext(LanguageContext);
 
-  return (key: string, values?: TranslationValues) =>
-    translate(language, key, values);
+  return useCallback(
+    (key: string, values?: TranslationValues) =>
+      translate(language, key, values),
+    [language],
+  );
 }
 
 export function getTranslation(key: string, values?: TranslationValues) {
-  const language: string = Settings.get("language") ?? "en";
-
-  return translate(language, key, values);
+  return translate(activeLanguage, key, values);
 }
 
 export function getLanguages() {
   return Object.keys(messages) as Locale[];
+}
+
+export function TranslationProvider({
+  children,
+  language,
+}: {
+  children: ReactNode;
+  language: string;
+}) {
+  const normalizedLanguage = normalizeLocale(language);
+  activeLanguage = normalizedLanguage;
+
+  return createElement(
+    LanguageContext.Provider,
+    { value: normalizedLanguage },
+    children,
+  );
 }

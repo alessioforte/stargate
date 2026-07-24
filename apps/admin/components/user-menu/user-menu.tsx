@@ -12,32 +12,26 @@ import {
 import { useColorScheme } from "@mantine/hooks";
 import { CiLogout, CiLight, CiDark } from "react-icons/ci";
 import { MdOutlineChevronLeft } from "react-icons/md";
-import { useLocation } from "react-router";
 import { useTranslations, getLanguages } from "@/i18n";
-import useStore from "@/store";
 import classes from "./user-menu.module.css";
-
-function currentReturnPath(pathname: string, query: string) {
-  return query ? `${pathname}${query}` : pathname;
-}
 
 function isSupportedLanguage(value: string): value is "en" | "it" {
   return value === "en" || value === "it";
 }
 
-const UserMenu = () => {
+interface Props {
+  language: string;
+  onLanguageChange: (language: "en" | "it") => void;
+  onLogout: () => void;
+}
+
+const UserMenu: React.FC<Props> = ({
+  language,
+  onLanguageChange,
+  onLogout,
+}) => {
   const t = useTranslations();
-  const location = useLocation();
-
-  const logout = useStore((state) => state.logout);
-  const language = useStore((state) => state.language);
-  const setLanguage = useStore((state) => state.setLanguage);
-
   const languages = useMemo(() => getLanguages(), []);
-
-  const handleLogout = () => {
-    logout(currentReturnPath(location.pathname, location.search));
-  };
 
   return (
     <Menu position="bottom-end" offset={15}>
@@ -86,7 +80,7 @@ const UserMenu = () => {
               value={language}
               onChange={(value) => {
                 if (isSupportedLanguage(value)) {
-                  setLanguage(value);
+                  onLanguageChange(value);
                 }
               }}
             >
@@ -118,7 +112,7 @@ const UserMenu = () => {
         </Menu.Sub>
         <Menu.Divider />
         <Menu.Item
-          onClick={handleLogout}
+          onClick={onLogout}
           leftSection={<CiLogout size={16} />}
           color="red"
         >

@@ -24,6 +24,7 @@ import type {
   CreateServiceAccountRequest,
   UpdateServiceAccountRequest,
   UpdateOAuthClientRequest,
+  UserOrganization,
   User,
   CreateUserRequest,
   CreateUserInvitationRequest,
@@ -57,6 +58,23 @@ export type AdminSessionResult =
   | { status: "redirecting" }
   | { status: "error"; message: string };
 
+export interface OAuthCallbackParams {
+  code: string | null;
+  error: string | null;
+  errorDescription: string | null;
+  state: string | null;
+}
+
+export type OAuthCallbackResult =
+  | { status: "success"; returnPath: string }
+  | { status: "redirecting" }
+  | { status: "error"; message: string };
+
+export interface SelectOption {
+  label: string;
+  value: string;
+}
+
 export interface State {
   adminError: string | null;
   adminReturnPath: string;
@@ -77,6 +95,7 @@ export interface State {
   serviceAccounts: StoreItem<List<ServiceAccount>>;
   users: StoreItem<List<User>>;
   usersQuery: Query;
+  userOrganizations: StoreItem<UserOrganization[], string>;
   superAdminUsers: StoreItem<List<User>>;
   outboxEvents: StoreItem<List<OutboxEvent>>;
   outboxEventsQuery: ListOutboxEventsQuery;
@@ -85,10 +104,14 @@ export interface State {
 
 export interface Actions {
   clearAdminError: () => void;
+  completeOAuthCallback: (
+    params: OAuthCallbackParams,
+  ) => Promise<OAuthCallbackResult>;
   ensureAdminSession: (returnPath: string) => Promise<AdminSessionResult>;
   logout: (returnPath: string) => Promise<void>;
-  signIn: (returnPath: string) => Promise<void>;
+  signIn: (returnPath: string) => Promise<AdminSessionResult>;
   setLanguage: (lang: "en" | "it") => void;
+  loadApiMessages: (locale?: "en" | "it") => Promise<void>;
 
   getAdminKeys: (query?: Query) => Promise<void>;
   createAdminKey: (
@@ -138,6 +161,10 @@ export interface Actions {
   ) => Promise<RotateOAuthClientSecretResponse | null>;
 
   getOrganizations: (query?: Query) => Promise<void>;
+  searchOrganizationOptions: (
+    query: string,
+    excludedIds?: string[],
+  ) => Promise<SelectOption[]>;
   createOrganization: (
     organization: CreateOrganizationRequest,
   ) => Promise<void>;
@@ -147,6 +174,7 @@ export interface Actions {
   ) => Promise<void>;
 
   getServiceAccounts: (query?: Query) => Promise<void>;
+  searchServiceAccountOptions: (query: string) => Promise<SelectOption[]>;
   createServiceAccount: (
     serviceAccount: CreateServiceAccountRequest,
   ) => Promise<void>;
@@ -157,12 +185,21 @@ export interface Actions {
   deleteServiceAccount: (id: string) => Promise<void>;
 
   getUsers: (query?: Query) => Promise<void>;
+  searchUserOptions: (query: string) => Promise<SelectOption[]>;
   getSuperAdminUsers: (query?: Query) => Promise<void>;
   createUser: (user: CreateUserRequest) => Promise<void>;
   inviteUser: (user: CreateUserInvitationRequest) => Promise<void>;
   updateUser: (id: string, user: UpdateUserRequest) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
   updateUserAttrs: (id: string, attrs: JsonValue) => Promise<void>;
+  getUserOrganizations: (id: string) => Promise<void>;
+  getUserOrganizationOptions: (id: string) => Promise<SelectOption[]>;
+  upsertUserOrganization: (
+    id: string,
+    orgId: string,
+    role: string,
+  ) => Promise<boolean>;
+  removeUserOrganization: (id: string, orgId: string) => Promise<boolean>;
 
   getOutboxEvents: (query?: ListOutboxEventsQuery) => Promise<void>;
   getOutboxEvent: (eventId: string) => Promise<void>;

@@ -19,13 +19,11 @@ import { useDisclosure } from "@mantine/hooks";
 import { FaPlus } from "react-icons/fa6";
 import { GoCheck, GoCopy } from "react-icons/go";
 import { useTranslations } from "@/i18n";
-import services from "@/services";
+import useStore from "@/store";
 import type {
   ApiKeyOwnerType,
   CreateApiKeyRequest,
   CreateApiKeyResponse,
-  ServiceAccount,
-  User,
 } from "@/services/types";
 import { AsyncSearchSelect, CodeBox, EntityDrawer } from "@/components";
 import type { AsyncSearchSelectOption } from "@/components/async-search-select/async-search-select";
@@ -52,6 +50,13 @@ const emptyFormValues: FormValues = {
 
 const CreateApiKey: React.FC<Props> = ({ onSave }) => {
   const t = useTranslations();
+  const getUserOrganizationOptions = useStore(
+    (state) => state.getUserOrganizationOptions,
+  );
+  const searchUserOptions = useStore((state) => state.searchUserOptions);
+  const searchServiceAccountOptions = useStore(
+    (state) => state.searchServiceAccountOptions,
+  );
   const [opened, { open, close }] = useDisclosure(false);
   const [keyModalOpened, { open: openKeyModal, close: closeKeyModal }] =
     useDisclosure(false);
@@ -80,8 +85,7 @@ const CreateApiKey: React.FC<Props> = ({ onSave }) => {
       userId: values.ownerType === "user" ? values.ownerId : null,
       serviceAccountId:
         values.ownerType === "service_account" ? values.ownerId : null,
-      orgId:
-        values.ownerType === "user" && values.orgId ? values.orgId : null,
+      orgId: values.ownerType === "user" && values.orgId ? values.orgId : null,
       attrs: JSON.parse(values.attrs) ?? {},
     };
 
@@ -118,43 +122,23 @@ const CreateApiKey: React.FC<Props> = ({ onSave }) => {
     if (ownerType !== "user" || !ownerId) return;
 
     let cancelled = false;
-    services.admin.getUserOrganizations(ownerId).then((res) => {
+    getUserOrganizationOptions(ownerId).then((options) => {
       if (cancelled) return;
-      setUserOrgOptions(
-        (res.data ?? []).map((org) => ({ value: org.id, label: org.name })),
-      );
+      setUserOrgOptions(options);
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownerId, ownerType]);
+  }, [getUserOrganizationOptions, ownerId, ownerType]);
 
   const fetchUsers = async (
     query: string,
-  ): Promise<AsyncSearchSelectOption[]> => {
-    const res = await services.admin.getUsers({
-      q: query || undefined,
-      limit: 20,
-    });
-    return (res.data?.data ?? []).map((user: User) => ({
-      value: user.id,
-      label: `${user.email} (${user.nickname})`,
-    }));
-  };
+  ): Promise<AsyncSearchSelectOption[]> => searchUserOptions(query);
 
   const fetchServiceAccounts = async (
     query: string,
-  ): Promise<AsyncSearchSelectOption[]> => {
-    const res = await services.admin.getServiceAccounts({
-      q: query || undefined,
-      limit: 20,
-    });
-    return (res.data?.data ?? []).map((sa: ServiceAccount) => ({
-      value: sa.id,
-      label: `${sa.name} (${sa.id})`,
-    }));
-  };
+  ): Promise<AsyncSearchSelectOption[]> => searchServiceAccountOptions(query);
 
   return (
     <>
@@ -233,9 +217,7 @@ const CreateApiKey: React.FC<Props> = ({ onSave }) => {
                   data={userOrgOptions}
                   value={form.values.orgId || null}
                   clearable
-                  onChange={(value) =>
-                    form.setFieldValue("orgId", value ?? "")
-                  }
+                  onChange={(value) => form.setFieldValue("orgId", value ?? "")}
                 />
               )}
 

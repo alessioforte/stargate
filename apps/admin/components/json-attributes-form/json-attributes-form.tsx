@@ -2,9 +2,16 @@ import { useState } from "react";
 import { Flex, Group, Text } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useTranslations } from "@/i18n";
-import type { JsonValue } from "@/services/types";
 import CodeBox from "../code-box/code-box";
 import EditActionControls from "../edit-action-controls/edit-action-controls";
+
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 interface Props {
   attrs: string;

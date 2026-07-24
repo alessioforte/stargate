@@ -1,6 +1,7 @@
 import { Http } from "./http";
 import type {
   AccountOrganizationsResponse,
+  ApiMessageCatalog,
   LoginRequest,
   LoginMFAResponse,
   LoginResponse,
@@ -19,6 +20,13 @@ export default class AuthService {
   constructor(http: Http, baseURL: string) {
     this.http = http;
     this.baseURL = baseURL;
+  }
+
+  async getApiMessages(locale: string) {
+    return this.http.request<ApiMessageCatalog>({
+      method: "GET",
+      url: `${this.baseURL}/i18n/${encodeURIComponent(locale)}`,
+    });
   }
 
   async login(payload: LoginRequest) {

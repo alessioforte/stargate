@@ -2,12 +2,16 @@ import { create } from "zustand";
 import type { StateCreator } from "zustand";
 import { devtools } from "zustand/middleware";
 import {
+  clearOAuthRequest,
   clearTokens,
+  exchangeAuthorizationCode,
+  getOAuthRequest,
   getStoredTokens,
   logoutAndRedirect,
   redirectToHostedLogin,
 } from "@/lib/oauth";
 import services from "@/services";
+import type { Response as ApiResponse } from "@/services/http";
 import { getTokenExpiry } from "@/services/jwt";
 import type {
   AccessControlRulesResponse,
@@ -23,6 +27,7 @@ import type {
   CreateOAuthClientRequest,
   CreateOAuthClientResponse,
   List,
+  MessageResponse,
   OAuthClient,
   Organization,
   OutboxEvent,
@@ -41,6 +46,7 @@ import type {
   UpdateServiceAccountRequest,
   UpdateUserRequest,
   UpdateAccessControlRulesRequest,
+  UserOrganization,
   ValidateAccessControlRulesRequest,
   ValidateAccessControlRulesResponse,
   EvaluateAccessControlRequest,
@@ -48,9 +54,20 @@ import type {
 } from "@/services/types";
 import Service from "@/services";
 import { showNotification } from "@/components";
-import type { Actions, AdminStatus, State } from "./types";
+import type {
+  Actions,
+  AdminStatus,
+  OAuthCallbackParams,
+  OAuthCallbackResult,
+  SelectOption,
+  State,
+} from "./types";
 import { StoreItem } from "./item";
 import Settings from "./settings";
+import {
+  registerApiMessageCatalog,
+  resolveApiMessage,
+} from "@/i18n/api-messages";
 
 const initialState: State = {
   adminError: null,
@@ -74,6 +91,7 @@ const initialState: State = {
   serviceAccounts: new StoreItem<List<ServiceAccount>>(null),
   users: new StoreItem<List<User>>(null),
   usersQuery: {},
+  userOrganizations: new StoreItem<UserOrganization[], string>(null, null),
   superAdminUsers: new StoreItem<List<User>>(null),
   outboxEvents: new StoreItem<List<OutboxEvent>>(null),
   outboxEventsQuery: {},
@@ -119,10 +137,117 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+async function localizedApiResponse<T>(
+  locale: string,
+  request: Promise<ApiResponse<T>>,
+): Promise<ApiResponse<T>> {
+  const response = await request;
+  if (!response.code) {
+    const data = response.data;
+    if (
+      data &&
+      typeof data === "object" &&
+      "code" in data &&
+      "message" in data &&
+      typeof data.code === "string" &&
+      typeof data.message === "string"
+    ) {
+      const apiMessage = data as MessageResponse;
+      return {
+        ...response,
+        data: {
+          ...apiMessage,
+          message: resolveApiMessage(
+            locale,
+            "messages",
+            apiMessage,
+            apiMessage.message,
+          ),
+        } as T,
+      };
+    }
+
+    return response;
+  }
+
+  return {
+    ...response,
+    message: resolveApiMessage(
+      locale,
+      response.error ? "errors" : "messages",
+      response,
+      response.message ?? "Request failed",
+    ),
+  };
+}
+
 export const store: StateCreator<State & Actions> = (set, get) => ({
   ...initialState,
 
   clearAdminError: () => set({ adminError: null }),
+
+  completeOAuthCallback: async (
+    params: OAuthCallbackParams,
+  ): Promise<OAuthCallbackResult> => {
+    const request = getOAuthRequest();
+
+    if (!request || !params.state || request.state !== params.state) {
+      clearTokens();
+      clearOAuthRequest();
+      return {
+        status: "error",
+        message: "Invalid OAuth state. Start sign in again.",
+      };
+    }
+
+    if (params.error) {
+      if (params.error === "login_required") {
+        try {
+          await redirectToHostedLogin(request.returnPath);
+          return { status: "redirecting" };
+        } catch (error: unknown) {
+          return {
+            status: "error",
+            message: errorMessage(error, "Unable to restart sign in."),
+          };
+        }
+      }
+
+      clearOAuthRequest();
+      return {
+        status: "error",
+        message:
+          params.errorDescription ??
+          `OAuth authorization failed: ${params.error}`,
+      };
+    }
+
+    if (!params.code) {
+      return {
+        status: "error",
+        message: "Missing OAuth authorization code.",
+      };
+    }
+
+    try {
+      const tokens = await exchangeAuthorizationCode(
+        params.code,
+        request.codeVerifier,
+      );
+      services.storeTokens(tokens);
+      clearOAuthRequest();
+      return {
+        status: "success",
+        returnPath: request.returnPath || "/",
+      };
+    } catch (error: unknown) {
+      clearTokens();
+      return {
+        status: "error",
+        message: errorMessage(error, "OAuth callback failed."),
+      };
+    }
+  },
 
   ensureAdminSession: async (returnPath) => {
     set({
@@ -147,7 +272,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
 
       services.setApiKey(accessToken);
 
-      const response = await services.admin.getAdminHealth();
+      const response = await localizedApiResponse(
+        get().language,
+        services.admin.getAdminHealth(),
+      );
 
       if (response.error) {
         if (response.status === 401) {
@@ -217,6 +345,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     });
     try {
       await redirectToHostedLogin(returnPath);
+      return { status: "redirecting" };
     } catch (error: unknown) {
       const message = errorMessage(error, "Unable to start admin auth");
       set({
@@ -225,6 +354,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         adminSessionStatus: "error",
         adminStatus: null,
       });
+      return { status: "error", message };
     }
   },
 
@@ -233,10 +363,22 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     Settings.set("language", lang);
   },
 
+  loadApiMessages: async (locale) => {
+    const response = await services.admin.getApiMessages(
+      locale ?? get().language,
+    );
+    if (!response.error && response.data) {
+      registerApiMessageCatalog(response.data);
+    }
+  },
+
   getAdminKeys: async (query?: Query) => {
     const adminKeys = get().adminKeys;
     set({ adminKeys: adminKeys.setLoading() });
-    const { data, error, message } = await Service.admin.getAdminKeys(query);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getAdminKeys(query),
+    );
     if (error) {
       set({ adminKeys: adminKeys.setError(message) });
       return;
@@ -250,8 +392,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const adminKeys = get().adminKeys;
     set({ adminKeys: adminKeys.setLoading() });
 
-    const { data, error, message } =
-      await Service.admin.createAdminKey(adminKey);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.createAdminKey(adminKey),
+    );
 
     if (error) {
       set({ adminKeys: adminKeys.setError(message) });
@@ -280,9 +424,9 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const adminKeys = get().adminKeys;
     set({ adminKeys: adminKeys.setLoading() });
 
-    const { error, message } = await Service.admin.updateAdminKeyPermissions(
-      id,
-      adminKey,
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateAdminKeyPermissions(id, adminKey),
     );
 
     if (error) {
@@ -309,7 +453,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const adminKeys = get().adminKeys;
     set({ adminKeys: adminKeys.setLoading() });
 
-    const { error, message } = await Service.admin.revokeAdminKey(id);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.revokeAdminKey(id),
+    );
 
     if (error) {
       set({ adminKeys: adminKeys.setError(message) });
@@ -325,7 +472,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     showNotification({
       type: "success",
       title: "Success",
-      message: "Admin key revoked successfully",
+      message: data?.message ?? message ?? "Admin key revoked successfully",
     });
 
     get().getAdminKeys();
@@ -334,7 +481,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   getApiKeys: async (query?: ApiKeyQuery) => {
     const apiKeys = get().apiKeys;
     set({ apiKeys: apiKeys.setLoading() });
-    const { data, error, message } = await Service.admin.getApiKeys(query);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getApiKeys(query),
+    );
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
       return;
@@ -348,7 +498,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const apiKeys = get().apiKeys;
     set({ apiKeys: apiKeys.setLoading() });
 
-    const { data, error, message } = await Service.admin.createApiKey(apiKey);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.createApiKey(apiKey),
+    );
 
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
@@ -374,9 +527,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const apiKeys = get().apiKeys;
     set({ apiKeys: apiKeys.setLoading() });
 
-    const { error, message } = await Service.admin.updateApiKeyAttrs(id, {
-      attrs,
-    });
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateApiKeyAttrs(id, { attrs }),
+    );
 
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
@@ -402,7 +556,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const apiKeys = get().apiKeys;
     set({ apiKeys: apiKeys.setLoading() });
 
-    const { error, message } = await Service.admin.revokeApiKey(id);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.revokeApiKey(id),
+    );
 
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
@@ -418,7 +575,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     showNotification({
       type: "success",
       title: "Success",
-      message: "API key revoked successfully",
+      message: data?.message ?? message ?? "API key revoked successfully",
     });
 
     get().getApiKeys();
@@ -428,7 +585,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const apiKeys = get().apiKeys;
     set({ apiKeys: apiKeys.setLoading() });
 
-    const { error, message } = await Service.admin.deleteApiKey(id);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.deleteApiKey(id),
+    );
 
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
@@ -444,7 +604,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     showNotification({
       type: "success",
       title: "Success",
-      message: "API key deleted successfully",
+      message: data?.message ?? message ?? "API key deleted successfully",
     });
 
     get().getApiKeys();
@@ -453,7 +613,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   getConfigurations: async () => {
     const configuration = get().configuration;
     set({ configuration: configuration.setLoading() });
-    const { data, error, message } = await Service.admin.getConfigurations();
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getConfigurations(),
+    );
     if (error) {
       set({ configuration: configuration.setError(message) });
       return;
@@ -465,8 +628,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const configurationItem = get().configuration;
     set({ configuration: configurationItem.setLoading() });
 
-    const { error, message } =
-      await Service.admin.updateConfigurations(configuration);
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateConfigurations(configuration),
+    );
 
     if (error) {
       set({ configuration: configurationItem.setError(message) });
@@ -493,8 +658,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const accessControlRules = get().accessControlRules;
     set({ accessControlRules: accessControlRules.setLoading() });
 
-    const { data, error, message } =
-      await Service.admin.getAccessControlRules();
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getAccessControlRules(),
+    );
     if (error) {
       set({ accessControlRules: accessControlRules.setError(message) });
       return;
@@ -514,8 +681,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const accessControlRules = get().accessControlRules;
     set({ accessControlRules: accessControlRules.setLoading() });
 
-    const { data, error, message } =
-      await Service.admin.updateAccessControlRules(request);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateAccessControlRules(request),
+    );
 
     if (error) {
       set({ accessControlRules: accessControlRules.setError(message) });
@@ -551,8 +720,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       accessControlValidation: accessControlValidation.setLoading(),
     });
 
-    const { data, error, message } =
-      await Service.admin.validateAccessControlRules(request);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.validateAccessControlRules(request),
+    );
 
     if (error) {
       set({
@@ -573,8 +744,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       accessControlEvaluation: accessControlEvaluation.setLoading(),
     });
 
-    const { data, error, message } =
-      await Service.admin.evaluateAccessControlRules(request);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.evaluateAccessControlRules(request),
+    );
 
     if (error) {
       set({
@@ -592,7 +765,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   getOAuthClients: async (query?: Query) => {
     const oauthClients = get().oauthClients;
     set({ oauthClients: oauthClients.setLoading() });
-    const { data, error, message } = await Service.admin.getOAuthClients(query);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getOAuthClients(query),
+    );
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
       return;
@@ -606,8 +782,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const oauthClients = get().oauthClients;
     set({ oauthClients: oauthClients.setLoading() });
 
-    const { data, error, message } =
-      await Service.admin.createOAuthClient(oauthClient);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.createOAuthClient(oauthClient),
+    );
 
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
@@ -636,9 +814,9 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const oauthClients = get().oauthClients;
     set({ oauthClients: oauthClients.setLoading() });
 
-    const { error, message } = await Service.admin.updateOAuthClient(
-      clientId,
-      oauthClient,
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateOAuthClient(clientId, oauthClient),
     );
 
     if (error) {
@@ -665,7 +843,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const oauthClients = get().oauthClients;
     set({ oauthClients: oauthClients.setLoading() });
 
-    const { error, message } = await Service.admin.enableOAuthClient(clientId);
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.enableOAuthClient(clientId),
+    );
 
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
@@ -691,7 +872,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const oauthClients = get().oauthClients;
     set({ oauthClients: oauthClients.setLoading() });
 
-    const { error, message } = await Service.admin.disableOAuthClient(clientId);
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.disableOAuthClient(clientId),
+    );
 
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
@@ -717,7 +901,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const oauthClients = get().oauthClients;
     set({ oauthClients: oauthClients.setLoading() });
 
-    const { error, message } = await Service.admin.deleteOAuthClient(clientId);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.deleteOAuthClient(clientId),
+    );
 
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
@@ -733,7 +920,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     showNotification({
       type: "success",
       title: "Success",
-      message: "OAuth client deleted successfully",
+      message: data?.message ?? message ?? "OAuth client deleted successfully",
     });
 
     get().getOAuthClients();
@@ -745,8 +932,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const oauthClients = get().oauthClients;
     set({ oauthClients: oauthClients.setLoading() });
 
-    const { data, error, message } =
-      await Service.admin.rotateOAuthClientSecret(clientId);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.rotateOAuthClientSecret(clientId),
+    );
 
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
@@ -772,8 +961,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   getOrganizations: async (query?: Query) => {
     const organizations = get().organizations;
     set({ organizations: organizations.setLoading() });
-    const { data, error, message } =
-      await Service.admin.getOrganizations(query);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getOrganizations(query),
+    );
     if (error) {
       set({ organizations: organizations.setError(message) });
       return;
@@ -781,12 +972,36 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     set({ organizations: organizations.setSuccess(data) });
   },
 
+  searchOrganizationOptions: async (
+    query: string,
+    excludedIds: string[] = [],
+  ): Promise<SelectOption[]> => {
+    const { data, error } = await localizedApiResponse(
+      get().language,
+      Service.admin.getOrganizations({
+        q: query || undefined,
+        limit: 20,
+      }),
+    );
+    if (error) return [];
+
+    const excluded = new Set(excludedIds);
+    return (data?.data ?? [])
+      .filter((organization) => !excluded.has(organization.id))
+      .map((organization) => ({
+        value: organization.id,
+        label: organization.name,
+      }));
+  },
+
   createOrganization: async (organization: CreateOrganizationRequest) => {
     const organizations = get().organizations;
     set({ organizations: organizations.setLoading() });
 
-    const { error, message } =
-      await Service.admin.createOrganization(organization);
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.createOrganization(organization),
+    );
 
     if (error) {
       set({ organizations: organizations.setError(message) });
@@ -814,9 +1029,9 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const organizations = get().organizations;
     set({ organizations: organizations.setLoading() });
 
-    const { error, message } = await Service.admin.updateOrganization(
-      id,
-      organization,
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateOrganization(id, organization),
     );
 
     if (error) {
@@ -842,8 +1057,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   getServiceAccounts: async (query?: Query) => {
     const serviceAccounts = get().serviceAccounts;
     set({ serviceAccounts: serviceAccounts.setLoading() });
-    const { data, error, message } =
-      await Service.admin.getServiceAccounts(query);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getServiceAccounts(query),
+    );
     if (error) {
       set({ serviceAccounts: serviceAccounts.setError(message) });
       return;
@@ -851,12 +1068,32 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     set({ serviceAccounts: serviceAccounts.setSuccess(data) });
   },
 
+  searchServiceAccountOptions: async (
+    query: string,
+  ): Promise<SelectOption[]> => {
+    const { data, error } = await localizedApiResponse(
+      get().language,
+      Service.admin.getServiceAccounts({
+        q: query || undefined,
+        limit: 20,
+      }),
+    );
+    if (error) return [];
+
+    return (data?.data ?? []).map((serviceAccount) => ({
+      value: serviceAccount.id,
+      label: `${serviceAccount.name} (${serviceAccount.id})`,
+    }));
+  },
+
   createServiceAccount: async (serviceAccount: CreateServiceAccountRequest) => {
     const serviceAccounts = get().serviceAccounts;
     set({ serviceAccounts: serviceAccounts.setLoading() });
 
-    const { error, message } =
-      await Service.admin.createServiceAccount(serviceAccount);
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.createServiceAccount(serviceAccount),
+    );
 
     if (error) {
       set({ serviceAccounts: serviceAccounts.setError(message) });
@@ -884,9 +1121,9 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const serviceAccounts = get().serviceAccounts;
     set({ serviceAccounts: serviceAccounts.setLoading() });
 
-    const { error, message } = await Service.admin.updateServiceAccount(
-      id,
-      serviceAccount,
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateServiceAccount(id, serviceAccount),
     );
 
     if (error) {
@@ -913,7 +1150,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const serviceAccounts = get().serviceAccounts;
     set({ serviceAccounts: serviceAccounts.setLoading() });
 
-    const { error, message } = await Service.admin.deleteServiceAccount(id);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.deleteServiceAccount(id),
+    );
 
     if (error) {
       set({ serviceAccounts: serviceAccounts.setError(message) });
@@ -929,7 +1169,8 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     showNotification({
       type: "success",
       title: "Success",
-      message: "Service account deleted successfully",
+      message:
+        data?.message ?? message ?? "Service account deleted successfully",
     });
 
     get().getServiceAccounts();
@@ -939,7 +1180,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const usersQuery = query ?? get().usersQuery;
     const users = get().users;
     set({ users: users.setLoading(), usersQuery });
-    const { data, error, message } = await Service.admin.getUsers(usersQuery);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getUsers(usersQuery),
+    );
     if (error) {
       set({ users: users.setError(message) });
       return;
@@ -947,10 +1191,29 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     set({ users: users.setSuccess(data) });
   },
 
+  searchUserOptions: async (query: string): Promise<SelectOption[]> => {
+    const { data, error } = await localizedApiResponse(
+      get().language,
+      Service.admin.getUsers({
+        q: query || undefined,
+        limit: 20,
+      }),
+    );
+    if (error) return [];
+
+    return (data?.data ?? []).map((user) => ({
+      value: user.id,
+      label: `${user.email} (${user.nickname})`,
+    }));
+  },
+
   getSuperAdminUsers: async () => {
     const superAdminUsers = get().superAdminUsers;
     set({ superAdminUsers: superAdminUsers.setLoading() });
-    const { data, error, message } = await Service.admin.getSuperAdminUsers();
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getSuperAdminUsers(),
+    );
     if (error) {
       set({ superAdminUsers: superAdminUsers.setError(message) });
       return;
@@ -962,7 +1225,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const users = get().users;
     set({ users: users.setLoading() });
 
-    const { error, message } = await Service.admin.createUser(user);
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.createUser(user),
+    );
 
     if (error) {
       set({ users: users.setError(message) });
@@ -987,7 +1253,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const users = get().users;
     set({ users: users.setLoading() });
 
-    const { error, message } = await Service.admin.inviteUser(user);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.inviteUser(user),
+    );
 
     if (error) {
       set({ users: users.setError(message) });
@@ -1003,7 +1272,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     showNotification({
       type: "success",
       title: "Success",
-      message: message ?? "User invitation sent successfully",
+      message: data?.message ?? message ?? "User invitation sent successfully",
     });
     get().getUsers(get().usersQuery);
   },
@@ -1012,7 +1281,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const users = get().users;
     set({ users: users.setLoading() });
 
-    const { error, message } = await Service.admin.updateUser(id, user);
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateUser(id, user),
+    );
 
     if (error) {
       set({ users: users.setError(message) });
@@ -1038,7 +1310,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const users = get().users;
     set({ users: users.setLoading() });
 
-    const { error, message } = await Service.admin.deleteUser(id);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.deleteUser(id),
+    );
 
     if (error) {
       set({ users: users.setError(message) });
@@ -1054,7 +1329,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     showNotification({
       type: "success",
       title: "Success",
-      message: "User deleted successfully",
+      message: data?.message ?? message ?? "User deleted successfully",
     });
 
     get().getUsers(get().usersQuery);
@@ -1064,9 +1339,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const users = get().users;
     set({ users: users.setLoading() });
 
-    const { error, message } = await Service.admin.updateUserAttrs(id, {
-      attrs,
-    });
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.updateUserAttrs(id, { attrs }),
+    );
 
     if (error) {
       set({ users: users.setError(message) });
@@ -1088,6 +1364,112 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     get().getUsers(get().usersQuery);
   },
 
+  getUserOrganizations: async (id: string) => {
+    const userOrganizations = get().userOrganizations;
+    if (userOrganizations.meta !== id) {
+      userOrganizations.setData(null);
+    }
+    set({
+      userOrganizations: userOrganizations.setMeta(id).setLoading(),
+    });
+
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getUserOrganizations(id),
+    );
+    if (get().userOrganizations.meta !== id) return;
+
+    if (error) {
+      set({
+        userOrganizations: userOrganizations.setError(message),
+      });
+      showNotification({
+        type: "error",
+        message: message ?? "Failed to load user organizations",
+      });
+      return;
+    }
+
+    set({
+      userOrganizations: userOrganizations.setSuccess(data ?? [], id),
+    });
+  },
+
+  getUserOrganizationOptions: async (id: string): Promise<SelectOption[]> => {
+    const { data, error } = await localizedApiResponse(
+      get().language,
+      Service.admin.getUserOrganizations(id),
+    );
+    if (error) return [];
+
+    return (data ?? []).map((organization) => ({
+      value: organization.id,
+      label: organization.name,
+    }));
+  },
+
+  upsertUserOrganization: async (id, orgId, role) => {
+    const userOrganizations = get().userOrganizations;
+    set({
+      userOrganizations: userOrganizations.setMeta(id).setLoading(),
+    });
+
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.addUserToOrganization(id, orgId, { role }),
+    );
+    if (error) {
+      if (get().userOrganizations.meta === id) {
+        set({
+          userOrganizations: userOrganizations.setError(message),
+        });
+      }
+      showNotification({
+        type: "error",
+        message: message ?? "Failed to update user organization",
+      });
+      return false;
+    }
+
+    if (get().userOrganizations.meta === id) {
+      await get().getUserOrganizations(id);
+    }
+    return true;
+  },
+
+  removeUserOrganization: async (id, orgId) => {
+    const userOrganizations = get().userOrganizations;
+    set({
+      userOrganizations: userOrganizations.setMeta(id).setLoading(),
+    });
+
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.removeUserFromOrganization(id, orgId),
+    );
+    if (error) {
+      if (get().userOrganizations.meta === id) {
+        set({
+          userOrganizations: userOrganizations.setError(message),
+        });
+      }
+      showNotification({
+        type: "error",
+        message: message ?? "Failed to remove user from organization",
+      });
+      return false;
+    }
+
+    showNotification({
+      type: "success",
+      message: data?.message ?? message ?? "User removed from organization",
+    });
+    if (get().userOrganizations.meta === id) {
+      await get().getUserOrganizations(id);
+    }
+    return true;
+  },
+
   getOutboxEvents: async (query) => {
     const outboxEvents = get().outboxEvents;
     set({
@@ -1095,7 +1477,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       outboxEventsQuery: query ?? {},
     });
 
-    const { data, error, message } = await Service.admin.getOutboxEvents(query);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getOutboxEvents(query),
+    );
     if (error) {
       set({
         outboxEvents: outboxEvents.setError(message),
@@ -1110,8 +1495,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     const selected = get().selectedOutboxEvent;
     set({ selectedOutboxEvent: selected.setLoading() });
 
-    const { data, error, message } =
-      await Service.admin.getOutboxEvent(eventId);
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getOutboxEvent(eventId),
+    );
     if (error) {
       set({
         selectedOutboxEvent: selected.setError(message),

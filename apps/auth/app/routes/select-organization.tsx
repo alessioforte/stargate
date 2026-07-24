@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router";
 import {
   Alert,
@@ -17,8 +17,8 @@ import {
   redirectToReturnTo,
 } from "@/lib/auth-flow";
 import { useTranslations } from "@/i18n";
-import services from "@/services";
 import type { AccountOrganization } from "@/services/types";
+import useStore from "@/store";
 import { useRouterLike } from "../../lib/navigation";
 import classes from "./select-organization.module.css";
 
@@ -35,11 +35,13 @@ export default function SelectOrganization() {
   const [searchParams] = useSearchParams();
   const returnTo = getReturnTo(searchParams);
 
-  const [organizations, setOrganizations] = useState<
-    AccountOrganization[] | null
-  >(null);
-  const [error, setError] = useState<string | null>(null);
-  const [switching, setSwitching] = useState<string | null>(null);
+  const organizations = useStore((state) => state.accountOrganizations);
+  const error = useStore((state) => state.organizationError);
+  const switching = useStore((state) => state.organizationSwitchingId);
+  const loadAccountOrganizations = useStore(
+    (state) => state.loadAccountOrganizations,
+  );
+  const switchOrganization = useStore((state) => state.switchOrganization);
   const startedRef = useRef(false);
 
   const finishLogin = () => {
@@ -51,39 +53,29 @@ export default function SelectOrganization() {
     if (startedRef.current) return;
     startedRef.current = true;
 
-    services.auth.getOrganizations().then((res) => {
-      if (res.error || !res.data) {
+    loadAccountOrganizations().then((result) => {
+      if (result.status === "error") {
         // No valid session (deep link or expired login): back to login.
         router.replace("/login");
         return;
       }
-      if (res.data.organizations.length <= 1) {
+      if (result.organizations.length <= 1) {
         finishLogin();
-        return;
       }
-      setOrganizations(res.data.organizations);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelect = async (org: AccountOrganization) => {
     if (switching) return;
-    setError(null);
 
     if (org.active) {
       finishLogin();
       return;
     }
 
-    setSwitching(org.id);
-    const res = await services.auth.switchOrganization(org.id);
-    setSwitching(null);
-
-    if (res.error) {
-      setError(res.message ?? t("error"));
-      return;
-    }
-    finishLogin();
+    const result = await switchOrganization(org.id);
+    if (result.status === "success") finishLogin();
   };
 
   return (

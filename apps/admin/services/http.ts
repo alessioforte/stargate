@@ -1,4 +1,5 @@
 import axios, { type AxiosRequestConfig, type AxiosError } from "axios";
+import type { ApiMessageParams } from "./types";
 import { TokenManager } from "./token-manager";
 
 export interface Response<T> {
@@ -7,12 +8,20 @@ export interface Response<T> {
   data: T | null;
   headers?: unknown;
   status?: number;
+  code?: string;
+  type?: string;
+  link?: string;
+  params?: ApiMessageParams;
 }
 
 interface ErrorResponse {
   error?: string;
   message?: string;
   error_description?: string;
+  code?: string;
+  type?: string;
+  link?: string;
+  params?: ApiMessageParams;
 }
 
 export class Http {
@@ -125,6 +134,10 @@ export class Http {
       data: null,
       status: err.response?.status,
       headers: err.response?.headers || null,
+      code: data?.code ?? data?.error,
+      type: data?.type,
+      link: data?.link,
+      params: data?.params,
     };
   }
 

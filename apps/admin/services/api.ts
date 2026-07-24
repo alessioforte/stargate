@@ -2,6 +2,7 @@ import type { AxiosRequestConfig } from "axios";
 import { Http, type Response as HttpResponse } from "./http";
 import type {
   AccessControlRulesResponse,
+  ApiMessageCatalog,
   AdminHealth,
   AdminKey,
   ApiKey,
@@ -67,6 +68,13 @@ export default class AdminApiService {
 
   private pathParam(value: string) {
     return encodeURIComponent(value);
+  }
+
+  async getApiMessages(locale: string) {
+    return this.http.request<ApiMessageCatalog>({
+      url: `/i18n/${this.pathParam(locale)}`,
+      method: "GET",
+    });
   }
 
   async getAdminHealth() {

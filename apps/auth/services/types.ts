@@ -3,6 +3,21 @@ export interface LoginRequest {
   password: string;
 }
 
+export type ApiMessageParams = Record<string, string | number | boolean | null>;
+
+export interface ApiMessages {
+  errors: Record<string, string>;
+  messages: Record<string, string>;
+}
+
+export interface ApiMessageCatalog {
+  schema: "stargate/i18n/v1";
+  locale: string;
+  fallbackLocale: string;
+  version: string;
+  messages: ApiMessages;
+}
+
 export type OtpMethod = "email";
 export type MfaMode = "off" | "optional" | "required";
 
@@ -41,6 +56,7 @@ export interface OtpChallengeResponse {
 export interface GeneralResponse {
   message: string;
   code: string;
+  params?: ApiMessageParams;
 }
 
 export interface SignupVerificationResponse {
