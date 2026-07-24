@@ -68,6 +68,7 @@ import {
   registerApiMessageCatalog,
   resolveApiMessage,
 } from "@/i18n/api-messages";
+import { translate } from "@/i18n";
 
 const initialState: State = {
   adminError: null,
@@ -137,6 +138,26 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function notificationText(
+  locale: string,
+  key: string,
+  values?: Record<string, string | number>,
+) {
+  return translate(locale, `notifications.${key}`, values);
+}
+
+function showStoreNotification(
+  locale: string,
+  type: "error" | "success",
+  message: string,
+) {
+  showNotification({
+    type,
+    title: translate(locale, type),
+    message,
+  });
+}
+
 async function localizedApiResponse<T>(
   locale: string,
   request: Promise<ApiResponse<T>>,
@@ -176,7 +197,7 @@ async function localizedApiResponse<T>(
       locale,
       response.error ? "errors" : "messages",
       response,
-      response.message ?? "Request failed",
+      response.message ?? notificationText(locale, "requestFailed"),
     ),
   };
 }
@@ -196,7 +217,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       clearOAuthRequest();
       return {
         status: "error",
-        message: "Invalid OAuth state. Start sign in again.",
+        message: notificationText(get().language, "invalidOAuthState"),
       };
     }
 
@@ -208,7 +229,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         } catch (error: unknown) {
           return {
             status: "error",
-            message: errorMessage(error, "Unable to restart sign in."),
+            message: errorMessage(
+              error,
+              notificationText(get().language, "unableToRestartSignIn"),
+            ),
           };
         }
       }
@@ -218,14 +242,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         status: "error",
         message:
           params.errorDescription ??
-          `OAuth authorization failed: ${params.error}`,
+          notificationText(get().language, "oauthAuthorizationFailed", {
+            error: params.error,
+          }),
       };
     }
 
     if (!params.code) {
       return {
         status: "error",
-        message: "Missing OAuth authorization code.",
+        message: notificationText(
+          get().language,
+          "missingOAuthAuthorizationCode",
+        ),
       };
     }
 
@@ -244,7 +273,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       clearTokens();
       return {
         status: "error",
-        message: errorMessage(error, "OAuth callback failed."),
+        message: errorMessage(
+          error,
+          notificationText(get().language, "oauthCallbackFailed"),
+        ),
       };
     }
   },
@@ -288,7 +320,9 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
           return { status: "redirecting" };
         }
 
-        const message = response.message ?? "Admin health check failed";
+        const message =
+          response.message ??
+          notificationText(get().language, "adminHealthCheckFailed");
         set({
           adminError: message,
           adminReturnPath: returnPath,
@@ -305,7 +339,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       });
       return { status: "ready" };
     } catch (error: unknown) {
-      const message = errorMessage(error, "Unable to start admin auth");
+      const message = errorMessage(
+        error,
+        notificationText(get().language, "unableToStartAdminAuth"),
+      );
       set({
         adminError: message,
         adminReturnPath: returnPath,
@@ -326,7 +363,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     try {
       await logoutAndRedirect(returnPath);
     } catch (error: unknown) {
-      const message = errorMessage(error, "Unable to restart admin auth");
+      const message = errorMessage(
+        error,
+        notificationText(get().language, "unableToRestartAdminAuth"),
+      );
       set({
         adminError: message,
         adminReturnPath: returnPath,
@@ -347,7 +387,10 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       await redirectToHostedLogin(returnPath);
       return { status: "redirecting" };
     } catch (error: unknown) {
-      const message = errorMessage(error, "Unable to start admin auth");
+      const message = errorMessage(
+        error,
+        notificationText(get().language, "unableToStartAdminAuth"),
+      );
       set({
         adminError: message,
         adminReturnPath: returnPath,
@@ -400,19 +443,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ adminKeys: adminKeys.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to create admin key",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "adminKeyCreateFailed"),
+      );
       return null;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Admin key created successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "adminKeyCreated"),
+    );
     get().getAdminKeys();
     return data;
   },
@@ -432,19 +475,20 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ adminKeys: adminKeys.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update admin key permissions",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "adminKeyPermissionsUpdateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Admin key permissions updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "adminKeyPermissionsUpdated"),
+    );
 
     get().getAdminKeys();
   },
@@ -461,19 +505,21 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ adminKeys: adminKeys.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to revoke admin key",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "adminKeyRevokeFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: data?.message ?? message ?? "Admin key revoked successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "adminKeyRevoked"),
+    );
 
     get().getAdminKeys();
   },
@@ -506,19 +552,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to create API key",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "apiKeyCreateFailed"),
+      );
       return null;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "API key created successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "apiKeyCreated"),
+    );
     get().getApiKeys();
     return data;
   },
@@ -535,19 +581,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update API key attrs",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "apiKeyAttrsUpdateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "API key attrs updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "apiKeyAttrsUpdated"),
+    );
 
     get().getApiKeys();
   },
@@ -564,19 +610,21 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to revoke API key",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "apiKeyRevokeFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: data?.message ?? message ?? "API key revoked successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "apiKeyRevoked"),
+    );
 
     get().getApiKeys();
   },
@@ -593,19 +641,21 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ apiKeys: apiKeys.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to delete API key",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "apiKeyDeleteFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: data?.message ?? message ?? "API key deleted successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "apiKeyDeleted"),
+    );
 
     get().getApiKeys();
   },
@@ -636,19 +686,20 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ configuration: configurationItem.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update gateway configuration",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "gatewayConfigurationUpdateFailed"),
+      );
       return false;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Gateway configuration updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "gatewayConfigurationUpdated"),
+    );
 
     set({ configuration: configurationItem.setSuccess(configuration) });
     return true;
@@ -688,11 +739,11 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
 
     if (error) {
       set({ accessControlRules: accessControlRules.setError(message) });
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to save access control policies",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? translate(get().language, "failedToSaveAccessControlRules"),
+      );
       return null;
     }
 
@@ -703,11 +754,11 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       ),
     });
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Access control policies saved successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      translate(get().language, "rulesSaved"),
+    );
 
     return data;
   },
@@ -790,19 +841,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to create OAuth client",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "oauthClientCreateFailed"),
+      );
       return null;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "OAuth client created successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "oauthClientCreated"),
+    );
     get().getOAuthClients();
     return data;
   },
@@ -822,19 +873,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update OAuth client",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "oauthClientUpdateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "OAuth client updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "oauthClientUpdated"),
+    );
 
     get().getOAuthClients();
   },
@@ -851,19 +902,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to enable OAuth client",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "oauthClientEnableFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "OAuth client enabled successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "oauthClientEnabled"),
+    );
 
     get().getOAuthClients();
   },
@@ -880,19 +931,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to disable OAuth client",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "oauthClientDisableFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "OAuth client disabled successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "oauthClientDisabled"),
+    );
 
     get().getOAuthClients();
   },
@@ -909,19 +960,21 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to delete OAuth client",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "oauthClientDeleteFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: data?.message ?? message ?? "OAuth client deleted successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "oauthClientDeleted"),
+    );
 
     get().getOAuthClients();
   },
@@ -940,19 +993,20 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ oauthClients: oauthClients.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to rotate OAuth client secret",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "oauthClientSecretRotateFailed"),
+      );
       return null;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "OAuth client secret rotated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "oauthClientSecretRotated"),
+    );
 
     get().getOAuthClients();
     return data;
@@ -1006,19 +1060,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ organizations: organizations.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to create organization",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "organizationCreateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Organization created successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "organizationCreated"),
+    );
     get().getOrganizations();
   },
 
@@ -1037,19 +1091,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ organizations: organizations.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update organization",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "organizationUpdateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Organization updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "organizationUpdated"),
+    );
 
     get().getOrganizations();
   },
@@ -1098,19 +1152,20 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ serviceAccounts: serviceAccounts.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to create service account",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "serviceAccountCreateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Service account created successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "serviceAccountCreated"),
+    );
     get().getServiceAccounts();
   },
 
@@ -1129,19 +1184,20 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ serviceAccounts: serviceAccounts.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update service account",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "serviceAccountUpdateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "Service account updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "serviceAccountUpdated"),
+    );
 
     get().getServiceAccounts();
   },
@@ -1158,20 +1214,22 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ serviceAccounts: serviceAccounts.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to delete service account",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "serviceAccountDeleteFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message:
-        data?.message ?? message ?? "Service account deleted successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "serviceAccountDeleted"),
+    );
 
     get().getServiceAccounts();
   },
@@ -1233,19 +1291,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ users: users.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to create user",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "userCreateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "User created successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "userCreated"),
+    );
     get().getUsers(get().usersQuery);
   },
 
@@ -1261,19 +1319,21 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ users: users.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to send user invitation",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "userInvitationSendFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: data?.message ?? message ?? "User invitation sent successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "userInvitationSent"),
+    );
     get().getUsers(get().usersQuery);
   },
 
@@ -1289,19 +1349,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ users: users.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update user",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "userUpdateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "User updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "userUpdated"),
+    );
 
     get().getUsers(get().usersQuery);
   },
@@ -1318,19 +1378,21 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ users: users.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to delete user",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "userDeleteFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: data?.message ?? message ?? "User deleted successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "userDeleted"),
+    );
 
     get().getUsers(get().usersQuery);
   },
@@ -1347,19 +1409,19 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (error) {
       set({ users: users.setError(message) });
 
-      showNotification({
-        type: "error",
-        title: "Error",
-        message: message ?? "Failed to update user attrs",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "userAttrsUpdateFailed"),
+      );
       return;
     }
 
-    showNotification({
-      type: "success",
-      title: "Success",
-      message: "User attrs updated successfully",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "userAttrsUpdated"),
+    );
 
     get().getUsers(get().usersQuery);
   },
@@ -1383,10 +1445,12 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       set({
         userOrganizations: userOrganizations.setError(message),
       });
-      showNotification({
-        type: "error",
-        message: message ?? "Failed to load user organizations",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "userOrganizationsLoadFailed"),
+      );
       return;
     }
 
@@ -1424,10 +1488,12 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
           userOrganizations: userOrganizations.setError(message),
         });
       }
-      showNotification({
-        type: "error",
-        message: message ?? "Failed to update user organization",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "userOrganizationUpdateFailed"),
+      );
       return false;
     }
 
@@ -1453,17 +1519,22 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
           userOrganizations: userOrganizations.setError(message),
         });
       }
-      showNotification({
-        type: "error",
-        message: message ?? "Failed to remove user from organization",
-      });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ??
+          notificationText(get().language, "userOrganizationRemoveFailed"),
+      );
       return false;
     }
 
-    showNotification({
-      type: "success",
-      message: data?.message ?? message ?? "User removed from organization",
-    });
+    showStoreNotification(
+      get().language,
+      "success",
+      data?.message ??
+        message ??
+        notificationText(get().language, "userOrganizationRemoved"),
+    );
     if (get().userOrganizations.meta === id) {
       await get().getUserOrganizations(id);
     }
