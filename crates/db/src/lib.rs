@@ -33,4 +33,4 @@ pub mod service;
     all(feature = "sqlite", not(feature = "postgres")),
     all(feature = "postgres", not(feature = "sqlite")),
 ))]
-pub use db::DbStore;
+pub use db::{DbStore, InstanceBootstrapResult};

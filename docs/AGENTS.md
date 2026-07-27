@@ -440,6 +440,9 @@ logical outbox columns.
 | `MFA_REQUIRED_FOR_SUPER_ADMIN` | true | Requires MFA for super-admin users when `MFA_MODE=optional` |
 | `MFA_ADMIN_STEP_UP_REQUIRED` | false | Requires an authenticated `admin` MFA step-up marker for super-admin user-session admin grants |
 | `MFA_STEP_UP_TTL_SECS` | 300 | TTL for authenticated MFA step-up markers |
+| `ADMIN_OAUTH_CLIENT_ID` | stargate_admin | Reserved public OAuth client provisioned for the Admin UI |
+| `ADMIN_OAUTH_REDIRECT_URI` | derived | Exact Admin UI callback; falls back through `ADMIN_PUBLIC_URL`, `OAUTH_BASE_URL`, or `JWT_ISSUER` |
+| `ADMIN_PUBLIC_URL` | - | Public Admin UI origin used to derive the bootstrap callback |
 | `PASSWORD_POLICY_*` | see `.env.example` | Global password policy (length, classes, banned list, expiry, history); per-org override via `organizations.attrs.password_policy`. Guide: `docs/password-policies-guide.md` |
 | `ARGON2_MEMORY_KIB` | 19456 | Argon2id memory cost; hash upgrades apply on next login |
 | `ARGON2_ITERATIONS` | 2 | Argon2id time cost |
@@ -465,17 +468,24 @@ docker build --build-arg STARGATE_PROFILE=edge -t stargate:edge .
 docker build --build-arg STARGATE_PROFILE=cluster -t stargate:cluster .
 ```
 
-## CLI: Bootstrap Super-Admin
+## CLI: Bootstrap Instance
 
 ```bash
 cargo run -- admin bootstrap \
   --email admin@example.com \
   --generate-password \
   --name "Admin User" \
-  --nickname admin
+  --nickname admin \
+  --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 ```
 
-Flags: `--password <val>`, `--password-stdin`, `--generate-password`
+The command atomically creates the first super-admin and the reserved Admin UI
+OAuth client. It is idempotent when both resources match. If the administrator
+already exists but the client is missing, omit the credential/profile flags and
+rerun with the OAuth settings.
+
+Flags: `--password <val>`, `--password-stdin`, `--generate-password`,
+`--oauth-client-id`, `--oauth-redirect-uri`
 
 ## CLI: Generate Internal-Context Key Material
 

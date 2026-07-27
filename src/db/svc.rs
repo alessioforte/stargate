@@ -2,7 +2,7 @@ use super::service;
 
 use anyhow::Result;
 use db::{
-    DbStore,
+    DbStore, InstanceBootstrapResult,
     ent::{
         AdminKey, ApiKey, ApiKeyAuth, Credential, CredentialHistory, CredentialType, OAuthClient,
         OAuthConsent, OrgMember, OrgMembership, Organization, OutboxEventFilter, OutboxEventRow,
@@ -11,6 +11,18 @@ use db::{
 };
 
 // ── Users ───────────────────────────────────────────────────────────────────
+
+pub async fn bootstrap_instance(
+    profile: Option<Profile>,
+    password_hash: Option<&str>,
+    admin_client: OAuthClient,
+    ctx: TrustedAuditContext,
+) -> Result<InstanceBootstrapResult> {
+    service()
+        .bootstrap_instance(profile, password_hash, admin_client, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error bootstrapping Stargate: {:?}", e))
+}
 
 pub async fn create_user(
     profile: Profile,
@@ -22,18 +34,6 @@ pub async fn create_user(
         .create_user(profile, credential_type, value, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error creating user: {:?}", e))
-}
-
-pub async fn create_super_admin_user(
-    profile: Profile,
-    credential_type: CredentialType,
-    value: &str,
-    ctx: TrustedAuditContext,
-) -> Result<User> {
-    service()
-        .create_super_admin_user(profile, credential_type, value, ctx)
-        .await
-        .inspect_err(|e| tracing::error!("Error creating super admin user: {:?}", e))
 }
 
 pub async fn get_user_by_username(username: &str) -> Result<Option<User>> {

@@ -121,7 +121,7 @@ fn default_mfa_method() -> Option<OtpMethod> {
 }
 
 fn mfa_required_for_super_admin() -> bool {
-    crate::etc::env::bool_or("MFA_REQUIRED_FOR_SUPER_ADMIN", true)
+    crate::etc::env::bool_or("MFA_REQUIRED_FOR_SUPER_ADMIN", false)
 }
 
 fn parse_method(value: &str) -> Option<OtpMethod> {

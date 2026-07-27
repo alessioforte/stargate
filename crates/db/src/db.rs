@@ -6,9 +6,22 @@ use crate::ent::{
 use anyhow::Result;
 use serde_json::Value as JsonValue;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct InstanceBootstrapResult {
+    pub super_admin_created: bool,
+    pub oauth_client_created: bool,
+}
+
 #[async_trait::async_trait]
 pub trait DbStore {
     // ── Users ───────────────────────────────────────────────────────────────
+    async fn bootstrap_instance(
+        &self,
+        profile: Option<Profile>,
+        password_hash: Option<&str>,
+        admin_client: OAuthClient,
+        ctx: TrustedAuditContext,
+    ) -> Result<InstanceBootstrapResult>;
     async fn create_user(
         &self,
         user: Profile,

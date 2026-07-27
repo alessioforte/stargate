@@ -21,7 +21,16 @@ VITE_OAUTH_CLIENT_ID=stargate_admin
 VITE_OAUTH_REDIRECT_URI=http://localhost:3011/auth/callback
 ```
 
-The `stargate_admin` OAuth client should be a public browser client:
+Provision the client together with the first administrator:
+
+```bash
+cargo run --features edge -- admin bootstrap \
+  --email admin@localhost \
+  --generate-password \
+  --oauth-redirect-uri http://localhost:3011/auth/callback
+```
+
+The resulting `stargate_admin` OAuth client is a public browser client:
 
 ```json
 {
@@ -33,7 +42,8 @@ The `stargate_admin` OAuth client should be a public browser client:
   "scopes": ["openid", "email", "profile", "offline_access"],
   "attrs": {
     "first_party": true,
-    "trusted": true
+    "trusted": true,
+    "system": true
   }
 }
 ```

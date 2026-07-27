@@ -4,7 +4,7 @@ use super::repo::{
     SuperAdminRepository, UserRepository,
 };
 use crate::backend::Pool;
-use crate::db::DbStore;
+use crate::db::{DbStore, InstanceBootstrapResult};
 use crate::ent::{
     AdminKey, ApiKey, ApiKeyAuth, AuditOperation, AuditResource, AuditScopeSelector, Credential,
     CredentialHistory, CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership,
@@ -326,6 +326,47 @@ fn ensure_super_admin_bootstrap_context(context: &TrustedAuditContext) -> Result
     Ok(())
 }
 
+fn oauth_client_bootstrap_mismatches(
+    existing: &OAuthClient,
+    desired: &OAuthClient,
+) -> Vec<&'static str> {
+    let mut fields = Vec::new();
+    if existing.client_secret_hash != desired.client_secret_hash {
+        fields.push("client_secret");
+    }
+    if existing.name != desired.name {
+        fields.push("name");
+    }
+    if existing.description != desired.description {
+        fields.push("description");
+    }
+    if existing.enabled != desired.enabled {
+        fields.push("enabled");
+    }
+    if existing.token_endpoint_auth_method != desired.token_endpoint_auth_method {
+        fields.push("token_endpoint_auth_method");
+    }
+    if existing.grant_types != desired.grant_types {
+        fields.push("grant_types");
+    }
+    if existing.response_types != desired.response_types {
+        fields.push("response_types");
+    }
+    if existing.redirect_uris != desired.redirect_uris {
+        fields.push("redirect_uris");
+    }
+    if existing.scopes != desired.scopes {
+        fields.push("scopes");
+    }
+    if existing.audiences != desired.audiences {
+        fields.push("audiences");
+    }
+    if existing.attrs != desired.attrs {
+        fields.push("attrs");
+    }
+    fields
+}
+
 fn user_changed_fields(before: &User, after: &User) -> Vec<&'static str> {
     let mut fields = Vec::new();
     if before.email != after.email {
@@ -549,6 +590,113 @@ pub async fn init(conn: &str) -> Result<Service> {
 #[async_trait::async_trait]
 impl DbStore for Service {
     // ── Users ───────────────────────────────────────────────────────────────
+
+    async fn bootstrap_instance(
+        &self,
+        profile: Option<Profile>,
+        password_hash: Option<&str>,
+        admin_client: OAuthClient,
+        context: TrustedAuditContext,
+    ) -> Result<InstanceBootstrapResult> {
+        ensure_super_admin_bootstrap_context(&context)?;
+        let mut tx = self.pool.begin().await?;
+
+        let existing_client = self
+            .oauth_client
+            .get_by_client_id(&mut *tx, &admin_client.client_id)
+            .await?;
+        if let Some(existing) = existing_client.as_ref() {
+            let mismatches = oauth_client_bootstrap_mismatches(existing, &admin_client);
+            ensure!(
+                mismatches.is_empty(),
+                "OAuth client '{}' already exists with incompatible fields: {}",
+                admin_client.client_id,
+                mismatches.join(", ")
+            );
+        }
+
+        let occurred_at = Utc::now();
+        let super_admin_exists = self.super_admin.count_active(&mut *tx).await? > 0;
+        let mut super_admin_created = false;
+
+        if !super_admin_exists {
+            let profile = profile
+                .context("bootstrap requires --email and a password when no super admin exists")?;
+            let password_hash = password_hash
+                .context("bootstrap requires --email and a password when no super admin exists")?;
+            ensure!(
+                self.user
+                    .get_by_username(&mut *tx, &profile.email)
+                    .await?
+                    .is_none(),
+                "user with email '{}' already exists",
+                profile.email
+            );
+
+            let user = User::new(profile.email, profile.nickname)
+                .given_name(profile.given_name)
+                .family_name(profile.family_name)
+                .picture(profile.picture)
+                .phone_number(profile.phone_number)
+                .attrs(profile.attrs);
+            let user_id = user.id.clone();
+            let record = self.user.create(&mut tx, user).await?;
+            self.credential
+                .create(&mut tx, &user_id, CredentialType::Password, password_hash)
+                .await?;
+            let super_admin = self.super_admin.create(&mut tx, &user_id).await?;
+
+            let user_event = build_outbox_event(
+                &context,
+                occurred_at,
+                AuditResource::new("user", &record.id),
+                "user.created",
+                AuditOperation::Create,
+                None,
+                Some(snapshot(UserAuditSnapshot::from(&record))?),
+                serde_json::json!({ "source": "cli_bootstrap" }),
+            )?;
+            let super_admin_event = build_outbox_event(
+                &context,
+                occurred_at,
+                AuditResource::new("super_admin", &record.id),
+                "super_admin.granted",
+                AuditOperation::Create,
+                None,
+                Some(snapshot(SuperAdminAuditSnapshot::from(&super_admin))?),
+                serde_json::json!({ "source": "cli_bootstrap" }),
+            )?;
+            self.outbox.insert(&mut tx, &user_event, None).await?;
+            self.outbox
+                .insert(&mut tx, &super_admin_event, None)
+                .await?;
+            super_admin_created = true;
+        }
+
+        let oauth_client_created = if existing_client.is_none() {
+            let client = self.oauth_client.create(&mut tx, admin_client).await?;
+            let event = build_outbox_event(
+                &context,
+                occurred_at,
+                AuditResource::new("oauth_client", &client.client_id),
+                "oauth_client.created",
+                AuditOperation::Create,
+                None,
+                Some(snapshot(OAuthClientAuditSnapshot::from(&client))?),
+                serde_json::json!({ "source": "cli_bootstrap" }),
+            )?;
+            self.outbox.insert(&mut tx, &event, None).await?;
+            true
+        } else {
+            false
+        };
+
+        tx.commit().await?;
+        Ok(InstanceBootstrapResult {
+            super_admin_created,
+            oauth_client_created,
+        })
+    }
 
     async fn create_user(
         &self,
@@ -1815,8 +1963,8 @@ mod sqlite_tests {
     use super::*;
     use crate::db::DbStore;
     use crate::ent::{
-        CredentialType, Organization, Profile, TrustedAdminActor, TrustedAuditContext,
-        TrustedAuditRequest, User,
+        CredentialType, Organization, Profile, TrustedAdminActor, TrustedAuditBoundary,
+        TrustedAuditContext, TrustedAuditRequest, TrustedBackgroundActor, User,
     };
 
     async fn test_service() -> Service {
@@ -1834,6 +1982,41 @@ mod sqlite_tests {
         TrustedAuditContext::admin_control_plane(
             TrustedAdminActor::admin("01JZ000000000000000000000A"),
             TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None),
+        )
+    }
+
+    fn bootstrap_ctx() -> TrustedAuditContext {
+        TrustedAuditContext::background(
+            TrustedAuditBoundary::control_plane(),
+            TrustedBackgroundActor::system(None),
+        )
+    }
+
+    fn admin_bootstrap_client(redirect_uri: &str) -> OAuthClient {
+        OAuthClient::new(
+            "stargate_admin".to_string(),
+            None,
+            "Stargate Admin".to_string(),
+            Some("Built-in public client for the Stargate Admin UI".to_string()),
+            "none".to_string(),
+            vec![
+                "authorization_code".to_string(),
+                "refresh_token".to_string(),
+            ],
+            vec!["code".to_string()],
+            vec![redirect_uri.to_string()],
+            vec![
+                "openid".to_string(),
+                "email".to_string(),
+                "profile".to_string(),
+                "offline_access".to_string(),
+            ],
+            Vec::new(),
+            serde_json::json!({
+                "first_party": true,
+                "trusted": true,
+                "system": true,
+            }),
         )
     }
 
@@ -2363,6 +2546,130 @@ mod sqlite_tests {
             !serde_json::to_string(&events)
                 .expect("serialize events")
                 .contains("BOOTSTRAP_PASSWORD_HASH_SECRET")
+        );
+    }
+
+    #[tokio::test]
+    async fn instance_bootstrap_is_atomic_and_idempotent() {
+        let svc = test_service().await;
+        let redirect_uri = "https://identity.example.com/stargate/auth/callback";
+        let result = svc
+            .bootstrap_instance(
+                Some(Profile::new(
+                    "root@example.com".to_string(),
+                    "root".to_string(),
+                )),
+                Some("BOOTSTRAP_PASSWORD_HASH_SECRET"),
+                admin_bootstrap_client(redirect_uri),
+                bootstrap_ctx(),
+            )
+            .await
+            .expect("bootstrap instance");
+
+        assert!(result.super_admin_created);
+        assert!(result.oauth_client_created);
+        assert!(svc.super_admin_exists().await.expect("query super admin"));
+        let client = svc
+            .get_oauth_client_by_client_id("stargate_admin")
+            .await
+            .expect("query OAuth client")
+            .expect("OAuth client exists");
+        assert_eq!(client.redirect_uris.as_slice(), &[redirect_uri]);
+
+        let events = audit_payloads(&svc).await;
+        assert_eq!(events.len(), 3);
+        assert!(
+            events
+                .iter()
+                .all(|event| event["metadata"]["source"] == "cli_bootstrap")
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| event["occurred_at"] == events[0]["occurred_at"])
+        );
+
+        let second = svc
+            .bootstrap_instance(
+                None,
+                None,
+                admin_bootstrap_client(redirect_uri),
+                bootstrap_ctx(),
+            )
+            .await
+            .expect("repeat bootstrap");
+        assert_eq!(
+            second,
+            InstanceBootstrapResult {
+                super_admin_created: false,
+                oauth_client_created: false,
+            }
+        );
+        assert_eq!(audit_payloads(&svc).await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn instance_bootstrap_repairs_missing_admin_oauth_client() {
+        let svc = test_service().await;
+        svc.create_super_admin_user(
+            Profile::new("root@example.com".to_string(), "root".to_string()),
+            CredentialType::Password,
+            "BOOTSTRAP_PASSWORD_HASH_SECRET",
+            bootstrap_ctx(),
+        )
+        .await
+        .expect("bootstrap super admin");
+
+        let result = svc
+            .bootstrap_instance(
+                None,
+                None,
+                admin_bootstrap_client("https://identity.example.com/stargate/auth/callback"),
+                bootstrap_ctx(),
+            )
+            .await
+            .expect("repair OAuth client");
+
+        assert!(!result.super_admin_created);
+        assert!(result.oauth_client_created);
+        assert!(
+            svc.get_oauth_client_by_client_id("stargate_admin")
+                .await
+                .expect("query OAuth client")
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn incompatible_admin_oauth_client_rolls_back_first_admin() {
+        let svc = test_service().await;
+        svc.create_oauth_client(
+            admin_bootstrap_client("https://wrong.example.com/callback"),
+            trusted_ctx(),
+        )
+        .await
+        .expect("create incompatible client");
+
+        let error = svc
+            .bootstrap_instance(
+                Some(Profile::new(
+                    "root@example.com".to_string(),
+                    "root".to_string(),
+                )),
+                Some("BOOTSTRAP_PASSWORD_HASH_SECRET"),
+                admin_bootstrap_client("https://identity.example.com/stargate/auth/callback"),
+                bootstrap_ctx(),
+            )
+            .await
+            .expect_err("incompatible client must fail");
+
+        assert!(error.to_string().contains("redirect_uris"));
+        assert!(!svc.super_admin_exists().await.expect("query super admin"));
+        assert!(
+            svc.get_user_by_username("root@example.com")
+                .await
+                .expect("query rolled-back user")
+                .is_none()
         );
     }
 
