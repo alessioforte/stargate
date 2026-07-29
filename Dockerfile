@@ -90,8 +90,9 @@ ARG STARGATE_PROFILE
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
-    groupadd --system stargate && \
-    useradd --system --gid stargate --home-dir /app stargate
+    groupadd --gid 10001 stargate && \
+    useradd --uid 10001 --gid 10001 --no-create-home \
+        --home-dir /app --shell /usr/sbin/nologin stargate
 
 WORKDIR /app
 RUN mkdir -p .stargate && chown stargate:stargate .stargate
@@ -103,7 +104,7 @@ COPY --from=auth-build --chown=stargate:stargate \
 COPY --from=mail-build --chown=stargate:stargate \
     /app/.stargate/transactional ./.stargate/transactional
 
-USER stargate
+USER 10001:10001
 EXPOSE 5050
 
 ENV RUST_LOG=info

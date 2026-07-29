@@ -1,15 +1,36 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ include "stargate.fullname" . }}-test-connection"
+  name: {{ printf "%s-test-connection" (include "stargate.fullname" .) | trunc 63 | trimSuffix "-" }}
   labels:
-    {{- include "stargate.labels" . | nindent 4 }}
+    {{- include "stargate.testLabels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": test
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: wget
-      image: busybox
-      command: ['wget']
-      args: ['{{ include "stargate.fullname" . }}:{{ .Values.service.port }}']
-  restartPolicy: Never
+      image: busybox:1.36.1
+      imagePullPolicy: IfNotPresent
+      command:
+        - wget
+      args:
+        - --quiet
+        - --timeout=10
+        - --tries=1
+        - --spider
+        - http://{{ include "stargate.fullname" . }}:{{ .Values.service.port }}/health
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL

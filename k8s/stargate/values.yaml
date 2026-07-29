@@ -1,140 +1,213 @@
-# Default values for stargate.
-# This chart defaults to the "edge" profile:
-# - single replica
-# - local sqlite + in-process memory state is acceptable
-# - intended for Raspberry Pi, edge, and other single-node deployments
+# Stargate Helm values.
 #
-# Switch to "cluster" only when you are using an image/runtime configured for
-# shared backends and you provide shared state services such as Redis/Postgres.
+# `edge` is a single-replica SQLite + in-memory deployment. `cluster` requires
+# an image compiled with STARGATE_PROFILE=cluster and shared PostgreSQL + Redis.
 deployment:
   mode: edge
+  annotations: {}
+  revisionHistoryLimit: 5
+  minReadySeconds: 0
+  strategy:
+    # Empty selects Recreate for edge and RollingUpdate for cluster.
+    type: ""
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
 
 replicaCount: 1
 
 image:
   repository: stargate
-  pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
   tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
+commonLabels: {}
 
 serviceAccount:
-  # Specifies whether a service account should be created
-  create: false
-  # Annotations to add to the service account
+  create: true
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
   name: ""
+  automountServiceAccountToken: false
 
 podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
 
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+containerPort: 5050
 terminationGracePeriodSeconds: 40
 
-podSecurityContext: {}
-  # fsGroup: 2000
-
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
-
 service:
-  # type: ClusterIP
-  type: LoadBalancer
+  type: ClusterIP
   port: 5050
+  annotations: {}
+  sessionAffinity: None
 
 ingress:
   enabled: false
-  className: "nginx"
+  className: ""
   annotations: {}
-    # kubernetes.io/ingress.class: nginx
-    # kubernetes.io/tls-acme: "true"
   hosts:
     - host: stargate.local
       paths:
         - path: /
           pathType: Prefix
   tls: []
-  #  - secretName: chart-example-tls
-  #    hosts:
-  #      - chart-example.local
 
-resources: {}
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+probes:
+  startup:
+    enabled: true
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 30
+  liveness:
+    enabled: true
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 20
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 6
 
 autoscaling:
   enabled: false
-  minReplicas: 1
-  maxReplicas: 100
+  minReplicas: 2
+  maxReplicas: 10
   targetCPUUtilizationPercentage: 80
-  # targetMemoryUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: null
+  behavior: {}
 
-nodeSelector: {}
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: null
 
-tolerations: []
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []
 
-affinity: {}
-
-persistentVolume:
-  enabled: true
-  accessModes:
-    - ReadWriteOnce
-
-persistentVolumeClaim:
-  enabled: true
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-
-volumes:
-  - name: stargate-pv
-    persistentVolumeClaim:
-      claimName: stargate-pvc
-
-volumeMounts:
-  - mountPath: /.stargate
-    name: stargate-pv
-
-configmap:
-  enabled: true
-  name: stargate-config
+# Non-confidential environment variables. Sensitive keys are rejected here;
+# put them in runtimeSecret instead.
+runtimeConfig:
+  create: true
+  existingConfigMap: ""
+  rolloutToken: ""
+  annotations: {}
   data:
-    # Cluster profile expects shared backends to be provided here.
-    # SERVER_SHUTDOWN_TIMEOUT_SECS: "25"
-    # AUDIT_REDIS_STREAM: "audit.raw"
-    # AUDIT_STREAM_MAXLEN: "100000"
-    # REDIS_URL: redis://redis.default.svc.cluster.local:6379
-    # POSTGRES_ENDPOINT: postgres.default.svc.cluster.local
-    # POSTGRES_DATABASE: stargate
-    # POSTGRES_USERNAME: stargate
-    # POSTGRES_PASSWORD: change-me
-    # SURREALDB_ENDPOINT: http://surrealdb-tikv.default.svc.cluster.local:8000
+    LOG_FILE_ENABLED: "false"
+    JWT_ALGORITHM: HS256
 
-livenessProbe:
+# Prefer an externally managed Secret in production. `stringData` exists for
+# local development and is retained in Helm release history.
+runtimeSecret:
+  create: false
+  existingSecret: ""
+  rolloutToken: ""
+  annotations: {}
+  stringData: {}
+
+# Stargate requires both files at startup. An existing ConfigMap must contain
+# keys matching `fileName` and `policiesFileName`.
+gatewayConfig:
+  create: true
+  existingConfigMap: ""
+  rolloutToken: ""
+  annotations: {}
+  mountPath: /etc/stargate
+  fileName: config.yaml
+  policiesFileName: policies
+  config: |
+    schema: stargate/v2alpha1
+  policies: ""
+
+# Edge-only state. No static PersistentVolume is created: a PVC uses the
+# cluster's default or selected StorageClass. The seed init container copies
+# the Admin UI, Auth UI, and mail assets into a new/existing claim.
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+  mountPath: /app/.stargate
+  seed:
+    enabled: true
+
+# Idempotent first-admin and Admin UI OAuth-client provisioning. The password
+# must be supplied by an existing Secret; it is never accepted in values.
+bootstrap:
   enabled: false
-  httpGet:
-    path: /health
-    port: http
-readinessProbe:
-  enabled: false
-  httpGet:
-    path: /health
-    port: http
+  email: ""
+  name: Stargate Admin
+  nickname: stargate-admin
+  oauthClientId: stargate_admin
+  oauthRedirectUri: ""
+  existingSecret: ""
+  passwordKey: password
+  rolloutToken: ""
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: null
+  annotations: {}
+  podAnnotations: {}
+
+command: []
+args: []
+lifecycle: {}
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+initContainers: []
+sidecars: []
+
+priorityClassName: ""
+runtimeClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

@@ -1,13 +1,16 @@
-{{ if .Values.configmap.enabled }}
+{{- if .Values.runtimeConfig.create }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Values.configmap.name }}
-  {{- if .Values.namespace }}
-  namespace: {{ .Values.namespace }}
+  name: {{ include "stargate.runtimeConfigName" . }}
+  labels:
+    {{- include "stargate.labels" . | nindent 4 }}
+  {{- with .Values.runtimeConfig.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
   {{- end }}
 data:
-  {{- range $key, $value := .Values.configmap.data }}
+  {{- range $key, $value := .Values.runtimeConfig.data }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
-{{ end }}
+{{- end }}

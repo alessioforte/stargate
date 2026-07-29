@@ -1,0 +1,78 @@
+# Example overrides for a production cluster deployment.
+# Replace hostnames, image, ingress, and NetworkPolicy selectors for your cluster.
+deployment:
+  mode: cluster
+
+replicaCount: 2
+
+image:
+  repository: registry.example.com/stargate
+  tag: 0.1.0-cluster
+
+persistence:
+  enabled: false
+
+runtimeConfig:
+  data:
+    LOG_FILE_ENABLED: "false"
+    JWT_ALGORITHM: HS256
+    JWT_ISSUER: https://identity.example.com
+    OAUTH_BASE_URL: https://identity.example.com
+    ADMIN_PUBLIC_URL: https://identity.example.com
+    ADMIN_APP_BASE_PATH: /stargate
+    AUTH_APP_BASE_PATH: /auth
+    TRUSTED_ORIGINS: https://identity.example.com
+    CORS_ORIGINS: https://identity.example.com
+    POSTGRES_ENDPOINT: postgres.database.svc.cluster.local:5432
+    POSTGRES_DATABASE: stargate
+    POSTGRES_USERNAME: stargate
+    REDIS_POOL_SIZE: "10"
+
+runtimeSecret:
+  existingSecret: stargate-runtime
+
+gatewayConfig:
+  config: |
+    schema: stargate/v2alpha1
+
+podDisruptionBudget:
+  enabled: true
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: stargate
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: identity.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: stargate-tls
+      hosts:
+        - identity.example.com
+
+bootstrap:
+  enabled: true
+  email: admin@example.com
+  oauthRedirectUri: https://identity.example.com/stargate/auth/callback
+  existingSecret: stargate-bootstrap
+
+# Enabling this policy without rules denies ingress and egress. These example
+# rules allow same-namespace ingress and all egress; restrict them further with
+# selectors/CIDRs that match the architecture's ingress, DNS, Postgres, Redis,
+# SMTP, upstream APIs, and telemetry endpoints.
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - {}

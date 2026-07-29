@@ -1,71 +1,189 @@
-{{- include "stargate.validateProfile" . }}
+{{- include "stargate.validateValues" . -}}
+{{- $podLabels := mergeOverwrite
+  (deepCopy (default (dict) .Values.podLabels))
+  (include "stargate.labels" . | fromYaml)
+-}}
+{{- $podAnnotations := deepCopy (default (dict) .Values.podAnnotations) -}}
+{{- if .Values.runtimeConfig.create -}}
+  {{- $_ := set $podAnnotations "checksum/runtime-config" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum) -}}
+{{- else if .Values.runtimeConfig.rolloutToken -}}
+  {{- $_ := set $podAnnotations "checksum/runtime-config" (.Values.runtimeConfig.rolloutToken | sha256sum) -}}
+{{- end -}}
+{{- if .Values.runtimeSecret.create -}}
+  {{- $_ := set $podAnnotations "checksum/runtime-secret" (include (print $.Template.BasePath "/secret.yaml") . | sha256sum) -}}
+{{- else if .Values.runtimeSecret.rolloutToken -}}
+  {{- $_ := set $podAnnotations "checksum/runtime-secret" (.Values.runtimeSecret.rolloutToken | sha256sum) -}}
+{{- end -}}
+{{- if .Values.gatewayConfig.create -}}
+  {{- $_ := set $podAnnotations "checksum/gateway-config" (include (print $.Template.BasePath "/gateway-configmap.yaml") . | sha256sum) -}}
+{{- else if .Values.gatewayConfig.rolloutToken -}}
+  {{- $_ := set $podAnnotations "checksum/gateway-config" (.Values.gatewayConfig.rolloutToken | sha256sum) -}}
+{{- end -}}
+{{- $strategyType := .Values.deployment.strategy.type -}}
+{{- if empty $strategyType -}}
+  {{- $strategyType = ternary "Recreate" "RollingUpdate" (eq .Values.deployment.mode "edge") -}}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "stargate.fullname" . }}
   labels:
     {{- include "stargate.labels" . | nindent 4 }}
+  {{- with .Values.deployment.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit }}
+  minReadySeconds: {{ .Values.deployment.minReadySeconds }}
+  strategy:
+    type: {{ $strategyType }}
+    {{- if eq $strategyType "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.deployment.strategy.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.deployment.strategy.rollingUpdate.maxUnavailable }}
+    {{- end }}
   selector:
     matchLabels:
       {{- include "stargate.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      labels:
+        {{- toYaml $podLabels | nindent 8 }}
+      {{- with $podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      labels:
-        {{- include "stargate.selectorLabels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "stargate.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "stargate.serviceAccountName" . }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      volumes:
-        {{- toYaml .Values.volumes | nindent 8 }}
-      containers:
-        - name: {{ .Chart.Name }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.runtimeClassName }}
+      runtimeClassName: {{ . | quote }}
+      {{- end }}
+      {{- if or (and .Values.persistence.enabled .Values.persistence.seed.enabled) .Values.initContainers }}
+      initContainers:
+        {{- if and .Values.persistence.enabled .Values.persistence.seed.enabled }}
+        - name: seed-image-assets
+          image: {{ include "stargate.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - cp -a /app/.stargate/. /stargate-data/
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           volumeMounts:
-            {{- toYaml .Values.volumeMounts | nindent 12 }}
+            - name: data
+              mountPath: /stargate-data
+        {{- end }}
+        {{- with .Values.initContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: stargate
+          image: {{ include "stargate.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: {{ .Values.containerPort }}
               protocol: TCP
           env:
             - name: STARGATE_RUNTIME_PROFILE
               value: {{ .Values.deployment.mode | quote }}
-            {{- range $key, $value := .Values.configmap.data }}
-            - name: {{ $key }}
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ $.Values.configmap.name }}
-                  key: {{ $key }}
+            - name: PORT
+              value: {{ .Values.containerPort | quote }}
+            - name: CONFIG_PATH
+              value: {{ .Values.gatewayConfig.mountPath | quote }}
+            - name: CONFIG_FILENAME
+              value: {{ .Values.gatewayConfig.fileName | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
-          
-          {{ if .Values.livenessProbe.enabled }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "stargate.runtimeConfigName" . }}
+            {{- if or .Values.runtimeSecret.create .Values.runtimeSecret.existingSecret }}
+            - secretRef:
+                name: {{ include "stargate.runtimeSecretName" . }}
+            {{- end }}
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: gateway-config
+              mountPath: {{ .Values.gatewayConfig.mountPath }}
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.probes.startup.enabled }}
+          startupProbe:
+            {{- omit .Values.probes.startup "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
           livenessProbe:
-            httpGet: {{ toYaml .Values.livenessProbe.httpGet | nindent 12 }}
-          {{ end }}
-
-          {{ if .Values.readinessProbe.enabled }}
+            {{- omit .Values.probes.liveness "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
           readinessProbe:
-            httpGet: {{ toYaml .Values.readinessProbe.httpGet | nindent 12 }}
-          {{ end }}
-
+            {{- omit .Values.probes.readiness "enabled" | toYaml | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+        {{- with .Values.sidecars }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: {{ include "stargate.gatewayConfigName" . }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.gatewayConfig.fileName }}
+                path: {{ .Values.gatewayConfig.fileName }}
+              - key: {{ .Values.gatewayConfig.policiesFileName }}
+                path: {{ .Values.gatewayConfig.policiesFileName }}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "stargate.persistenceClaimName" . }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -76,5 +194,9 @@ spec:
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}

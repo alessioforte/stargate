@@ -1,14 +1,21 @@
-{{- if .Values.persistentVolumeClaim.enabled }}
+{{- if and .Values.persistence.enabled (empty .Values.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Release.Name }}-pvc
+  name: {{ include "stargate.persistenceClaimName" . }}
+  labels:
+    {{- include "stargate.labels" . | nindent 4 }}
+  {{- with .Values.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
-    {{- range .Values.persistentVolumeClaim.accessModes }}
-    - {{ . }}
-    {{- end }}
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
   resources:
     requests:
-      storage: {{ .Values.persistentVolumeClaim.resources.requests.storage }}
+      storage: {{ .Values.persistence.size }}
 {{- end }}

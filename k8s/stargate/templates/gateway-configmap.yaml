@@ -1,0 +1,17 @@
+{{- if .Values.gatewayConfig.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stargate.gatewayConfigName" . }}
+  labels:
+    {{- include "stargate.labels" . | nindent 4 }}
+  {{- with .Values.gatewayConfig.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  {{ .Values.gatewayConfig.fileName }}: |
+    {{- tpl .Values.gatewayConfig.config . | nindent 4 }}
+  {{ .Values.gatewayConfig.policiesFileName }}: |
+    {{- tpl .Values.gatewayConfig.policies . | nindent 4 }}
+{{- end }}

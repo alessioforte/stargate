@@ -1,0 +1,97 @@
+{{- if .Values.bootstrap.enabled }}
+{{- include "stargate.validateValues" . -}}
+{{- $annotations := deepCopy (default (dict) .Values.bootstrap.annotations) -}}
+{{- $_ := set $annotations "helm.sh/hook" "post-install,post-upgrade" -}}
+{{- $_ := set $annotations "helm.sh/hook-weight" "10" -}}
+{{- $_ := set $annotations "helm.sh/hook-delete-policy" "before-hook-creation" -}}
+{{- if .Values.bootstrap.rolloutToken -}}
+  {{- $_ := set $annotations "checksum/bootstrap-secret" (.Values.bootstrap.rolloutToken | sha256sum) -}}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-bootstrap" (include "stargate.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "stargate.bootstrapLabels" . | nindent 4 }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.bootstrap.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.bootstrap.activeDeadlineSeconds }}
+  {{- if ne .Values.bootstrap.ttlSecondsAfterFinished nil }}
+  ttlSecondsAfterFinished: {{ .Values.bootstrap.ttlSecondsAfterFinished }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "stargate.bootstrapLabels" . | nindent 8 }}
+      {{- with .Values.bootstrap.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "stargate.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bootstrap
+          image: {{ include "stargate.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              printf '%s' "$STARGATE_BOOTSTRAP_PASSWORD" |
+                /bin/server admin bootstrap \
+                  --email "$STARGATE_BOOTSTRAP_EMAIL" \
+                  --password-stdin \
+                  --name "$STARGATE_BOOTSTRAP_NAME" \
+                  --nickname "$STARGATE_BOOTSTRAP_NICKNAME" \
+                  --oauth-client-id "$STARGATE_ADMIN_OAUTH_CLIENT_ID" \
+                  --oauth-redirect-uri "$STARGATE_ADMIN_OAUTH_REDIRECT_URI"
+          env:
+            - name: STARGATE_RUNTIME_PROFILE
+              value: {{ .Values.deployment.mode | quote }}
+            - name: STARGATE_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.bootstrap.existingSecret }}
+                  key: {{ .Values.bootstrap.passwordKey }}
+            - name: STARGATE_BOOTSTRAP_EMAIL
+              value: {{ .Values.bootstrap.email | quote }}
+            - name: STARGATE_BOOTSTRAP_NAME
+              value: {{ .Values.bootstrap.name | quote }}
+            - name: STARGATE_BOOTSTRAP_NICKNAME
+              value: {{ .Values.bootstrap.nickname | quote }}
+            - name: STARGATE_ADMIN_OAUTH_CLIENT_ID
+              value: {{ .Values.bootstrap.oauthClientId | quote }}
+            - name: STARGATE_ADMIN_OAUTH_REDIRECT_URI
+              value: {{ .Values.bootstrap.oauthRedirectUri | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "stargate.runtimeConfigName" . }}
+            {{- if or .Values.runtimeSecret.create .Values.runtimeSecret.existingSecret }}
+            - secretRef:
+                name: {{ include "stargate.runtimeSecretName" . }}
+            {{- end }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+          {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "stargate.persistenceClaimName" . }}
+      {{- end }}
+{{- end }}

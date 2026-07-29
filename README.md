@@ -9,6 +9,13 @@ Stargate supports different deployment profiles with different operational limit
 
 The Helm chart defaults to `deployment.mode=edge` and validates incompatible combinations at template time.
 
+For Helm values, security defaults, production examples, and 0.1.x migration
+notes, see the [Stargate Helm chart guide](k8s/stargate/README.md).
+
+For a Terraform-managed Kubernetes deployment that connects to existing
+PostgreSQL and Redis services, see
+[Deploy Stargate on Kubernetes with Terraform](docs/terraform-kubernetes-deployment.md).
+
 ## Docker
 
 The Dockerfile builds the Rust server, the `admin` and `auth` web apps, and the
