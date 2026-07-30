@@ -30,6 +30,23 @@ pub async fn shutdown() {
     relay::shutdown().await;
 }
 
+/// Delivery behavior exposed to the admin overview.
+pub fn delivery_mode() -> &'static str {
+    #[cfg(all(feature = "postgres", feature = "redis"))]
+    {
+        if relay::enabled() {
+            "relay"
+        } else {
+            "disabled"
+        }
+    }
+
+    #[cfg(not(all(feature = "postgres", feature = "redis")))]
+    {
+        "durable_only"
+    }
+}
+
 #[cfg(all(test, feature = "edge"))]
 mod tests {
     #[tokio::test]

@@ -3,9 +3,11 @@ pub mod admin_keys;
 pub mod api_keys;
 pub mod configurations;
 pub mod health;
+pub mod me;
 pub mod oauth_clients;
 pub mod organizations;
 pub mod outbox_events;
+pub mod overview;
 pub mod service_accounts;
 pub mod users;
 
@@ -30,6 +32,26 @@ impl Grants {
     pub fn has_any(&self, needed: &[&str]) -> bool {
         needed.iter().any(|g| self.0.contains(*g))
     }
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminAuthenticationKind {
+    Session,
+    OAuth,
+}
+
+#[derive(Clone, Debug)]
+pub struct AdminPrincipal {
+    pub user_id: String,
+    pub kind: AdminAuthenticationKind,
+    pub claims: jwt::Claims,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AdminAuthenticationState {
+    pub credential_present: bool,
+    pub authenticated: bool,
 }
 
 fn admin_key_grants<'a>(permissions: impl IntoIterator<Item = &'a String>) -> HashSet<String> {
@@ -106,13 +128,18 @@ enum AuditRouteBoundary {
 }
 
 struct GrantResolution {
+    authentication: AdminAuthenticationState,
     grants: HashSet<String>,
     actor: Option<db::ent::TrustedAdminActor>,
+    principal: Option<AdminPrincipal>,
 }
 
 async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> GrantResolution {
+    let credential_present = token.is_some() || raw_key.is_some();
+    let mut authenticated = false;
     let mut grants: HashSet<String> = HashSet::new();
     let mut actor = None;
+    let mut principal = None;
 
     if let Some(token) = token {
         let jwt = jwt_config();
@@ -122,11 +149,21 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
                     let sid = claims.sid.clone().unwrap_or_default();
                     let store = crate::etc::store::use_store();
                     let session = store.get::<Subject>(&sid).await.unwrap_or(None);
-                    if session.is_some()
+                    authenticated = session.as_ref().is_some_and(|subject| {
+                        subject.sub_type == crate::etc::sub::SubjectType::User
+                            && claims.sub_id.as_deref() == Some(subject.id.as_str())
+                    });
+                    if authenticated
                         && let Some(user_id) = claims.sub_id.as_deref()
                         && grant_super_admin_if_allowed(&mut grants, user_id, Some(&sid)).await
                     {
-                        actor = Some(db::ent::TrustedAdminActor::admin(user_id));
+                        let user_id = user_id.to_string();
+                        actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
+                        principal = Some(AdminPrincipal {
+                            user_id,
+                            kind: AdminAuthenticationKind::Session,
+                            claims,
+                        });
                     }
                 }
                 Ok(true) => {}
@@ -137,13 +174,20 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None) {
             match crate::act::token_revocation::is_revoked(&claims).await {
                 Ok(false) => {
+                    authenticated = true;
                     let client_id = claims.azp.as_deref().unwrap_or_default();
                     if oauth_client_is_trusted_admin_client(client_id).await
                         && let Some(user_id) = claims.sub_id.as_deref()
                         && grant_super_admin_if_allowed(&mut grants, user_id, claims.sid.as_deref())
                             .await
                     {
-                        actor = Some(db::ent::TrustedAdminActor::admin(user_id));
+                        let user_id = user_id.to_string();
+                        actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
+                        principal = Some(AdminPrincipal {
+                            user_id,
+                            kind: AdminAuthenticationKind::OAuth,
+                            claims,
+                        });
                     }
                 }
                 Ok(true) => {}
@@ -161,12 +205,21 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
         if let Ok(Some(key)) = crate::db::get_admin_key_by_hash(&hash).await
             && !key.revoked
         {
+            authenticated = true;
             actor = Some(db::ent::TrustedAdminActor::admin_key(key.id));
             grants = admin_key_grants(key.permissions.iter());
         }
     }
 
-    GrantResolution { grants, actor }
+    GrantResolution {
+        authentication: AdminAuthenticationState {
+            credential_present,
+            authenticated,
+        },
+        grants,
+        actor,
+        principal,
+    }
 }
 
 fn install_audit_context(
@@ -205,6 +258,10 @@ async fn extract_grants_for(
     let raw_key = req.get_api_key();
     let resolution = resolve_grants(token, raw_key).await;
     install_audit_context(req.extensions_mut(), resolution.actor, boundary);
+    req.extensions_mut().insert(resolution.authentication);
+    if let Some(principal) = resolution.principal {
+        req.extensions_mut().insert(principal);
+    }
     req.extensions_mut().insert(Grants(resolution.grants));
     next.run(req).await
 }
@@ -307,6 +364,8 @@ pub fn router() -> axum::Router {
 
     axum::Router::new()
         .route("/admin/health", get(health::get_admin_health))
+        .route("/admin/me", get(me::get_admin_me))
+        .route("/admin/overview", get(overview::get_admin_overview))
         .route(
             "/admin/users",
             get(users::get_users).post(users::create_user),

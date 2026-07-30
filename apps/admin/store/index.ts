@@ -17,6 +17,7 @@ import type {
   AccessControlRulesResponse,
   AdminKey,
   AdminHealth,
+  AdminOverview,
   ApiKey,
   ApiKeyQuery,
   Configuration,
@@ -74,6 +75,9 @@ const initialState: State = {
   adminError: null,
   adminReturnPath: "/",
   adminSessionStatus: "checking",
+  adminHealth: new StoreItem<AdminHealth>(null),
+  adminMe: null,
+  adminOverview: new StoreItem<AdminOverview>(null),
   adminStatus: null,
   message: null,
   loading: false,
@@ -296,6 +300,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         clearTokens();
         set({
           adminSessionStatus: "redirecting",
+          adminMe: null,
           adminStatus: null,
         });
         await redirectToHostedLogin(returnPath);
@@ -306,7 +311,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
 
       const response = await localizedApiResponse(
         get().language,
-        services.admin.getAdminHealth(),
+        services.admin.getAdminMe(),
       );
 
       if (response.error) {
@@ -314,6 +319,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
           clearTokens();
           set({
             adminSessionStatus: "redirecting",
+            adminMe: null,
             adminStatus: null,
           });
           await redirectToHostedLogin(returnPath);
@@ -322,11 +328,12 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
 
         const message =
           response.message ??
-          notificationText(get().language, "adminHealthCheckFailed");
+          notificationText(get().language, "adminSessionCheckFailed");
         set({
           adminError: message,
           adminReturnPath: returnPath,
           adminSessionStatus: "error",
+          adminMe: null,
           adminStatus: null,
         });
         return { status: "error", message };
@@ -335,7 +342,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       set({
         adminError: null,
         adminSessionStatus: "ready",
-        adminStatus: mapAdminHealth(response.data),
+        adminMe: response.data,
       });
       return { status: "ready" };
     } catch (error: unknown) {
@@ -347,6 +354,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         adminError: message,
         adminReturnPath: returnPath,
         adminSessionStatus: "error",
+        adminMe: null,
         adminStatus: null,
       });
       return { status: "error", message };
@@ -358,6 +366,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       adminError: null,
       adminReturnPath: returnPath,
       adminSessionStatus: "redirecting",
+      adminMe: null,
       adminStatus: null,
     });
     try {
@@ -371,6 +380,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         adminError: message,
         adminReturnPath: returnPath,
         adminSessionStatus: "error",
+        adminMe: null,
         adminStatus: null,
       });
     }
@@ -381,6 +391,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       adminError: null,
       adminReturnPath: returnPath,
       adminSessionStatus: "redirecting",
+      adminMe: null,
       adminStatus: null,
     });
     try {
@@ -395,10 +406,43 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         adminError: message,
         adminReturnPath: returnPath,
         adminSessionStatus: "error",
+        adminMe: null,
         adminStatus: null,
       });
       return { status: "error", message };
     }
+  },
+
+  getAdminHealth: async () => {
+    const adminHealth = get().adminHealth;
+    set({ adminHealth: adminHealth.setLoading() });
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      services.admin.getAdminHealth(),
+    );
+    if (error || !data) {
+      set({ adminHealth: adminHealth.setError(message) });
+      return;
+    }
+
+    set({
+      adminHealth: adminHealth.setSuccess(data),
+      adminStatus: mapAdminHealth(data),
+    });
+  },
+
+  getAdminOverview: async () => {
+    const adminOverview = get().adminOverview;
+    set({ adminOverview: adminOverview.setLoading() });
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      services.admin.getAdminOverview(),
+    );
+    if (error) {
+      set({ adminOverview: adminOverview.setError(message) });
+      return;
+    }
+    set({ adminOverview: adminOverview.setSuccess(data) });
   },
 
   setLanguage: (lang: "en" | "it") => {

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import {
+  Avatar,
   Box,
   Menu,
   Group,
@@ -8,11 +9,14 @@ import {
   Text,
   Switch,
   useMantineColorScheme,
+  Stack,
 } from "@mantine/core";
 import { useColorScheme } from "@mantine/hooks";
 import { CiLogout, CiLight, CiDark } from "react-icons/ci";
 import { MdOutlineChevronLeft } from "react-icons/md";
 import { useTranslations, getLanguages } from "@/i18n";
+import type { AdminMe } from "@/services/types";
+import { formatDate } from "@/lib/format-date";
 import classes from "./user-menu.module.css";
 
 function isSupportedLanguage(value: string): value is "en" | "it" {
@@ -20,12 +24,14 @@ function isSupportedLanguage(value: string): value is "en" | "it" {
 }
 
 interface Props {
+  adminMe: AdminMe | null;
   language: string;
   onLanguageChange: (language: "en" | "it") => void;
   onLogout: () => void;
 }
 
 const UserMenu: React.FC<Props> = ({
+  adminMe,
   language,
   onLanguageChange,
   onLogout,
@@ -42,23 +48,61 @@ const UserMenu: React.FC<Props> = ({
             variant="transparent"
             className={classes.actionIcon}
           >
-            {/*<Box className={classes.labels}>
-              <Text fw={600}>{profile?.full_name || profile?.email || ""}</Text>
-              <Text className={classes.description} fw={500} tt="uppercase">
-                {currentOrganization?.org_name || ""}
-              </Text>
-            </Box>*/}
-            <Center className={classes.avatar}>
-              <Text size="xl" className={classes.char}>
-                A
-              </Text>
-            </Center>
+            {adminMe && (
+              <Group align="center">
+                <Stack gap={0} align="end">
+                  <Text fw={600} size="sm">
+                    {adminMe.user.name}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {adminMe.user.email}
+                  </Text>
+                </Stack>
+                <Avatar
+                  color="dark"
+                  src={adminMe.user.picture}
+                  name={adminMe.user.name}
+                />
+              </Group>
+            )}
           </ActionIcon>
         </Center>
       </Menu.Target>
       <Menu.Dropdown className={classes.dropdown}>
-        <Menu.Label>{t("admin")}</Menu.Label>
+        {adminMe && (
+          <>
+            <Stack p="sm" gap="xs">
+              <Group align="center" justify="space-between">
+                <Text size="xs" c="dimmed">
+                  {t("authenticatedAt")}
+                </Text>
+                <Text size="xs">
+                  {adminMe.authentication.authenticatedAt
+                    ? formatDate(
+                        adminMe.authentication.authenticatedAt,
+                        null,
+                        language,
+                      )
+                    : "—"}
+                </Text>
+              </Group>
+              <Group align="center" justify="space-between">
+                <Text size="xs" c="dimmed">
+                  {t("accessExpiresAt")}
+                </Text>
+                <Text size="xs">
+                  {formatDate(
+                    adminMe.authentication.tokenExpiresAt,
+                    null,
+                    language,
+                  )}
+                </Text>
+              </Group>
+            </Stack>
+          </>
+        )}
         <Menu.Divider />
+        <Menu.Label>{t("settings")}</Menu.Label>
         <Menu.Item>
           <Group justify="space-between">
             <ColorSchemeSwitch />

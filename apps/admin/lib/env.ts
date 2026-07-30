@@ -18,7 +18,9 @@ function cleanUrl(value: string | undefined) {
 
 function browserOrigin() {
   if (typeof window === "undefined") {
-    throw new Error("VITE_API_URL is required when window.location is unavailable");
+    throw new Error(
+      "VITE_API_URL is required when window.location is unavailable",
+    );
   }
 
   return window.location.origin;

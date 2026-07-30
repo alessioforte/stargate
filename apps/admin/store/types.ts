@@ -1,7 +1,10 @@
 import { StoreItem } from "./item";
 import type {
   AccessControlRulesResponse,
+  AdminHealth,
   AdminKey,
+  AdminMe,
+  AdminOverview,
   ApiKey,
   ApiKeyQuery,
   Configuration,
@@ -79,6 +82,9 @@ export interface State {
   adminError: string | null;
   adminReturnPath: string;
   adminSessionStatus: AdminSessionStatus;
+  adminHealth: StoreItem<AdminHealth>;
+  adminMe: AdminMe | null;
+  adminOverview: StoreItem<AdminOverview>;
   adminStatus: AdminStatus | null;
   message: AppMessage | null;
   loading: boolean;
@@ -108,6 +114,8 @@ export interface Actions {
     params: OAuthCallbackParams,
   ) => Promise<OAuthCallbackResult>;
   ensureAdminSession: (returnPath: string) => Promise<AdminSessionResult>;
+  getAdminHealth: () => Promise<void>;
+  getAdminOverview: () => Promise<void>;
   logout: (returnPath: string) => Promise<void>;
   signIn: (returnPath: string) => Promise<AdminSessionResult>;
   setLanguage: (lang: "en" | "it") => void;

@@ -43,6 +43,7 @@ export interface MessageResponse {
 
 export interface ComponentStatus {
   detail?: string | null;
+  latencyMs: number;
   status: string;
 }
 
@@ -53,12 +54,73 @@ export interface StoreStats {
 }
 
 export interface AdminHealth {
+  checkedAt: string;
   database: ComponentStatus;
+  databaseBackend: string;
   name: string;
   redis?: ComponentStatus;
+  runtimeProfile: string;
+  stateBackend: string;
   status: string;
   store?: StoreStats;
   version: string;
+}
+
+export interface AdminMe {
+  user: {
+    email: string;
+    id: string;
+    name: string;
+    picture: string | null;
+  };
+  authentication: {
+    authenticatedAt: string | null;
+    clientId: string | null;
+    kind: "oauth" | "session";
+    scopes: string[];
+    tokenExpiresAt: string;
+    tokenIssuedAt: string;
+  };
+  authorization: {
+    grants: string[];
+  };
+}
+
+export interface AdminOverview {
+  generatedAt: string;
+  resources: {
+    users: { total: number };
+    organizations: { total: number };
+    serviceAccounts: { total: number };
+    oauthClients: {
+      disabled: number;
+      enabled: number;
+      total: number;
+    };
+    apiKeys: {
+      active: number;
+      revoked: number;
+      total: number;
+    };
+    adminKeys: {
+      active: number;
+      revoked: number;
+      total: number;
+    };
+  };
+  audit: {
+    mode: "disabled" | "durable_only" | "relay";
+    oldestPendingAt: string | null;
+    pending: number;
+  };
+  gateway: {
+    configVersion: number;
+    policyRevision: string | null;
+    routers: number;
+    services: number;
+    targets: number;
+    upstreams: number;
+  };
 }
 
 export interface ConfigurationsQuery {

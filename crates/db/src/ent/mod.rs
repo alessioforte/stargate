@@ -1,4 +1,5 @@
 mod admin_key;
+mod admin_overview;
 mod api_key;
 mod audit;
 mod credential;
@@ -12,6 +13,7 @@ mod super_admin;
 mod user;
 
 pub use admin_key::*;
+pub use admin_overview::*;
 pub use api_key::*;
 pub use audit::*;
 pub use credential::*;

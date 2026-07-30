@@ -1,7 +1,7 @@
 use crate::ent::{
-    AdminKey, ApiKey, ApiKeyAuth, Credential, CredentialHistory, CredentialType, OAuthClient,
-    OAuthConsent, OrgMember, OrgMembership, Organization, Profile, ServiceAccount, SuperAdmin,
-    TrustedAuditContext, User,
+    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, Credential, CredentialHistory,
+    CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization, Profile,
+    ServiceAccount, SuperAdmin, TrustedAuditContext, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -14,6 +14,9 @@ pub struct InstanceBootstrapResult {
 
 #[async_trait::async_trait]
 pub trait DbStore {
+    // ── Admin overview ──────────────────────────────────────────────────────
+    async fn get_admin_overview_stats(&self) -> Result<AdminOverviewStats>;
+
     // ── Users ───────────────────────────────────────────────────────────────
     async fn bootstrap_instance(
         &self,

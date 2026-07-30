@@ -4,11 +4,16 @@ use anyhow::Result;
 use db::{
     DbStore, InstanceBootstrapResult,
     ent::{
-        AdminKey, ApiKey, ApiKeyAuth, Credential, CredentialHistory, CredentialType, OAuthClient,
-        OAuthConsent, OrgMember, OrgMembership, Organization, OutboxEventFilter, OutboxEventRow,
-        Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
+        AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, Credential, CredentialHistory,
+        CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
+        OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount, SuperAdmin,
+        TrustedAuditContext, User,
     },
 };
+
+pub async fn get_admin_overview_stats() -> Result<AdminOverviewStats> {
+    service().get_admin_overview_stats().await
+}
 
 // ── Users ───────────────────────────────────────────────────────────────────
 

@@ -513,6 +513,9 @@ server startup validates but never generates missing internal-context keys.
 - `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`, `/oauth/introspect`, `/oauth/revoke` - OAuth/OIDC provider endpoints
 - `/oauth/state`, `/oauth/github`, `/oauth/google` - Google/GitHub consumer login endpoints
 - `/signup/*` - registration + email verification
+- `GET /admin/me` - validated current admin identity, authentication details, token timing, scopes, and effective grants
+- `GET /admin/overview` - aggregate resource counts, audit delivery backlog, and active gateway graph counts
+- `GET /admin/health` - dependency health with runtime profile, backend kinds, latency, and check timestamp
 - `/admin/*` - users, orgs, API keys, OAuth clients, service accounts, audit outbox events, config, access-control rules (super-admin)
 
 ## Error Response Format
@@ -567,6 +570,11 @@ SIGTERM/SIGINT -> drain requests (25s default timeout) -> stop audit relay -> cl
 Stack (admin/auth): React 19, Vite, TypeScript, Mantine v9 (`@mantine/core|form|hooks|notifications`), Zustand v5, react-router v7, axios, `@tanstack/react-table`, react-icons. Path alias `@/*` maps to the app root, so imports read `@/services`, `@/store`, `@/components`, `@/i18n`, `@/lib`. Build-time API base URL comes from `VITE_API_URL`.
 
 Dev commands (run inside `apps/admin` or `apps/auth`): `npm run dev` (Vite), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run format` (prettier).
+
+The admin home uses `/admin/me` as its authentication probe so a dependency
+outage does not block the console shell. It polls `/admin/health` separately
+and loads `/admin/overview` plus recent control-plane outbox events for the
+operational dashboard.
 
 ### Layered Architecture
 

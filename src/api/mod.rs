@@ -53,6 +53,8 @@ use utoipa::OpenApi;
         crate::api::account::credentials::forgot::post_credentials,
         crate::api::account::credentials::reset::put_credentials,
         crate::api::admin::health::get_admin_health,
+        crate::api::admin::me::get_admin_me,
+        crate::api::admin::overview::get_admin_overview,
         crate::api::admin::users::get_users,
         crate::api::admin::users::get_super_admin_users,
         crate::api::admin::users::get_user,
@@ -372,6 +374,8 @@ mod tests {
         assert!(json["paths"]["/account/refresh-token"].is_object());
         assert!(json["paths"]["/account/credentials"].is_object());
         assert!(json["paths"]["/admin/health"].is_object());
+        assert!(json["paths"]["/admin/me"].is_object());
+        assert!(json["paths"]["/admin/overview"].is_object());
         assert!(json["paths"]["/admin/users"].is_object());
         assert!(json["paths"]["/admin/users/invitations"].is_object());
         assert!(json["paths"]["/admin/users/super-admins"].is_object());
@@ -457,6 +461,18 @@ mod tests {
     #[tokio::test]
     async fn admin_outbox_events_missing_grant_forbidden() {
         let resp = send("/admin/outbox-events").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_me_missing_token_unauthorized() {
+        let resp = send("/admin/me").await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn admin_overview_missing_grant_forbidden() {
+        let resp = send("/admin/overview").await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

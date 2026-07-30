@@ -232,6 +232,10 @@ fn relay_enabled() -> io::Result<bool> {
     }
 }
 
+pub(super) fn enabled() -> bool {
+    relay_enabled().unwrap_or(false)
+}
+
 fn env_value(name: &str) -> io::Result<Option<String>> {
     match std::env::var(name) {
         Ok(value) => Ok(Some(value)),

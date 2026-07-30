@@ -2,11 +2,12 @@ import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { Center, Stack, Text } from "@mantine/core";
 import { RiHomeLine } from "react-icons/ri";
-import { HiOutlineUsers } from "react-icons/hi2";
-import { GoOrganization } from "react-icons/go";
-import { GrServices } from "react-icons/gr";
-import { AiOutlineApi } from "react-icons/ai";
-import { GoShieldLock } from "react-icons/go";
+import {
+  HiOutlineKey,
+  HiOutlineServerStack,
+  HiOutlineUsers,
+} from "react-icons/hi2";
+import { GoOrganization, GoShieldLock } from "react-icons/go";
 import { AiOutlineAppstoreAdd } from "react-icons/ai";
 import { GrGateway } from "react-icons/gr";
 import { BsFillJournalBookmarkFill } from "react-icons/bs";
@@ -30,12 +31,12 @@ const sidebarItems = [
   {
     label: "Service Accounts",
     path: "/service-accounts",
-    icon: <GrServices size={18} />,
+    icon: <HiOutlineServerStack size={18} />,
   },
   {
     label: "API Keys",
     path: "/api-keys",
-    icon: <AiOutlineApi size={18} />,
+    icon: <HiOutlineKey size={18} />,
   },
   {
     label: "Admin Keys",
@@ -68,9 +69,12 @@ const Layout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const returnPath = currentReturnPath(location.pathname, location.search);
+
+  const adminMe = useStore((state) => state.adminMe);
   const adminSessionStatus = useStore((state) => state.adminSessionStatus);
   const adminStatus = useStore((state) => state.adminStatus);
   const ensureAdminSession = useStore((state) => state.ensureAdminSession);
+  const getAdminHealth = useStore((state) => state.getAdminHealth);
   const language = useStore((state) => state.language);
   const loadApiMessages = useStore((state) => state.loadApiMessages);
   const loading = useStore((state) => state.loading);
@@ -97,6 +101,17 @@ const Layout = () => {
     };
   }, [ensureAdminSession, navigate, returnPath]);
 
+  useEffect(() => {
+    if (adminSessionStatus !== "ready") return;
+
+    void getAdminHealth();
+    const interval = window.setInterval(() => {
+      void getAdminHealth();
+    }, 30_000);
+
+    return () => window.clearInterval(interval);
+  }, [adminSessionStatus, getAdminHealth]);
+
   if (adminSessionStatus !== "ready") {
     return (
       <Center mih="100vh">
@@ -115,6 +130,7 @@ const Layout = () => {
   return (
     <TranslationProvider language={language}>
       <Shell
+        adminMe={adminMe}
         adminStatus={adminStatus}
         language={language}
         onLanguageChange={setLanguage}

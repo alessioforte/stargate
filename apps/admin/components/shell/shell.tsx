@@ -3,8 +3,10 @@ import styles from "./shell.module.css";
 import Header from "./header";
 import Sidebar from "./sidebar";
 import Footer, { type FooterStatus } from "./footer";
+import type { AdminMe } from "@/services/types";
 
 interface Props {
+  adminMe: AdminMe | null;
   adminStatus: FooterStatus | null;
   children: React.ReactNode;
   language: string;
@@ -18,6 +20,7 @@ interface Props {
 }
 
 const Shell: React.FC<Props> = ({
+  adminMe,
   adminStatus,
   children,
   language,
@@ -28,6 +31,7 @@ const Shell: React.FC<Props> = ({
   return (
     <div className={styles.shell}>
       <Header
+        adminMe={adminMe}
         language={language}
         onLanguageChange={onLanguageChange}
         onLogout={onLogout}

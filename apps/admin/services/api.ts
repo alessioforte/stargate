@@ -4,6 +4,8 @@ import type {
   AccessControlRulesResponse,
   ApiMessageCatalog,
   AdminHealth,
+  AdminMe,
+  AdminOverview,
   AdminKey,
   ApiKey,
   ApiKeyAttrsRequest,
@@ -80,6 +82,21 @@ export default class AdminApiService {
   async getAdminHealth() {
     return this.request<AdminHealth>({
       url: this.url("/health"),
+      method: "GET",
+      validateStatus: (status) => status === 200 || status === 503,
+    });
+  }
+
+  async getAdminMe() {
+    return this.request<AdminMe>({
+      url: this.url("/me"),
+      method: "GET",
+    });
+  }
+
+  async getAdminOverview() {
+    return this.request<AdminOverview>({
+      url: this.url("/overview"),
       method: "GET",
     });
   }

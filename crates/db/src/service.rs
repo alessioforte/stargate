@@ -1,15 +1,15 @@
 use super::repo::{
-    AdminKeyRepository, ApiKeyRepository, CredentialRepository, OAuthClientRepository,
-    OAuthConsentRepository, OrganizationRepository, OutboxRepository, ServiceAccountRepository,
-    SuperAdminRepository, UserRepository,
+    AdminKeyRepository, AdminOverviewRepository, ApiKeyRepository, CredentialRepository,
+    OAuthClientRepository, OAuthConsentRepository, OrganizationRepository, OutboxRepository,
+    ServiceAccountRepository, SuperAdminRepository, UserRepository,
 };
 use crate::backend::Pool;
 use crate::db::{DbStore, InstanceBootstrapResult};
 use crate::ent::{
-    AdminKey, ApiKey, ApiKeyAuth, AuditOperation, AuditResource, AuditScopeSelector, Credential,
-    CredentialHistory, CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership,
-    Organization, OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount, SuperAdmin,
-    TrustedAuditContext, User, ValidatedAuditEvent,
+    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, AuditOperation, AuditResource,
+    AuditScopeSelector, Credential, CredentialHistory, CredentialType, OAuthClient, OAuthConsent,
+    OrgMember, OrgMembership, Organization, OutboxEventFilter, OutboxEventRow, Profile,
+    ServiceAccount, SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent,
 };
 use crate::repo::ApiKeyAuditRecord;
 use anyhow::{Context, Result, bail, ensure};
@@ -27,6 +27,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/sqli
 pub struct Service {
     pool: Pool,
     admin_key: AdminKeyRepository,
+    admin_overview: AdminOverviewRepository,
     user: UserRepository,
     credential: CredentialRepository,
     oauth_client: OAuthClientRepository,
@@ -43,6 +44,7 @@ impl Service {
         Self {
             pool,
             admin_key: AdminKeyRepository::new(),
+            admin_overview: AdminOverviewRepository::new(),
             user: UserRepository::new(),
             credential: CredentialRepository::new(),
             oauth_client: OAuthClientRepository::new(),
@@ -589,6 +591,10 @@ pub async fn init(conn: &str) -> Result<Service> {
 
 #[async_trait::async_trait]
 impl DbStore for Service {
+    async fn get_admin_overview_stats(&self) -> Result<AdminOverviewStats> {
+        self.admin_overview.get(&self.pool).await
+    }
+
     // ── Users ───────────────────────────────────────────────────────────────
 
     async fn bootstrap_instance(

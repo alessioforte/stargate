@@ -12,14 +12,13 @@ interface Props {
   status: FooterStatus | null;
 }
 
-const Footer: React.FC<Props> = ({ status }) => {
-  const statusColor =
-    status?.status === "healthy"
-      ? "var(--mantine-color-green-6)"
-      : status?.status === "degraded"
-        ? "var(--mantine-color-yellow-6)"
-        : "var(--mantine-color-red-6)";
+const colorMap: Record<string, string> = {
+  healthy: "var(--mantine-color-green-6)",
+  degraded: "var(--mantine-color-yellow-6)",
+  unhealthy: "var(--mantine-color-red-6)",
+};
 
+const Footer: React.FC<Props> = ({ status }) => {
   return (
     <div className={styles.footer}>
       <div className={styles.footerInner}>
@@ -31,30 +30,24 @@ const Footer: React.FC<Props> = ({ status }) => {
 
             <Group gap="xs" className={styles.footerItems} justify="flex-end">
               <Text size="xs" c="dimmed">
-                db: {status.databaseStatus}
+                db:
               </Text>
+              <span
+                className={styles.statusDot}
+                style={{ backgroundColor: colorMap[status.databaseStatus] }}
+              />
 
               <Text size="xs" c="dimmed" className={styles.footerSeparator}>
                 |
               </Text>
 
               <Text size="xs" c="dimmed">
-                store: {status.storeStatus}
+                store:
               </Text>
-
-              <Text size="xs" c="dimmed" className={styles.footerSeparator}>
-                |
-              </Text>
-
-              <Group>
-                <Text size="xs" c="dimmed">
-                  {status.status}
-                </Text>
-                <span
-                  className={styles.statusDot}
-                  style={{ backgroundColor: statusColor }}
-                />
-              </Group>
+              <span
+                className={styles.statusDot}
+                style={{ backgroundColor: colorMap[status.storeStatus] }}
+              />
             </Group>
           </Group>
         ) : (
