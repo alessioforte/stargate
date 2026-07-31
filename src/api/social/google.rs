@@ -144,7 +144,7 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
     let org = crate::act::sessions::resolve_org_context(&user, None).await?;
     claims.org_id = org.as_ref().map(|org| org.org_id.clone());
 
-    let (access_token, refresh_token) = crate::fun::generate_tokens(claims).map_err(|e| {
+    let tokens = crate::fun::generate_tokens(claims).map_err(|e| {
         tracing::error!("Token generation error: {}", e);
         ErrorResponse::new(ErrorCode::SystemInternal)
     })?;
@@ -162,12 +162,24 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
         tracing::error!("Failed to store OAuth session: {}", e);
         ErrorResponse::new(ErrorCode::SystemInternal)
     })?;
-    crate::act::sessions::register_session(&user.id, &sid, subject.org_id.as_deref(), sttl).await;
+    if let Err(error) = crate::act::sessions::register_session(
+        &user.id,
+        &sid,
+        subject.org_id.as_deref(),
+        auth_time as u64,
+        &tokens.refresh_jti,
+        sttl,
+    )
+    .await
+    {
+        let _ = store.delete(&sid).await;
+        return Err(ErrorResponse::internal(error));
+    }
 
-    let cookie = build_jwt_cookie(&access_token, cttl);
+    let cookie = build_jwt_cookie(&tokens.access_token, cttl);
     let body = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
     };
 
     let mut resp = Json(body).into_response();

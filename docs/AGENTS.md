@@ -212,6 +212,9 @@ publish, or otherwise mutate outbox rows.
 
 Login/logout audit events are not currently produced; any such coverage is a
 separately reviewed follow-up rather than part of the core outbox contract.
+The first admin session-registry API follows the same boundary: revocations
+emit structured tracing but do not claim transactional outbox coverage across
+the state-store/SQL boundary.
 
 ### Singletons / Runtime State
 
@@ -223,6 +226,22 @@ separately reviewed follow-up rather than part of the core outbox contract.
 - Gateway load balancers
 - ACE policy engine
 - Limiter/quota service
+
+Each login session uses the standard JWT `sid` as its stable identifier. Native
+access and refresh tokens retain the same `sid` for the lifetime of the login,
+and linked user OAuth/OIDC tokens carry it as well. Native refresh-token replay
+protection is independent: each refresh token has a rotating `jti`, whose
+current value is stored under `account:session-refresh:{sid}` and updated
+atomically.
+
+The state store keeps a per-user session index plus the global
+`account:sessions:directory` hash. Directory fields expire with the native
+refresh-token TTL and hold the stable sid, org, authentication/last-seen/expiry
+times, and linked OAuth client IDs. Removing a session deletes its sid-backed
+subject and refresh-rotation state; Stargate's admin, userinfo, introspection,
+and OAuth-refresh paths also require linked user OAuth tokens to have a live
+backing session. OAuth tokens validated offline by an external resource server
+remain subject to their normal JWT expiry.
 
 ### Config Hot-Reload
 
@@ -514,7 +533,10 @@ server startup validates but never generates missing internal-context keys.
 - `/oauth/state`, `/oauth/github`, `/oauth/google` - Google/GitHub consumer login endpoints
 - `/signup/*` - registration + email verification
 - `GET /admin/me` - validated current admin identity, authentication details, token timing, scopes, and effective grants
-- `GET /admin/overview` - aggregate resource counts, audit delivery backlog, and active gateway graph counts
+- `GET /admin/overview` - aggregate resource and active-session counts, audit delivery backlog, and active gateway graph counts
+- `GET /admin/sessions` - paginated active-session registry, filterable by user, organization, and OAuth client
+- `DELETE /admin/sessions/{session_id}` - revoke one login session by its standard JWT `sid`
+- `DELETE /admin/users/{user_id}/sessions` - revoke all login sessions for a user
 - `GET /admin/health` - dependency health with runtime profile, backend kinds, latency, and check timestamp
 - `/admin/*` - users, orgs, API keys, OAuth clients, service accounts, audit outbox events, config, access-control rules (super-admin)
 

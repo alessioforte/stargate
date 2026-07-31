@@ -17,6 +17,8 @@ pub struct AuthorizationCodeRecord {
     pub code_challenge: String,
     pub code_challenge_method: String,
     pub auth_time: DateTime<Utc>,
+    #[serde(default)]
+    pub sid: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -96,6 +98,7 @@ mod tests {
         AuthorizationCodeRecord {
             client_id: "client-1".to_string(),
             user_id: "user-1".to_string(),
+            sid: Some("session-1".to_string()),
             redirect_uri: "https://app.example.com/callback".to_string(),
             scope: "openid email".to_string(),
             audience: Some("gateway".to_string()),

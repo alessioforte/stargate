@@ -77,6 +77,17 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
     {
         return Err(bearer_unauthorized("invalid token"));
     }
+    if let Some(sid) = claims.sid.as_deref() {
+        let Some(user_id) = claims.sub_id.as_deref() else {
+            return Err(bearer_unauthorized("invalid token"));
+        };
+        if !crate::act::sessions::is_session_active(sid, user_id)
+            .await
+            .map_err(ErrorResponse::internal)?
+        {
+            return Err(bearer_unauthorized("invalid token"));
+        }
+    }
 
     let Some(client_id) = claims.azp.as_deref() else {
         return Err(bearer_unauthorized("invalid token"));

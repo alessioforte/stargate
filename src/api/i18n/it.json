@@ -19,6 +19,7 @@
     "auth.login_rate_limited": "Troppi tentativi di accesso non riusciti",
     "auth.login_unavailable": "L'accesso non è temporaneamente disponibile",
     "session.organization_membership_required": "L'utente non appartiene all'organizzazione richiesta",
+    "session.not_found": "Sessione non trovata",
     "user.not_found": "Utente non trovato",
     "user.email_already_exists": "Esiste già un utente con questo indirizzo email",
     "user.nickname_already_exists": "Esiste già un utente con questo nome utente",

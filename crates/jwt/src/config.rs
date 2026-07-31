@@ -50,6 +50,7 @@ pub enum JwtValidationError {
         actual: Option<String>,
     },
     MissingClaim(&'static str),
+    UnexpectedClaim(&'static str),
     AudienceMismatch {
         expected: String,
         actual: Option<String>,
@@ -68,6 +69,9 @@ impl fmt::Display for JwtValidationError {
                 write!(f, "invalid JWT type: expected {expected}, got {actual:?}")
             }
             JwtValidationError::MissingClaim(claim) => write!(f, "missing JWT claim: {claim}"),
+            JwtValidationError::UnexpectedClaim(claim) => {
+                write!(f, "unexpected JWT claim: {claim}")
+            }
             JwtValidationError::AudienceMismatch { expected, actual } => {
                 write!(
                     f,
@@ -248,6 +252,9 @@ impl JwtConfig {
         let claims = self.decode_without_audience(token)?;
         Self::require_type(&claims, TOKEN_TYPE_BEARER)?;
         Self::require_non_empty_claim(claims.sid.as_deref(), "sid")?;
+        if claims.azp.is_some() {
+            return Err(JwtValidationError::UnexpectedClaim("azp"));
+        }
         Ok(claims)
     }
 
@@ -258,6 +265,9 @@ impl JwtConfig {
         let claims = self.decode_without_audience(token)?;
         Self::require_type(&claims, TOKEN_TYPE_REFRESH)?;
         Self::require_non_empty_claim(claims.sid.as_deref(), "sid")?;
+        if claims.azp.is_some() {
+            return Err(JwtValidationError::UnexpectedClaim("azp"));
+        }
         Ok(claims)
     }
 
@@ -413,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn session_access_validation_requires_bearer_with_session_id() {
+    fn session_access_validation_requires_bearer_with_sid() {
         let config = JwtConfig::new(
             Algorithm::HS256,
             KeySource::Secret("secret".to_string()),
@@ -429,6 +439,26 @@ mod tests {
 
         assert_eq!(decoded.typ.as_deref(), Some("bearer"));
         assert_eq!(decoded.sid.as_deref(), Some("sid-1"));
+    }
+
+    #[test]
+    fn session_access_validation_rejects_oauth_tokens() {
+        let config = JwtConfig::new(
+            Algorithm::HS256,
+            KeySource::Secret("secret".to_string()),
+            Duration::minutes(5),
+            Duration::minutes(5),
+        );
+        let mut claims = Claims::default()
+            .subject("user-1".to_string())
+            .sid("sid-1".to_string());
+        claims.azp = Some("client-1".to_string());
+        let token = config.generate_oauth_access_token(claims).unwrap();
+
+        assert!(matches!(
+            config.validate_session_access_token(&token),
+            Err(JwtValidationError::UnexpectedClaim("azp"))
+        ));
     }
 
     #[test]

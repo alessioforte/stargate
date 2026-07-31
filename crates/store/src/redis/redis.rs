@@ -561,6 +561,37 @@ impl Store for RedisStore {
         Ok(())
     }
 
+    async fn set_if_absent<T: SerializeValue>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+        }
+
+        let mut con = self.pool.get();
+        let serialized_value = self.serialize(value)?;
+        let mut command = redis::cmd("SET");
+        command.arg(key).arg(serialized_value).arg("NX");
+        if let Some(ttl) = ttl {
+            command.arg("EX").arg(ttl);
+        }
+
+        command
+            .query_async::<Option<String>>(&mut con)
+            .await
+            .map(|result| result.is_some())
+            .map_err(|error| {
+                StoreError::RedisFailed(format!(
+                    "Failed to set key '{}' when absent: {}",
+                    key, error
+                ))
+            })
+    }
+
     async fn delete(&self, key: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
 

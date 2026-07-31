@@ -252,6 +252,7 @@ fn user_claims_profile(user: &db::ent::User) -> oidc::claims::UserClaimsProfile 
 fn issue_user_token_response(
     client: &db::ent::OAuthClient,
     user: &db::ent::User,
+    sid: Option<&str>,
     scopes: &[String],
     audience: Option<String>,
     auth_time: chrono::DateTime<Utc>,
@@ -264,12 +265,13 @@ fn issue_user_token_response(
     let access_claims = oidc::claims::user_access_claims(
         &profile,
         &client.client_id,
+        sid,
         scope.clone(),
         audience,
         auth_time,
     );
     let id_claims =
-        oidc::claims::id_token_claims(&profile, &client.client_id, scopes, auth_time, nonce);
+        oidc::claims::id_token_claims(&profile, &client.client_id, sid, scopes, auth_time, nonce);
 
     let access_token = jwt
         .generate_oauth_access_token(access_claims)
@@ -300,6 +302,14 @@ async fn issue_authorization_code_token(
     user: &db::ent::User,
     scopes: &[String],
 ) -> OAuthResult<TokenResponse> {
+    if let Some(sid) = code.sid.as_deref()
+        && !crate::act::sessions::register_session_client(sid, &user.id, &client.client_id)
+            .await
+            .map_err(OAuthErrorResponse::internal)?
+    {
+        return Err(oauth_invalid_grant("login session is no longer active"));
+    }
+
     let refresh_token = if scope_contains(scopes, SCOPE_OFFLINE_ACCESS) {
         if !client_allows_grant(client, GRANT_REFRESH_TOKEN) {
             return Err(oauth_invalid_grant(
@@ -310,6 +320,7 @@ async fn issue_authorization_code_token(
             refresh_tokens::issue(
                 client.client_id.clone(),
                 user.id.clone(),
+                code.sid.clone(),
                 scopes.join(" "),
                 code.audience.clone(),
                 code.auth_time,
@@ -325,6 +336,7 @@ async fn issue_authorization_code_token(
     issue_user_token_response(
         client,
         user,
+        code.sid.as_deref(),
         scopes,
         code.audience.clone(),
         code.auth_time,
@@ -422,9 +434,17 @@ async fn issue_refresh_token_grant(
     };
 
     let scopes = parse_space_delimited(Some(family.scope.as_str()), "scope")?;
+    if let Some(sid) = family.sid.as_deref()
+        && !crate::act::sessions::touch_session(sid, &family.user_id)
+            .await
+            .map_err(OAuthErrorResponse::internal)?
+    {
+        return Err(oauth_invalid_grant("login session is no longer active"));
+    }
     issue_user_token_response(
         client,
         &user,
+        family.sid.as_deref(),
         &scopes,
         family.audience.clone(),
         family.auth_time,

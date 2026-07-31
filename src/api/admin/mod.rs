@@ -9,6 +9,7 @@ pub mod organizations;
 pub mod outbox_events;
 pub mod overview;
 pub mod service_accounts;
+pub mod sessions;
 pub mod users;
 
 use crate::err::{ErrorCode, ErrorResponse};
@@ -149,10 +150,24 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
                     let sid = claims.sid.clone().unwrap_or_default();
                     let store = crate::etc::store::use_store();
                     let session = store.get::<Subject>(&sid).await.unwrap_or(None);
-                    authenticated = session.as_ref().is_some_and(|subject| {
-                        subject.sub_type == crate::etc::sub::SubjectType::User
-                            && claims.sub_id.as_deref() == Some(subject.id.as_str())
-                    });
+                    if let Some(subject) = session.as_ref()
+                        && subject.sub_type == crate::etc::sub::SubjectType::User
+                        && claims.sub_id.as_deref() == Some(subject.id.as_str())
+                    {
+                        match crate::act::sessions::ensure_session_registered(
+                            &subject.id,
+                            &sid,
+                            subject.org_id.as_deref(),
+                            claims.auth_time.unwrap_or(claims.iat) as u64,
+                        )
+                        .await
+                        {
+                            Ok(()) => authenticated = true,
+                            Err(err) => {
+                                tracing::error!("Failed to register admin session: {}", err);
+                            }
+                        }
+                    }
                     if authenticated
                         && let Some(user_id) = claims.sub_id.as_deref()
                         && grant_super_admin_if_allowed(&mut grants, user_id, Some(&sid)).await
@@ -174,12 +189,32 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None) {
             match crate::act::token_revocation::is_revoked(&claims).await {
                 Ok(false) => {
-                    authenticated = true;
                     let client_id = claims.azp.as_deref().unwrap_or_default();
+                    let user_id = claims.sub_id.as_deref();
+                    let active_session = match (claims.sid.as_deref(), user_id) {
+                        (Some(sid), Some(user_id)) => {
+                            match crate::act::sessions::get_active_session(sid, user_id).await {
+                                Ok(session) => session,
+                                Err(err) => {
+                                    tracing::error!(
+                                        "Failed to resolve backing OAuth session: {}",
+                                        err
+                                    );
+                                    None
+                                }
+                            }
+                        }
+                        // Access tokens minted before stable sessions were
+                        // introduced remain valid until their normal expiry.
+                        (None, _) => None,
+                        _ => None,
+                    };
+                    authenticated = claims.sid.is_none() || active_session.is_some();
+                    let step_up_sid = claims.sid.as_deref();
                     if oauth_client_is_trusted_admin_client(client_id).await
-                        && let Some(user_id) = claims.sub_id.as_deref()
-                        && grant_super_admin_if_allowed(&mut grants, user_id, claims.sid.as_deref())
-                            .await
+                        && authenticated
+                        && let Some(user_id) = user_id
+                        && grant_super_admin_if_allowed(&mut grants, user_id, step_up_sid).await
                     {
                         let user_id = user_id.to_string();
                         actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
@@ -360,12 +395,17 @@ macro_rules! require_grants {
 
 pub fn router() -> axum::Router {
     use axum::middleware::from_fn;
-    use axum::routing::{get, post, put};
+    use axum::routing::{delete, get, post, put};
 
     axum::Router::new()
         .route("/admin/health", get(health::get_admin_health))
         .route("/admin/me", get(me::get_admin_me))
         .route("/admin/overview", get(overview::get_admin_overview))
+        .route("/admin/sessions", get(sessions::get_sessions))
+        .route(
+            "/admin/sessions/{session_id}",
+            delete(sessions::delete_session),
+        )
         .route(
             "/admin/users",
             get(users::get_users).post(users::create_user),
@@ -400,6 +440,10 @@ pub fn router() -> axum::Router {
         .route(
             "/admin/users/{id}/organizations/{org_id}",
             put(users::add_user_to_organization).delete(users::remove_user_from_organization),
+        )
+        .route(
+            "/admin/users/{user_id}/sessions",
+            delete(sessions::delete_user_sessions),
         )
         .route(
             "/admin/organizations",

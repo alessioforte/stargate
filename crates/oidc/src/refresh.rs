@@ -19,6 +19,8 @@ pub struct RefreshTokenFamily {
     pub expires_at: DateTime<Utc>,
     pub generation: u64,
     pub revoked_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub sid: Option<String>,
 }
 
 pub fn family_key(family_id: &str) -> String {
@@ -49,6 +51,7 @@ pub async fn issue<S: Store>(
     store: &S,
     client_id: String,
     user_id: String,
+    sid: Option<String>,
     scope: String,
     audience: Option<String>,
     auth_time: DateTime<Utc>,
@@ -62,6 +65,7 @@ pub async fn issue<S: Store>(
     let family = RefreshTokenFamily {
         client_id,
         user_id,
+        sid,
         current_secret_hash: pw::hash_api_key(&secret),
         scope,
         audience,
@@ -158,6 +162,7 @@ mod tests {
             &store,
             "client-1".to_string(),
             "user-1".to_string(),
+            Some("session-1".to_string()),
             "openid offline_access".to_string(),
             Some("gateway".to_string()),
             Utc::now(),

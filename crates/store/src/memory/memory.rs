@@ -394,6 +394,42 @@ impl Store for MemoryStore {
         Ok(())
     }
 
+    async fn set_if_absent<T: SerializeValue>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if ttl == Some(0) {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+        }
+
+        let data: Data = self.serialize(value)?.into();
+        let exp = self.expiration_from_ttl(ttl);
+        let new_value = StoreValue::Simple(data, exp);
+
+        match self.data.entry(key.to_string()) {
+            DashEntry::Vacant(entry) => {
+                entry.insert(new_value);
+            }
+            DashEntry::Occupied(mut entry) => {
+                if !self.store_value_is_expired_at(entry.get(), self.get_cached_now()) {
+                    return Ok(false);
+                }
+                entry.insert(new_value);
+                self.stats
+                    .expired_entries_cleaned
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
+        Ok(true)
+    }
+
     async fn delete(&self, key: &str) -> StoreResult<bool> {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
@@ -437,49 +473,44 @@ impl Store for MemoryStore {
         let serialized_value: Data = self.serialize(value)?.into();
         let field_exp = self.expiration_from_ttl(ttl);
 
-        // Check if the key already exists before inserting, to detect type mismatches
-        // and handle expired hashes correctly.
-        if let Some(existing) = self.data.get(key) {
-            match existing.value() {
-                StoreValue::Hash(_, exp) => {
-                    let now = self.get_cached_now();
-                    if self.is_expired_at(exp, now) {
-                        // Expired hash: drop the read guard, remove the key, and fall through
-                        // to create a fresh hash below (same as if key didn't exist).
-                        drop(existing);
-                        if self.remove_key_if_expired_at(key, now) {
+        match self.data.entry(key.to_string()) {
+            DashEntry::Vacant(entry) => {
+                let hash = DashMap::new();
+                hash.insert(field.to_string(), (serialized_value, field_exp));
+                entry.insert(StoreValue::Hash(hash, None));
+                Ok(true)
+            }
+            DashEntry::Occupied(mut entry) => {
+                let value = entry.get_mut();
+                match value {
+                    StoreValue::Hash(hash, exp) => {
+                        if self.is_expired_at(exp, self.get_cached_now()) {
+                            let hash = DashMap::new();
+                            hash.insert(field.to_string(), (serialized_value, field_exp));
+                            *value = StoreValue::Hash(hash, None);
                             self.stats
                                 .expired_entries_cleaned
                                 .fetch_add(1, Ordering::Relaxed);
+                            return Ok(true);
                         }
-                    } else {
-                        // Key exists and is a live hash — insert the field directly.
-                        if let StoreValue::Hash(hash_map, _) = existing.value() {
-                            match hash_map.entry(field.to_string()) {
-                                DashEntry::Occupied(mut occupied) => {
-                                    occupied.insert((serialized_value, field_exp));
-                                    return Ok(false);
-                                }
-                                DashEntry::Vacant(vacant) => {
-                                    vacant.insert((serialized_value, field_exp));
-                                    return Ok(true);
-                                }
+
+                        match hash.entry(field.to_string()) {
+                            DashEntry::Occupied(mut field) => {
+                                field.insert((serialized_value, field_exp));
+                                Ok(false)
+                            }
+                            DashEntry::Vacant(field) => {
+                                field.insert((serialized_value, field_exp));
+                                Ok(true)
                             }
                         }
                     }
-                }
-                StoreValue::Simple(_, _) | StoreValue::AtomicI64(_, _) => {
-                    return Err(self.wrong_type_error());
+                    StoreValue::Simple(_, _) | StoreValue::AtomicI64(_, _) => {
+                        Err(self.wrong_type_error())
+                    }
                 }
             }
         }
-
-        // Key does not exist (or was just removed as expired): create a new hash.
-        let new_hash_map = DashMap::new();
-        new_hash_map.insert(field.to_string(), (serialized_value, field_exp));
-        self.data
-            .insert(key.to_string(), StoreValue::Hash(new_hash_map, None));
-        Ok(true)
     }
 
     async fn hget<T: DeserializeValue>(&self, key: &str, field: &str) -> StoreResult<Option<T>> {
@@ -1741,6 +1772,40 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, StoreError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_set_if_absent_preserves_existing_value() {
+        let store = MemoryStore::new();
+
+        assert!(store.set_if_absent("k", &"first", None).await.unwrap());
+        assert!(!store.set_if_absent("k", &"second", None).await.unwrap());
+        assert_eq!(
+            store.get::<String>("k").await.unwrap().as_deref(),
+            Some("first")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_first_hash_writes_preserve_every_field() {
+        let store = MemoryStore::new();
+        let mut tasks = Vec::new();
+
+        for field in 0..128 {
+            let store = store.clone();
+            tasks.push(tokio::spawn(async move {
+                store
+                    .hset("sessions", &field.to_string(), &field, None)
+                    .await
+                    .unwrap();
+            }));
+        }
+
+        for task in tasks {
+            task.await.unwrap();
+        }
+
+        assert_eq!(store.hlen("sessions").await.unwrap(), 128);
     }
 
     #[tokio::test]

@@ -38,6 +38,10 @@ pub async fn put_refresh_token(
         .sid
         .clone()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
+    let presented_jti = claims
+        .jti
+        .as_deref()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let store = etc::store::use_store();
     let session = store
@@ -46,10 +50,7 @@ pub async fn put_refresh_token(
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let old_subject = match session {
-        Some(subject) => {
-            let _ = store.delete(&sid).await;
-            subject
-        }
+        Some(subject) => subject,
         None => {
             return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
         }
@@ -59,8 +60,6 @@ pub async fn put_refresh_token(
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-
-    crate::act::sessions::forget_session(&user.id, &sid).await;
 
     // Re-validate the session's active org: a user removed from the org
     // cannot carry its context past the access-token lifetime. The role is
@@ -83,14 +82,13 @@ pub async fn put_refresh_token(
     let auth_time = claims
         .auth_time
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-    let new_sid = ulid::Ulid::new().to_string();
     let mut new_claims = jwt::Claims::default()
         .subject(user.email.to_owned())
         .sub_id(user.id.to_owned())
         .name(name)
         .email(user.email.to_owned())
         .email_verified(true)
-        .sid(new_sid.clone());
+        .sid(sid.clone());
     new_claims.auth_time = Some(auth_time);
     new_claims.org_id = org.as_ref().map(|org| org.org_id.clone());
 
@@ -101,8 +99,7 @@ pub async fn put_refresh_token(
         new_claims = new_claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
     }
 
-    let (access_token, refresh_token) =
-        crate::fun::generate_tokens(new_claims).map_err(ErrorResponse::internal)?;
+    let tokens = crate::fun::generate_tokens(new_claims).map_err(ErrorResponse::internal)?;
 
     let refresh_exp = jwt_config().refresh_exp;
     let access_exp = jwt_config().access_exp;
@@ -112,17 +109,34 @@ pub async fn put_refresh_token(
     let mut subject = Subject::from(user.clone());
     subject.org_id = org.as_ref().map(|org| org.org_id.clone());
     subject.org_role = org.as_ref().map(|org| org.role.clone());
+    let rotated =
+        crate::act::sessions::rotate_refresh_token(&sid, presented_jti, &tokens.refresh_jti, sttl)
+            .await
+            .map_err(ErrorResponse::internal)?;
+    if !rotated {
+        return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
+    }
+
     store
-        .set(&new_sid, &subject, Some(sttl))
+        .set(&sid, &subject, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
-    crate::act::sessions::register_session(&user.id, &new_sid, subject.org_id.as_deref(), sttl)
-        .await;
+    if let Err(error) = crate::act::sessions::renew_session(
+        &user.id,
+        &sid,
+        subject.org_id.as_deref(),
+        auth_time as u64,
+        sttl,
+    )
+    .await
+    {
+        return Err(ErrorResponse::internal(error));
+    }
 
-    let cookie = build_jwt_cookie(&access_token, cttl);
+    let cookie = build_jwt_cookie(&tokens.access_token, cttl);
     let body = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
         token_type: "Bearer".to_string(),
         org_id: subject.org_id.clone(),
     };

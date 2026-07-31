@@ -3,9 +3,11 @@ use chrono::{DateTime, Utc};
 
 pub(super) use oidc::refresh::RefreshTokenFamily;
 
+#[allow(clippy::too_many_arguments)] // complete refresh-family context
 pub(super) async fn issue(
     client_id: String,
     user_id: String,
+    sid: Option<String>,
     scope: String,
     audience: Option<String>,
     auth_time: DateTime<Utc>,
@@ -16,6 +18,7 @@ pub(super) async fn issue(
         crate::etc::store::use_store(),
         client_id,
         user_id,
+        sid,
         scope,
         audience,
         auth_time,
@@ -44,6 +47,7 @@ mod tests {
         let token = issue(
             "client-1".to_string(),
             "user-1".to_string(),
+            Some("session-1".to_string()),
             "openid offline_access".to_string(),
             Some("gateway".to_string()),
             Utc::now(),
