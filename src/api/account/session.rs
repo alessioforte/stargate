@@ -45,8 +45,7 @@ pub(crate) async fn issue_user_session(
         claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
     }
 
-    let (access_token, refresh_token) =
-        crate::fun::generate_tokens(claims).map_err(ErrorResponse::internal)?;
+    let tokens = crate::fun::generate_tokens(claims).map_err(ErrorResponse::internal)?;
 
     let store = etc::store::use_store();
     let refresh_exp = jwt_config().refresh_exp;
@@ -58,12 +57,24 @@ pub(crate) async fn issue_user_session(
         .set(&sid, &subject, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
-    sessions::register_session(&user.id, &sid, subject.org_id.as_deref(), sttl).await;
+    if let Err(error) = sessions::register_session(
+        &user.id,
+        &sid,
+        subject.org_id.as_deref(),
+        auth_time as u64,
+        &tokens.refresh_jti,
+        sttl,
+    )
+    .await
+    {
+        let _ = store.delete(&sid).await;
+        return Err(ErrorResponse::internal(error));
+    }
 
-    let cookie = build_jwt_cookie(&access_token, cttl);
+    let cookie = build_jwt_cookie(&tokens.access_token, cttl);
     let body = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
         token_type: "Bearer".to_string(),
         org_id: subject.org_id.clone(),
     };

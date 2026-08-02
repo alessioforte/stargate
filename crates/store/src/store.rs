@@ -27,6 +27,17 @@ pub trait Store: Send + Sync {
         ttl: Option<u64>,
     ) -> StoreResult<()>;
 
+    /// Set a value only when the key does not already exist.
+    ///
+    /// Returns `true` when the value was stored and `false` when a live value
+    /// already exists.
+    async fn set_if_absent<T: SerializeValue>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Option<u64>,
+    ) -> StoreResult<bool>;
+
     /// Delete a value from the store.
     async fn delete(&self, key: &str) -> StoreResult<bool>;
 

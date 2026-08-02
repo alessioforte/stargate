@@ -26,6 +26,7 @@ pub struct AdminAuthentication {
     token_issued_at: String,
     token_expires_at: String,
     client_id: Option<String>,
+    session_id: Option<String>,
     scopes: Vec<String>,
 }
 
@@ -124,6 +125,7 @@ pub async fn get_admin_me(req: Request) -> Result<Json<AdminMe>, ErrorResponse> 
             token_issued_at: timestamp(claims.iat)?,
             token_expires_at: timestamp(claims.exp)?,
             client_id: claims.azp,
+            session_id: claims.sid,
             scopes,
         },
         authorization: AdminAuthorization { grants },

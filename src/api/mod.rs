@@ -55,6 +55,9 @@ use utoipa::OpenApi;
         crate::api::admin::health::get_admin_health,
         crate::api::admin::me::get_admin_me,
         crate::api::admin::overview::get_admin_overview,
+        crate::api::admin::sessions::get_sessions,
+        crate::api::admin::sessions::delete_session,
+        crate::api::admin::sessions::delete_user_sessions,
         crate::api::admin::users::get_users,
         crate::api::admin::users::get_super_admin_users,
         crate::api::admin::users::get_user,
@@ -376,6 +379,9 @@ mod tests {
         assert!(json["paths"]["/admin/health"].is_object());
         assert!(json["paths"]["/admin/me"].is_object());
         assert!(json["paths"]["/admin/overview"].is_object());
+        assert!(json["paths"]["/admin/sessions"].is_object());
+        assert!(json["paths"]["/admin/sessions/{session_id}"].is_object());
+        assert!(json["paths"]["/admin/users/{user_id}/sessions"].is_object());
         assert!(json["paths"]["/admin/users"].is_object());
         assert!(json["paths"]["/admin/users/invitations"].is_object());
         assert!(json["paths"]["/admin/users/super-admins"].is_object());
@@ -473,6 +479,38 @@ mod tests {
     #[tokio::test]
     async fn admin_overview_missing_grant_forbidden() {
         let resp = send("/admin/overview").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_sessions_missing_grant_forbidden() {
+        let resp = send("/admin/sessions").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_session_delete_missing_grant_forbidden() {
+        let resp = send_req(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/admin/sessions/01JZ0000000000000000000001")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_user_sessions_delete_missing_grant_forbidden() {
+        let resp = send_req(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/admin/users/01JZ0000000000000000000001/sessions")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

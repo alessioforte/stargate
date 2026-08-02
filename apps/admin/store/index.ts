@@ -18,6 +18,7 @@ import type {
   AdminKey,
   AdminHealth,
   AdminOverview,
+  AdminSession,
   ApiKey,
   ApiKeyQuery,
   Configuration,
@@ -28,6 +29,7 @@ import type {
   CreateOAuthClientRequest,
   CreateOAuthClientResponse,
   List,
+  ListAdminSessionsQuery,
   MessageResponse,
   OAuthClient,
   Organization,
@@ -78,6 +80,8 @@ const initialState: State = {
   adminHealth: new StoreItem<AdminHealth>(null),
   adminMe: null,
   adminOverview: new StoreItem<AdminOverview>(null),
+  adminSessions: new StoreItem<List<AdminSession>>(null),
+  adminSessionsQuery: {},
   adminStatus: null,
   message: null,
   loading: false,
@@ -443,6 +447,93 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       return;
     }
     set({ adminOverview: adminOverview.setSuccess(data) });
+  },
+
+  getAdminSessions: async (query?: ListAdminSessionsQuery) => {
+    const adminSessions = get().adminSessions;
+    set({
+      adminSessions: adminSessions.setLoading(),
+      adminSessionsQuery: query ?? {},
+    });
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.getAdminSessions(query),
+    );
+    if (error) {
+      set({ adminSessions: adminSessions.setError(message) });
+      return;
+    }
+    set({ adminSessions: adminSessions.setSuccess(data) });
+  },
+
+  revokeAdminSession: async (sessionId) => {
+    const adminSessions = get().adminSessions;
+    set({ adminSessions: adminSessions.setLoading() });
+
+    const { error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.revokeAdminSession(sessionId),
+    );
+    if (error) {
+      set({ adminSessions: adminSessions.setError(message) });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "sessionRevokeFailed"),
+      );
+      return;
+    }
+
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "sessionRevoked"),
+    );
+    if (get().adminMe?.authentication.sessionId === sessionId) {
+      await get().logout("/sessions");
+      return;
+    }
+
+    await Promise.all([
+      get().getAdminSessions(get().adminSessionsQuery),
+      get().getAdminOverview(),
+    ]);
+  },
+
+  revokeUserSessions: async (userId) => {
+    const adminSessions = get().adminSessions;
+    set({ adminSessions: adminSessions.setLoading() });
+
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.revokeUserSessions(userId),
+    );
+    if (error) {
+      set({ adminSessions: adminSessions.setError(message) });
+      showStoreNotification(
+        get().language,
+        "error",
+        message ?? notificationText(get().language, "userSessionsRevokeFailed"),
+      );
+      return;
+    }
+
+    showStoreNotification(
+      get().language,
+      "success",
+      notificationText(get().language, "userSessionsRevoked", {
+        count: data?.revokedSessions ?? 0,
+      }),
+    );
+    if (get().adminMe?.user.id === userId) {
+      await get().logout("/sessions");
+      return;
+    }
+
+    await Promise.all([
+      get().getAdminSessions(get().adminSessionsQuery),
+      get().getAdminOverview(),
+    ]);
   },
 
   setLanguage: (lang: "en" | "it") => {

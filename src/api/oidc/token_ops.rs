@@ -155,6 +155,16 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
             crate::act::token_revocation::revoke_claims(&claims)
                 .await
                 .map_err(OAuthErrorResponse::internal)?;
+            if claims.typ.as_deref() == Some("refresh")
+                && let (Some(user_id), Some(sid)) =
+                    (claims.sub_id.as_deref(), claims.sid.as_deref())
+            {
+                crate::etc::store::use_store()
+                    .delete(sid)
+                    .await
+                    .map_err(OAuthErrorResponse::internal)?;
+                crate::act::sessions::forget_session(user_id, sid).await;
+            }
         }
         Err(_) => {
             revoke_api_key_token(
@@ -209,14 +219,17 @@ fn scope_from_attrs(attrs: &JsonValue) -> Option<String> {
 
 async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     if let Some(sid) = claims.sid.as_deref() {
-        return crate::etc::store::use_store()
+        let active = crate::etc::store::use_store()
             .exists(sid)
             .await
-            .map_err(OAuthErrorResponse::internal);
+            .map_err(OAuthErrorResponse::internal)?;
+        if !active {
+            return Ok(false);
+        }
     }
 
     let Some(client_id) = claims.azp.as_deref() else {
-        return Ok(false);
+        return Ok(claims.sid.is_some());
     };
     let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
         .await

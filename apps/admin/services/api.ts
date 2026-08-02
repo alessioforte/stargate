@@ -6,6 +6,7 @@ import type {
   AdminHealth,
   AdminMe,
   AdminOverview,
+  AdminSession,
   AdminKey,
   ApiKey,
   ApiKeyAttrsRequest,
@@ -25,6 +26,7 @@ import type {
   EvaluateAccessControlRequest,
   EvaluateAccessControlResponse,
   List,
+  ListAdminSessionsQuery,
   ListOutboxEventsQuery,
   MessageResponse,
   OAuthClient,
@@ -34,6 +36,7 @@ import type {
   PatchUserRequest,
   Query,
   RotateOAuthClientSecretResponse,
+  SessionRevocationResponse,
   ServiceAccount,
   UpdateAccessControlRulesRequest,
   UpdateAdminKeyPermissionsRequest,
@@ -43,6 +46,7 @@ import type {
   UpdateServiceAccountRequest,
   UpdateUserRequest,
   User,
+  UserSessionsRevocationResponse,
   UserAttrsRequest,
   UserOrganization,
   ValidateAccessControlRulesRequest,
@@ -98,6 +102,28 @@ export default class AdminApiService {
     return this.request<AdminOverview>({
       url: this.url("/overview"),
       method: "GET",
+    });
+  }
+
+  async getAdminSessions(query?: ListAdminSessionsQuery) {
+    return this.request<List<AdminSession>>({
+      url: this.url("/sessions"),
+      method: "GET",
+      params: query,
+    });
+  }
+
+  async revokeAdminSession(sessionId: string) {
+    return this.request<SessionRevocationResponse>({
+      url: this.url(`/sessions/${this.pathParam(sessionId)}`),
+      method: "DELETE",
+    });
+  }
+
+  async revokeUserSessions(userId: string) {
+    return this.request<UserSessionsRevocationResponse>({
+      url: this.url(`/users/${this.pathParam(userId)}/sessions`),
+      method: "DELETE",
     });
   }
 

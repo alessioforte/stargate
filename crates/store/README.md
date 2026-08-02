@@ -76,6 +76,7 @@ pub trait Store: Send + Sync {
     // Key-value
     async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>>;
     async fn set<T: SerializeValue>(&self, key: &str, value: &T, ttl: Option<u64>) -> StoreResult<()>;
+    async fn set_if_absent<T: SerializeValue>(&self, key: &str, value: &T, ttl: Option<u64>) -> StoreResult<bool>;
     async fn delete(&self, key: &str) -> StoreResult<bool>;
     async fn exists(&self, key: &str) -> StoreResult<bool>;
 
@@ -333,6 +334,7 @@ async fn main() -> store::StoreResult<()> {
     store.incr_i64("hits", 1, None).await?;
 
     // Optimistic update
+    let created = store.set_if_absent("lock", &"owner-1", Some(30)).await?;
     let swapped = store.compare_and_swap("cfg", &"old", &"new", None).await?;
 
     // Snapshot

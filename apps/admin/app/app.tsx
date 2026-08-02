@@ -13,6 +13,7 @@ import OrganizationsPage from "./routes/organizations/organizations";
 import ServiceAccountsPage from "./routes/service-accounts/service-accounts";
 import AccessControlPoliciesPage from "./routes/access-control-policies/access-control-policies";
 import AuditsPage from "./routes/audits/audits";
+import SessionsPage from "./routes/sessions/sessions";
 
 const router = createBrowserRouter(
   [
@@ -35,6 +36,10 @@ const router = createBrowserRouter(
         {
           path: "users",
           element: <UsersPage />,
+        },
+        {
+          path: "sessions",
+          element: <SessionsPage />,
         },
         {
           path: "gateway",

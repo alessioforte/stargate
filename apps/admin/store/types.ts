@@ -5,6 +5,7 @@ import type {
   AdminKey,
   AdminMe,
   AdminOverview,
+  AdminSession,
   ApiKey,
   ApiKeyQuery,
   Configuration,
@@ -15,6 +16,7 @@ import type {
   CreateOAuthClientRequest,
   CreateOAuthClientResponse,
   List,
+  ListAdminSessionsQuery,
   ListOutboxEventsQuery,
   OAuthClient,
   Organization,
@@ -85,6 +87,8 @@ export interface State {
   adminHealth: StoreItem<AdminHealth>;
   adminMe: AdminMe | null;
   adminOverview: StoreItem<AdminOverview>;
+  adminSessions: StoreItem<List<AdminSession>>;
+  adminSessionsQuery: ListAdminSessionsQuery;
   adminStatus: AdminStatus | null;
   message: AppMessage | null;
   loading: boolean;
@@ -116,6 +120,9 @@ export interface Actions {
   ensureAdminSession: (returnPath: string) => Promise<AdminSessionResult>;
   getAdminHealth: () => Promise<void>;
   getAdminOverview: () => Promise<void>;
+  getAdminSessions: (query?: ListAdminSessionsQuery) => Promise<void>;
+  revokeAdminSession: (sessionId: string) => Promise<void>;
+  revokeUserSessions: (userId: string) => Promise<void>;
   logout: (returnPath: string) => Promise<void>;
   signIn: (returnPath: string) => Promise<AdminSessionResult>;
   setLanguage: (lang: "en" | "it") => void;

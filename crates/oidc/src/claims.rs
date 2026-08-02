@@ -38,6 +38,7 @@ pub fn client_credentials_access_claims(
 pub fn user_access_claims(
     user: &UserClaimsProfile,
     client_id: &str,
+    sid: Option<&str>,
     scope: Option<String>,
     audience: Option<String>,
     auth_time: chrono::DateTime<chrono::Utc>,
@@ -46,6 +47,7 @@ pub fn user_access_claims(
         .subject(user.id.clone())
         .sub_id(user.id.clone());
     claims.azp = Some(client_id.to_string());
+    claims.sid = sid.map(str::to_string);
     claims.scope = scope;
     claims.aud = audience;
     claims.auth_time = Some(auth_time.timestamp() as usize);
@@ -55,6 +57,7 @@ pub fn user_access_claims(
 pub fn id_token_claims(
     user: &UserClaimsProfile,
     client_id: &str,
+    sid: Option<&str>,
     scopes: &[String],
     auth_time: chrono::DateTime<chrono::Utc>,
     nonce: Option<String>,
@@ -64,6 +67,7 @@ pub fn id_token_claims(
         .sub_id(user.id.clone())
         .aud(client_id.to_string());
     claims.azp = Some(client_id.to_string());
+    claims.sid = sid.map(str::to_string);
     claims.auth_time = Some(auth_time.timestamp() as usize);
     claims.nonce = nonce;
 
@@ -105,11 +109,13 @@ mod tests {
         let claims = id_token_claims(
             &user(),
             "client-1",
+            Some("session-1"),
             &[SCOPE_OPENID.to_string()],
             Utc::now(),
             None,
         );
 
+        assert_eq!(claims.sid.as_deref(), Some("session-1"));
         assert!(claims.email.is_none());
         assert!(claims.name.is_none());
     }
@@ -119,6 +125,7 @@ mod tests {
         let claims = id_token_claims(
             &user(),
             "client-1",
+            Some("session-1"),
             &[
                 SCOPE_OPENID.to_string(),
                 SCOPE_EMAIL.to_string(),

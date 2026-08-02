@@ -52,6 +52,13 @@ pub struct AuditOverview {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct SessionOverview {
+    active_sessions: usize,
+    active_users: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct GatewayOverview {
     config_version: u64,
     policy_revision: Option<String>,
@@ -66,6 +73,7 @@ pub struct GatewayOverview {
 pub struct AdminOverview {
     generated_at: String,
     resources: AdminResourceOverview,
+    sessions: SessionOverview,
     audit: AuditOverview,
     gateway: GatewayOverview,
 }
@@ -83,7 +91,7 @@ fn revocable(total: i64, revoked: i64) -> RevocableResourceCount {
     path = "/admin/overview",
     tags = ["Admin"],
     summary = "Admin overview",
-    description = "Returns a compact snapshot of resource counts, audit delivery backlog, and the active gateway graph.",
+    description = "Returns a compact snapshot of resource and active-session counts, audit delivery backlog, and the active gateway graph.",
     responses(
         (status = 200, description = "Overview retrieved successfully", body = AdminOverview),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -100,6 +108,9 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
         .cloned()
         .ok_or_else(|| ErrorResponse::internal("gateway runtime is unavailable"))?;
     let stats = crate::db::get_admin_overview_stats()
+        .await
+        .map_err(ErrorResponse::internal)?;
+    let session_summary = crate::act::sessions::session_summary()
         .await
         .map_err(ErrorResponse::internal)?;
     let graph = gate.http_graph.load();
@@ -125,6 +136,10 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
             },
             api_keys: revocable(stats.api_keys_total, stats.api_keys_revoked),
             admin_keys: revocable(stats.admin_keys_total, stats.admin_keys_revoked),
+        },
+        sessions: SessionOverview {
+            active_sessions: session_summary.active_sessions,
+            active_users: session_summary.active_users,
         },
         audit: AuditOverview {
             mode: crate::aud::delivery_mode(),

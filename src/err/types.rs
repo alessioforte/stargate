@@ -59,6 +59,7 @@ pub enum ErrorCode {
     AuthLoginRateLimited,
     AuthLoginUnavailable,
     SessionOrganizationMembershipRequired,
+    SessionNotFound,
     UserNotFound,
     UserEmailAlreadyExists,
     UserNicknameAlreadyExists,
@@ -177,6 +178,7 @@ impl ErrorCode {
         Self::AuthLoginRateLimited,
         Self::AuthLoginUnavailable,
         Self::SessionOrganizationMembershipRequired,
+        Self::SessionNotFound,
         Self::UserNotFound,
         Self::UserEmailAlreadyExists,
         Self::UserNicknameAlreadyExists,
@@ -297,6 +299,7 @@ impl ErrorCode {
             Self::SessionOrganizationMembershipRequired => {
                 "session.organization_membership_required"
             }
+            Self::SessionNotFound => "session.not_found",
             Self::UserNotFound => "user.not_found",
             Self::UserEmailAlreadyExists => "user.email_already_exists",
             Self::UserNicknameAlreadyExists => "user.nickname_already_exists",
@@ -485,6 +488,7 @@ impl ErrorCode {
                 Validation,
                 "User is not a member of the requested organization",
             ),
+            Self::SessionNotFound => definition(Status::NOT_FOUND, NotFound, "Session not found"),
             Self::UserNotFound => definition(Status::NOT_FOUND, NotFound, "User not found"),
             Self::UserEmailAlreadyExists => definition(
                 Status::CONFLICT,
