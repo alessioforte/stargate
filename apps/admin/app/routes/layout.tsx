@@ -12,6 +12,7 @@ import { AiOutlineAppstoreAdd } from "react-icons/ai";
 import { GrGateway } from "react-icons/gr";
 import { BsFillJournalBookmarkFill } from "react-icons/bs";
 import { MdLocalPolice } from "react-icons/md";
+import { LuMonitorSmartphone } from "react-icons/lu";
 import { Shell, Loader } from "@/components";
 import { TranslationProvider } from "@/i18n";
 import useStore from "@/store";
@@ -28,6 +29,11 @@ const sidebarItems = [
     icon: <GoOrganization size={18} />,
   },
   { label: "Users", path: "/users", icon: <HiOutlineUsers size={18} /> },
+  {
+    label: "Sessions",
+    path: "/sessions",
+    icon: <LuMonitorSmartphone size={18} />,
+  },
   {
     label: "Service Accounts",
     path: "/service-accounts",

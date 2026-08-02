@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import {
-  ActionIcon,
   Alert,
   Anchor,
   Badge,
   Box,
   Card,
+  Code,
   Divider,
   Group,
   SimpleGrid,
@@ -14,26 +14,28 @@ import {
   Text,
   ThemeIcon,
   Title,
-  Tooltip,
 } from "@mantine/core";
 import { Link } from "react-router";
 import {
   HiOutlineKey,
   HiOutlineServerStack,
+  HiOutlineUserGroup,
   HiOutlineUsers,
 } from "react-icons/hi2";
-import { LuActivity, LuRefreshCw, LuRoute } from "react-icons/lu";
+import { LuActivity, LuMonitorSmartphone, LuRoute } from "react-icons/lu";
 import { GoOrganization, GoShieldLock } from "react-icons/go";
 import { MdOutlineApps } from "react-icons/md";
 import useStore from "@/store";
 import type { JsonValue, OutboxEvent } from "@/services/types";
 import { formatDate } from "@/lib/format-date";
 import { useTranslations } from "@/i18n";
+import { usePolling } from "@/hooks";
 import MetricCard from "./metric-card";
 import StatusRow from "./status-row";
 import Metric from "./metric";
 
 export default function AdminHomePage() {
+  const t = useTranslations();
   const {
     adminHealth,
     adminMe,
@@ -44,12 +46,19 @@ export default function AdminHomePage() {
     language,
     outboxEvents,
   } = useStore();
-  const t = useTranslations();
 
   useEffect(() => {
     void getAdminOverview();
     void getOutboxEvents({ limit: 6, pairRole: "control_plane" });
   }, [getAdminOverview, getOutboxEvents]);
+
+  const refresh = () => {
+    void getAdminHealth();
+    void getAdminOverview();
+    void getOutboxEvents({ limit: 6, pairRole: "control_plane" });
+  };
+
+  usePolling(refresh, { interval: 9000 });
 
   const overview = adminOverview.data;
   const health = adminHealth.data;
@@ -65,12 +74,6 @@ export default function AdminHomePage() {
       ? `${health.store.totalKeys.toLocaleString()} ${t("storedKeys")}`
       : undefined;
 
-  const refresh = () => {
-    void getAdminHealth();
-    void getAdminOverview();
-    void getOutboxEvents({ limit: 6, pairRole: "control_plane" });
-  };
-
   return (
     <Box p={{ base: "sm", md: "lg" }}>
       <Group justify="space-between" mb="lg">
@@ -80,16 +83,6 @@ export default function AdminHomePage() {
             {t("operationalOverview")}
           </Text>
         </div>
-        <Tooltip label={t("refresh")}>
-          <ActionIcon
-            variant="light"
-            size="lg"
-            onClick={refresh}
-            aria-label={t("refresh")}
-          >
-            <LuRefreshCw size={18} />
-          </ActionIcon>
-        </Tooltip>
       </Group>
 
       {adminOverview.isError() && (
@@ -98,7 +91,7 @@ export default function AdminHomePage() {
         </Alert>
       )}
 
-      <SimpleGrid cols={{ base: 1, xs: 3, md: 6, xl: 6 }} mb="md">
+      <SimpleGrid cols={{ base: 1, xs: 2, md: 4, xl: 8 }} mb="md">
         <MetricCard
           label={t("users")}
           value={overview?.resources.users.total}
@@ -141,6 +134,20 @@ export default function AdminHomePage() {
           loading={loadingOverview}
           icon={<GoShieldLock size={20} />}
         />
+        <MetricCard
+          label={t("activeSessions")}
+          value={overview?.sessions.activeSessions}
+          detail={t("openLoginSessions")}
+          loading={loadingOverview}
+          icon={<LuMonitorSmartphone size={20} />}
+        />
+        <MetricCard
+          label={t("activeUsers")}
+          value={overview?.sessions.activeUsers}
+          detail={t("signedInUsers")}
+          loading={loadingOverview}
+          icon={<HiOutlineUserGroup size={20} />}
+        />
       </SimpleGrid>
 
       <Card withBorder radius="md" mb="md" p={8}>
@@ -174,7 +181,7 @@ export default function AdminHomePage() {
         )}
       </Card>
 
-      <SimpleGrid cols={{ base: 1, lg: 2 }} mb="md">
+      <SimpleGrid cols={{ base: 1, lg: 3 }} mb="md">
         <Card withBorder radius="md" p={8}>
           <Group justify="space-between" mb="md">
             <Group gap="xs">
@@ -258,6 +265,67 @@ export default function AdminHomePage() {
             </Stack>
           ) : (
             <Skeleton h={90} />
+          )}
+        </Card>
+
+        <Card withBorder radius="md" p={8}>
+          <Group justify="space-between" mb="md">
+            <Group gap="xs">
+              <ThemeIcon variant="light" color="indigo">
+                <LuMonitorSmartphone size={18} />
+              </ThemeIcon>
+              <Title order={5}>{t("currentSession")}</Title>
+            </Group>
+            {adminMe && (
+              <Badge variant="light" color="indigo">
+                {adminMe.authentication.kind}
+              </Badge>
+            )}
+          </Group>
+          {adminMe ? (
+            <Stack gap="sm">
+              <Group justify="space-between" wrap="nowrap">
+                <Text size="sm">{t("sessionId")}</Text>
+                {adminMe.authentication.sessionId ? (
+                  <Code fz={10}>{adminMe.authentication.sessionId}</Code>
+                ) : (
+                  <Text c="dimmed">—</Text>
+                )}
+              </Group>
+              {adminMe.authentication.clientId && (
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="sm">{t("clientId")}</Text>
+                  <Code fz={10}>{adminMe.authentication.clientId}</Code>
+                </Group>
+              )}
+              <Group justify="space-between" wrap="nowrap">
+                <Text size="sm">{t("authenticatedAt")}</Text>
+                <Text size="xs" c="dimmed">
+                  {adminMe.authentication.authenticatedAt
+                    ? formatDate(
+                        adminMe.authentication.authenticatedAt,
+                        null,
+                        language,
+                      )
+                    : "—"}
+                </Text>
+              </Group>
+              <Group justify="space-between" wrap="nowrap">
+                <Text size="sm">{t("accessExpiresAt")}</Text>
+                <Text size="xs" c="dimmed">
+                  {formatDate(
+                    adminMe.authentication.tokenExpiresAt,
+                    null,
+                    language,
+                  )}
+                </Text>
+              </Group>
+              <Anchor component={Link} to="/sessions" size="sm">
+                {t("viewAllSessions")}
+              </Anchor>
+            </Stack>
+          ) : (
+            <Skeleton h={120} />
           )}
         </Card>
       </SimpleGrid>

@@ -77,6 +77,7 @@ export interface AdminMe {
     authenticatedAt: string | null;
     clientId: string | null;
     kind: "oauth" | "session";
+    sessionId: string | null;
     scopes: string[];
     tokenExpiresAt: string;
     tokenIssuedAt: string;
@@ -121,6 +122,44 @@ export interface AdminOverview {
     targets: number;
     upstreams: number;
   };
+  sessions: {
+    activeSessions: number;
+    activeUsers: number;
+  };
+}
+
+export interface AdminSessionUser {
+  email: string | null;
+  id: string;
+  name: string | null;
+}
+
+export interface AdminSession {
+  authenticatedAt: string;
+  clientIds: string[];
+  current: boolean;
+  expiresAt: string;
+  id: string;
+  lastSeenAt: string;
+  organizationId: string | null;
+  user: AdminSessionUser;
+}
+
+export interface ListAdminSessionsQuery extends PaginationQuery {
+  clientId?: string;
+  organizationId?: string;
+  userId?: string;
+}
+
+export interface SessionRevocationResponse {
+  revoked: boolean;
+  sessionId: string;
+  userId: string;
+}
+
+export interface UserSessionsRevocationResponse {
+  revokedSessions: number;
+  userId: string;
 }
 
 export interface ConfigurationsQuery {
