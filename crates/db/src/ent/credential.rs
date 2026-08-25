@@ -22,7 +22,7 @@ pub struct Credential {
 
 impl Credential {
     pub fn new(user_id: String, credential_type: CredentialType, value: String) -> Self {
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         let now = Utc::now();
         Credential {
             id,
@@ -47,7 +47,7 @@ pub struct CredentialHistory {
 impl CredentialHistory {
     pub fn new(user_id: String, value: String) -> Self {
         CredentialHistory {
-            id: ulid::Ulid::new().to_string(),
+            id: ulid::Ulid::generate().to_string(),
             user_id,
             value,
             created_at: Utc::now(),

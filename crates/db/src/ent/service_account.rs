@@ -14,7 +14,7 @@ pub struct ServiceAccount {
 
 impl ServiceAccount {
     pub fn new(name: String, description: Option<String>, org_id: Option<String>) -> Self {
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         let now = Utc::now();
         ServiceAccount {
             id,

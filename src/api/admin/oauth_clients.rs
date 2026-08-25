@@ -180,7 +180,7 @@ struct NormalizedClientInput {
 }
 
 fn generate_client_id() -> String {
-    format!("client_{}", ulid::Ulid::new())
+    format!("client_{}", ulid::Ulid::generate())
 }
 
 fn validate_client_id(client_id: &str) -> Result<(), ErrorResponse> {

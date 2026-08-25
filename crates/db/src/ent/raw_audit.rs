@@ -103,7 +103,7 @@ pub struct AuditId(String);
 
 impl AuditId {
     pub fn new() -> Self {
-        Self(ulid::Ulid::new().to_string())
+        Self(ulid::Ulid::generate().to_string())
     }
 
     pub fn parse(value: impl Into<String>) -> AuditEventResult<Self> {

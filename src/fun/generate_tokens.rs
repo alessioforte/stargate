@@ -10,7 +10,7 @@ pub fn generate_tokens(claims: jwt::Claims) -> Result<SessionTokens, jwt::JwtErr
     let jwt = jwt_config();
     // RFC 7519 §4.1.7: `jti` uniquely identifies the refresh token, while
     // `sid` continues to identify the login session.
-    let refresh_jti = ulid::Ulid::new().to_string();
+    let refresh_jti = ulid::Ulid::generate().to_string();
 
     let mut jwt_refresh_claims = jwt::Claims::default()
         .subject(claims.sub.clone())

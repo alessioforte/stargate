@@ -19,7 +19,7 @@ pub struct User {
 
 impl User {
     pub fn new(email: String, nickname: String) -> Self {
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         let now = Utc::now();
         User {
             id,

@@ -1,5 +1,6 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use lb::{BaseLoadBalancer, IpHash, LoadBalancer, Random, RequestContext, RoundRobin, Upstream};
+use std::hint::black_box;
 
 /// Build `total` upstreams, the first `down` of which have an open circuit so
 /// `select` must probe past them.

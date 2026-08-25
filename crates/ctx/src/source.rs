@@ -29,6 +29,6 @@ pub struct UlidDispatchIdSource;
 
 impl DispatchIdSource for UlidDispatchIdSource {
     fn next_dispatch_id(&self) -> String {
-        ulid::Ulid::new().to_string()
+        ulid::Ulid::generate().to_string()
     }
 }

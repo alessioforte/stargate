@@ -14,7 +14,7 @@ pub use v2alpha1::{
 };
 
 use graph::CompiledConfig;
-use serde_yaml_bw::Value;
+use serde_json::Value;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::Path;
@@ -32,7 +32,7 @@ pub enum ConfigLoadError {
         path: String,
         source: std::io::Error,
     },
-    Parse(serde_yaml_bw::Error),
+    Parse(serde_saphyr::Error),
     Compile(graph::CompileError),
     MissingV2Schema,
 }
@@ -81,8 +81,7 @@ impl RuntimeConfig {
 
     pub fn from_yaml_str(yaml: &str) -> Result<Self, ConfigLoadError> {
         ensure_v2alpha1_schema(yaml)?;
-        let raw: v2alpha1::Config =
-            serde_yaml_bw::from_str(yaml).map_err(ConfigLoadError::Parse)?;
+        let raw: v2alpha1::Config = serde_saphyr::from_str(yaml).map_err(ConfigLoadError::Parse)?;
         Self::from_raw(raw)
     }
 
@@ -109,10 +108,10 @@ impl RuntimeConfig {
 }
 
 fn ensure_v2alpha1_schema(yaml: &str) -> Result<(), ConfigLoadError> {
-    let value = serde_yaml_bw::from_str::<Value>(yaml).map_err(ConfigLoadError::Parse)?;
+    let value = serde_saphyr::from_str::<Value>(yaml).map_err(ConfigLoadError::Parse)?;
     let Some(schema) = value
-        .as_mapping()
-        .and_then(|mapping| mapping.get(Value::String("schema".to_string(), None)))
+        .as_object()
+        .and_then(|mapping| mapping.get("schema"))
         .and_then(Value::as_str)
     else {
         return Err(ConfigLoadError::MissingV2Schema);

@@ -99,29 +99,31 @@ fn key_algorithm_name(jwk: &jwt::Jwk) -> Option<String> {
         .map(|algorithm| algorithm.to_string())
 }
 
-fn elliptic_curve_name(curve: &EllipticCurve) -> &'static str {
+fn elliptic_curve_name(curve: &EllipticCurve) -> Option<&'static str> {
     match curve {
-        EllipticCurve::P256 => "P-256",
-        EllipticCurve::P384 => "P-384",
-        EllipticCurve::P521 => "P-521",
-        EllipticCurve::Ed25519 => "Ed25519",
+        EllipticCurve::P256 => Some("P-256"),
+        EllipticCurve::P384 => Some("P-384"),
+        EllipticCurve::P521 => Some("P-521"),
+        EllipticCurve::Ed25519 => Some("Ed25519"),
+        _ => None,
     }
 }
 
-pub fn jwt_algorithm_name(algorithm: jwt::Algorithm) -> &'static str {
+pub fn jwt_algorithm_name(algorithm: jwt::Algorithm) -> Option<&'static str> {
     match algorithm {
-        jwt::Algorithm::HS256 => "HS256",
-        jwt::Algorithm::HS384 => "HS384",
-        jwt::Algorithm::HS512 => "HS512",
-        jwt::Algorithm::ES256 => "ES256",
-        jwt::Algorithm::ES384 => "ES384",
-        jwt::Algorithm::RS256 => "RS256",
-        jwt::Algorithm::RS384 => "RS384",
-        jwt::Algorithm::RS512 => "RS512",
-        jwt::Algorithm::PS256 => "PS256",
-        jwt::Algorithm::PS384 => "PS384",
-        jwt::Algorithm::PS512 => "PS512",
-        jwt::Algorithm::EdDSA => "EdDSA",
+        jwt::Algorithm::HS256 => Some("HS256"),
+        jwt::Algorithm::HS384 => Some("HS384"),
+        jwt::Algorithm::HS512 => Some("HS512"),
+        jwt::Algorithm::ES256 => Some("ES256"),
+        jwt::Algorithm::ES384 => Some("ES384"),
+        jwt::Algorithm::RS256 => Some("RS256"),
+        jwt::Algorithm::RS384 => Some("RS384"),
+        jwt::Algorithm::RS512 => Some("RS512"),
+        jwt::Algorithm::PS256 => Some("PS256"),
+        jwt::Algorithm::PS384 => Some("PS384"),
+        jwt::Algorithm::PS512 => Some("PS512"),
+        jwt::Algorithm::EdDSA => Some("EdDSA"),
+        _ => None,
     }
 }
 
@@ -149,11 +151,12 @@ fn public_jwk_from_jwk(jwk: jwt::Jwk) -> Option<PublicJwk> {
             alg,
             n: None,
             e: None,
-            crv: Some(elliptic_curve_name(&params.curve).to_string()),
+            crv: Some(elliptic_curve_name(&params.curve)?.to_string()),
             x: Some(params.x),
             y: Some(params.y),
         }),
         AlgorithmParameters::OctetKey(_) | AlgorithmParameters::OctetKeyPair(_) => None,
+        _ => None,
     }
 }
 
@@ -211,9 +214,10 @@ pub fn openid_configuration(
             GRANT_REFRESH_TOKEN.to_string(),
         ],
         subject_types_supported: vec!["public".to_string()],
-        id_token_signing_alg_values_supported: vec![
-            jwt_algorithm_name(signing_algorithm).to_string(),
-        ],
+        id_token_signing_alg_values_supported: jwt_algorithm_name(signing_algorithm)
+            .map(str::to_string)
+            .into_iter()
+            .collect(),
         scopes_supported: vec![
             SCOPE_OPENID.to_string(),
             SCOPE_EMAIL.to_string(),

@@ -126,7 +126,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
     let family_name = user.family_name.clone().unwrap_or_default();
     let name = format_name(&given_name, &family_name);
 
-    let sid = ulid::Ulid::new().to_string();
+    let sid = ulid::Ulid::generate().to_string();
     let auth_time = chrono::Utc::now().timestamp() as usize;
     let mut claims = Claims::default()
         .subject(user.email.to_owned())

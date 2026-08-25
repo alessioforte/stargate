@@ -32,7 +32,7 @@ pub fn code_key(code_hash: &str) -> String {
 }
 
 pub fn authorization_code() -> String {
-    format!("code_{}_{}", ulid::Ulid::new(), pw::generate_api_key())
+    format!("code_{}_{}", ulid::Ulid::generate(), pw::generate_api_key())
 }
 
 pub async fn store<S: Store>(
@@ -112,7 +112,7 @@ mod tests {
     #[tokio::test]
     async fn consume_is_single_use() {
         let store = MemoryStore::new();
-        let code_hash = format!("test-{}", ulid::Ulid::new());
+        let code_hash = format!("test-{}", ulid::Ulid::generate());
 
         super::store(&store, &code_hash, record(), 60)
             .await

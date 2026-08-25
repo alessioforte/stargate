@@ -1987,7 +1987,7 @@ mod sqlite_tests {
     fn trusted_ctx() -> TrustedAuditContext {
         TrustedAuditContext::admin_control_plane(
             TrustedAdminActor::admin("01JZ000000000000000000000A"),
-            TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None),
+            TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None),
         )
     }
 
@@ -2225,14 +2225,14 @@ mod sqlite_tests {
     fn anonymous_application_context() -> TrustedAuditContext {
         TrustedAuditContext::application(
             crate::ent::TrustedAuditActor::anonymous(),
-            TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None),
+            TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None),
         )
     }
 
     fn user_application_context(user_id: &str) -> TrustedAuditContext {
         TrustedAuditContext::application(
             crate::ent::TrustedAuditActor::user(user_id),
-            TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None),
+            TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None),
         )
     }
 
@@ -2346,7 +2346,7 @@ mod sqlite_tests {
         social_update.picture = Some("SOCIAL_PICTURE_SECRET".to_string());
         let social_context = TrustedAuditContext::application(
             crate::ent::TrustedAuditActor::external_identity("github:verified-subject"),
-            TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None),
+            TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None),
         );
         svc.update_user(social_update, social_context)
             .await
@@ -2683,7 +2683,7 @@ mod sqlite_tests {
     async fn audit_validation_failure_rolls_back_business_mutation_and_outbox() {
         let svc = test_service().await;
         let invalid_request = TrustedAuditRequest::from_http(
-            ulid::Ulid::new().to_string(),
+            ulid::Ulid::generate().to_string(),
             None,
             None,
             Some("x".repeat(513)),
@@ -2749,7 +2749,7 @@ mod sqlite_tests {
     #[tokio::test]
     async fn audit_oauth_client_lifecycle_uses_semantic_actions_and_never_serializes_secrets() {
         let svc = test_service().await;
-        let client_id = format!("audit-client-{}", ulid::Ulid::new());
+        let client_id = format!("audit-client-{}", ulid::Ulid::generate());
         let initial_hash = "OAUTH_INITIAL_SECRET_HASH";
         let rotated_hash = "OAUTH_ROTATED_SECRET_HASH";
         let client = svc
@@ -2894,7 +2894,7 @@ mod sqlite_tests {
             .expect("update API key attrs");
         let oauth_context = TrustedAuditContext::organization(
             crate::ent::TrustedAuditActor::service("authorized-oauth-client"),
-            TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None),
+            TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None),
             Some(&org.id),
             None,
         )
@@ -2906,7 +2906,12 @@ mod sqlite_tests {
             &unbound_key.id,
             TrustedAuditContext::application(
                 crate::ent::TrustedAuditActor::service("authorized-oauth-client"),
-                TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None),
+                TrustedAuditRequest::from_http(
+                    ulid::Ulid::generate().to_string(),
+                    None,
+                    None,
+                    None,
+                ),
             ),
         )
         .await
@@ -3079,7 +3084,7 @@ mod sqlite_tests {
             TrustedAuditContext::admin_control_plane(
                 TrustedAdminActor::admin("01JZ000000000000000000000A"),
                 TrustedAuditRequest::from_http(
-                    ulid::Ulid::new().to_string(),
+                    ulid::Ulid::generate().to_string(),
                     None,
                     None,
                     Some("x".repeat(513)),
@@ -3087,7 +3092,7 @@ mod sqlite_tests {
             )
         };
 
-        let client_id = format!("rollback-client-{}", ulid::Ulid::new());
+        let client_id = format!("rollback-client-{}", ulid::Ulid::generate());
         assert!(
             svc.create_oauth_client(
                 test_oauth_client(&client_id, Some("ROLLBACK_OAUTH_HASH_SECRET")),
@@ -3170,7 +3175,7 @@ mod sqlite_tests {
             .await
             .expect("add organization member");
 
-        let client_id = format!("a6-client-{}", ulid::Ulid::new());
+        let client_id = format!("a6-client-{}", ulid::Ulid::generate());
         svc.create_oauth_client(
             test_oauth_client(&client_id, Some("A6_OAUTH_HASH_SECRET")),
             trusted_ctx(),
@@ -3227,7 +3232,7 @@ mod sqlite_tests {
         let invalid_context = TrustedAuditContext::admin_control_plane(
             TrustedAdminActor::admin("01JZ000000000000000000000A"),
             TrustedAuditRequest::from_http(
-                ulid::Ulid::new().to_string(),
+                ulid::Ulid::generate().to_string(),
                 None,
                 None,
                 Some("x".repeat(513)),
@@ -3435,11 +3440,11 @@ mod tests {
     }
 
     fn unique_email() -> String {
-        format!("test-{}@example.com", ulid::Ulid::new())
+        format!("test-{}@example.com", ulid::Ulid::generate())
     }
 
     fn unique_nick() -> String {
-        ulid::Ulid::new().to_string()
+        ulid::Ulid::generate().to_string()
     }
 
     async fn insert_outbox_relay_event(svc: &Service, request_id: &str) -> String {
@@ -3473,8 +3478,8 @@ mod tests {
         let svc = test_service().await;
 
         let email = unique_email();
-        let req_ok = ulid::Ulid::new().to_string();
-        let req_fail = ulid::Ulid::new().to_string();
+        let req_ok = ulid::Ulid::generate().to_string();
+        let req_fail = ulid::Ulid::generate().to_string();
 
         // First create succeeds — establishes the email that will trigger a constraint violation.
         let ctx_ok = admin_context(req_ok.clone());
@@ -3532,7 +3537,7 @@ mod tests {
     async fn super_admin_create_writes_two_audit_outbox_rows() {
         let svc = test_service().await;
 
-        let actor_id = format!("bootstrap-test:{}", ulid::Ulid::new());
+        let actor_id = format!("bootstrap-test:{}", ulid::Ulid::generate());
         let ctx = TrustedAuditContext::background(
             TrustedAuditBoundary::control_plane(),
             TrustedBackgroundActor::system(Some(actor_id.clone())),
@@ -3598,7 +3603,7 @@ mod tests {
     #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
     async fn audit_validation_failure_rolls_back_postgres_business_mutation() {
         let svc = test_service().await;
-        let request_id = ulid::Ulid::new().to_string();
+        let request_id = ulid::Ulid::generate().to_string();
         let context = TrustedAuditContext::admin_control_plane(
             TrustedAdminActor::admin("01JZ000000000000000000000A"),
             TrustedAuditRequest::from_http(request_id.clone(), None, None, Some("x".repeat(513))),
@@ -3632,9 +3637,9 @@ mod tests {
     #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
     async fn audit_a5_postgres_producers_use_outbox_semantics_and_exclude_secrets() {
         let svc = test_service().await;
-        let request_id = ulid::Ulid::new().to_string();
+        let request_id = ulid::Ulid::generate().to_string();
         let context = admin_context(request_id.clone());
-        let client_id = format!("audit-client-{}", ulid::Ulid::new());
+        let client_id = format!("audit-client-{}", ulid::Ulid::generate());
         let oauth_hash = "POSTGRES_OAUTH_SECRET_HASH";
         let rotated_hash = "POSTGRES_ROTATED_OAUTH_SECRET_HASH";
         let mut client = OAuthClient::new(
@@ -3674,7 +3679,7 @@ mod tests {
             )
             .await
             .expect("create key owner");
-        let api_hash = format!("POSTGRES_API_KEY_HASH_{}", ulid::Ulid::new());
+        let api_hash = format!("POSTGRES_API_KEY_HASH_{}", ulid::Ulid::generate());
         let api_key = svc
             .create_user_api_key(
                 &user.id,
@@ -3695,7 +3700,7 @@ mod tests {
             .await
             .expect("revoke API key");
 
-        let admin_hash = format!("POSTGRES_ADMIN_KEY_HASH_{}", ulid::Ulid::new());
+        let admin_hash = format!("POSTGRES_ADMIN_KEY_HASH_{}", ulid::Ulid::generate());
         let admin_key = svc
             .create_admin_key(
                 &admin_hash,
@@ -3791,8 +3796,8 @@ mod tests {
     #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
     async fn audit_a5_postgres_invalid_event_rolls_back_secret_creating_mutation() {
         let svc = test_service().await;
-        let request_id = ulid::Ulid::new().to_string();
-        let client_id = format!("rollback-client-{}", ulid::Ulid::new());
+        let request_id = ulid::Ulid::generate().to_string();
+        let client_id = format!("rollback-client-{}", ulid::Ulid::generate());
         let context = TrustedAuditContext::admin_control_plane(
             TrustedAdminActor::admin("01JZ000000000000000000000A"),
             TrustedAuditRequest::from_http(request_id.clone(), None, None, Some("x".repeat(513))),
@@ -3835,7 +3840,7 @@ mod tests {
         let _guard = CLAIM_LOCK.lock().await;
         let svc = test_service().await;
 
-        let req_id = ulid::Ulid::new().to_string();
+        let req_id = ulid::Ulid::generate().to_string();
         let event_id = insert_outbox_relay_event(&svc, &req_id).await;
 
         // Claim with a limit large enough to swallow any backlog left behind by
@@ -3880,7 +3885,7 @@ mod tests {
 
         // Insert 4 unpublished raw outbox rows.
         for _ in 0..4 {
-            insert_outbox_relay_event(&svc, &ulid::Ulid::new().to_string()).await;
+            insert_outbox_relay_event(&svc, &ulid::Ulid::generate().to_string()).await;
         }
 
         // Open claim1 (limit 2) — keeps its transaction open.

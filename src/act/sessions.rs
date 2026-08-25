@@ -590,7 +590,7 @@ mod index_tests {
     }
 
     fn unique(prefix: &str) -> String {
-        format!("{prefix}-{}", ulid::Ulid::new())
+        format!("{prefix}-{}", ulid::Ulid::generate())
     }
 
     #[tokio::test]

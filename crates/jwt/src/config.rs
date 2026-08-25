@@ -171,7 +171,7 @@ impl JwtConfig {
         claims.iat = now.timestamp() as usize;
         claims.exp = (now + ttl).timestamp() as usize;
         if claims.jti.is_none() {
-            claims.jti = Some(ulid::Ulid::new().to_string());
+            claims.jti = Some(ulid::Ulid::generate().to_string());
         }
         claims
     }

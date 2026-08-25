@@ -6,7 +6,7 @@ const TTL_SECS: u64 = 300; // 5 minutes
 
 pub async fn create_oauth_state() -> Result<String, store::StoreError> {
     let store = use_store();
-    let state = ulid::Ulid::new().to_string();
+    let state = ulid::Ulid::generate().to_string();
     let key = format!("{}:{}", KEY_PREFIX, state);
     store.set(key.as_str(), &"1", Some(TTL_SECS)).await?;
     Ok(state)

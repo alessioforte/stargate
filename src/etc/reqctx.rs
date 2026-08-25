@@ -407,7 +407,7 @@ pub fn request_id_from(extensions: &http::Extensions) -> String {
     extensions
         .get::<RequestContext>()
         .map(|ctx| ctx.request_id().to_string())
-        .unwrap_or_else(|| Ulid::new().to_string())
+        .unwrap_or_else(|| Ulid::generate().to_string())
 }
 
 pub fn audit_request_from(extensions: &http::Extensions) -> TrustedAuditRequest {

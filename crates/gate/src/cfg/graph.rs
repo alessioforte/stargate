@@ -100,7 +100,7 @@ pub struct HeaderValueNode {
 #[derive(Debug, Clone)]
 pub enum ResponseBodyNode {
     Text(String),
-    Json(serde_yaml_bw::Value),
+    Json(serde_json::Value),
 }
 
 #[derive(Debug, Clone)]

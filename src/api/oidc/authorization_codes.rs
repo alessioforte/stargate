@@ -48,7 +48,7 @@ mod tests {
 
     #[tokio::test]
     async fn consume_is_single_use() {
-        let code_hash = format!("test-{}", ulid::Ulid::new());
+        let code_hash = format!("test-{}", ulid::Ulid::generate());
 
         store(&code_hash, record(), 60).await.unwrap();
 

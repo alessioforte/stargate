@@ -43,17 +43,17 @@ impl Config {
         if !Path::new(path).exists() {
             tracing::info!("Creating v2alpha1 gate configuration yaml file");
             let config = Config::default();
-            let config_str = serde_yaml_bw::to_string(&config).expect("Unable to serialize config");
+            let config_str = serde_saphyr::to_string(&config).expect("Unable to serialize config");
             std::fs::write(path, config_str).expect("Unable to write config file");
             return config;
         }
 
         let file = std::fs::read_to_string(path).expect("Unable to read config file");
-        serde_yaml_bw::from_str(&file).expect("Unable to parse config file")
+        serde_saphyr::from_str(&file).expect("Unable to parse config file")
     }
 
     pub fn to_file(&self, path: &str) {
-        let config_str = serde_yaml_bw::to_string(self).expect("Unable to serialize config");
+        let config_str = serde_saphyr::to_string(self).expect("Unable to serialize config");
         std::fs::write(path, config_str).expect("Unable to write config file");
     }
 
@@ -207,7 +207,7 @@ pub struct HeaderValue {
 #[serde(untagged)]
 pub enum ResponseBody {
     Text { text: String },
-    Json { json: serde_yaml_bw::Value },
+    Json { json: serde_json::Value },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1141,7 +1141,7 @@ mod tests {
     use crate::graph::{MatchExprNode, MiddlewareNode, PathPredicate, ServiceNode, ValuePredicate};
 
     fn parse_config(yaml: &str) -> Config {
-        serde_yaml_bw::from_str(yaml).expect("config should parse")
+        serde_saphyr::from_str(yaml).expect("config should parse")
     }
 
     #[test]
@@ -1624,7 +1624,7 @@ http:
 
     #[test]
     fn rejects_unknown_internal_context_fields() {
-        let error = serde_yaml_bw::from_str::<Config>(
+        let error = serde_saphyr::from_str::<Config>(
             r#"
 schema: stargate/v2alpha1
 http:

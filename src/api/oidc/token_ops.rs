@@ -514,7 +514,12 @@ mod tests {
     }
 
     fn audit_request() -> db::ent::TrustedAuditRequest {
-        db::ent::TrustedAuditRequest::from_http(ulid::Ulid::new().to_string(), None, None, None)
+        db::ent::TrustedAuditRequest::from_http(
+            ulid::Ulid::generate().to_string(),
+            None,
+            None,
+            None,
+        )
     }
 
     #[test]

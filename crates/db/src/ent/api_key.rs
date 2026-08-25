@@ -28,7 +28,7 @@ pub struct ApiKeyAuth {
 
 impl ApiKey {
     pub fn new(key_hash: String, label: String, attrs: Value) -> Self {
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         let now = Utc::now();
         ApiKey {
             id,

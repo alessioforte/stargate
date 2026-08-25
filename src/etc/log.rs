@@ -154,7 +154,7 @@ pub async fn trace_middleware(
 ) -> axum::response::Response {
     use tracing::Instrument;
 
-    let request_id = Ulid::new().to_string();
+    let request_id = Ulid::generate().to_string();
     let now = Utc::now();
     let started = Instant::now();
     let method = req.method().clone();

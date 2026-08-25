@@ -59,7 +59,7 @@ pub async fn issue<S: Store>(
     ttl_secs: u64,
 ) -> Result<String, OAuthError> {
     let ttl_secs = ttl_secs.max(1);
-    let family_id = ulid::Ulid::new().to_string();
+    let family_id = ulid::Ulid::generate().to_string();
     let secret = new_secret();
     let expires_at = Utc::now() + chrono::Duration::seconds(ttl_secs as i64);
     let family = RefreshTokenFamily {

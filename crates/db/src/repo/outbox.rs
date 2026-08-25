@@ -809,7 +809,7 @@ mod postgres_tests {
             .expect("PostgreSQL test connection must open");
         let schema = format!(
             "audit_a2_{}",
-            ulid::Ulid::new().to_string().to_ascii_lowercase()
+            ulid::Ulid::generate().to_string().to_ascii_lowercase()
         );
         sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA \"{schema}\"")))
             .execute(&mut connection)

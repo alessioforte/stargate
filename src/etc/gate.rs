@@ -284,7 +284,7 @@ fn refresh_policy_revision(path: &str) {
 }
 
 fn policy_revision(content: &[u8]) -> String {
-    format!("sha256:{:x}", Sha256::digest(content))
+    format!("sha256:{}", hex::encode(Sha256::digest(content)))
 }
 
 pub async fn reload_policy_engine(gate: &Gate) {

@@ -16,7 +16,7 @@ pub struct AdminKey {
 
 impl AdminKey {
     pub fn new(key_hash: String, label: Option<String>, permissions: Vec<String>) -> Self {
-        let id = ulid::Ulid::new().to_string();
+        let id = ulid::Ulid::generate().to_string();
         let now = Utc::now();
         AdminKey {
             id,

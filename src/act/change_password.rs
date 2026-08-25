@@ -8,7 +8,7 @@ pub const CHANGE_PASSWORD_REQUEST_TTL_SECS: u64 = 60 * 60;
 
 pub async fn create_change_password_request(email: &str) -> Result<String, store::StoreError> {
     let store = use_store();
-    let sid = ulid::Ulid::new().to_string();
+    let sid = ulid::Ulid::generate().to_string();
 
     let key = format!("{}:{}", KEY_PREFIX, email);
     store

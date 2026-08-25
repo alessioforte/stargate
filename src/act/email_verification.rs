@@ -9,7 +9,7 @@ pub async fn create_email_verification_request(
     profile: &PendingSignupProfile,
 ) -> Result<String, store::StoreError> {
     let store = use_store();
-    let sid = ulid::Ulid::new().to_string();
+    let sid = ulid::Ulid::generate().to_string();
 
     let key1 = format!("{}:{}", KEY_PREFIX, sid);
     let key2 = format!("{}:{}", KEY_PREFIX, profile.email);

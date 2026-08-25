@@ -7,6 +7,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-lettre = "0.11.16"
-thiserror = "2.0.17"
+lettre = "0.11.23"
+thiserror = "2.0.20"
 tracing = "0.1.44"

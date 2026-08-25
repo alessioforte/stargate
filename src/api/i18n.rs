@@ -86,7 +86,7 @@ fn catalog_version(locale: &str, messages: &ApiMessages) -> String {
     hasher.update(locale);
     hasher.update(serde_json::to_vec(messages).expect("API messages must serialize"));
     let digest = hasher.finalize();
-    format!("sha256:{digest:x}")
+    format!("sha256:{}", hex::encode(digest))
 }
 
 #[utoipa::path(

@@ -1,4 +1,5 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::time::Duration;
 use store::memory::{MemoryStore, MemoryStoreConfig};
 use store::{AtomicStore, Store};
@@ -30,7 +31,7 @@ fn bench_set_get(c: &mut Criterion) {
             |b, _| {
                 b.to_async(&rt).iter(|| async {
                     let got: Option<String> = store.get("hit_key").await.unwrap();
-                    criterion::black_box(got);
+                    black_box(got);
                 });
             },
         );
@@ -50,7 +51,7 @@ fn bench_set_get(c: &mut Criterion) {
     group.bench_function("get_miss", |b| {
         b.to_async(&rt).iter(|| async {
             let got: Option<String> = miss_store.get("missing").await.unwrap();
-            criterion::black_box(got);
+            black_box(got);
         });
     });
 
@@ -76,21 +77,21 @@ fn bench_hash_ops(c: &mut Criterion) {
     group.bench_function("hget_hit", |b| {
         b.to_async(&rt).iter(|| async {
             let got: Option<i32> = store.hget("users", "field:64").await.unwrap();
-            criterion::black_box(got);
+            black_box(got);
         });
     });
 
     group.bench_function("hkeys", |b| {
         b.to_async(&rt).iter(|| async {
             let keys = store.hkeys("users").await.unwrap();
-            criterion::black_box(keys);
+            black_box(keys);
         });
     });
 
     group.bench_function("hgetall", |b| {
         b.to_async(&rt).iter(|| async {
             let all: std::collections::HashMap<String, i32> = store.hgetall("users").await.unwrap();
-            criterion::black_box(all);
+            black_box(all);
         });
     });
 
@@ -109,7 +110,7 @@ fn bench_atomic_ops(c: &mut Criterion) {
     group.bench_function("incr_i64", |b| {
         b.to_async(&rt).iter(|| async {
             let new_value = store.incr_i64("counter", 1, None).await.unwrap();
-            criterion::black_box(new_value);
+            black_box(new_value);
         });
     });
 
@@ -120,7 +121,7 @@ fn bench_atomic_ops(c: &mut Criterion) {
                 .compare_and_swap_i64("counter", -1, 0, None)
                 .await
                 .unwrap();
-            criterion::black_box(res);
+            black_box(res);
         });
     });
 
@@ -146,7 +147,7 @@ fn bench_batch_ops(c: &mut Criterion) {
     group.bench_function("batch_get_128", |b| {
         b.to_async(&rt).iter(|| async {
             let out: Vec<Option<usize>> = store.batch_get(&key_refs).await.unwrap();
-            criterion::black_box(out);
+            black_box(out);
         });
     });
 

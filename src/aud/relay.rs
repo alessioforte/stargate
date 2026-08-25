@@ -389,7 +389,7 @@ mod tests {
         let store = RedisStore::new(&redis_url)
             .await
             .expect("initialize relay test Redis store");
-        let suffix = ulid::Ulid::new().to_string().to_ascii_lowercase();
+        let suffix = ulid::Ulid::generate().to_string().to_ascii_lowercase();
         let stream = format!("audit.raw.test.{suffix}");
         let failure_stream = format!("audit.raw.test.failure.{suffix}");
 
@@ -456,7 +456,7 @@ mod tests {
                 .expect("read relay test stream")
         }
 
-        let success_request = ulid::Ulid::new().to_string();
+        let success_request = ulid::Ulid::generate().to_string();
         create_event(&svc, &format!("relay-success-{suffix}"), &success_request)
             .await
             .expect("create success event");
@@ -467,7 +467,7 @@ mod tests {
             fields.len() == 1 && fields[0].0 == "payload" && fields[0].1 == success_row.payload
         }));
 
-        let retry_request = ulid::Ulid::new().to_string();
+        let retry_request = ulid::Ulid::generate().to_string();
         create_event(&svc, &format!("relay-retry-{suffix}"), &retry_request)
             .await
             .expect("create retry event");
@@ -520,7 +520,7 @@ mod tests {
             2
         );
 
-        let failure_request = ulid::Ulid::new().to_string();
+        let failure_request = ulid::Ulid::generate().to_string();
         create_event(&svc, &format!("relay-failure-{suffix}"), &failure_request)
             .await
             .expect("create failure event");

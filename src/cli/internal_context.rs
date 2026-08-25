@@ -220,7 +220,7 @@ mod tests {
     use rsa::BigUint;
 
     fn temporary_output_dir(test_name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("stargate-{test_name}-{}", ulid::Ulid::new()))
+        std::env::temp_dir().join(format!("stargate-{test_name}-{}", ulid::Ulid::generate()))
     }
 
     #[test]
