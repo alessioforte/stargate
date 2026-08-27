@@ -29,18 +29,6 @@ export const columns: ColumnDef<OutboxEvent>[] = [
       ),
   },
   {
-    accessorKey: "pairRole",
-    header: () => getTranslation("pairRole").toLowerCase(),
-    cell: ({ row }) =>
-      row.original.pairRole ? (
-        <Badge variant="light" color="violet">
-          {row.original.pairRole}
-        </Badge>
-      ) : (
-        <span style={{ color: "var(--mantine-color-dimmed)" }}>—</span>
-      ),
-  },
-  {
     accessorKey: "payload.action",
     header: () => getTranslation("action").toLowerCase(),
     size: 200,

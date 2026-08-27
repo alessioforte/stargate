@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-use crate::ent::{AuditId, OutboxEventFilter, OutboxEventRow, OutboxPairRole, ValidatedAuditEvent};
+use crate::ent::{AuditId, OutboxEventFilter, OutboxEventRow, ValidatedAuditEvent};
 
 pub const OUTBOX_EVENT: &str = "outbox_events";
 
@@ -9,7 +9,6 @@ pub const OUTBOX_EVENT: &str = "outbox_events";
 struct PayloadIdentity {
     event_id: AuditId,
     operation_id: Option<AuditId>,
-    scope: crate::ent::AuditScopeSelector,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -24,28 +23,23 @@ impl OutboxRepository {
         &self,
         tx: &mut crate::backend::Tx<'_>,
         event: &ValidatedAuditEvent,
-        pair_role: Option<OutboxPairRole>,
     ) -> Result<OutboxEventRow> {
-        validate_pair_role(event, pair_role)?;
         verify_validated_payload_identity(event)?;
 
         let operation_id = event.operation_id().map(AuditId::as_str);
-        let pair_role = pair_role.map(OutboxPairRole::as_str);
         let row = sqlx::query_as::<_, OutboxEventRow>(
             r#"
             INSERT INTO outbox_events (
                 event_id,
                 payload,
-                operation_id,
-                pair_role
+                operation_id
             )
-            VALUES ($1, $2, $3, $4)
+            VALUES ($1, $2, $3)
             RETURNING
                 event_id,
                 payload,
                 seq,
                 operation_id,
-                pair_role,
                 created_at,
                 published_at
             "#,
@@ -53,7 +47,6 @@ impl OutboxRepository {
         .bind(event.event_id().as_str())
         .bind(event.payload())
         .bind(operation_id)
-        .bind(pair_role)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -76,7 +69,6 @@ impl OutboxRepository {
                 payload,
                 seq,
                 operation_id,
-                pair_role,
                 created_at,
                 published_at
             FROM outbox_events
@@ -113,25 +105,22 @@ impl OutboxRepository {
                 payload,
                 seq,
                 operation_id,
-                pair_role,
                 created_at,
                 published_at
             FROM outbox_events
             WHERE ($1 IS NULL OR event_id = $1)
               AND ($2 IS NULL OR operation_id = $2)
-              AND ($3 IS NULL OR pair_role = $3)
               AND (
-                    $4 IS NULL
-                    OR ($4 = TRUE AND published_at IS NOT NULL)
-                    OR ($4 = FALSE AND published_at IS NULL)
+                    $3 IS NULL
+                    OR ($3 = TRUE AND published_at IS NOT NULL)
+                    OR ($3 = FALSE AND published_at IS NULL)
                   )
             ORDER BY seq DESC
-            LIMIT $5 OFFSET $6
+            LIMIT $4 OFFSET $5
             "#,
         )
         .bind(filter.event_id.as_deref())
         .bind(filter.operation_id.as_deref())
-        .bind(filter.pair_role.as_deref())
         .bind(filter.published)
         .bind(limit)
         .bind(offset)
@@ -154,17 +143,15 @@ impl OutboxRepository {
             FROM outbox_events
             WHERE ($1 IS NULL OR event_id = $1)
               AND ($2 IS NULL OR operation_id = $2)
-              AND ($3 IS NULL OR pair_role = $3)
               AND (
-                    $4 IS NULL
-                    OR ($4 = TRUE AND published_at IS NOT NULL)
-                    OR ($4 = FALSE AND published_at IS NULL)
+                    $3 IS NULL
+                    OR ($3 = TRUE AND published_at IS NOT NULL)
+                    OR ($3 = FALSE AND published_at IS NULL)
                   )
             "#,
         )
         .bind(filter.event_id.as_deref())
         .bind(filter.operation_id.as_deref())
-        .bind(filter.pair_role.as_deref())
         .bind(filter.published)
         .fetch_one(ex)
         .await?;
@@ -189,7 +176,6 @@ impl OutboxRepository {
                 payload,
                 seq,
                 operation_id,
-                pair_role,
                 created_at,
                 published_at
             FROM outbox_events
@@ -226,26 +212,6 @@ impl OutboxRepository {
     }
 }
 
-fn validate_pair_role(
-    event: &ValidatedAuditEvent,
-    pair_role: Option<OutboxPairRole>,
-) -> Result<()> {
-    ensure!(
-        event.operation_id().is_some() == pair_role.is_some(),
-        "operation_id and pair_role must either both be present or both be absent"
-    );
-    if matches!(pair_role, Some(OutboxPairRole::ControlPlane)) {
-        ensure!(
-            matches!(
-                event.event().scope,
-                crate::ent::AuditScopeSelector::ControlPlane
-            ),
-            "control_plane pair_role requires a control_plane payload scope"
-        );
-    }
-    Ok(())
-}
-
 fn verify_validated_payload_identity(event: &ValidatedAuditEvent) -> Result<()> {
     let identity = payload_identity(event.payload())?;
     ensure!(
@@ -278,18 +244,6 @@ fn verify_row_payload_identity(row: &OutboxEventRow) -> Result<()> {
         identity.operation_id == row_operation_id,
         "outbox row operation_id does not match payload operation_id"
     );
-    match row.pair_role.as_deref() {
-        Some("control_plane") => ensure!(
-            matches!(identity.scope, crate::ent::AuditScopeSelector::ControlPlane),
-            "outbox control_plane pair_role does not match payload scope"
-        ),
-        Some("target") => ensure!(
-            !matches!(identity.scope, crate::ent::AuditScopeSelector::ControlPlane),
-            "outbox target pair_role cannot contain a control_plane payload scope"
-        ),
-        Some(_) => anyhow::bail!("outbox row contains an invalid pair_role"),
-        None => {}
-    }
     Ok(())
 }
 
@@ -350,7 +304,6 @@ mod tests {
             payload: mismatched,
             seq: 1,
             operation_id: None,
-            pair_role: None,
             created_at: Utc::now(),
             published_at: None,
         };
@@ -358,40 +311,6 @@ mod tests {
         let error = verify_row_payload_identity(&row)
             .expect_err("mismatched row and payload ids must fail");
         assert!(error.to_string().contains("event_id does not match"));
-    }
-
-    #[test]
-    fn audit_outbox_pair_role_requires_operation_id() {
-        let unpaired = validated_event("01JZ0000000000000000000001", None);
-        assert!(validate_pair_role(&unpaired, None).is_ok());
-        assert!(validate_pair_role(&unpaired, Some(OutboxPairRole::ControlPlane)).is_err());
-
-        let paired = validated_event(
-            "01JZ0000000000000000000002",
-            Some("01JZ000000000000000000000X"),
-        );
-        assert!(validate_pair_role(&paired, None).is_err());
-        assert!(validate_pair_role(&paired, Some(OutboxPairRole::ControlPlane)).is_ok());
-
-        let application_paired = validated_event_in_scope(
-            "01JZ0000000000000000000003",
-            Some("01JZ000000000000000000000X"),
-            AuditScopeSelector::application(),
-        );
-        assert!(
-            validate_pair_role(&application_paired, Some(OutboxPairRole::ControlPlane)).is_err()
-        );
-
-        let mismatched_row = OutboxEventRow {
-            event_id: application_paired.event_id().to_string(),
-            payload: application_paired.payload().to_string(),
-            seq: 1,
-            operation_id: application_paired.operation_id().map(AuditId::to_string),
-            pair_role: Some("control_plane".to_string()),
-            created_at: Utc::now(),
-            published_at: None,
-        };
-        assert!(verify_row_payload_identity(&mismatched_row).is_err());
     }
 }
 
@@ -407,6 +326,7 @@ mod sqlite_tests {
     };
 
     const PRE_OUTBOX_MIGRATION: i64 = 20_260_712_000_000;
+    const PRE_PAIR_ROLE_REMOVAL_MIGRATION: i64 = 20_260_719_010_000;
     static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/sqlite");
 
     fn validated_event(event_id: &str, operation_id: Option<&str>) -> ValidatedAuditEvent {
@@ -477,7 +397,6 @@ mod sqlite_tests {
                 "event_id",
                 "payload",
                 "operation_id",
-                "pair_role",
                 "created_at",
                 "published_at",
             ]
@@ -498,7 +417,7 @@ mod sqlite_tests {
         assert!(
             indexes
                 .iter()
-                .any(|name| name == "idx_outbox_events_pair_role")
+                .any(|name| name == "idx_outbox_events_operation_id")
         );
     }
 
@@ -520,6 +439,43 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
+    async fn audit_outbox_sqlite_pair_role_removal_preserves_correlated_events() {
+        let pool = empty_pool().await;
+        SQLITE_MIGRATOR
+            .run_to(PRE_PAIR_ROLE_REMOVAL_MIGRATION, &pool)
+            .await
+            .expect("pre-removal migrations must apply");
+
+        let operation_id = "01JZ000000000000000000000X";
+        let event = validated_event("01JZ0000000000000000000001", Some(operation_id));
+        sqlx::query(
+            "INSERT INTO outbox_events (event_id, payload, operation_id, pair_role)
+             VALUES ($1, $2, $3, 'control_plane')",
+        )
+        .bind(event.event_id().as_str())
+        .bind(event.payload())
+        .bind(operation_id)
+        .execute(&pool)
+        .await
+        .expect("legacy correlated event must insert");
+
+        SQLITE_MIGRATOR
+            .run(&pool)
+            .await
+            .expect("pair-role removal migration must apply");
+
+        let stored = OutboxRepository::new()
+            .get_by_event_id(&pool, event.event_id().as_str())
+            .await
+            .expect("migrated event must be readable")
+            .expect("migrated event must remain present");
+        assert_eq!(stored.payload, event.payload());
+        assert_eq!(stored.operation_id.as_deref(), Some(operation_id));
+        assert_eq!(stored.seq, 1);
+        assert_eq!(stored.published_at, None);
+    }
+
+    #[tokio::test]
     async fn audit_outbox_sqlite_insert_preserves_exact_payload_and_pending_state() {
         let pool = migrated_pool().await;
         let repository = OutboxRepository::new();
@@ -527,7 +483,7 @@ mod sqlite_tests {
         let mut tx = pool.begin().await.expect("transaction must begin");
 
         let row = repository
-            .insert(&mut tx, &event, None)
+            .insert(&mut tx, &event)
             .await
             .expect("validated event must insert");
         tx.commit().await.expect("transaction must commit");
@@ -536,7 +492,6 @@ mod sqlite_tests {
         assert_eq!(row.payload, event.payload());
         assert_eq!(row.seq, 1);
         assert_eq!(row.operation_id, None);
-        assert_eq!(row.pair_role, None);
         assert_eq!(row.published_at, None);
 
         let stored = sqlx::query_as::<_, OutboxEventRow>(
@@ -546,7 +501,6 @@ mod sqlite_tests {
                 payload,
                 seq,
                 operation_id,
-                pair_role,
                 created_at,
                 published_at
             FROM outbox_events
@@ -594,28 +548,32 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
-    async fn audit_outbox_sqlite_enforces_operation_role_uniqueness() {
+    async fn audit_outbox_sqlite_allows_multiple_events_per_operation() {
         let pool = migrated_pool().await;
         let repository = OutboxRepository::new();
         let operation_id = "01JZ000000000000000000000X";
-        let control_plane = validated_event("01JZ0000000000000000000001", Some(operation_id));
-        let duplicate_control_plane =
-            validated_event("01JZ0000000000000000000002", Some(operation_id));
+        let first = validated_event("01JZ0000000000000000000001", Some(operation_id));
+        let second = validated_event("01JZ0000000000000000000002", Some(operation_id));
         let mut tx = pool.begin().await.expect("transaction must begin");
 
         repository
-            .insert(&mut tx, &control_plane, Some(OutboxPairRole::ControlPlane))
+            .insert(&mut tx, &first)
             .await
-            .expect("control-plane pair member must insert");
-        let duplicate = repository
-            .insert(
-                &mut tx,
-                &duplicate_control_plane,
-                Some(OutboxPairRole::ControlPlane),
-            )
-            .await;
-        assert!(duplicate.is_err());
-        tx.rollback().await.expect("transaction must roll back");
+            .expect("first correlated event must insert");
+        repository
+            .insert(&mut tx, &second)
+            .await
+            .expect("second correlated event must insert");
+        tx.commit().await.expect("transaction must commit");
+
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM outbox_events WHERE operation_id = $1",
+        )
+        .bind(operation_id)
+        .fetch_one(&pool)
+        .await
+        .expect("correlated events must be countable");
+        assert_eq!(count, 2);
     }
 
     #[tokio::test]
@@ -631,7 +589,7 @@ mod sqlite_tests {
         for id in ids {
             let event = validated_event(id, None);
             repository
-                .insert(&mut tx, &event, None)
+                .insert(&mut tx, &event)
                 .await
                 .expect("pending event must insert");
         }
@@ -657,21 +615,17 @@ mod sqlite_tests {
         let mut tx = pool.begin().await.expect("transaction must begin");
 
         repository
-            .insert(&mut tx, &validated_event(first_id, None), None)
+            .insert(&mut tx, &validated_event(first_id, None))
             .await
             .expect("first event must insert");
         repository
-            .insert(&mut tx, &validated_event(second_id, None), None)
+            .insert(&mut tx, &validated_event(second_id, None))
             .await
             .expect("second event must insert");
         repository
-            .insert(
-                &mut tx,
-                &validated_event(third_id, Some(operation_id)),
-                Some(OutboxPairRole::ControlPlane),
-            )
+            .insert(&mut tx, &validated_event(third_id, Some(operation_id)))
             .await
-            .expect("paired event must insert");
+            .expect("correlated event must insert");
         tx.commit().await.expect("transaction must commit");
 
         sqlx::query(
@@ -713,18 +667,17 @@ mod sqlite_tests {
             1
         );
 
-        let paired_filter = OutboxEventFilter {
+        let operation_filter = OutboxEventFilter {
             operation_id: Some(operation_id.to_string()),
-            pair_role: Some("control_plane".to_string()),
             published: Some(false),
             ..OutboxEventFilter::default()
         };
-        let paired = repository
-            .query(&pool, &paired_filter, 10, 0)
+        let correlated = repository
+            .query(&pool, &operation_filter, 10, 0)
             .await
-            .expect("paired pending events must be queryable");
-        assert_eq!(paired.len(), 1);
-        assert_eq!(paired[0].event_id, third_id);
+            .expect("correlated pending events must be queryable");
+        assert_eq!(correlated.len(), 1);
+        assert_eq!(correlated[0].event_id, third_id);
 
         let page = repository
             .query(&pool, &OutboxEventFilter::default(), 1, 1)
@@ -749,7 +702,7 @@ mod sqlite_tests {
         let event = validated_event("01JZ0000000000000000000001", None);
         let mut tx = pool.begin().await.expect("transaction must begin");
         repository
-            .insert(&mut tx, &event, None)
+            .insert(&mut tx, &event)
             .await
             .expect("event must insert before rollback");
         tx.rollback().await.expect("transaction must roll back");
@@ -881,7 +834,6 @@ mod postgres_tests {
                 "payload",
                 "seq",
                 "operation_id",
-                "pair_role",
                 "created_at",
                 "published_at",
             ]
@@ -970,11 +922,11 @@ mod postgres_tests {
         let second = validated_event(&second_id);
         let mut insert_tx = pool.begin().await.expect("insert transaction must begin");
         let first_row = repository
-            .insert(&mut insert_tx, &first, None)
+            .insert(&mut insert_tx, &first)
             .await
             .expect("first PostgreSQL event must insert");
         let second_row = repository
-            .insert(&mut insert_tx, &second, None)
+            .insert(&mut insert_tx, &second)
             .await
             .expect("second PostgreSQL event must insert");
         insert_tx

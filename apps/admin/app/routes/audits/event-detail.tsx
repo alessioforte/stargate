@@ -82,17 +82,6 @@ const OutboxEventDetail: React.FC<Props> = ({ event, opened, onClose }) => {
             </Stack>
           )}
 
-          {event.pairRole && (
-            <Stack gap={0} p="xs">
-              <Text size="xs" c="dimmed">
-                {t("pairRole")}
-              </Text>
-              <Badge variant="light" color="violet" w="fit-content">
-                {event.pairRole}
-              </Badge>
-            </Stack>
-          )}
-
           <Stack gap={0} mt="md">
             <Text size="xs" c="dimmed" mb={4} p="xs">
               {t("payload")}

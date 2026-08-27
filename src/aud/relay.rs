@@ -296,7 +296,6 @@ mod tests {
             payload: payload.to_string(),
             seq: 42,
             operation_id: Some("01JZ000000000000000000000X".to_string()),
-            pair_role: Some("control_plane".to_string()),
             created_at: Utc::now(),
             published_at: None,
         }

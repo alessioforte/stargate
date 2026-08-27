@@ -12,22 +12,6 @@ const MAX_LIMIT: i64 = 100;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum OutboxEventPairRole {
-    Target,
-    ControlPlane,
-}
-
-impl OutboxEventPairRole {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Target => "target",
-            Self::ControlPlane => "control_plane",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
 pub enum OutboxEventStatus {
     Pending,
     Published,
@@ -51,8 +35,6 @@ pub struct ListOutboxEventsQuery {
     #[serde(default)]
     pub operation_id: Option<String>,
     #[serde(default)]
-    pub pair_role: Option<OutboxEventPairRole>,
-    #[serde(default)]
     pub status: Option<OutboxEventStatus>,
 }
 
@@ -61,10 +43,6 @@ impl ListOutboxEventsQuery {
         OutboxEventFilter {
             event_id: non_empty(self.event_id),
             operation_id: non_empty(self.operation_id),
-            pair_role: self
-                .pair_role
-                .map(OutboxEventPairRole::as_str)
-                .map(str::to_string),
             published: self.status.map(OutboxEventStatus::published),
         }
     }
@@ -84,7 +62,6 @@ pub struct OutboxEventSchema {
     pub payload: serde_json::Value,
     pub seq: i64,
     pub operation_id: Option<String>,
-    pub pair_role: Option<String>,
     pub status: OutboxEventStatus,
     pub created_at: String,
     pub published_at: Option<String>,
@@ -106,7 +83,6 @@ impl TryFrom<OutboxEventRow> for OutboxEventSchema {
             payload,
             seq: row.seq,
             operation_id: row.operation_id,
-            pair_role: row.pair_role,
             status,
             created_at: row.created_at.to_rfc3339(),
             published_at: row.published_at.map(|value| value.to_rfc3339()),
@@ -207,7 +183,6 @@ mod tests {
         let query: ListOutboxEventsQuery = serde_json::from_value(serde_json::json!({
             "eventId": " 01JZ0000000000000000000001 ",
             "operationId": " ",
-            "pairRole": "control_plane",
             "status": "pending"
         }))
         .expect("query must deserialize");
@@ -217,7 +192,6 @@ mod tests {
             OutboxEventFilter {
                 event_id: Some("01JZ0000000000000000000001".to_string()),
                 operation_id: None,
-                pair_role: Some("control_plane".to_string()),
                 published: Some(false),
             }
         );
@@ -230,7 +204,6 @@ mod tests {
             payload: r#"{"event_id":"01JZ0000000000000000000001"}"#.to_string(),
             seq: 42,
             operation_id: None,
-            pair_role: None,
             created_at: Utc
                 .with_ymd_and_hms(2026, 7, 23, 12, 0, 0)
                 .single()

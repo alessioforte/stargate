@@ -672,10 +672,8 @@ impl DbStore for Service {
                 Some(snapshot(SuperAdminAuditSnapshot::from(&super_admin))?),
                 serde_json::json!({ "source": "cli_bootstrap" }),
             )?;
-            self.outbox.insert(&mut tx, &user_event, None).await?;
-            self.outbox
-                .insert(&mut tx, &super_admin_event, None)
-                .await?;
+            self.outbox.insert(&mut tx, &user_event).await?;
+            self.outbox.insert(&mut tx, &super_admin_event).await?;
             super_admin_created = true;
         }
 
@@ -691,7 +689,7 @@ impl DbStore for Service {
                 Some(snapshot(OAuthClientAuditSnapshot::from(&client))?),
                 serde_json::json!({ "source": "cli_bootstrap" }),
             )?;
-            self.outbox.insert(&mut tx, &event, None).await?;
+            self.outbox.insert(&mut tx, &event).await?;
             true
         } else {
             false
@@ -736,7 +734,7 @@ impl DbStore for Service {
             Some(snapshot(UserAuditSnapshot::from(&record))?),
             serde_json::json!({ "source": source }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -785,10 +783,8 @@ impl DbStore for Service {
             Some(snapshot(SuperAdminAuditSnapshot::from(&super_admin))?),
             serde_json::json!({ "source": "cli_bootstrap" }),
         )?;
-        self.outbox.insert(&mut tx, &user_event, None).await?;
-        self.outbox
-            .insert(&mut tx, &super_admin_event, None)
-            .await?;
+        self.outbox.insert(&mut tx, &user_event).await?;
+        self.outbox.insert(&mut tx, &super_admin_event).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -854,7 +850,7 @@ impl DbStore for Service {
                 "changed_fields": changed_fields,
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(updated_user)
     }
@@ -884,7 +880,7 @@ impl DbStore for Service {
                 "revoked_api_key_count": revoked_key_hashes.len(),
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(revoked_key_hashes)
     }
@@ -928,7 +924,7 @@ impl DbStore for Service {
                 "credential_type": "password",
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(credential)
     }
@@ -980,7 +976,7 @@ impl DbStore for Service {
                     "trigger": "login",
                 }),
             )?;
-            self.outbox.insert(&mut tx, &event, None).await?;
+            self.outbox.insert(&mut tx, &event).await?;
         }
         tx.commit().await?;
         Ok(updated)
@@ -1006,7 +1002,7 @@ impl DbStore for Service {
             Some(snapshot(OAuthClientAuditSnapshot::from(&client))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(client)
     }
@@ -1067,7 +1063,7 @@ impl DbStore for Service {
                 "source": "admin_api",
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(client)
     }
@@ -1098,7 +1094,7 @@ impl DbStore for Service {
             None,
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(client)
     }
@@ -1135,7 +1131,7 @@ impl DbStore for Service {
             Some(snapshot(OAuthClientAuditSnapshot::from(&client))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(client)
     }
@@ -1165,7 +1161,7 @@ impl DbStore for Service {
             None,
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1243,7 +1239,7 @@ impl DbStore for Service {
             Some(snapshot(ApiKeyAuditSnapshot::from(&record))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(api_key)
     }
@@ -1278,7 +1274,7 @@ impl DbStore for Service {
             Some(snapshot(ApiKeyAuditSnapshot::from(&record))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(api_key)
     }
@@ -1381,7 +1377,7 @@ impl DbStore for Service {
                 "source": "admin_api",
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(updated)
     }
@@ -1417,7 +1413,7 @@ impl DbStore for Service {
             Some(snapshot(ApiKeyAuditSnapshot::from(&after))?),
             serde_json::json!({ "source": source }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1442,7 +1438,7 @@ impl DbStore for Service {
             None,
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1472,7 +1468,7 @@ impl DbStore for Service {
             Some(snapshot(AdminKeyAuditSnapshot::from(&admin_key))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(admin_key)
     }
@@ -1519,7 +1515,7 @@ impl DbStore for Service {
                 "source": "admin_api",
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(updated)
     }
@@ -1552,7 +1548,7 @@ impl DbStore for Service {
             Some(snapshot(AdminKeyAuditSnapshot::from(&after))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1576,7 +1572,7 @@ impl DbStore for Service {
             None,
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1606,7 +1602,7 @@ impl DbStore for Service {
             Some(snapshot(ServiceAccountAuditSnapshot::from(&sa))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(sa)
     }
@@ -1676,7 +1672,7 @@ impl DbStore for Service {
                 "source": "admin_api",
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(sa)
     }
@@ -1708,7 +1704,7 @@ impl DbStore for Service {
                 "source": "admin_api",
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(revoked_key_hashes)
     }
@@ -1738,7 +1734,7 @@ impl DbStore for Service {
             Some(snapshot(OrganizationAuditSnapshot::from(&org))?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(org)
     }
@@ -1803,7 +1799,7 @@ impl DbStore for Service {
                 "changed_fields": changed_fields,
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(org)
     }
@@ -1838,7 +1834,7 @@ impl DbStore for Service {
                 "revoked_api_key_count": revoked_key_hashes.len(),
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(revoked_key_hashes)
     }
@@ -1874,7 +1870,7 @@ impl DbStore for Service {
             })?),
             serde_json::json!({ "source": "admin_api" }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1918,7 +1914,7 @@ impl DbStore for Service {
                 "revoked_api_key_count": revoked_key_hashes.len(),
             }),
         )?;
-        self.outbox.insert(&mut tx, &event, None).await?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(revoked_key_hashes)
     }
@@ -3204,8 +3200,8 @@ mod sqlite_tests {
             .await
             .expect("create service account");
 
-        let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT event_id, payload, operation_id, pair_role FROM outbox_events ORDER BY seq",
+        let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT event_id, payload, operation_id FROM outbox_events ORDER BY seq",
         )
         .fetch_all(&svc.pool)
         .await
@@ -3217,7 +3213,7 @@ mod sqlite_tests {
         );
 
         let mut event_ids = std::collections::HashSet::new();
-        for (row_event_id, payload, row_operation_id, pair_role) in &rows {
+        for (row_event_id, payload, row_operation_id) in &rows {
             let event: JsonValue = serde_json::from_str(payload).expect("valid audit JSON");
             assert_eq!(event["metadata"]["source"], "admin_api");
             assert_eq!(event["scope"]["kind"], "control_plane");
@@ -3225,7 +3221,6 @@ mod sqlite_tests {
             assert_eq!(event["event_id"].as_str(), Some(row_event_id.as_str()));
             assert!(event["operation_id"].is_null());
             assert!(row_operation_id.is_none());
-            assert!(pair_role.is_none());
             assert!(event_ids.insert(row_event_id), "duplicate event_id");
         }
 

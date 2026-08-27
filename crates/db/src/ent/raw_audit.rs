@@ -829,8 +829,7 @@ mod tests {
         include_str!("../../tests/fixtures/audit/application.json"),
         include_str!("../../tests/fixtures/audit/organization.json"),
         include_str!("../../tests/fixtures/audit/control_plane.json"),
-        include_str!("../../tests/fixtures/audit/correlated_target.json"),
-        include_str!("../../tests/fixtures/audit/correlated_control_plane.json"),
+        include_str!("../../tests/fixtures/audit/operation.json"),
     ];
 
     fn audit_id(value: &str) -> AuditId {
@@ -881,19 +880,20 @@ mod tests {
     }
 
     #[test]
-    fn audit_correlated_fixtures_share_only_the_operation_id() {
-        let target: RawAuditEvent =
-            serde_json::from_str(FIXTURES[3]).expect("target fixture must deserialize");
-        let control_plane: RawAuditEvent =
-            serde_json::from_str(FIXTURES[4]).expect("control-plane fixture must deserialize");
+    fn audit_operation_fixture_carries_correlation_without_pair_semantics() {
+        let event: RawAuditEvent =
+            serde_json::from_str(FIXTURES[3]).expect("operation fixture must deserialize");
 
-        assert_ne!(target.event_id, control_plane.event_id);
-        assert_eq!(target.operation_id, control_plane.operation_id);
-        assert!(matches!(
-            target.scope,
-            AuditScopeSelector::Organization { .. }
-        ));
-        assert_eq!(control_plane.scope, AuditScopeSelector::ControlPlane);
+        assert_eq!(
+            event.operation_id,
+            Some(audit_id("01JZ000000000000000000000X"))
+        );
+        assert_eq!(event.scope, AuditScopeSelector::ControlPlane);
+        assert_eq!(event.actor.actor_type, "admin_key");
+        assert_eq!(
+            event.actor.id.as_deref(),
+            Some("01JZ000000000000000000000K")
+        );
     }
 
     #[test]

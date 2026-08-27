@@ -49,13 +49,13 @@ export default function AdminHomePage() {
 
   useEffect(() => {
     void getAdminOverview();
-    void getOutboxEvents({ limit: 6, pairRole: "control_plane" });
+    void getOutboxEvents({ limit: 6 });
   }, [getAdminOverview, getOutboxEvents]);
 
   const refresh = () => {
     void getAdminHealth();
     void getAdminOverview();
-    void getOutboxEvents({ limit: 6, pairRole: "control_plane" });
+    void getOutboxEvents({ limit: 6 });
   };
 
   usePolling(refresh, { interval: 9000 });
@@ -353,7 +353,7 @@ export default function AdminHomePage() {
                 <Group justify="space-between" py="sm" wrap="nowrap">
                   <div>
                     <Text size="sm" fw={500}>
-                      {activityDescription(event, t("controlPlaneChange"))}
+                      {activityDescription(event, t("auditChange"))}
                     </Text>
                     <Text size="xs" c="dimmed">
                       {event.eventId}

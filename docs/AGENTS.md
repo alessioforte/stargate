@@ -192,7 +192,7 @@ actor, request facts, and scope come from authenticated or persisted state. All
 
 Super-admins can inspect delivery state through the read-only
 `GET /admin/outbox-events` and `GET /admin/outbox-events/{event_id}` endpoints.
-The list endpoint supports exact event/operation/pair-role filters, pending or
+The list endpoint supports exact event and operation filters, pending or
 published status, and limit/offset pagination. These reads never claim, lock,
 publish, or otherwise mutate outbox rows.
 
@@ -396,9 +396,9 @@ Tables include `organizations`, `users`, `super_admins`, `credentials`,
 `service_account_api_keys`, and `outbox_events`.
 
 Entity and audit event ids are ULIDs stored as text. `outbox_events` stores the
-immutable raw JSON payload plus local `seq`, optional operation/pair metadata,
-`created_at`, and nullable `published_at`. PostgreSQL and SQLite expose the same
-logical outbox columns.
+immutable raw JSON payload plus local `seq`, optional `operation_id` correlation
+metadata, `created_at`, and nullable `published_at`. PostgreSQL and SQLite expose
+the same logical outbox columns.
 
 ## Key Env Vars
 
@@ -595,8 +595,8 @@ Dev commands (run inside `apps/admin` or `apps/auth`): `npm run dev` (Vite), `np
 
 The admin home uses `/admin/me` as its authentication probe so a dependency
 outage does not block the console shell. It polls `/admin/health` separately
-and loads `/admin/overview` plus recent control-plane outbox events for the
-operational dashboard.
+and loads `/admin/overview` plus recent outbox events for the operational
+dashboard.
 
 ### Layered Architecture
 

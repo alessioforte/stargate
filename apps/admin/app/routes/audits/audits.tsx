@@ -3,21 +3,12 @@ import { Box, Group, Select, TextInput, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import useStore from "@/store";
 import { Table } from "@/components";
-import type {
-  OutboxEvent,
-  OutboxEventPairRole,
-  OutboxEventStatus,
-} from "@/services/types";
+import type { OutboxEvent, OutboxEventStatus } from "@/services/types";
 import { useTranslations } from "@/i18n";
 import { columns } from "./columns";
 import OutboxEventDetail from "./event-detail";
 
 const DEFAULT_PAGE_SIZE = 20;
-
-const pairRoleOptions = [
-  { value: "target", label: "Target" },
-  { value: "control_plane", label: "Control Plane" },
-] as const;
 
 const statusOptions = [
   { value: "pending", label: "Pending" },
@@ -32,9 +23,6 @@ const AuditsPage = () => {
   const [selectedEvent, setSelectedEvent] = useState<OutboxEvent | null>(null);
   const [eventIdFilter, setEventIdFilter] = useState("");
   const [operationIdFilter, setOperationIdFilter] = useState("");
-  const [pairRoleFilter, setPairRoleFilter] = useState<
-    OutboxEventPairRole | ""
-  >("");
   const [statusFilter, setStatusFilter] = useState<OutboxEventStatus | "">("");
   const [pagination, setPagination] = useState({
     pageIndex: 0,
@@ -45,7 +33,6 @@ const AuditsPage = () => {
     getOutboxEvents({
       eventId: eventIdFilter || undefined,
       operationId: operationIdFilter || undefined,
-      pairRole: pairRoleFilter || undefined,
       status: statusFilter || undefined,
       limit: pagination.pageSize,
       offset: pagination.pageIndex * pagination.pageSize,
@@ -54,7 +41,6 @@ const AuditsPage = () => {
     getOutboxEvents,
     eventIdFilter,
     operationIdFilter,
-    pairRoleFilter,
     statusFilter,
     pagination.pageIndex,
     pagination.pageSize,
@@ -107,19 +93,6 @@ const AuditsPage = () => {
           value={operationIdFilter}
           onChange={(event) => {
             setOperationIdFilter(event.currentTarget.value);
-            setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
-          }}
-        />
-        <Select
-          size="xs"
-          style={{ width: 160 }}
-          clearable
-          variant="filled"
-          placeholder={t("pairRole")}
-          data={pairRoleOptions}
-          value={pairRoleFilter || null}
-          onChange={(value) => {
-            setPairRoleFilter((value ?? "") as OutboxEventPairRole | "");
             setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
           }}
         />
