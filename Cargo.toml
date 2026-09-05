@@ -129,3 +129,4 @@ redis-compression = ["store/compression"]
 
 [dev-dependencies]
 redis = { version = "1.6.0", features = ["tokio-comp"] }
+tokio = { version = "1.53.1", features = ["test-util"] }

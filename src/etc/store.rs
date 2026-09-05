@@ -234,6 +234,14 @@ mod redis {
             .get()
             .expect("Redis store not initialized. Call init() first")
     }
+
+    pub async fn ping() -> anyhow::Result<()> {
+        let store = STORE
+            .get()
+            .ok_or_else(|| anyhow::anyhow!("Redis store not initialized"))?;
+        store::Store::ping(store).await?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "memory")]
@@ -252,6 +260,8 @@ pub async fn save() {
 
 #[cfg(feature = "redis")]
 pub use redis::init;
+#[cfg(feature = "redis")]
+pub use redis::ping;
 #[cfg(feature = "redis")]
 pub use redis::use_store;
 #[cfg(feature = "redis")]

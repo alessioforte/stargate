@@ -447,7 +447,8 @@ the same logical outbox columns.
 | `TRUSTED_ORIGINS` | - | Trusted browser origins for sensitive IAM endpoints |
 | `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
 | `GATEWAY_REPLAY_BODY_LIMIT` | 2MiB | Max buffered body for mirror/failover replay |
-| `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | Request drain timeout during shutdown |
+| `SERVER_DRAIN_DELAY_SECS` | 5 | Time with readiness disabled before listeners close; 0 disables the delay |
+| `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | TLS connection drain deadline after listeners close |
 | `EMAIL_OTP_PEPPER` | - | Server-side HMAC pepper for email/message OTP records |
 | `EMAIL_OTP_LENGTH` | 6 | Email OTP code length |
 | `EMAIL_OTP_TTL_SECS` | 300 | Email OTP challenge TTL |
@@ -520,7 +521,9 @@ server startup validates but never generates missing internal-context keys.
 
 ## API Overview
 
-- `GET /health` - health check
+- `GET /livez` - dependency-free process liveness; also suitable for startup probes
+- `GET /readyz` - traffic readiness: initialized, not draining, SQL and (cluster) Redis available
+- `GET /health` - readiness compatibility endpoint preserving name/version/healthy status fields
 - `GET /docs` - Swagger UI
 - `GET /docs/errors` - machine-readable error catalog used by documentation UIs
 - `GET /i18n/{locale}` - versioned API error/success message catalog (`en`, `it`)
@@ -579,7 +582,18 @@ HTTP codes currently used include: 400, 401, 403, 404, 409, 413, 429, 500, 502, 
 
 ## Graceful Shutdown
 
-SIGTERM/SIGINT -> drain requests (25s default timeout) -> stop audit relay -> close DB -> save in-memory state.
+SIGTERM/SIGINT -> disable readiness -> wait `SERVER_DRAIN_DELAY_SECS` (5s) ->
+close listeners and drain requests -> stop audit relay -> save in-memory state.
+TLS draining has a 25s default deadline (`SERVER_SHUTDOWN_TIMEOUT_SECS`);
+plain HTTP uses Axum graceful shutdown without an application drain deadline.
+
+Probe routes are mounted outside authentication and rate limiting. `/livez`
+stays successful while the listener responds, including the shutdown delay.
+Readiness and `/admin/health` share dependency checks in `src/etc/health.rs`,
+with concurrent one-second timeouts. Invalid config reloads keep the active
+graph and do not disable readiness; upstreams, SMTP, identity providers,
+telemetry, and audit delivery lag are not readiness dependencies.
+See `docs/health-probes.md` for contracts and deployment guidance.
 
 ## Frontend (apps/)
 
@@ -684,7 +698,7 @@ Following the arrows keeps each concern in exactly one place.
 - HTTP proxying strips hop-by-hop headers and supports preserve-host behavior.
 - GeoIP is available via MaxMind GeoLite2-City, but geo-aware routing is not yet first-class in v2 matchers.
 - OpenAPI docs use `utoipa` with `utoipa-axum` + `utoipa-swagger-ui`.
-- Middleware chain in `main.rs`: rate limit -> security headers -> trace -> CORS -> compression -> normalize-path.
+- `api::server_router` applies rate limiting to IAM/admin APIs and merges probe routes outside that layer; `main.rs` adds security headers, tracing, CORS, compression, and normalize-path.
 - TLS server uses a custom hyper-util connection loop with per-connection graceful shutdown and drain deadline.
 - OAuth/OIDC browser consent UI is not implemented; third-party clients without stored consent receive `consent_required`.
 - OAuth/OIDC non-redirect errors still use Stargate's generic error envelope rather than full RFC-shaped error bodies.

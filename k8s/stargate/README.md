@@ -168,8 +168,17 @@ the Service.
   Redis, SMTP, upstream APIs, telemetry, and ingress-controller traffic as
   required by the architecture.
 
-The public `/health` endpoint checks PostgreSQL but not Redis. Monitor Redis
-separately.
+Startup and liveness probes use `/livez`; readiness and the Helm connection
+test use `/readyz`. Readiness checks SQLite in edge mode and PostgreSQL plus
+Redis in cluster mode, with concurrent one-second dependency timeouts.
+The public probes bypass authentication and rate limiting.
+
+`/health` follows readiness semantics while retaining its legacy JSON fields.
+`/admin/health` provides authenticated dependency diagnostics. See
+[Health and readiness probes](../../docs/health-probes.md) for response contracts
+and shutdown behavior. `SERVER_DRAIN_DELAY_SECS` defaults to 5 seconds;
+allow room in `terminationGracePeriodSeconds` for that delay, connection
+draining, and final persistence hooks. The chart defaults to 40 seconds.
 
 ## Configuration ownership
 

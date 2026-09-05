@@ -17,6 +17,8 @@ use utoipa::OpenApi;
 #[openapi(
     paths(
         crate::api::health::get_health,
+        crate::api::health::get_livez,
+        crate::api::health::get_readyz,
         crate::api::internal_context::get_internal_context_jwks,
         crate::api::oidc::well_known::get_jwks,
         crate::api::oidc::well_known::get_oauth_metadata,
@@ -120,11 +122,19 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
+pub fn server_router(lifecycle: crate::etc::health::Lifecycle) -> axum::Router {
+    router()
+        .layer(axum::middleware::from_fn(
+            crate::etc::mid::rate_limit_middleware,
+        ))
+        .fallback_service(tower::service_fn(gateway::service))
+        .merge(health::router(lifecycle))
+}
+
 pub fn router() -> axum::Router {
     use axum::routing::get;
 
     axum::Router::new()
-        .route("/health", get(health::get_health))
         .route(
             "/.well-known/stargate-context-jwks.json",
             get(internal_context::get_internal_context_jwks),
@@ -161,23 +171,6 @@ mod tests {
 
     async fn send_req(req: Request<Body>) -> http::Response<Body> {
         router().oneshot(req).await.unwrap()
-    }
-
-    #[tokio::test]
-    async fn health_returns_json() {
-        let resp = send("/health").await;
-        // /health pings DB which is not initialized in tests; expect 503.
-        assert!(matches!(
-            resp.status(),
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
-        assert_eq!(
-            resp.headers().get(CONTENT_TYPE).unwrap(),
-            "application/json"
-        );
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["name"], "stargate");
     }
 
     #[tokio::test]

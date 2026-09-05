@@ -27,7 +27,7 @@ spec:
         - --timeout=10
         - --tries=1
         - --spider
-        - http://{{ include "stargate.fullname" . }}:{{ .Values.service.port }}/health
+        - http://{{ include "stargate.fullname" . }}:{{ .Values.service.port }}/readyz
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true

@@ -23,7 +23,8 @@ transactional mail templates. The final image serves:
 
 - Admin UI: `/stargate`
 - Auth UI: `/auth`
-- API routes and health endpoint: `/account/*`, `/admin/*`, and `/health`
+- API routes: `/account/*`, `/admin/*`
+- Probes: `/livez` (liveness), `/readyz` (readiness), `/health` (readiness compatibility)
 
 ### Build an image
 
@@ -101,7 +102,11 @@ Open:
 
 - `http://localhost:5050/stargate` for the admin UI
 - `http://localhost:5050/auth` for the auth UI
-- `http://localhost:5050/health` for the health endpoint
+- `http://localhost:5050/livez` for process liveness
+- `http://localhost:5050/readyz` for traffic readiness
+
+Probe behavior, dependency checks, and shutdown timing are documented in
+[Health and readiness probes](docs/health-probes.md).
 
 Bootstrap the first administrator and the Admin UI OAuth client while the
 container is running:

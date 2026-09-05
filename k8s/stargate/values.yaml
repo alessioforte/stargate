@@ -80,10 +80,12 @@ resources:
     memory: 1Gi
 
 probes:
+  # Initialization finishes before the listener opens. Liveness has no SQL,
+  # Redis, auth, or rate-limiter dependencies; readiness checks SQL and Redis.
   startup:
     enabled: true
     httpGet:
-      path: /health
+      path: /livez
       port: http
     periodSeconds: 5
     timeoutSeconds: 3
@@ -91,7 +93,7 @@ probes:
   liveness:
     enabled: true
     httpGet:
-      path: /health
+      path: /livez
       port: http
     initialDelaySeconds: 20
     periodSeconds: 20
@@ -100,7 +102,7 @@ probes:
   readiness:
     enabled: true
     httpGet:
-      path: /health
+      path: /readyz
       port: http
     initialDelaySeconds: 5
     periodSeconds: 10

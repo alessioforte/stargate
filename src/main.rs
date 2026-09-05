@@ -16,7 +16,6 @@ use axum::middleware::from_fn;
 use dotenvy::dotenv;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower::service_fn;
 use tower_http::{compression::CompressionLayer, normalize_path::NormalizePathLayer};
 use tracing::info;
 
@@ -82,10 +81,9 @@ pub async fn run() -> std::io::Result<()> {
     aud::spawn()?;
 
     let gate = gate::init();
+    let lifecycle = etc::health::Lifecycle::default();
 
-    let app = api::router()
-        .layer(from_fn(etc::mid::rate_limit_middleware))
-        .fallback_service(service_fn(api::gateway::service))
+    let app = api::server_router(lifecycle.clone())
         .layer(Extension(Arc::clone(&gate)))
         .layer(from_fn(headers::security_headers_middleware))
         .layer(from_fn(log::trace_middleware))
@@ -93,7 +91,14 @@ pub async fn run() -> std::io::Result<()> {
         .layer(CompressionLayer::new())
         .layer(NormalizePathLayer::trim_trailing_slash());
 
-    let shutdown = fun::shutdown_signal()?;
+    let signal = fun::shutdown_signal()?;
+
+    lifecycle.mark_ready();
+    let shutdown = fun::drain_on_shutdown(
+        signal,
+        lifecycle,
+        std::time::Duration::from_secs(fun::server_drain_delay_secs()),
+    );
 
     info!("Server listening on {}", addr);
 

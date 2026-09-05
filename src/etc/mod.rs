@@ -6,6 +6,7 @@ pub mod gate;
 pub mod geoip;
 pub mod guard;
 pub mod headers;
+pub mod health;
 pub mod input;
 pub mod internal_context;
 pub mod jwt;

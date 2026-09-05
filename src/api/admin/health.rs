@@ -1,13 +1,11 @@
 use crate::err::ErrorResponse;
+use crate::etc::health::{ComponentHealth, check_dependencies};
 use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use serde::Serialize;
-use std::time::Instant;
-#[cfg(feature = "redis")]
-use store::Store;
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -17,6 +15,20 @@ struct ComponentStatus {
     latency_ms: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+}
+
+impl From<ComponentHealth> for ComponentStatus {
+    fn from(check: ComponentHealth) -> Self {
+        Self {
+            status: if check.is_healthy() {
+                "healthy"
+            } else {
+                "unhealthy"
+            },
+            latency_ms: check.latency_ms,
+            detail: check.error,
+        }
+    }
 }
 
 #[cfg(feature = "memory")]
@@ -61,37 +73,8 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
 
     let version = env!("CARGO_PKG_VERSION");
 
-    let database_started = Instant::now();
-    let database = match crate::db::ping().await {
-        Ok(_) => ComponentStatus {
-            status: "healthy",
-            latency_ms: database_started.elapsed().as_secs_f64() * 1000.0,
-            detail: None,
-        },
-        Err(e) => ComponentStatus {
-            status: "unhealthy",
-            latency_ms: database_started.elapsed().as_secs_f64() * 1000.0,
-            detail: Some(e.to_string()),
-        },
-    };
-
-    #[cfg(feature = "redis")]
-    let redis = {
-        let store = crate::etc::store::use_store();
-        let redis_started = Instant::now();
-        match store.ping().await {
-            Ok(_) => ComponentStatus {
-                status: "healthy",
-                latency_ms: redis_started.elapsed().as_secs_f64() * 1000.0,
-                detail: None,
-            },
-            Err(e) => ComponentStatus {
-                status: "unhealthy",
-                latency_ms: redis_started.elapsed().as_secs_f64() * 1000.0,
-                detail: Some(e.to_string()),
-            },
-        }
-    };
+    let dependencies = check_dependencies().await;
+    let all_healthy = dependencies.is_healthy();
 
     #[cfg(feature = "memory")]
     let store_stats = {
@@ -101,17 +84,6 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
             total_keys: stats.total_keys,
             estimated_memory_bytes: stats.estimated_memory_bytes,
             cache_hit_ratio: store.get_cache_hit_ratio(),
-        }
-    };
-
-    let all_healthy = database.status == "healthy" && {
-        #[cfg(feature = "redis")]
-        {
-            redis.status == "healthy"
-        }
-        #[cfg(not(feature = "redis"))]
-        {
-            true
         }
     };
 
@@ -125,9 +97,9 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
         runtime_profile: crate::etc::profile::COMPILED_PROFILE,
         database_backend: crate::etc::profile::COMPILED_DB_BACKEND,
         state_backend: crate::etc::profile::COMPILED_STATE_BACKEND,
-        database,
+        database: dependencies.database.into(),
         #[cfg(feature = "redis")]
-        redis,
+        redis: dependencies.redis.into(),
         #[cfg(feature = "memory")]
         store: store_stats,
     };
