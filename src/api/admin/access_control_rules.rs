@@ -1,18 +1,18 @@
-use super::{SUPER_ADMIN, extract_json};
+use super::{
+    authorization::{self, Permission},
+    extract_json,
+};
 use crate::act::access_control_rules::{
     AccessControlRulesResponse, EvaluateAccessControlRequest, EvaluateAccessControlResponse,
     UpdateAccessControlRulesRequest, ValidateAccessControlRulesRequest,
     ValidateAccessControlRulesResponse, evaluate_rules, read_rules, update_rules, validate_rules,
 };
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
 use gate::Gate;
 use std::sync::Arc;
-
-pub const ACCESS_CONTROL_GRANT: &str = "access_control";
 
 #[utoipa::path(
     get,
@@ -26,7 +26,7 @@ pub const ACCESS_CONTROL_GRANT: &str = "access_control";
     )
 )]
 pub async fn get_access_control_rules(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ACCESS_CONTROL_GRANT);
+    authorization::require(&req, Permission::AccessControlRead)?;
 
     Ok(Json(read_rules()?).into_response())
 }
@@ -46,7 +46,7 @@ pub async fn get_access_control_rules(req: Request) -> Result<Response, ErrorRes
     )
 )]
 pub async fn update_access_control_rules(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ACCESS_CONTROL_GRANT);
+    authorization::require(&req, Permission::AccessControlUpdate)?;
 
     let gate = gate_from_request(&req)?;
     let payload: UpdateAccessControlRulesRequest = extract_json(req).await?;
@@ -69,7 +69,7 @@ pub async fn update_access_control_rules(req: Request) -> Result<Response, Error
     )
 )]
 pub async fn validate_access_control_rules(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ACCESS_CONTROL_GRANT);
+    authorization::require(&req, Permission::AccessControlValidate)?;
 
     let payload: ValidateAccessControlRulesRequest = extract_json(req).await?;
 
@@ -90,7 +90,7 @@ pub async fn validate_access_control_rules(req: Request) -> Result<Response, Err
     )
 )]
 pub async fn evaluate_access_control_rules(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ACCESS_CONTROL_GRANT);
+    authorization::require(&req, Permission::AccessControlEvaluate)?;
 
     let payload: EvaluateAccessControlRequest = extract_json(req).await?;
 

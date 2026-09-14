@@ -100,6 +100,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
                 new_user,
                 CredentialType::Oauth,
                 &value,
+                None,
                 audit_context.clone(),
             )
             .await

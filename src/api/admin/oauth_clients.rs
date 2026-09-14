@@ -1,8 +1,10 @@
-use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use super::{
+    authorization::{self, Permission},
+    extract_json, extract_path, extract_query,
+};
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::msg::{MessageCode, MessageResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -14,7 +16,6 @@ use std::collections::HashSet;
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
-const OAUTH_CLIENTS_GRANT: &str = "oauth_clients";
 const AUTH_METHOD_NONE: &str = "none";
 const AUTH_METHOD_CLIENT_SECRET_BASIC: &str = "client_secret_basic";
 const AUTH_METHOD_CLIENT_SECRET_POST: &str = "client_secret_post";
@@ -507,7 +508,7 @@ async fn load_client(client_id: &str) -> Result<OAuthClient, ErrorResponse> {
     )
 )]
 pub async fn get_oauth_clients(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsRead)?;
 
     let query: ListOAuthClientsQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -558,7 +559,7 @@ pub async fn get_oauth_clients(req: Request) -> Result<Response, ErrorResponse> 
     )
 )]
 pub async fn get_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsRead)?;
 
     let client_id: String = extract_path(&mut req).await?;
     let client = load_client(&client_id).await?;
@@ -580,7 +581,7 @@ pub async fn get_oauth_client(mut req: Request) -> Result<Response, ErrorRespons
     )
 )]
 pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateOAuthClientRequest = extract_json(req).await?;
@@ -641,7 +642,7 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
@@ -674,7 +675,7 @@ pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn patch_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
@@ -705,7 +706,7 @@ pub async fn patch_oauth_client(mut req: Request) -> Result<Response, ErrorRespo
     )
 )]
 pub async fn disable_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsUpdateStatus)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
@@ -730,7 +731,7 @@ pub async fn disable_oauth_client(mut req: Request) -> Result<Response, ErrorRes
     )
 )]
 pub async fn enable_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsUpdateStatus)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
@@ -756,7 +757,7 @@ pub async fn enable_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn rotate_oauth_client_secret(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsRotateSecret)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
@@ -793,7 +794,7 @@ pub async fn rotate_oauth_client_secret(mut req: Request) -> Result<Response, Er
     )
 )]
 pub async fn delete_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, OAUTH_CLIENTS_GRANT);
+    authorization::require(&req, Permission::OAuthClientsDelete)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;

@@ -1,7 +1,8 @@
 use crate::ent::{
     AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, Credential, CredentialHistory,
-    CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization, Profile,
-    ServiceAccount, SuperAdmin, TrustedAuditContext, User,
+    CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership,
+    Organization, OrganizationMembershipMutation, Profile, ServiceAccount, SuperAdmin,
+    TrustedAuditContext, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -30,6 +31,7 @@ pub trait DbStore {
         user: Profile,
         credential_type: CredentialType,
         value: &str,
+        membership: Option<NewOrganizationMembership>,
         ctx: TrustedAuditContext,
     ) -> Result<User>;
     async fn create_super_admin_user(
@@ -261,12 +263,14 @@ pub trait DbStore {
     /// keys bound to the org, keys of its cascading service accounts).
     /// Returns the revoked key hashes.
     async fn delete_organization(&self, id: &str, ctx: TrustedAuditContext) -> Result<Vec<String>>;
-    /// Upsert: adds the membership or updates the role of an existing one.
+    /// Applies an authorized create/update membership intent and rejects the
+    /// write if the persisted state changed since authorization.
     async fn add_user_to_organization(
         &self,
         user_id: &str,
         org_id: &str,
         role: &str,
+        mutation: OrganizationMembershipMutation,
         ctx: TrustedAuditContext,
     ) -> Result<()>;
     /// Removes the membership and revokes the user's API keys bound to that

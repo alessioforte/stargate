@@ -1,10 +1,10 @@
-import { Checkbox, Stack } from "@mantine/core";
+import { Checkbox, SimpleGrid, Stack, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n";
 import type { AdminKeyPermission } from "@/services/types";
 import {
-  adminKeyPermissionValues,
-  permissionTranslationKeys,
+  adminKeyPermissionGroups,
+  getAdminKeyPermissionActionLabel,
 } from "./permissions";
 
 interface Props {
@@ -29,16 +29,23 @@ const AdminKeyPermissionsInput: React.FC<Props> = ({
       error={error}
       onChange={(value) => onChange(value as AdminKeyPermission[])}
     >
-      <Stack mt="xs" gap="xs">
-        {adminKeyPermissionValues.map((permission) => (
-          <Checkbox
-            key={permission}
-            disabled={disabled}
-            value={permission}
-            label={t(permissionTranslationKeys[permission])}
-          />
+      <SimpleGrid mt="xs" cols={{ base: 1, sm: 2 }} spacing="md">
+        {adminKeyPermissionGroups.map((group) => (
+          <Stack key={group.labelKey} gap={4}>
+            <Text size="sm" fw={600}>
+              {t(group.labelKey)}
+            </Text>
+            {group.permissions.map((permission) => (
+              <Checkbox
+                key={permission}
+                disabled={disabled}
+                value={permission}
+                label={getAdminKeyPermissionActionLabel(permission)}
+              />
+            ))}
+          </Stack>
         ))}
-      </Stack>
+      </SimpleGrid>
     </Checkbox.Group>
   );
 };

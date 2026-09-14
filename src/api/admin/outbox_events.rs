@@ -1,6 +1,8 @@
-use super::{SUPER_ADMIN, extract_path, extract_query};
+use super::{
+    authorization::{self, Permission},
+    extract_path, extract_query,
+};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -114,7 +116,7 @@ pub struct PaginatedOutboxEventsResponse {
     )
 )]
 pub async fn get_outbox_events(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN);
+    authorization::require(&req, Permission::AuditRead)?;
 
     let query: ListOutboxEventsQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -158,7 +160,7 @@ pub async fn get_outbox_events(req: Request) -> Result<Response, ErrorResponse> 
     )
 )]
 pub async fn get_outbox_event(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN);
+    authorization::require(&req, Permission::AuditRead)?;
 
     let event_id: String = extract_path(&mut req).await?;
     let row = crate::db::get_outbox_event_by_id(&event_id)

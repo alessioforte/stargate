@@ -1,8 +1,10 @@
-use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use super::{
+    authorization::{self, Permission},
+    extract_json, extract_path, extract_query,
+};
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::msg::{MessageCode, MessageResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -13,7 +15,6 @@ use store::Store;
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
-const API_KEYS_GRANT: &str = "api_keys";
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +100,7 @@ pub struct ApiKeyAttrsRequest {
     )
 )]
 pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
+    authorization::require(&req, Permission::ApiKeysRead)?;
 
     let query: ListApiKeysQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -187,7 +188,7 @@ pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn get_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
+    authorization::require(&req, Permission::ApiKeysRead)?;
 
     let id: String = extract_path(&mut req).await?;
 
@@ -215,7 +216,7 @@ pub async fn get_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
+    authorization::require(&req, Permission::ApiKeysCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateApiKeyRequest = extract_json(req).await?;
@@ -294,7 +295,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     )
 )]
 pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
+    authorization::require(&req, Permission::ApiKeysDelete)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -332,7 +333,7 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     )
 )]
 pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
+    authorization::require(&req, Permission::ApiKeysRevoke)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -376,7 +377,7 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     )
 )]
 pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
+    authorization::require(&req, Permission::ApiKeysUpdateAttrs)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -414,7 +415,7 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
     )
 )]
 pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, API_KEYS_GRANT);
+    authorization::require(&req, Permission::ApiKeysUpdateAttrs)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;

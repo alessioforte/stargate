@@ -535,13 +535,17 @@ server startup validates but never generates missing internal-context keys.
 - `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo`, `/oauth/introspect`, `/oauth/revoke` - OAuth/OIDC provider endpoints
 - `/oauth/state`, `/oauth/github`, `/oauth/google` - Google/GitHub consumer login endpoints
 - `/signup/*` - registration + email verification
-- `GET /admin/me` - validated current admin identity, authentication details, token timing, scopes, and effective grants
+- `GET /admin/me` - validated user/admin-key principal, authentication details, token timing, scopes, and canonical effective permissions
 - `GET /admin/overview` - aggregate resource and active-session counts, audit delivery backlog, and active gateway graph counts
 - `GET /admin/sessions` - paginated active-session registry, filterable by user, organization, and OAuth client
 - `DELETE /admin/sessions/{session_id}` - revoke one login session by its standard JWT `sid`
 - `DELETE /admin/users/{user_id}/sessions` - revoke all login sessions for a user
 - `GET /admin/health` - dependency health with runtime profile, backend kinds, latency, and check timestamp
-- `/admin/*` - users, orgs, API keys, OAuth clients, service accounts, audit outbox events, config, access-control rules (super-admin)
+- `POST /admin/users` and `POST /admin/users/invitations` - accept an optional
+  `membership: { organizationId, role? }`; the admin key remains
+  application-wide and may target any organization
+- `/admin/*` - super-admin users bypass capability checks; admin keys use exact
+  `<resource>:<action>` permissions from `src/api/admin/authorization.rs`
 
 ## Error Response Format
 

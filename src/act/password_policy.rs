@@ -67,6 +67,25 @@ pub fn validate_global(
     to_result(global.set.validate_all(password, &ctx))
 }
 
+/// Validate a new user's password for an optional initial organization.
+/// A valid organization override replaces the global policy, matching the
+/// effective-policy rules used after the membership exists.
+pub fn validate_for_organization(
+    organization: &Organization,
+    password: &str,
+    username: Option<&str>,
+    email: Option<&str>,
+) -> Result<(), String> {
+    let global = global();
+    let set = org_policy(organization).unwrap_or_else(|| global.set.clone());
+    let ctx = PolicyContext {
+        username,
+        email,
+        banned: Some(&global.banned),
+    };
+    to_result(set.validate_all(password, &ctx))
+}
+
 /// Validate a candidate password for an existing user. Organizations the
 /// user belongs to replace the global policy via `attrs.password_policy`;
 /// the password must satisfy every applicable organization policy.

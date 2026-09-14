@@ -72,6 +72,33 @@ The body on `PUT` is optional; omitting it defaults the role to `member`.
 Roles are free-form strings (max 50 chars); the admin UI offers the
 conventional `owner`/`admin`/`member`.
 
+### Provisioning a user with an initial membership
+
+The existing direct-create and invitation endpoints accept the same optional
+membership object:
+
+```json
+{
+  "email": "admin@tenant.example",
+  "password": "use-a-policy-compliant-secret",
+  "membership": {
+    "organizationId": "01H8XYZ...",
+    "role": "admin"
+  }
+}
+```
+
+Omit `password` when sending the body to `POST /admin/users/invitations`.
+Omitting `membership` preserves the original organization-less behavior. A
+machine principal needs `users:create` or `users:invite`, plus
+`memberships:create` when the object is present. Admin keys are
+application-wide: the organization ID selects the membership to create, not a
+scope attached to the key.
+
+Direct creation commits the user, credential, membership, and audit outbox
+events in one transaction. Invitations retain the normalized organization and
+role in server-side pending state and use the same transaction when accepted.
+
 ## API keys and orgs
 
 - User API keys may carry an optional org binding (`orgId` at creation;

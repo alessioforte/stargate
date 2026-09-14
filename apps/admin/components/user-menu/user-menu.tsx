@@ -52,16 +52,16 @@ const UserMenu: React.FC<Props> = ({
               <Group align="center">
                 <Stack gap={0} align="end">
                   <Text fw={600} size="sm">
-                    {adminMe.user.name}
+                    {adminMe.user?.name ?? t("adminKey")}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    {adminMe.user.email}
+                    {adminMe.user?.email ?? adminMe.adminKeyId}
                   </Text>
                 </Stack>
                 <Avatar
                   color="dark"
-                  src={adminMe.user.picture}
-                  name={adminMe.user.name}
+                  src={adminMe.user?.picture}
+                  name={adminMe.user?.name ?? t("adminKey")}
                 />
               </Group>
             )}
@@ -91,11 +91,13 @@ const UserMenu: React.FC<Props> = ({
                   {t("accessExpiresAt")}
                 </Text>
                 <Text size="xs">
-                  {formatDate(
-                    adminMe.authentication.tokenExpiresAt,
-                    null,
-                    language,
-                  )}
+                  {adminMe.authentication.tokenExpiresAt
+                    ? formatDate(
+                        adminMe.authentication.tokenExpiresAt,
+                        null,
+                        language,
+                      )
+                    : "—"}
                 </Text>
               </Group>
             </Stack>

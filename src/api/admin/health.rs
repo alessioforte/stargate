@@ -1,6 +1,6 @@
+use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
 use crate::etc::health::{ComponentHealth, check_dependencies};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -69,7 +69,7 @@ pub struct AdminHealth {
     )
 )]
 pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, "super_admin");
+    authorization::require(&req, Permission::HealthRead)?;
 
     let version = env!("CARGO_PKG_VERSION");
 

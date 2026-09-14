@@ -14,8 +14,10 @@ const DEFAULT_PAGE_SIZE = 20;
 const UsersPage = () => {
   const {
     users,
+    organizations,
     superAdminUsers,
     getUsers,
+    getOrganizations,
     getSuperAdminUsers,
     createUser,
     inviteUser,
@@ -44,6 +46,10 @@ const UsersPage = () => {
   useEffect(() => {
     getSuperAdminUsers();
   }, [getSuperAdminUsers]);
+
+  useEffect(() => {
+    getOrganizations({ limit: 100 });
+  }, [getOrganizations]);
 
   useEffect(() => {
     const total = users?.data?.total;
@@ -77,7 +83,11 @@ const UsersPage = () => {
           placeholder={`${t("search").toLowerCase()}...`}
           onSearch={handleSearch}
         />
-        <CreateUser onSave={createUser} onInvite={inviteUser} />
+        <CreateUser
+          organizations={organizations?.data?.data ?? []}
+          onSave={createUser}
+          onInvite={inviteUser}
+        />
       </Group>
       <Table
         stickyHeader

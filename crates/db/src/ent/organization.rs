@@ -34,6 +34,19 @@ impl Organization {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NewOrganizationMembership {
+    pub organization_id: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum OrganizationMembershipMutation {
+    Create,
+    Update,
+}
+
 /// An organization a user belongs to, with the membership metadata.
 ///
 /// `member_since` is nullable because sqlite rows created before the

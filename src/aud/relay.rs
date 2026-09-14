@@ -413,6 +413,7 @@ mod tests {
                 Profile::new(format!("{tag}@example.com"), tag.to_string()),
                 CredentialType::Password,
                 "AUDIT_RELAY_LIVE_TEST_PASSWORD_HASH",
+                None,
                 context,
             )
             .await?;

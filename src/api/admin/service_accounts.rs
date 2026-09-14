@@ -1,8 +1,10 @@
-use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use super::{
+    authorization::{self, Permission},
+    extract_json, extract_path, extract_query,
+};
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::msg::{MessageCode, MessageResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -11,7 +13,6 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
-const SA_GRANT: &str = "service_accounts";
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -74,7 +75,7 @@ pub struct UpdateServiceAccountRequest {
     )
 )]
 pub async fn get_service_accounts(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, SA_GRANT);
+    authorization::require(&req, Permission::ServiceAccountsRead)?;
 
     let query: ListServiceAccountsQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -124,7 +125,7 @@ pub async fn get_service_accounts(req: Request) -> Result<Response, ErrorRespons
     )
 )]
 pub async fn get_service_account(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, SA_GRANT);
+    authorization::require(&req, Permission::ServiceAccountsRead)?;
 
     let id: String = extract_path(&mut req).await?;
 
@@ -152,7 +153,7 @@ pub async fn get_service_account(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn create_service_account(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, SA_GRANT);
+    authorization::require(&req, Permission::ServiceAccountsCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateServiceAccountRequest = extract_json(req).await?;
@@ -189,7 +190,7 @@ pub async fn create_service_account(mut req: Request) -> Result<Response, ErrorR
     )
 )]
 pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, SA_GRANT);
+    authorization::require(&req, Permission::ServiceAccountsUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -231,7 +232,7 @@ pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorR
     )
 )]
 pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, SA_GRANT);
+    authorization::require(&req, Permission::ServiceAccountsDelete)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;

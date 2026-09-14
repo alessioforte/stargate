@@ -1,6 +1,9 @@
-use super::{AdminPrincipal, SUPER_ADMIN, extract_path, extract_query};
+use super::{
+    AdminPrincipal,
+    authorization::{self, Permission},
+    extract_path, extract_query,
+};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use chrono::{DateTime, Utc};
@@ -110,7 +113,7 @@ fn user_name(user: &db::ent::User) -> String {
     )
 )]
 pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN);
+    authorization::require(&req, Permission::SessionsRead)?;
 
     let query: ListSessionsQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -121,7 +124,8 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
     let current_session_id = req
         .extensions()
         .get::<AdminPrincipal>()
-        .and_then(|principal| principal.claims.sid.as_deref())
+        .and_then(AdminPrincipal::claims)
+        .and_then(|claims| claims.sid.as_deref())
         .map(str::to_string);
 
     let mut sessions = crate::act::sessions::list_sessions()
@@ -199,12 +203,13 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
 pub async fn delete_session(
     mut req: Request,
 ) -> Result<Json<SessionRevocationResponse>, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN);
+    authorization::require(&req, Permission::SessionsRevoke)?;
 
     let admin_user_id = req
         .extensions()
         .get::<AdminPrincipal>()
-        .map(|principal| principal.user_id.clone());
+        .and_then(AdminPrincipal::user_id)
+        .map(str::to_string);
     let session_id: String = extract_path(&mut req).await?;
     let session = crate::act::sessions::revoke_session(&session_id)
         .await
@@ -244,12 +249,13 @@ pub async fn delete_session(
 pub async fn delete_user_sessions(
     mut req: Request,
 ) -> Result<Json<UserSessionsRevocationResponse>, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN);
+    authorization::require(&req, Permission::SessionsRevoke)?;
 
     let admin_user_id = req
         .extensions()
         .get::<AdminPrincipal>()
-        .map(|principal| principal.user_id.clone());
+        .and_then(AdminPrincipal::user_id)
+        .map(str::to_string);
     let user_id: String = extract_path(&mut req).await?;
     crate::db::get_user_by_id(&user_id)
         .await
