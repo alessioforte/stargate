@@ -29,7 +29,7 @@ const AdminKeyPermissionsInput: React.FC<Props> = ({
       error={error}
       onChange={(value) => onChange(value as AdminKeyPermission[])}
     >
-      <SimpleGrid mt="xs" cols={{ base: 1, sm: 2 }} spacing="md">
+      <SimpleGrid mt="xs" cols={{ base: 1, sm: 1 }} spacing="md">
         {adminKeyPermissionGroups.map((group) => (
           <Stack key={group.labelKey} gap={4}>
             <Text size="sm" fw={600}>
