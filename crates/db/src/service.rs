@@ -2096,12 +2096,12 @@ mod sqlite_tests {
         )
     }
 
-    fn admin_bootstrap_client(redirect_uri: &str) -> OAuthClient {
+    fn console_bootstrap_client(redirect_uri: &str) -> OAuthClient {
         OAuthClient::new(
-            "stargate_admin".to_string(),
+            "stargate_console".to_string(),
             None,
-            "Stargate Admin".to_string(),
-            Some("Built-in public client for the Stargate Admin UI".to_string()),
+            "Stargate Console".to_string(),
+            Some("Built-in public client for the Stargate Console".to_string()),
             "none".to_string(),
             vec![
                 "authorization_code".to_string(),
@@ -2860,7 +2860,7 @@ mod sqlite_tests {
                     "root".to_string(),
                 )),
                 Some("BOOTSTRAP_PASSWORD_HASH_SECRET"),
-                admin_bootstrap_client(redirect_uri),
+                console_bootstrap_client(redirect_uri),
                 bootstrap_ctx(),
             )
             .await
@@ -2870,7 +2870,7 @@ mod sqlite_tests {
         assert!(result.oauth_client_created);
         assert!(svc.super_admin_exists().await.expect("query super admin"));
         let client = svc
-            .get_oauth_client_by_client_id("stargate_admin")
+            .get_oauth_client_by_client_id("stargate_console")
             .await
             .expect("query OAuth client")
             .expect("OAuth client exists");
@@ -2893,7 +2893,7 @@ mod sqlite_tests {
             .bootstrap_instance(
                 None,
                 None,
-                admin_bootstrap_client(redirect_uri),
+                console_bootstrap_client(redirect_uri),
                 bootstrap_ctx(),
             )
             .await
@@ -2909,7 +2909,7 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
-    async fn instance_bootstrap_repairs_missing_admin_oauth_client() {
+    async fn instance_bootstrap_repairs_missing_console_oauth_client() {
         let svc = test_service().await;
         svc.create_super_admin_user(
             Profile::new("root@example.com".to_string(), "root".to_string()),
@@ -2924,7 +2924,7 @@ mod sqlite_tests {
             .bootstrap_instance(
                 None,
                 None,
-                admin_bootstrap_client("https://identity.example.com/stargate/auth/callback"),
+                console_bootstrap_client("https://identity.example.com/stargate/auth/callback"),
                 bootstrap_ctx(),
             )
             .await
@@ -2933,7 +2933,7 @@ mod sqlite_tests {
         assert!(!result.super_admin_created);
         assert!(result.oauth_client_created);
         assert!(
-            svc.get_oauth_client_by_client_id("stargate_admin")
+            svc.get_oauth_client_by_client_id("stargate_console")
                 .await
                 .expect("query OAuth client")
                 .is_some()
@@ -2941,10 +2941,10 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
-    async fn incompatible_admin_oauth_client_rolls_back_first_admin() {
+    async fn incompatible_console_oauth_client_rolls_back_first_admin() {
         let svc = test_service().await;
         svc.create_oauth_client(
-            admin_bootstrap_client("https://wrong.example.com/callback"),
+            console_bootstrap_client("https://wrong.example.com/callback"),
             trusted_ctx(),
         )
         .await
@@ -2957,7 +2957,7 @@ mod sqlite_tests {
                     "root".to_string(),
                 )),
                 Some("BOOTSTRAP_PASSWORD_HASH_SECRET"),
-                admin_bootstrap_client("https://identity.example.com/stargate/auth/callback"),
+                console_bootstrap_client("https://identity.example.com/stargate/auth/callback"),
                 bootstrap_ctx(),
             )
             .await

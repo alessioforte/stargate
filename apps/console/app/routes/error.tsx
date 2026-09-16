@@ -3,7 +3,7 @@ import useStore from "@/store";
 
 export default function ErrorPage() {
   const message =
-    useStore((state) => state.adminError) ?? "Unable to open Stargate Admin.";
+    useStore((state) => state.adminError) ?? "Unable to open Stargate Console.";
   const returnPath = useStore((state) => state.adminReturnPath);
   const signIn = useStore((state) => state.signIn);
 

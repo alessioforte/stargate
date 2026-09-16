@@ -161,9 +161,9 @@ variable "bootstrap_password" {
   sensitive = true
 }
 
-variable "admin_oauth_client_id" {
+variable "console_oauth_client_id" {
   type    = string
-  default = "stargate_admin"
+  default = "stargate_console"
 }
 ```
 
@@ -257,15 +257,15 @@ resource "helm_release" "stargate" {
 
       runtimeConfig = {
         data = {
-          LOG_FILE_ENABLED    = "false"
-          JWT_ALGORITHM       = "HS256"
-          JWT_ISSUER          = local.public_url
-          OAUTH_BASE_URL      = local.public_url
-          ADMIN_PUBLIC_URL    = local.public_url
-          ADMIN_APP_BASE_PATH = "/stargate"
-          AUTH_APP_BASE_PATH  = "/auth"
-          TRUSTED_ORIGINS     = local.public_url
-          CORS_ORIGINS        = local.public_url
+          LOG_FILE_ENABLED      = "false"
+          JWT_ALGORITHM         = "HS256"
+          JWT_ISSUER            = local.public_url
+          OAUTH_BASE_URL        = local.public_url
+          CONSOLE_PUBLIC_URL    = local.public_url
+          CONSOLE_APP_BASE_PATH = "/stargate"
+          AUTH_APP_BASE_PATH    = "/auth"
+          TRUSTED_ORIGINS       = local.public_url
+          CORS_ORIGINS          = local.public_url
 
           POSTGRES_ENDPOINT = var.postgres_endpoint
           POSTGRES_DATABASE = var.postgres_database
@@ -302,7 +302,7 @@ resource "helm_release" "stargate" {
       bootstrap = {
         enabled          = true
         email            = var.bootstrap_email
-        oauthClientId    = var.admin_oauth_client_id
+        oauthClientId    = var.console_oauth_client_id
         oauthRedirectUri = local.oauth_redirect_uri
         existingSecret   = kubernetes_secret_v1.bootstrap.metadata[0].name
         rolloutToken     = kubernetes_secret_v1.bootstrap.metadata[0].resource_version
@@ -322,9 +322,9 @@ input. If the chart is published to an OCI or Helm repository, replace
 `chart_path` with the repository/chart/version fields required by that source.
 
 The post-install/post-upgrade hook runs the idempotent bootstrap command. It
-creates the first administrator and `stargate_admin` OAuth client, or verifies
-the existing resources. The Admin UI is compiled into the image, so
-`admin_oauth_client_id` and the callback must match its
+creates the first administrator and `stargate_console` OAuth client, or verifies
+the existing resources. The Console is compiled into the image, so
+`console_oauth_client_id` and the callback must match its
 `VITE_OAUTH_CLIENT_ID` and `VITE_OAUTH_REDIRECT_URI` build arguments.
 
 ## Ingress and NetworkPolicy
@@ -382,7 +382,7 @@ Verify that:
 2. PostgreSQL migrations completed;
 3. Redis connections succeed;
 4. the bootstrap hook completed;
-5. the Admin UI returns to `/stargate/auth/callback`;
+5. the Console returns to `/stargate/auth/callback`;
 6. terminating one pod does not invalidate sessions or OAuth state.
 
 The readiness probe `/readyz` checks PostgreSQL and Redis in cluster mode.

@@ -56,8 +56,8 @@ spec:
                   --password-stdin \
                   --name "$STARGATE_BOOTSTRAP_NAME" \
                   --nickname "$STARGATE_BOOTSTRAP_NICKNAME" \
-                  --oauth-client-id "$STARGATE_ADMIN_OAUTH_CLIENT_ID" \
-                  --oauth-redirect-uri "$STARGATE_ADMIN_OAUTH_REDIRECT_URI"
+                  --oauth-client-id "$STARGATE_CONSOLE_OAUTH_CLIENT_ID" \
+                  --oauth-redirect-uri "$STARGATE_CONSOLE_OAUTH_REDIRECT_URI"
           env:
             - name: STARGATE_RUNTIME_PROFILE
               value: {{ .Values.deployment.mode | quote }}
@@ -72,9 +72,9 @@ spec:
               value: {{ .Values.bootstrap.name | quote }}
             - name: STARGATE_BOOTSTRAP_NICKNAME
               value: {{ .Values.bootstrap.nickname | quote }}
-            - name: STARGATE_ADMIN_OAUTH_CLIENT_ID
+            - name: STARGATE_CONSOLE_OAUTH_CLIENT_ID
               value: {{ .Values.bootstrap.oauthClientId | quote }}
-            - name: STARGATE_ADMIN_OAUTH_REDIRECT_URI
+            - name: STARGATE_CONSOLE_OAUTH_REDIRECT_URI
               value: {{ .Values.bootstrap.oauthRedirectUri | quote }}
           envFrom:
             - configMapRef:

@@ -7,7 +7,7 @@ Cluster mode uses shared PostgreSQL and Redis and does not mount local state.
 {{- end }}
 
 {{- if .Values.bootstrap.enabled }}
-The idempotent bootstrap hook provisions the first administrator and Admin UI OAuth client.
+The idempotent bootstrap hook provisions the first administrator and Console OAuth client.
 Inspect it with:
   kubectl logs --namespace {{ .Release.Namespace }} job/{{ include "stargate.fullname" . }}-bootstrap
 {{- else }}

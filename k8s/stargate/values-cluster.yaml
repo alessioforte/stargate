@@ -18,8 +18,8 @@ runtimeConfig:
     JWT_ALGORITHM: HS256
     JWT_ISSUER: https://identity.example.com
     OAUTH_BASE_URL: https://identity.example.com
-    ADMIN_PUBLIC_URL: https://identity.example.com
-    ADMIN_APP_BASE_PATH: /stargate
+    CONSOLE_PUBLIC_URL: https://identity.example.com
+    CONSOLE_APP_BASE_PATH: /stargate
     AUTH_APP_BASE_PATH: /auth
     TRUSTED_ORIGINS: https://identity.example.com
     CORS_ORIGINS: https://identity.example.com

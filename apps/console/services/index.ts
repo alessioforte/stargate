@@ -10,7 +10,7 @@ import {
   type OAuthTokenResponse,
 } from "@/lib/oauth";
 import { appPath } from "@/lib/base-path";
-import { getAdminAppConfig } from "@/lib/env";
+import { getConsoleAppConfig } from "@/lib/env";
 
 export type AuthResponse = OAuthTokenResponse;
 
@@ -95,7 +95,7 @@ let service: Service | null = null;
 
 function initialize(): Service {
   const apiKey = getStoredAccessToken();
-  const apiUrl = getAdminAppConfig().apiUrl;
+  const apiUrl = getConsoleAppConfig().apiUrl;
 
   return new Service(apiKey, apiUrl);
 }

@@ -38,7 +38,7 @@ stargate/
 │   ├── store/         # State store (DashMap / Redis)
 │   └── tools/         # Shared utilities
 ├── apps/              # TypeScript frontends (see "Frontend (apps/)")
-│   ├── admin/         # Super-admin console (React + Vite + Mantine + Zustand)
+│   ├── console/       # Super-admin console (React + Vite + Mantine + Zustand)
 │   ├── auth/          # Hosted login / auth-flow UI (same stack + layering)
 │   └── mail/          # Transactional email templates (react-email)
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
@@ -460,9 +460,9 @@ the same logical outbox columns.
 | `MFA_REQUIRED_FOR_SUPER_ADMIN` | true | Requires MFA for super-admin users when `MFA_MODE=optional` |
 | `MFA_ADMIN_STEP_UP_REQUIRED` | false | Requires an authenticated `admin` MFA step-up marker for super-admin user-session admin grants |
 | `MFA_STEP_UP_TTL_SECS` | 300 | TTL for authenticated MFA step-up markers |
-| `ADMIN_OAUTH_CLIENT_ID` | stargate_admin | Reserved public OAuth client provisioned for the Admin UI |
-| `ADMIN_OAUTH_REDIRECT_URI` | derived | Exact Admin UI callback; falls back through `ADMIN_PUBLIC_URL`, `OAUTH_BASE_URL`, or `JWT_ISSUER` |
-| `ADMIN_PUBLIC_URL` | - | Public Admin UI origin used to derive the bootstrap callback |
+| `CONSOLE_OAUTH_CLIENT_ID` | stargate_console | Reserved public OAuth client provisioned for the Console |
+| `CONSOLE_OAUTH_REDIRECT_URI` | derived | Exact Console callback; falls back through `CONSOLE_PUBLIC_URL`, `OAUTH_BASE_URL`, or `JWT_ISSUER` |
+| `CONSOLE_PUBLIC_URL` | - | Public Console origin used to derive the bootstrap callback |
 | `PASSWORD_POLICY_*` | see `.env.example` | Global password policy (length, classes, banned list, expiry, history); per-org override via `organizations.attrs.password_policy`. Guide: `docs/password-policies-guide.md` |
 | `ARGON2_MEMORY_KIB` | 19456 | Argon2id memory cost; hash upgrades apply on next login |
 | `ARGON2_ITERATIONS` | 2 | Argon2id time cost |
@@ -499,7 +499,7 @@ cargo run -- admin bootstrap \
   --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 ```
 
-The command atomically creates the first super-admin and the reserved Admin UI
+The command atomically creates the first super-admin and the reserved Console
 OAuth client. It is idempotent when both resources match. If the administrator
 already exists but the client is missing, omit the credential/profile flags and
 rerun with the OAuth settings.
@@ -603,15 +603,15 @@ See `docs/health-probes.md` for contracts and deployment guidance.
 
 `apps/` holds the TypeScript frontends, separate from the Rust binary. Three apps:
 
-- `admin` — super-admin console (users, orgs, API/admin keys, OAuth clients, service accounts, gateway config, access-control policies). This is the reference implementation of the layering below.
+- `console` — super-admin console (users, orgs, API/admin keys, OAuth clients, service accounts, gateway config, access-control policies). This is the reference implementation of the layering below.
 - `auth` — hosted login / auth-flow UI (password login, passwordless email OTP, login MFA, reset/change password). Same stack, same layering (`services/`, `store/`, `app/routes/`, `components/`).
 - `mail` — transactional email templates (`react-email`). A build-time template project, **not** a runtime SPA; it does not follow the layering below.
 
-Stack (admin/auth): React 19, Vite, TypeScript, Mantine v9 (`@mantine/core|form|hooks|notifications`), Zustand v5, react-router v7, axios, `@tanstack/react-table`, react-icons. Path alias `@/*` maps to the app root, so imports read `@/services`, `@/store`, `@/components`, `@/i18n`, `@/lib`. Build-time API base URL comes from `VITE_API_URL`.
+Stack (console/auth): React 19, Vite, TypeScript, Mantine v9 (`@mantine/core|form|hooks|notifications`), Zustand v5, react-router v7, axios, `@tanstack/react-table`, react-icons. Path alias `@/*` maps to the app root, so imports read `@/services`, `@/store`, `@/components`, `@/i18n`, `@/lib`. Build-time API base URL comes from `VITE_API_URL`.
 
-Dev commands (run inside `apps/admin` or `apps/auth`): `npm run dev` (Vite), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run format` (prettier).
+Dev commands (run inside `apps/console` or `apps/auth`): `npm run dev` (Vite), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run format` (prettier).
 
-The admin home uses `/admin/me` as its authentication probe so a dependency
+The console home uses `/admin/me` as its authentication probe so a dependency
 outage does not block the console shell. It polls `/admin/health` separately
 and loads `/admin/overview` plus recent outbox events for the operational
 dashboard.

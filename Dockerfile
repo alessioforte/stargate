@@ -6,17 +6,17 @@ ARG CARGO_CHEF_VERSION=0.1.77
 ARG APP_NAME=stargate
 ARG STARGATE_PROFILE=edge
 
-FROM node:${NODE_VERSION}-bookworm-slim AS admin-build
-WORKDIR /app/apps/admin
-COPY apps/admin/package.json apps/admin/package-lock.json ./
+FROM node:${NODE_VERSION}-bookworm-slim AS console-build
+WORKDIR /app/apps/console
+COPY apps/console/package.json apps/console/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
-COPY apps/admin ./
-ARG ADMIN_APP_BASE_PATH=/stargate
+COPY apps/console ./
+ARG CONSOLE_APP_BASE_PATH=/stargate
 ARG VITE_API_URL
 ARG VITE_AUTH_URL
-ARG VITE_OAUTH_CLIENT_ID=stargate_admin
+ARG VITE_OAUTH_CLIENT_ID=stargate_console
 ARG VITE_OAUTH_REDIRECT_URI
-RUN VITE_BASE_PATH="${ADMIN_APP_BASE_PATH}" \
+RUN VITE_BASE_PATH="${CONSOLE_APP_BASE_PATH}" \
     VITE_API_URL="${VITE_API_URL}" \
     VITE_AUTH_URL="${VITE_AUTH_URL}" \
     VITE_OAUTH_CLIENT_ID="${VITE_OAUTH_CLIENT_ID}" \
@@ -97,8 +97,8 @@ RUN apt-get update && \
 WORKDIR /app
 RUN mkdir -p .stargate && chown stargate:stargate .stargate
 COPY --from=server-build /bin/server /bin/server
-COPY --from=admin-build --chown=stargate:stargate \
-    /app/.stargate/apps/admin ./.stargate/apps/admin
+COPY --from=console-build --chown=stargate:stargate \
+    /app/.stargate/apps/console ./.stargate/apps/console
 COPY --from=auth-build --chown=stargate:stargate \
     /app/.stargate/apps/auth ./.stargate/apps/auth
 COPY --from=mail-build --chown=stargate:stargate \
@@ -110,13 +110,13 @@ EXPOSE 5050
 ENV RUST_LOG=info
 ENV PORT=5050
 ENV STARGATE_RUNTIME_PROFILE=${STARGATE_PROFILE}
-ARG ADMIN_APP_BASE_PATH=/stargate
+ARG CONSOLE_APP_BASE_PATH=/stargate
 ARG AUTH_APP_BASE_PATH=/auth
-ARG VITE_OAUTH_CLIENT_ID=stargate_admin
+ARG VITE_OAUTH_CLIENT_ID=stargate_console
 ARG VITE_OAUTH_REDIRECT_URI
-ENV ADMIN_APP_BASE_PATH=${ADMIN_APP_BASE_PATH}
+ENV CONSOLE_APP_BASE_PATH=${CONSOLE_APP_BASE_PATH}
 ENV AUTH_APP_BASE_PATH=${AUTH_APP_BASE_PATH}
-ENV ADMIN_OAUTH_CLIENT_ID=${VITE_OAUTH_CLIENT_ID}
-ENV ADMIN_OAUTH_REDIRECT_URI=${VITE_OAUTH_REDIRECT_URI}
+ENV CONSOLE_OAUTH_CLIENT_ID=${VITE_OAUTH_CLIENT_ID}
+ENV CONSOLE_OAUTH_REDIRECT_URI=${VITE_OAUTH_REDIRECT_URI}
 
 CMD ["/bin/server"]

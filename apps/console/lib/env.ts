@@ -1,6 +1,6 @@
 import { appPath } from "@/lib/base-path";
 
-export interface AdminAppConfig {
+export interface ConsoleAppConfig {
   apiUrl: string;
   authUrl: string;
   oauthClientId: string;
@@ -35,7 +35,7 @@ function requiredEnv(key: string, value: string | undefined) {
   return cleaned;
 }
 
-export function getAdminAppConfig(): AdminAppConfig {
+export function getConsoleAppConfig(): ConsoleAppConfig {
   const origin = browserOrigin();
 
   return {

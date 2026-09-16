@@ -1,4 +1,4 @@
-import { getAdminAppConfig } from "@/lib/env";
+import { getConsoleAppConfig } from "@/lib/env";
 
 export interface OAuthConfig {
   apiUrl: string;
@@ -23,11 +23,11 @@ export interface OAuthTokenResponse {
   token_type: string;
 }
 
-const OAUTH_REQUEST_KEY = "stargate.admin.oauth.request";
+const OAUTH_REQUEST_KEY = "stargate.console.oauth.request";
 const AUTH_STORAGE_KEY = "auth";
 const DEFAULT_SCOPE = "openid email profile offline_access";
 const WEB_CRYPTO_UNAVAILABLE_MESSAGE =
-  "Stargate Admin sign-in requires Web Crypto SHA-256 for OAuth PKCE. Open the admin UI over HTTPS, or use localhost when working on the same machine.";
+  "Stargate Console sign-in requires Web Crypto SHA-256 for OAuth PKCE. Open the console over HTTPS, or use localhost when working on the same machine.";
 
 function webCryptoUnavailableMessage() {
   const insecureContext =
@@ -71,7 +71,7 @@ async function sha256(value: string) {
 }
 
 export function getOAuthConfig(): OAuthConfig {
-  const config = getAdminAppConfig();
+  const config = getConsoleAppConfig();
 
   return {
     apiUrl: config.apiUrl,

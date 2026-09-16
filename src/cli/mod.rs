@@ -33,7 +33,7 @@ pub struct AdminArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum AdminCommand {
-    /// Provision the first super admin and the Admin UI OAuth client.
+    /// Provision the first super admin and the Console OAuth client.
     Bootstrap(BootstrapArgs),
 }
 
@@ -63,11 +63,11 @@ pub struct BootstrapArgs {
     #[arg(long)]
     pub nickname: Option<String>,
 
-    /// Admin UI OAuth client ID; defaults to ADMIN_OAUTH_CLIENT_ID.
+    /// Console OAuth client ID; defaults to CONSOLE_OAUTH_CLIENT_ID.
     #[arg(long)]
     pub oauth_client_id: Option<String>,
 
-    /// Exact Admin UI OAuth callback URI.
+    /// Exact Console OAuth callback URI.
     #[arg(long)]
     pub oauth_redirect_uri: Option<String>,
 }
@@ -166,9 +166,9 @@ async fn run_bootstrap(args: BootstrapArgs) -> io::Result<()> {
         (Some(email), Some(password), generated_password)
     };
 
-    let client_id = crate::fun::resolve_admin_oauth_client_id(args.oauth_client_id)
+    let client_id = crate::fun::resolve_console_oauth_client_id(args.oauth_client_id)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let redirect_uri = crate::fun::resolve_admin_oauth_redirect_uri(args.oauth_redirect_uri)
+    let redirect_uri = crate::fun::resolve_console_oauth_redirect_uri(args.oauth_redirect_uri)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     let result = crate::fun::bootstrap_instance(
         email,
@@ -194,9 +194,11 @@ async fn run_bootstrap(args: BootstrapArgs) -> io::Result<()> {
     }
 
     if result.oauth_client_created {
-        println!("Created Admin OAuth client '{client_id}' with redirect URI '{redirect_uri}'.");
+        println!("Created Console OAuth client '{client_id}' with redirect URI '{redirect_uri}'.");
     } else {
-        println!("Admin OAuth client '{client_id}' already exists and matches; left it unchanged.");
+        println!(
+            "Console OAuth client '{client_id}' already exists and matches; left it unchanged."
+        );
     }
     Ok(())
 }
@@ -233,7 +235,7 @@ mod tests {
             "admin@example.com",
             "--generate-password",
             "--oauth-client-id",
-            "stargate_admin",
+            "stargate_console",
             "--oauth-redirect-uri",
             "https://identity.example.com/stargate/auth/callback",
         ])
@@ -247,7 +249,7 @@ mod tests {
         };
         assert_eq!(args.email.as_deref(), Some("admin@example.com"));
         assert!(args.generate_password);
-        assert_eq!(args.oauth_client_id.as_deref(), Some("stargate_admin"));
+        assert_eq!(args.oauth_client_id.as_deref(), Some("stargate_console"));
         assert_eq!(
             args.oauth_redirect_uri.as_deref(),
             Some("https://identity.example.com/stargate/auth/callback")

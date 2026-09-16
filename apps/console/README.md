@@ -1,6 +1,6 @@
-# Stargate Admin
+# Stargate Console
 
-Vite React admin app for Stargate. Authentication is handled through the hosted
+Vite React management console for Stargate. Authentication is handled through the hosted
 Stargate auth app with OAuth Authorization Code + PKCE.
 
 ## Local Development
@@ -17,7 +17,7 @@ Required local env:
 ```text
 VITE_API_URL=http://localhost:5050
 VITE_AUTH_URL=http://localhost:3010
-VITE_OAUTH_CLIENT_ID=stargate_admin
+VITE_OAUTH_CLIENT_ID=stargate_console
 VITE_OAUTH_REDIRECT_URI=http://localhost:3011/auth/callback
 ```
 
@@ -30,11 +30,11 @@ cargo run --features edge -- admin bootstrap \
   --oauth-redirect-uri http://localhost:3011/auth/callback
 ```
 
-The resulting `stargate_admin` OAuth client is a public browser client:
+The resulting `stargate_console` OAuth client is a public browser client:
 
 ```json
 {
-  "clientId": "stargate_admin",
+  "clientId": "stargate_console",
   "tokenEndpointAuthMethod": "none",
   "grantTypes": ["authorization_code", "refresh_token"],
   "responseTypes": ["code"],
@@ -51,7 +51,7 @@ The resulting `stargate_admin` OAuth client is a public browser client:
 No client secret is used because this is a browser app. PKCE protects the
 authorization code flow.
 
-When opening the admin app from another device, serve it over HTTPS. Browsers
+When opening the console from another device, serve it over HTTPS. Browsers
 expose `crypto.subtle` only in secure contexts, and the PKCE flow needs
 SHA-256. `http://localhost` works for local development, but
 `http://<raspberry-pi-ip>` is not treated as secure. For a device-accessible

@@ -7,8 +7,8 @@ use tracing::info;
 use url::Url;
 
 pub const SUPER_ADMIN_ROLE: &str = "super_admin";
-pub const DEFAULT_ADMIN_OAUTH_CLIENT_ID: &str = "stargate_admin";
-const DEFAULT_ADMIN_APP_BASE_PATH: &str = "/stargate";
+pub const DEFAULT_CONSOLE_OAUTH_CLIENT_ID: &str = "stargate_console";
+const DEFAULT_CONSOLE_APP_BASE_PATH: &str = "/stargate";
 
 pub async fn super_admin_exists() -> Result<bool> {
     crate::db::super_admin_exists().await
@@ -18,10 +18,10 @@ pub async fn is_super_admin_user_id(user_id: &str) -> Result<bool> {
     crate::db::is_super_admin_user_id(user_id).await
 }
 
-pub fn resolve_admin_oauth_client_id(explicit: Option<String>) -> Result<String> {
+pub fn resolve_console_oauth_client_id(explicit: Option<String>) -> Result<String> {
     let client_id = explicit
-        .or_else(|| nonempty_env("ADMIN_OAUTH_CLIENT_ID"))
-        .unwrap_or_else(|| DEFAULT_ADMIN_OAUTH_CLIENT_ID.to_string());
+        .or_else(|| nonempty_env("CONSOLE_OAUTH_CLIENT_ID"))
+        .unwrap_or_else(|| DEFAULT_CONSOLE_OAUTH_CLIENT_ID.to_string());
     let client_id = client_id.trim().to_string();
 
     ensure!(
@@ -30,16 +30,16 @@ pub fn resolve_admin_oauth_client_id(explicit: Option<String>) -> Result<String>
             && client_id
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')),
-        "admin OAuth client ID must contain only ASCII letters, numbers, '.', '-', or '_'"
+        "console OAuth client ID must contain only ASCII letters, numbers, '.', '-', or '_'"
     );
     Ok(client_id)
 }
 
-pub fn resolve_admin_oauth_redirect_uri(explicit: Option<String>) -> Result<String> {
+pub fn resolve_console_oauth_redirect_uri(explicit: Option<String>) -> Result<String> {
     let redirect_uri = explicit
-        .or_else(|| nonempty_env("ADMIN_OAUTH_REDIRECT_URI"))
-        .unwrap_or_else(default_admin_oauth_redirect_uri);
-    validate_admin_oauth_redirect_uri(&redirect_uri)?;
+        .or_else(|| nonempty_env("CONSOLE_OAUTH_REDIRECT_URI"))
+        .unwrap_or_else(default_console_oauth_redirect_uri);
+    validate_console_oauth_redirect_uri(&redirect_uri)?;
     Ok(redirect_uri)
 }
 
@@ -72,8 +72,8 @@ pub async fn bootstrap_instance(
     let client = OAuthClient::new(
         client_id.clone(),
         None,
-        "Stargate Admin".to_string(),
-        Some("Built-in public client for the Stargate Admin UI".to_string()),
+        "Stargate Console".to_string(),
+        Some("Built-in public client for the Stargate Console".to_string()),
         "none".to_string(),
         vec![
             "authorization_code".to_string(),
@@ -109,7 +109,7 @@ pub async fn bootstrap_instance(
         info!("First super admin bootstrapped");
     }
     if result.oauth_client_created {
-        info!("Admin OAuth client '{}' bootstrapped", client_id);
+        info!("Console OAuth client '{}' bootstrapped", client_id);
     }
     Ok(result)
 }
@@ -121,13 +121,13 @@ fn nonempty_env(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn default_admin_oauth_redirect_uri() -> String {
-    let public_url = nonempty_env("ADMIN_PUBLIC_URL")
+fn default_console_oauth_redirect_uri() -> String {
+    let public_url = nonempty_env("CONSOLE_PUBLIC_URL")
         .or_else(|| nonempty_env("OAUTH_BASE_URL"))
         .unwrap_or_else(jwt::issuer_from_env);
-    let base_path = nonempty_env("ADMIN_APP_BASE_PATH")
+    let base_path = nonempty_env("CONSOLE_APP_BASE_PATH")
         .map(|value| normalize_base_path(&value))
-        .unwrap_or_else(|| DEFAULT_ADMIN_APP_BASE_PATH.to_string());
+        .unwrap_or_else(|| DEFAULT_CONSOLE_APP_BASE_PATH.to_string());
     format!(
         "{}{}/auth/callback",
         public_url.trim_end_matches('/'),
@@ -138,25 +138,25 @@ fn default_admin_oauth_redirect_uri() -> String {
 fn normalize_base_path(value: &str) -> String {
     let path = value.trim().trim_matches('/');
     if path.is_empty() {
-        DEFAULT_ADMIN_APP_BASE_PATH.to_string()
+        DEFAULT_CONSOLE_APP_BASE_PATH.to_string()
     } else {
         format!("/{path}")
     }
 }
 
-fn validate_admin_oauth_redirect_uri(redirect_uri: &str) -> Result<()> {
+fn validate_console_oauth_redirect_uri(redirect_uri: &str) -> Result<()> {
     ensure!(
         redirect_uri == redirect_uri.trim()
             && !redirect_uri.contains('*')
             && !redirect_uri.contains('#')
             && !redirect_uri.chars().any(char::is_whitespace),
-        "admin OAuth redirect URI is invalid"
+        "console OAuth redirect URI is invalid"
     );
-    let parsed = Url::parse(redirect_uri).context("admin OAuth redirect URI must be absolute")?;
+    let parsed = Url::parse(redirect_uri).context("console OAuth redirect URI must be absolute")?;
     let loopback = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
     ensure!(
         parsed.scheme() == "https" || (parsed.scheme() == "http" && loopback),
-        "admin OAuth redirect URI must use HTTPS; HTTP is allowed only for loopback hosts"
+        "console OAuth redirect URI must use HTTPS; HTTP is allowed only for loopback hosts"
     );
     Ok(())
 }
@@ -166,29 +166,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validates_admin_client_id() {
+    fn validates_console_client_id() {
         assert_eq!(
-            resolve_admin_oauth_client_id(Some("stargate_admin".to_string())).unwrap(),
-            "stargate_admin"
+            resolve_console_oauth_client_id(Some("stargate_console".to_string())).unwrap(),
+            "stargate_console"
         );
-        assert!(resolve_admin_oauth_client_id(Some("bad client".to_string())).is_err());
+        assert!(resolve_console_oauth_client_id(Some("bad client".to_string())).is_err());
     }
 
     #[test]
     fn redirect_uri_allows_https_and_loopback_http() {
         assert!(
-            validate_admin_oauth_redirect_uri(
+            validate_console_oauth_redirect_uri(
                 "https://identity.example.com/stargate/auth/callback"
             )
             .is_ok()
         );
         assert!(
-            validate_admin_oauth_redirect_uri("http://localhost:5050/stargate/auth/callback")
+            validate_console_oauth_redirect_uri("http://localhost:5050/stargate/auth/callback")
                 .is_ok()
         );
         assert!(
-            validate_admin_oauth_redirect_uri("http://identity.example.com/stargate/auth/callback")
-                .is_err()
+            validate_console_oauth_redirect_uri(
+                "http://identity.example.com/stargate/auth/callback"
+            )
+            .is_err()
         );
     }
 }

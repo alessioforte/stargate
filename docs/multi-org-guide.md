@@ -69,7 +69,7 @@ GET    /admin/users/organizations/{org_id}                               # membe
 ```
 
 The body on `PUT` is optional; omitting it defaults the role to `member`.
-Roles are free-form strings (max 50 chars); the admin UI offers the
+Roles are free-form strings (max 50 chars); the Console offers the
 conventional `owner`/`admin`/`member`.
 
 ### Provisioning a user with an initial membership

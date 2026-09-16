@@ -173,7 +173,7 @@ const EditOAuthClient: React.FC<Props> = ({
                     type="button"
                     color="red"
                     size="compact-sm"
-                    disabled={oauthClient.clientId === "stargate_admin"}
+                    disabled={oauthClient.clientId === "stargate_console"}
                     onClick={() => {
                       onDisable(oauthClient.clientId);
                       onClose();
@@ -198,7 +198,7 @@ const EditOAuthClient: React.FC<Props> = ({
                   type="button"
                   color="red"
                   size="compact-sm"
-                  disabled={oauthClient.clientId === "stargate_admin"}
+                  disabled={oauthClient.clientId === "stargate_console"}
                   onClick={async () => {
                     const confirmed = await confirm({
                       color: "red",

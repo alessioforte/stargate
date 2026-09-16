@@ -2,16 +2,16 @@ use axum::Router;
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
-const DEFAULT_ADMIN_APP_BASE_PATH: &str = "/stargate";
-const DEFAULT_ADMIN_APP_DIR: &str = ".stargate/apps/admin";
+const DEFAULT_CONSOLE_APP_BASE_PATH: &str = "/stargate";
+const DEFAULT_CONSOLE_APP_DIR: &str = ".stargate/apps/console";
 
 pub fn router() -> Router {
-    let base_path = std::env::var("ADMIN_APP_BASE_PATH")
+    let base_path = std::env::var("CONSOLE_APP_BASE_PATH")
         .map(|value| normalize_base_path(&value))
-        .unwrap_or_else(|_| DEFAULT_ADMIN_APP_BASE_PATH.to_string());
-    let app_dir = std::env::var_os("ADMIN_APP_DIR")
+        .unwrap_or_else(|_| DEFAULT_CONSOLE_APP_BASE_PATH.to_string());
+    let app_dir = std::env::var_os("CONSOLE_APP_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_ADMIN_APP_DIR));
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONSOLE_APP_DIR));
     router_from(base_path, app_dir)
 }
 
@@ -25,7 +25,7 @@ fn router_from(base_path: String, app_dir: PathBuf) -> Router {
 fn normalize_base_path(value: &str) -> String {
     let trimmed = value.trim().trim_matches('/');
     if trimmed.is_empty() {
-        return DEFAULT_ADMIN_APP_BASE_PATH.to_string();
+        return DEFAULT_CONSOLE_APP_BASE_PATH.to_string();
     }
     format!("/{trimmed}")
 }
@@ -41,17 +41,17 @@ mod tests {
     use tower::ServiceExt;
 
     #[test]
-    fn normalizes_admin_app_base_path() {
+    fn normalizes_console_app_base_path() {
         assert_eq!(normalize_base_path("stargate"), "/stargate");
         assert_eq!(normalize_base_path("/stargate/"), "/stargate");
         assert_eq!(normalize_base_path("  console/admin  "), "/console/admin");
     }
 
     #[tokio::test]
-    async fn serves_admin_spa_under_base_path() {
-        let dir = temp_admin_app_dir();
+    async fn serves_console_spa_under_base_path() {
+        let dir = temp_console_app_dir();
         std::fs::create_dir_all(dir.join("assets")).unwrap();
-        std::fs::write(dir.join("index.html"), "admin-index").unwrap();
+        std::fs::write(dir.join("index.html"), "console-index").unwrap();
         std::fs::write(dir.join("assets/app.js"), "console.log('ok');").unwrap();
 
         let app = router_from("/stargate".to_string(), dir.clone());
@@ -68,7 +68,7 @@ mod tests {
             .unwrap();
         assert_eq!(spa.status(), StatusCode::OK);
         let body = spa.into_body().collect().await.unwrap().to_bytes();
-        assert_eq!(&body[..], b"admin-index");
+        assert_eq!(&body[..], b"console-index");
 
         let asset = app
             .oneshot(
@@ -86,13 +86,13 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    fn temp_admin_app_dir() -> PathBuf {
+    fn temp_console_app_dir() -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "stargate-admin-app-test-{}-{nanos}",
+            "stargate-console-app-test-{}-{nanos}",
             std::process::id()
         ))
     }

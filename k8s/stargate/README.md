@@ -35,7 +35,7 @@ helm upgrade --install stargate ./k8s/stargate \
   --set image.tag=edge
 ```
 
-The seed init container copies the image-bundled Admin UI, Auth UI, and mail
+The seed init container copies the image-bundled Console, Auth UI, and mail
 templates into the claim before Stargate starts. The Deployment uses
 `Recreate`, preventing two edge processes from sharing SQLite during an
 upgrade.
@@ -145,12 +145,12 @@ Enable the hook:
 bootstrap:
   enabled: true
   email: admin@example.com
-  oauthClientId: stargate_admin
+  oauthClientId: stargate_console
   oauthRedirectUri: https://identity.example.com/stargate/auth/callback
   existingSecret: stargate-bootstrap
 ```
 
-The client ID and redirect URI must match the Admin UI image's
+The client ID and redirect URI must match the Console image's
 `VITE_OAUTH_CLIENT_ID` and `VITE_OAUTH_REDIRECT_URI` build configuration. The
 Job uses different labels from the server pods and can never be selected by
 the Service.

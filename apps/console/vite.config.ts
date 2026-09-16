@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     envPrefix,
     build: {
-      outDir: "../../.stargate/apps/admin",
+      outDir: "../../.stargate/apps/console",
       emptyOutDir: true,
       rolldownOptions: {
         output: {

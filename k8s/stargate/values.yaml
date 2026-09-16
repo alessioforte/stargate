@@ -166,7 +166,7 @@ gatewayConfig:
 
 # Edge-only state. No static PersistentVolume is created: a PVC uses the
 # cluster's default or selected StorageClass. The seed init container copies
-# the Admin UI, Auth UI, and mail assets into a new/existing claim.
+# the Console, Auth UI, and mail assets into a new/existing claim.
 persistence:
   enabled: true
   existingClaim: ""
@@ -179,14 +179,14 @@ persistence:
   seed:
     enabled: true
 
-# Idempotent first-admin and Admin UI OAuth-client provisioning. The password
+# Idempotent first-admin and Console OAuth-client provisioning. The password
 # must be supplied by an existing Secret; it is never accepted in values.
 bootstrap:
   enabled: false
   email: ""
   name: Stargate Admin
   nickname: stargate-admin
-  oauthClientId: stargate_admin
+  oauthClientId: stargate_console
   oauthRedirectUri: ""
   existingSecret: ""
   passwordKey: password

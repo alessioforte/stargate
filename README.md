@@ -18,10 +18,10 @@ PostgreSQL and Redis services, see
 
 ## Docker
 
-The Dockerfile builds the Rust server, the `admin` and `auth` web apps, and the
+The Dockerfile builds the Rust server, the `console` and `auth` web apps, and the
 transactional mail templates. The final image serves:
 
-- Admin UI: `/stargate`
+- Console: `/stargate`
 - Auth UI: `/auth`
 - API routes: `/account/*`, `/admin/*`
 - Probes: `/livez` (liveness), `/readyz` (readiness), `/health` (readiness compatibility)
@@ -47,12 +47,12 @@ The main build arguments are:
 | Argument | Default | Purpose |
 | --- | --- | --- |
 | `STARGATE_PROFILE` | `edge` | Compiles the `edge` or `cluster` backend |
-| `ADMIN_APP_BASE_PATH` | `/stargate` | Build and runtime path for the admin UI |
+| `CONSOLE_APP_BASE_PATH` | `/stargate` | Build and runtime path for the Console |
 | `AUTH_APP_BASE_PATH` | `/auth` | Build and runtime path for the auth UI |
 | `VITE_API_URL` | same browser origin | Public API URL embedded in both web apps |
-| `VITE_AUTH_URL` | `<origin>/auth` | Public auth-app URL embedded in the admin UI |
-| `VITE_OAUTH_CLIENT_ID` | `stargate_admin` | OAuth client used by the admin UI and instance bootstrap |
-| `VITE_OAUTH_REDIRECT_URI` | `<origin><ADMIN_APP_BASE_PATH>/auth/callback` | Admin OAuth callback used by the UI and instance bootstrap |
+| `VITE_AUTH_URL` | `<origin>/auth` | Public auth-app URL embedded in the Console |
+| `VITE_OAUTH_CLIENT_ID` | `stargate_console` | OAuth client used by the Console and instance bootstrap |
+| `VITE_OAUTH_REDIRECT_URI` | `<origin><CONSOLE_APP_BASE_PATH>/auth/callback` | Console OAuth callback used by the UI and instance bootstrap |
 
 For a deployment with explicit public URLs:
 
@@ -61,12 +61,12 @@ docker build \
   --build-arg STARGATE_PROFILE=cluster \
   --build-arg VITE_API_URL=https://identity.example.com \
   --build-arg VITE_AUTH_URL=https://identity.example.com/auth \
-  --build-arg VITE_OAUTH_CLIENT_ID=stargate_admin \
+  --build-arg VITE_OAUTH_CLIENT_ID=stargate_console \
   --build-arg VITE_OAUTH_REDIRECT_URI=https://identity.example.com/stargate/auth/callback \
   -t stargate:cluster .
 ```
 
-`ADMIN_APP_BASE_PATH` and `AUTH_APP_BASE_PATH` are also written into the image's
+`CONSOLE_APP_BASE_PATH` and `AUTH_APP_BASE_PATH` are also written into the image's
 runtime environment, keeping the Vite asset paths and Rust routes synchronized.
 The `VITE_*` values are compiled into the web apps; rebuild the image to change
 them.
@@ -92,7 +92,7 @@ docker run --rm \
 
 The named volume persists SQLite, the in-memory store snapshot, generated key
 material, policies, and logs. On its first use, Docker initializes the empty
-volume with the admin UI, auth UI, and mail templates bundled in the image.
+volume with the Console, auth UI, and mail templates bundled in the image.
 
 If the admin configuration API must update `config.yaml`, remove `readonly` and
 make the host file writable by container UID/GID `999`. The final image runs as
@@ -100,7 +100,7 @@ the non-root `stargate` user.
 
 Open:
 
-- `http://localhost:5050/stargate` for the admin UI
+- `http://localhost:5050/stargate` for the Console
 - `http://localhost:5050/auth` for the auth UI
 - `http://localhost:5050/livez` for process liveness
 - `http://localhost:5050/readyz` for traffic readiness
@@ -108,7 +108,7 @@ Open:
 Probe behavior, dependency checks, and shutdown timing are documented in
 [Health and readiness probes](docs/health-probes.md).
 
-Bootstrap the first administrator and the Admin UI OAuth client while the
+Bootstrap the first administrator and the Console OAuth client while the
 container is running:
 
 ```bash
@@ -154,7 +154,7 @@ When upgrading the image, migrate persistent state to a newly initialized
 volume or explicitly refresh these directories:
 
 ```text
-/app/.stargate/apps/admin
+/app/.stargate/apps/console
 /app/.stargate/apps/auth
 /app/.stargate/transactional
 ```
@@ -187,7 +187,7 @@ stargate admin bootstrap
 ## Bootstrap The Instance
 
 Use the CLI to create the initial super-admin account and the public OAuth
-client required by the Admin UI. Stargate does not auto-create privileged
+client required by the Console. Stargate does not auto-create privileged
 resources during normal startup.
 
 A profile must be selected on every build/run (`edge` and `cluster` are
@@ -238,19 +238,19 @@ If you are running a built binary instead of `cargo run`, use the same arguments
 
 ## CLI Behavior
 
-- `admin bootstrap` creates the first super-admin and the Admin UI OAuth client
+- `admin bootstrap` creates the first super-admin and the Console OAuth client
   in one database transaction.
 - The OAuth client is a public Authorization Code + PKCE client with refresh
   tokens and the `openid`, `email`, `profile`, and `offline_access` scopes.
-- `--oauth-client-id` defaults to `ADMIN_OAUTH_CLIENT_ID`, then
-  `stargate_admin`.
-- `--oauth-redirect-uri` defaults to `ADMIN_OAUTH_REDIRECT_URI`. When it is
-  unset, Stargate derives the callback from `ADMIN_PUBLIC_URL`,
-  `OAUTH_BASE_URL`, or `JWT_ISSUER`, plus `ADMIN_APP_BASE_PATH`.
+- `--oauth-client-id` defaults to `CONSOLE_OAUTH_CLIENT_ID`, then
+  `stargate_console`.
+- `--oauth-redirect-uri` defaults to `CONSOLE_OAUTH_REDIRECT_URI`. When it is
+  unset, Stargate derives the callback from `CONSOLE_PUBLIC_URL`,
+  `OAUTH_BASE_URL`, or `JWT_ISSUER`, plus `CONSOLE_APP_BASE_PATH`.
 - Production redirect URIs must use HTTPS. HTTP is accepted only for loopback
   hosts such as `localhost`.
 - Re-running the command leaves matching resources unchanged.
-- When a super-admin already exists but the Admin OAuth client is missing, run
+- When a super-admin already exists but the Console OAuth client is missing, run
   the command with only the OAuth options to repair it:
 
   ```bash
