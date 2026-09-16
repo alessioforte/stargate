@@ -525,7 +525,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         count: data?.revokedSessions ?? 0,
       }),
     );
-    if (get().adminMe?.user.id === userId) {
+    if (get().adminMe?.user?.id === userId) {
       await get().logout("/sessions");
       return;
     }

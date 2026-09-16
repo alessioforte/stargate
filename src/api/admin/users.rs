@@ -1,20 +1,24 @@
-use super::{SUPER_ADMIN, extract_json, extract_optional_json, extract_path, extract_query};
+use super::{
+    authorization::{self, Permission},
+    extract_json, extract_optional_json, extract_path, extract_query,
+};
 use crate::act::PendingSignupProfile;
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::msg::{MessageCode, MessageResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
-use db::ent::{CredentialType, Profile};
+use db::ent::{
+    CredentialType, NewOrganizationMembership, Organization, OrganizationMembershipMutation,
+    Profile,
+};
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
-const USERS_GRANT: &str = "users";
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +76,14 @@ pub struct OrganizationMembershipRequest {
     pub role: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InitialOrganizationMembershipRequest {
+    pub organization_id: String,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
 const DEFAULT_MEMBERSHIP_ROLE: &str = "member";
 const MAX_MEMBERSHIP_ROLE_LEN: usize = 50;
 
@@ -88,6 +100,39 @@ fn normalize_membership_role(role: Option<String>) -> Result<String, ErrorRespon
             .with_param("maxLength", MAX_MEMBERSHIP_ROLE_LEN));
     }
     Ok(role.to_string())
+}
+
+fn normalize_initial_membership(
+    membership: Option<InitialOrganizationMembershipRequest>,
+) -> Result<Option<NewOrganizationMembership>, ErrorResponse> {
+    let Some(membership) = membership else {
+        return Ok(None);
+    };
+    let organization_id = membership.organization_id.trim();
+    if organization_id.is_empty() {
+        return Err(ErrorResponse::new(ErrorCode::RequestInvalid)
+            .with_message("membership organizationId is required"));
+    }
+    Ok(Some(NewOrganizationMembership {
+        organization_id: organization_id.to_string(),
+        role: normalize_membership_role(membership.role)?,
+    }))
+}
+
+async fn get_membership_organization(
+    membership: Option<&NewOrganizationMembership>,
+) -> Result<Option<Organization>, ErrorResponse> {
+    let Some(membership) = membership else {
+        return Ok(None);
+    };
+    crate::db::get_organization_by_id(&membership.organization_id)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .ok_or_else(|| {
+            ErrorResponse::new(ErrorCode::OrganizationNotFound)
+                .with_param("id", membership.organization_id.clone())
+        })
+        .map(Some)
 }
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
@@ -127,6 +172,8 @@ pub struct CreateUserRequest {
     pub phone_number: Option<String>,
     #[serde(default = "default_attrs")]
     pub attrs: Value,
+    #[serde(default)]
+    pub membership: Option<InitialOrganizationMembershipRequest>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
@@ -145,6 +192,8 @@ pub struct CreateUserInvitationRequest {
     pub phone_number: Option<String>,
     #[serde(default = "default_invitation_attrs")]
     pub attrs: Value,
+    #[serde(default)]
+    pub membership: Option<InitialOrganizationMembershipRequest>,
 }
 
 fn default_attrs() -> Value {
@@ -207,7 +256,7 @@ pub struct UserAttrsRequest {
     )
 )]
 pub async fn get_users(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::UsersRead)?;
 
     let query: ListUsersQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -255,7 +304,7 @@ pub async fn get_users(req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn get_super_admin_users(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::SuperAdminsRead)?;
 
     let users = crate::db::get_super_admin_users()
         .await
@@ -278,7 +327,7 @@ pub async fn get_super_admin_users(req: Request) -> Result<Response, ErrorRespon
     )
 )]
 pub async fn get_user(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::UsersRead)?;
 
     let id: String = extract_path(&mut req).await?;
 
@@ -305,10 +354,14 @@ pub async fn get_user(mut req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    let authorization = authorization::get(&req)?.clone();
+    authorization.require(Permission::UsersCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateUserRequest = extract_json(req).await?;
+    let membership = normalize_initial_membership(payload.membership)?;
+    authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
+    let organization = get_membership_organization(membership.as_ref()).await?;
 
     if let Ok(Some(_)) = crate::db::get_user_by_username(&payload.email).await {
         return Err(ErrorResponse::new(ErrorCode::UserEmailAlreadyExists)
@@ -320,12 +373,20 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .clone()
         .unwrap_or_else(|| payload.email.clone());
 
-    crate::act::password_policy::validate_global(
-        &payload.password,
-        Some(&nickname),
-        Some(&payload.email),
-    )
-    .map_err(|message| {
+    let password_validation = match organization.as_ref() {
+        Some(organization) => crate::act::password_policy::validate_for_organization(
+            organization,
+            &payload.password,
+            Some(&nickname),
+            Some(&payload.email),
+        ),
+        None => crate::act::password_policy::validate_global(
+            &payload.password,
+            Some(&nickname),
+            Some(&payload.email),
+        ),
+    };
+    password_validation.map_err(|message| {
         ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
     })?;
 
@@ -339,7 +400,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .phone_number(payload.phone_number.clone())
         .attrs(payload.attrs.clone());
 
-    let user = crate::db::create_user(profile, CredentialType::Password, &hashed, ctx)
+    let user = crate::db::create_user(profile, CredentialType::Password, &hashed, membership, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -361,9 +422,13 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    let authorization = authorization::get(&req)?.clone();
+    authorization.require(Permission::UsersInvite)?;
 
     let payload: CreateUserInvitationRequest = extract_json(req).await?;
+    let membership = normalize_initial_membership(payload.membership)?;
+    authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
+    get_membership_organization(membership.as_ref()).await?;
 
     if crate::db::get_user_by_username(&payload.email)
         .await
@@ -395,6 +460,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
         picture: payload.picture,
         phone_number: payload.phone_number,
         attrs: payload.attrs,
+        membership,
     };
     crate::api::signup::request::send_signup_request(profile).await?;
 
@@ -421,7 +487,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
     )
 )]
 pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::UsersUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -469,7 +535,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::UsersUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -522,7 +588,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::UsersUpdateAttrs)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -558,7 +624,7 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
     )
 )]
 pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::UsersUpdateAttrs)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -601,7 +667,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
     )
 )]
 pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::UsersDelete)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -646,7 +712,7 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn get_user_organizations(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::MembershipsRead)?;
 
     let id: String = extract_path(&mut req).await?;
 
@@ -681,7 +747,7 @@ pub async fn get_user_organizations(mut req: Request) -> Result<Response, ErrorR
     )
 )]
 pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::MembershipsRead)?;
 
     let query: ListUsersQuery = extract_query(&req)?;
     let org_id: String = extract_path(&mut req).await?;
@@ -734,7 +800,7 @@ pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorR
     )
 )]
 pub async fn add_user_to_organization(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    let authorization = authorization::get(&req)?.clone();
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
@@ -758,7 +824,24 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
         );
     }
 
-    crate::db::add_user_to_organization(&user_id, &org_id, &role, ctx)
+    let membership_exists = crate::db::get_user_organization(&user_id, &org_id)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .is_some();
+    let (permission, mutation) = if membership_exists {
+        (
+            Permission::MembershipsUpdate,
+            OrganizationMembershipMutation::Update,
+        )
+    } else {
+        (
+            Permission::MembershipsCreate,
+            OrganizationMembershipMutation::Create,
+        )
+    };
+    authorization.require(permission)?;
+
+    crate::db::add_user_to_organization(&user_id, &org_id, &role, mutation, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -782,7 +865,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
     )
 )]
 pub async fn remove_user_from_organization(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, USERS_GRANT);
+    authorization::require(&req, Permission::MembershipsDelete)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
@@ -828,7 +911,10 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_membership_role;
+    use super::{
+        InitialOrganizationMembershipRequest, normalize_initial_membership,
+        normalize_membership_role,
+    };
 
     #[test]
     fn membership_role_defaults_to_member() {
@@ -848,5 +934,31 @@ mod tests {
         assert!(normalize_membership_role(Some("   ".to_string())).is_err());
         assert!(normalize_membership_role(Some("x".repeat(51))).is_err());
         assert!(normalize_membership_role(Some("x".repeat(50))).is_ok());
+    }
+
+    #[test]
+    fn initial_membership_is_optional_and_normalized() {
+        assert!(normalize_initial_membership(None).unwrap().is_none());
+
+        let membership = normalize_initial_membership(Some(InitialOrganizationMembershipRequest {
+            organization_id: " 01JZ0000000000000000000001 ".to_string(),
+            role: Some(" admin ".to_string()),
+        }))
+        .unwrap()
+        .expect("membership");
+
+        assert_eq!(membership.organization_id, "01JZ0000000000000000000001");
+        assert_eq!(membership.role, "admin");
+    }
+
+    #[test]
+    fn initial_membership_rejects_an_empty_organization_id() {
+        assert!(
+            normalize_initial_membership(Some(InitialOrganizationMembershipRequest {
+                organization_id: "  ".to_string(),
+                role: None,
+            }))
+            .is_err()
+        );
     }
 }

@@ -22,7 +22,7 @@ import type {
   UpdateServiceAccountRequest,
 } from "@/services/types";
 import { EditActionControls, EntityDrawer } from "@/components";
-import { organizationOptions } from "./organization-options";
+import { organizationOptions } from "@/lib/organization-options";
 
 interface FormValues {
   id: string;

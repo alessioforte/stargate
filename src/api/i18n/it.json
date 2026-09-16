@@ -36,6 +36,7 @@
     "api_key.already_revoked": "La chiave API è già stata revocata",
     "admin_key.not_found": "Chiave amministrativa non trovata",
     "admin_key.permissions_required": "È obbligatorio almeno un permesso per la chiave amministrativa",
+    "admin_key.permission_invalid": "Il permesso della chiave amministrativa non è valido",
     "admin_key.revoked": "La chiave amministrativa è revocata",
     "admin_key.already_revoked": "La chiave amministrativa è già stata revocata",
     "service_account.not_found": "Account di servizio non trovato",

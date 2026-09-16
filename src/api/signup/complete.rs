@@ -79,10 +79,34 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         return Err(ErrorResponse::new(ErrorCode::UserNicknameAlreadyExists));
     }
 
-    act::password_policy::validate_global(&body.password, Some(&nickname), Some(&signup.email))
-        .map_err(|message| {
-            ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
-        })?;
+    let organization = match signup.membership.as_ref() {
+        Some(membership) => Some(
+            crate::db::get_organization_by_id(&membership.organization_id)
+                .await
+                .map_err(ErrorResponse::internal)?
+                .ok_or_else(|| {
+                    ErrorResponse::new(ErrorCode::OrganizationNotFound)
+                        .with_param("id", membership.organization_id.clone())
+                })?,
+        ),
+        None => None,
+    };
+    let password_validation = match organization.as_ref() {
+        Some(organization) => act::password_policy::validate_for_organization(
+            organization,
+            &body.password,
+            Some(&nickname),
+            Some(&signup.email),
+        ),
+        None => act::password_policy::validate_global(
+            &body.password,
+            Some(&nickname),
+            Some(&signup.email),
+        ),
+    };
+    password_validation.map_err(|message| {
+        ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
+    })?;
 
     let profile = Profile::new(signup.email.clone(), nickname)
         .given_name(optional_nonempty(&body.given_name))
@@ -97,9 +121,15 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
 
     let audit_context =
         TrustedAuditContext::application(TrustedAuditActor::anonymous(), audit_request);
-    let user = crate::db::create_user(profile, CredentialType::Password, &password, audit_context)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let user = crate::db::create_user(
+        profile,
+        CredentialType::Password,
+        &password,
+        signup.membership,
+        audit_context,
+    )
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     let _ = act::delete_signup_request(&sid).await;
     let _ = act::delete_email_verification_request(&sid).await;

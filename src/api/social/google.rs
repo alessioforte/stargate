@@ -96,6 +96,7 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
                 new_user,
                 CredentialType::Oauth,
                 &value,
+                None,
                 audit_context.clone(),
             )
             .await

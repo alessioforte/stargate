@@ -1,6 +1,8 @@
-use super::{SUPER_ADMIN, extract_json, extract_query};
+use super::{
+    authorization::{self, Permission},
+    extract_json, extract_query,
+};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -15,8 +17,6 @@ struct ConfigFormatQuery {
     format: Option<String>,
 }
 
-const CONFIG_GRANT: &str = "configurations";
-
 #[utoipa::path(
     get,
     path = "/admin/configurations",
@@ -30,7 +30,7 @@ const CONFIG_GRANT: &str = "configurations";
     )
 )]
 pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, CONFIG_GRANT);
+    authorization::require(&req, Permission::ConfigurationsRead)?;
 
     let query: ConfigFormatQuery = extract_query(&req)?;
     let format = query.format.unwrap_or_else(|| "json".to_string());
@@ -69,7 +69,7 @@ pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse>
     )
 )]
 pub async fn update_configurations(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, CONFIG_GRANT);
+    authorization::require(&req, Permission::ConfigurationsUpdate)?;
 
     let config: Config = extract_json(req).await?;
     RuntimeConfig::from_raw(config.clone()).map_err(|error| {

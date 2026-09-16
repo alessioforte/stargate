@@ -5,9 +5,9 @@ use db::{
     DbStore, InstanceBootstrapResult,
     ent::{
         AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, Credential, CredentialHistory,
-        CredentialType, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
-        OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount, SuperAdmin,
-        TrustedAuditContext, User,
+        CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember,
+        OrgMembership, Organization, OrganizationMembershipMutation, OutboxEventFilter,
+        OutboxEventRow, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
     },
 };
 
@@ -33,10 +33,11 @@ pub async fn create_user(
     profile: Profile,
     credential_type: CredentialType,
     value: &str,
+    membership: Option<NewOrganizationMembership>,
     ctx: TrustedAuditContext,
 ) -> Result<User> {
     service()
-        .create_user(profile, credential_type, value, ctx)
+        .create_user(profile, credential_type, value, membership, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error creating user: {:?}", e))
 }
@@ -548,10 +549,11 @@ pub async fn add_user_to_organization(
     user_id: &str,
     org_id: &str,
     role: &str,
+    mutation: OrganizationMembershipMutation,
     ctx: TrustedAuditContext,
 ) -> Result<()> {
     service()
-        .add_user_to_organization(user_id, org_id, role, ctx)
+        .add_user_to_organization(user_id, org_id, role, mutation, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error adding user to organization: {:?}", e))
 }

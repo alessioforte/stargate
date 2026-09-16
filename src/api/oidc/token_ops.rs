@@ -1,8 +1,8 @@
 use super::shared::{
     AUTH_METHOD_NONE, ClientCredentials, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR,
-    OAUTH_INTROSPECT_SCOPE, OAUTH_REVOKE_SCOPE, OAUTH_TOKENS_GRANT, OAuthResult,
-    authenticate_oauth_client, extract_basic_client_credentials, oauth_bad_request,
-    oauth_invalid_client, resolve_client_credentials_parts,
+    OAUTH_INTROSPECT_SCOPE, OAUTH_REVOKE_SCOPE, OAuthResult, authenticate_oauth_client,
+    extract_basic_client_credentials, oauth_bad_request, oauth_invalid_client,
+    resolve_client_credentials_parts,
 };
 use crate::err::OAuthErrorResponse;
 use crate::etc::reqctx::{audit_request_from, take_trusted_audit_context_from};
@@ -83,7 +83,10 @@ enum TokenOperationCaller {
 )]
 pub async fn post_introspect(req: Request) -> OAuthResult<Json<IntrospectionResponse>> {
     let basic = extract_basic_client_credentials(&req)?;
-    let has_admin_grant = has_token_operation_grant(&req);
+    let has_admin_grant = has_token_operation_permission(
+        &req,
+        crate::api::admin::authorization::Permission::OAuthTokensIntrospect,
+    );
     let form = extract_token_form(req).await?;
     let _ = form.token_type_hint.as_deref();
     let caller = authorize_token_operation(has_admin_grant, &form, basic).await?;
@@ -124,7 +127,10 @@ pub async fn post_introspect(req: Request) -> OAuthResult<Json<IntrospectionResp
 )]
 pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
     let basic = extract_basic_client_credentials(&req)?;
-    let has_admin_grant = has_token_operation_grant(&req);
+    let has_admin_grant = has_token_operation_permission(
+        &req,
+        crate::api::admin::authorization::Permission::OAuthTokensRevoke,
+    );
     let audit_request = audit_request_from(req.extensions());
     let authenticated_admin_actor = take_trusted_audit_context_from(req.extensions_mut())
         .map(|context| context.actor().clone());
@@ -355,12 +361,13 @@ fn client_can_access_token_response(
     client.audiences.iter().any(|allowed| allowed == audience)
 }
 
-fn has_token_operation_grant(req: &Request) -> bool {
+fn has_token_operation_permission(
+    req: &Request,
+    permission: crate::api::admin::authorization::Permission,
+) -> bool {
     req.extensions()
-        .get::<crate::api::admin::Grants>()
-        .cloned()
-        .unwrap_or_default()
-        .has_any(&[crate::api::admin::SUPER_ADMIN, OAUTH_TOKENS_GRANT])
+        .get::<crate::api::admin::authorization::AdminAuthorization>()
+        .is_some_and(|authorization| authorization.has(permission))
 }
 
 async fn authorize_token_operation(

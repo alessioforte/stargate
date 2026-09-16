@@ -1,6 +1,7 @@
 pub mod access_control_rules;
 pub mod admin_keys;
 pub mod api_keys;
+pub mod authorization;
 pub mod configurations;
 pub mod health;
 pub mod me;
@@ -21,46 +22,50 @@ use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use std::collections::HashSet;
 use store::Store;
 
-pub const SUPER_ADMIN: &str = "super_admin";
-
-#[derive(Clone, Default, Debug)]
-pub struct Grants(pub HashSet<String>);
-
-impl Grants {
-    pub fn has_any(&self, needed: &[&str]) -> bool {
-        needed.iter().any(|g| self.0.contains(*g))
-    }
-}
+use authorization::{AdminAuthorization, parse_stored_permissions};
 
 #[derive(Clone, Copy, Debug, serde::Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminAuthenticationKind {
     Session,
     OAuth,
+    AdminKey,
 }
 
 #[derive(Clone, Debug)]
-pub struct AdminPrincipal {
-    pub user_id: String,
-    pub kind: AdminAuthenticationKind,
-    pub claims: jwt::Claims,
+pub enum AdminPrincipal {
+    User {
+        user_id: String,
+        kind: AdminAuthenticationKind,
+        claims: Box<jwt::Claims>,
+    },
+    AdminKey {
+        key_id: String,
+    },
+}
+
+impl AdminPrincipal {
+    pub fn user_id(&self) -> Option<&str> {
+        match self {
+            Self::User { user_id, .. } => Some(user_id),
+            Self::AdminKey { .. } => None,
+        }
+    }
+
+    pub fn claims(&self) -> Option<&jwt::Claims> {
+        match self {
+            Self::User { claims, .. } => Some(claims.as_ref()),
+            Self::AdminKey { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AdminAuthenticationState {
     pub credential_present: bool,
     pub authenticated: bool,
-}
-
-fn admin_key_grants<'a>(permissions: impl IntoIterator<Item = &'a String>) -> HashSet<String> {
-    permissions
-        .into_iter()
-        .filter(|permission| permission.as_str() != SUPER_ADMIN)
-        .cloned()
-        .collect()
 }
 
 async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
@@ -87,20 +92,9 @@ async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
     }
 }
 
-async fn grant_super_admin_if_allowed(
-    grants: &mut HashSet<String>,
-    user_id: &str,
-    sid: Option<&str>,
-) -> bool {
+async fn grant_super_admin_if_allowed(user_id: &str, sid: Option<&str>) -> bool {
     match crate::db::is_super_admin_user_id(user_id).await {
-        Ok(true) => {
-            if super_admin_step_up_satisfied(sid.unwrap_or_default(), user_id).await {
-                grants.insert(SUPER_ADMIN.to_string());
-                true
-            } else {
-                false
-            }
-        }
+        Ok(true) => super_admin_step_up_satisfied(sid.unwrap_or_default(), user_id).await,
         Ok(false) => false,
         Err(err) => {
             tracing::error!("Failed to resolve super admin grants: {}", err);
@@ -128,19 +122,20 @@ enum AuditRouteBoundary {
     AdminControlPlane,
 }
 
-struct GrantResolution {
+struct AuthorizationResolution {
     authentication: AdminAuthenticationState,
-    grants: HashSet<String>,
     actor: Option<db::ent::TrustedAdminActor>,
-    principal: Option<AdminPrincipal>,
+    authorization: Option<AdminAuthorization>,
 }
 
-async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> GrantResolution {
+async fn resolve_authorization(
+    token: Option<String>,
+    raw_key: Option<String>,
+) -> AuthorizationResolution {
     let credential_present = token.is_some() || raw_key.is_some();
     let mut authenticated = false;
-    let mut grants: HashSet<String> = HashSet::new();
     let mut actor = None;
-    let mut principal = None;
+    let mut authorization = None;
 
     if let Some(token) = token {
         let jwt = jwt_config();
@@ -170,15 +165,15 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
                     }
                     if authenticated
                         && let Some(user_id) = claims.sub_id.as_deref()
-                        && grant_super_admin_if_allowed(&mut grants, user_id, Some(&sid)).await
+                        && grant_super_admin_if_allowed(user_id, Some(&sid)).await
                     {
                         let user_id = user_id.to_string();
                         actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
-                        principal = Some(AdminPrincipal {
+                        authorization = Some(AdminAuthorization::super_admin_user(
                             user_id,
-                            kind: AdminAuthenticationKind::Session,
-                            claims,
-                        });
+                            AdminAuthenticationKind::Session,
+                            Box::new(claims),
+                        ));
                     }
                 }
                 Ok(true) => {}
@@ -214,15 +209,15 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
                     if oauth_client_is_trusted_admin_client(client_id).await
                         && authenticated
                         && let Some(user_id) = user_id
-                        && grant_super_admin_if_allowed(&mut grants, user_id, step_up_sid).await
+                        && grant_super_admin_if_allowed(user_id, step_up_sid).await
                     {
                         let user_id = user_id.to_string();
                         actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
-                        principal = Some(AdminPrincipal {
+                        authorization = Some(AdminAuthorization::super_admin_user(
                             user_id,
-                            kind: AdminAuthenticationKind::OAuth,
-                            claims,
-                        });
+                            AdminAuthenticationKind::OAuth,
+                            Box::new(claims),
+                        ));
                     }
                 }
                 Ok(true) => {}
@@ -233,7 +228,7 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
         }
     }
 
-    if grants.is_empty()
+    if authorization.is_none()
         && let Some(raw_key) = raw_key
     {
         let hash = pw::hash_api_key(&raw_key);
@@ -241,19 +236,24 @@ async fn resolve_grants(token: Option<String>, raw_key: Option<String>) -> Grant
             && !key.revoked
         {
             authenticated = true;
-            actor = Some(db::ent::TrustedAdminActor::admin_key(key.id));
-            grants = admin_key_grants(key.permissions.iter());
+            let key_id = key.id.clone();
+            actor = Some(db::ent::TrustedAdminActor::admin_key(&key_id));
+            authorization = Some(AdminAuthorization::admin_key(
+                AdminPrincipal::AdminKey {
+                    key_id: key_id.clone(),
+                },
+                parse_stored_permissions(&key_id, key.permissions.iter()),
+            ));
         }
     }
 
-    GrantResolution {
+    AuthorizationResolution {
         authentication: AdminAuthenticationState {
             credential_present,
             authenticated,
         },
-        grants,
         actor,
-        principal,
+        authorization,
     }
 }
 
@@ -284,33 +284,33 @@ fn install_audit_context(
     extensions.insert(context);
 }
 
-async fn extract_grants_for(
+async fn extract_authorization_for(
     mut req: Request,
     next: Next,
     boundary: AuditRouteBoundary,
 ) -> Response {
     let token = req.get_token();
     let raw_key = req.get_api_key();
-    let resolution = resolve_grants(token, raw_key).await;
+    let resolution = resolve_authorization(token, raw_key).await;
     install_audit_context(req.extensions_mut(), resolution.actor, boundary);
     req.extensions_mut().insert(resolution.authentication);
-    if let Some(principal) = resolution.principal {
-        req.extensions_mut().insert(principal);
+    if let Some(authorization) = resolution.authorization {
+        req.extensions_mut().insert(authorization.principal.clone());
+        req.extensions_mut().insert(authorization);
     }
-    req.extensions_mut().insert(Grants(resolution.grants));
     next.run(req).await
 }
 
-/// Grant extraction reused by non-admin OAuth token operations. An admin
+/// Authorization extraction reused by non-admin OAuth token operations. An admin
 /// principal does not imply control-plane scope outside `/admin/*`.
-pub async fn extract_grants(req: Request, next: Next) -> Response {
-    extract_grants_for(req, next, AuditRouteBoundary::Application).await
+pub async fn extract_authorization(req: Request, next: Next) -> Response {
+    extract_authorization_for(req, next, AuditRouteBoundary::Application).await
 }
 
 /// `/admin/*` authentication and its route-owned, immutable control-plane
 /// audit boundary.
-pub async fn extract_admin_grants(req: Request, next: Next) -> Response {
-    extract_grants_for(req, next, AuditRouteBoundary::AdminControlPlane).await
+pub async fn extract_admin_authorization(req: Request, next: Next) -> Response {
+    extract_authorization_for(req, next, AuditRouteBoundary::AdminControlPlane).await
 }
 
 pub fn take_admin_audit_context(
@@ -375,22 +375,6 @@ where
         ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.to_string())
     })?;
     Ok(Some(value))
-}
-
-#[macro_export]
-macro_rules! require_grants {
-    ($req:expr, $($grant:expr),+ $(,)?) => {{
-        let grants = $req
-            .extensions()
-            .get::<$crate::api::admin::Grants>()
-            .cloned()
-            .unwrap_or_default();
-        if !grants.has_any(&[$($grant),+]) {
-            return Err($crate::err::ErrorResponse::new(
-                $crate::err::ErrorCode::AuthInsufficientPermissions,
-            ));
-        }
-    }};
 }
 
 pub fn router() -> axum::Router {
@@ -543,7 +527,7 @@ pub fn router() -> axum::Router {
             "/admin/access-control/rules/evaluate",
             post(access_control_rules::evaluate_access_control_rules),
         )
-        .layer(from_fn(extract_admin_grants))
+        .layer(from_fn(extract_admin_authorization))
 }
 
 #[cfg(test)]
@@ -556,7 +540,7 @@ mod tests {
 
     use crate::etc::reqctx::RequestContext;
 
-    use super::{AuditRouteBoundary, SUPER_ADMIN, admin_key_grants, install_audit_context};
+    use super::{AuditRouteBoundary, install_audit_context};
 
     fn request_extensions() -> http::Extensions {
         let mut extensions = http::Extensions::new();
@@ -571,17 +555,40 @@ mod tests {
     }
 
     #[test]
-    fn admin_key_grants_do_not_include_super_admin() {
-        let permissions = [
-            "users".to_string(),
-            SUPER_ADMIN.to_string(),
-            "organizations".to_string(),
+    fn every_admin_handler_uses_typed_authorization() {
+        let sources = [
+            (
+                "access_control_rules",
+                include_str!("access_control_rules.rs"),
+            ),
+            ("admin_keys", include_str!("admin_keys.rs")),
+            ("api_keys", include_str!("api_keys.rs")),
+            ("configurations", include_str!("configurations.rs")),
+            ("health", include_str!("health.rs")),
+            ("me", include_str!("me.rs")),
+            ("oauth_clients", include_str!("oauth_clients.rs")),
+            ("organizations", include_str!("organizations.rs")),
+            ("outbox_events", include_str!("outbox_events.rs")),
+            ("overview", include_str!("overview.rs")),
+            ("service_accounts", include_str!("service_accounts.rs")),
+            ("sessions", include_str!("sessions.rs")),
+            ("users", include_str!("users.rs")),
         ];
-        let grants = admin_key_grants(permissions.iter());
 
-        assert!(grants.contains("users"));
-        assert!(grants.contains("organizations"));
-        assert!(!grants.contains(SUPER_ADMIN));
+        for (module, source) in sources {
+            assert!(
+                !source.contains("require_grants!"),
+                "{module} uses the removed string-grant macro"
+            );
+            for handler in source.split("pub async fn ").skip(1) {
+                let handler_name = handler.split('(').next().unwrap_or("unknown");
+                assert!(
+                    handler.contains("authorization::require")
+                        || handler.contains("authorization::get"),
+                    "admin handler {module}::{handler_name} does not use typed authorization"
+                );
+            }
+        }
     }
 
     #[test]

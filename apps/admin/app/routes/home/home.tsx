@@ -65,7 +65,7 @@ export default function AdminHomePage() {
   const loadingOverview = !overview && !adminOverview.isError();
   const recentActivity = outboxEvents.data?.data ?? [];
   const loadingActivity = !outboxEvents.data && !outboxEvents.isError();
-  const firstName = adminMe?.user.name.split(/\s+/)[0] || t("admin");
+  const firstName = adminMe?.user?.name.split(/\s+/)[0] || t("admin");
   const stateStatus =
     health?.redis?.status ?? (health?.store ? "healthy" : "unknown");
   const stateLatency = health?.redis
@@ -313,11 +313,13 @@ export default function AdminHomePage() {
               <Group justify="space-between" wrap="nowrap">
                 <Text size="sm">{t("accessExpiresAt")}</Text>
                 <Text size="xs" c="dimmed">
-                  {formatDate(
-                    adminMe.authentication.tokenExpiresAt,
-                    null,
-                    language,
-                  )}
+                  {adminMe.authentication.tokenExpiresAt
+                    ? formatDate(
+                        adminMe.authentication.tokenExpiresAt,
+                        null,
+                        language,
+                      )
+                    : "—"}
                 </Text>
               </Group>
               <Anchor component={Link} to="/sessions" size="sm">

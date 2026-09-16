@@ -1,6 +1,5 @@
-use super::SUPER_ADMIN;
+use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use chrono::Utc;
@@ -100,7 +99,7 @@ fn revocable(total: i64, revoked: i64) -> RevocableResourceCount {
     )
 )]
 pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN);
+    authorization::require(&req, Permission::OverviewRead)?;
 
     let gate = req
         .extensions()

@@ -7,6 +7,7 @@ import {
   Stack,
   Flex,
   Group,
+  Select,
   Text,
   Tooltip,
   SegmentedControl,
@@ -19,8 +20,10 @@ import { useTranslations } from "@/i18n";
 import type {
   CreateUserInvitationRequest,
   CreateUserRequest,
+  Organization,
 } from "@/services/types";
 import { CodeBox, EntityDrawer } from "@/components";
+import { organizationOptions } from "@/lib/organization-options";
 
 interface FormValues {
   nickname: string;
@@ -31,10 +34,13 @@ interface FormValues {
   confirmPassword: string;
   phoneNumber: string;
   picture: string;
+  organizationId: string;
+  role: string;
   attrs: string;
 }
 
 interface Props {
+  organizations: Organization[];
   onSave: (user: CreateUserRequest) => void;
   onInvite: (user: CreateUserInvitationRequest) => void;
 }
@@ -50,10 +56,12 @@ const emptyFormValues: FormValues = {
   confirmPassword: "",
   phoneNumber: "",
   picture: "",
+  organizationId: "",
+  role: "member",
   attrs: "{}",
 };
 
-const CreateUser: React.FC<Props> = ({ onSave, onInvite }) => {
+const CreateUser: React.FC<Props> = ({ organizations, onSave, onInvite }) => {
   const t = useTranslations();
   const [opened, { open, close }] = useDisclosure(false);
   const [mode, setMode] = useState<CreationMode>("password");
@@ -80,6 +88,7 @@ const CreateUser: React.FC<Props> = ({ onSave, onInvite }) => {
   });
 
   const handleSubmit = (values: FormValues) => {
+    const organizationId = values.organizationId.trim();
     const profile: CreateUserInvitationRequest = {
       nickname: values.nickname.trim() || null,
       email: values.email.trim(),
@@ -88,6 +97,12 @@ const CreateUser: React.FC<Props> = ({ onSave, onInvite }) => {
       phoneNumber: values.phoneNumber.trim() || null,
       picture: values.picture.trim() || null,
       attrs: JSON.parse(values.attrs) ?? {},
+      membership: organizationId
+        ? {
+            organizationId,
+            role: values.role,
+          }
+        : undefined,
     };
 
     if (mode === "invitation") {
@@ -186,6 +201,30 @@ const CreateUser: React.FC<Props> = ({ onSave, onInvite }) => {
                       {...form.getInputProps("confirmPassword")}
                     />
                   </>
+                )}
+                <Select
+                  searchable
+                  clearable
+                  variant="filled"
+                  label={t("initialOrganization")}
+                  placeholder={t("selectOrganization")}
+                  data={organizationOptions(organizations)}
+                  value={form.values.organizationId || null}
+                  onChange={(value) =>
+                    form.setFieldValue("organizationId", value ?? "")
+                  }
+                />
+                {form.values.organizationId && (
+                  <Select
+                    variant="filled"
+                    label={t("role")}
+                    data={["owner", "admin", "member"]}
+                    value={form.values.role}
+                    allowDeselect={false}
+                    onChange={(value) =>
+                      form.setFieldValue("role", value ?? "member")
+                    }
+                  />
                 )}
               </Stack>
             </Flex>

@@ -18,7 +18,7 @@ import type {
   Organization,
 } from "@/services/types";
 import { EntityDrawer } from "@/components";
-import { organizationOptions } from "./organization-options";
+import { organizationOptions } from "@/lib/organization-options";
 
 interface FormValues {
   name: string;

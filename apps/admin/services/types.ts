@@ -72,18 +72,20 @@ export interface AdminMe {
     id: string;
     name: string;
     picture: string | null;
-  };
+  } | null;
+  adminKeyId: string | null;
   authentication: {
     authenticatedAt: string | null;
     clientId: string | null;
-    kind: "oauth" | "session";
+    kind: "admin_key" | "oauth" | "session";
     sessionId: string | null;
     scopes: string[];
-    tokenExpiresAt: string;
-    tokenIssuedAt: string;
+    tokenExpiresAt: string | null;
+    tokenIssuedAt: string | null;
   };
   authorization: {
-    grants: string[];
+    permissions: AdminKeyPermission[];
+    superAdmin: boolean;
   };
 }
 
@@ -237,25 +239,59 @@ export interface EvaluateAccessControlResponse {
 }
 
 export const AdminKeyPermission = {
-  AccessControl: "access_control",
-  Users: "users",
-  Organizations: "organizations",
-  ApiKeys: "api_keys",
-  OAuthClients: "oauth_clients",
-  ServiceAccounts: "service_accounts",
-  Configurations: "configurations",
+  UsersRead: "users:read",
+  UsersCreate: "users:create",
+  UsersInvite: "users:invite",
+  UsersUpdate: "users:update",
+  UsersUpdateAttrs: "users:update_attrs",
+  UsersDelete: "users:delete",
+  SuperAdminsRead: "super_admins:read",
+  MembershipsRead: "memberships:read",
+  MembershipsCreate: "memberships:create",
+  MembershipsUpdate: "memberships:update",
+  MembershipsDelete: "memberships:delete",
+  SessionsRead: "sessions:read",
+  SessionsRevoke: "sessions:revoke",
+  OrganizationsRead: "organizations:read",
+  OrganizationsCreate: "organizations:create",
+  OrganizationsUpdate: "organizations:update",
+  OrganizationsDelete: "organizations:delete",
+  ApiKeysRead: "api_keys:read",
+  ApiKeysCreate: "api_keys:create",
+  ApiKeysUpdateAttrs: "api_keys:update_attrs",
+  ApiKeysRevoke: "api_keys:revoke",
+  ApiKeysDelete: "api_keys:delete",
+  ServiceAccountsRead: "service_accounts:read",
+  ServiceAccountsCreate: "service_accounts:create",
+  ServiceAccountsUpdate: "service_accounts:update",
+  ServiceAccountsDelete: "service_accounts:delete",
+  OAuthClientsRead: "oauth_clients:read",
+  OAuthClientsCreate: "oauth_clients:create",
+  OAuthClientsUpdate: "oauth_clients:update",
+  OAuthClientsUpdateStatus: "oauth_clients:update_status",
+  OAuthClientsRotateSecret: "oauth_clients:rotate_secret",
+  OAuthClientsDelete: "oauth_clients:delete",
+  OAuthTokensIntrospect: "oauth_tokens:introspect",
+  OAuthTokensRevoke: "oauth_tokens:revoke",
+  ConfigurationsRead: "configurations:read",
+  ConfigurationsUpdate: "configurations:update",
+  AccessControlRead: "access_control:read",
+  AccessControlUpdate: "access_control:update",
+  AccessControlValidate: "access_control:validate",
+  AccessControlEvaluate: "access_control:evaluate",
+  AuditRead: "audit:read",
+  HealthRead: "health:read",
+  OverviewRead: "overview:read",
 } as const;
 
 export type AdminKeyPermission =
   (typeof AdminKeyPermission)[keyof typeof AdminKeyPermission];
 
-export type AdminKeyStoredPermission = AdminKeyPermission | "super_admin";
-
 export interface AdminKey {
   createdAt: string;
   id: string;
   label?: string | null;
-  permissions: AdminKeyStoredPermission[];
+  permissions: AdminKeyPermission[];
   revoked: boolean;
   updatedAt: string;
 }
@@ -414,6 +450,12 @@ export interface OrganizationMembershipRequest {
   role?: string;
 }
 
+export interface InitialOrganizationMembershipRequest {
+  organizationId: string;
+  /** Free-form role; convention: owner | admin | member. Defaults to member. */
+  role?: string;
+}
+
 export interface CreateOrganizationRequest {
   attrs?: JsonValue | null;
   description?: string | null;
@@ -468,6 +510,7 @@ export interface CreateUserRequest {
   password: string;
   phoneNumber?: string | null;
   picture?: string | null;
+  membership?: InitialOrganizationMembershipRequest;
 }
 
 export interface CreateUserInvitationRequest {
@@ -478,6 +521,7 @@ export interface CreateUserInvitationRequest {
   nickname?: string | null;
   phoneNumber?: string | null;
   picture?: string | null;
+  membership?: InitialOrganizationMembershipRequest;
 }
 
 export interface UpdateUserRequest {

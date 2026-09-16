@@ -6,10 +6,11 @@ use super::repo::{
 use crate::backend::Pool;
 use crate::db::{DbStore, InstanceBootstrapResult};
 use crate::ent::{
-    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, AuditOperation, AuditResource,
-    AuditScopeSelector, Credential, CredentialHistory, CredentialType, OAuthClient, OAuthConsent,
-    OrgMember, OrgMembership, Organization, OutboxEventFilter, OutboxEventRow, Profile,
-    ServiceAccount, SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent,
+    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, AuditId, AuditOperation, AuditResource,
+    AuditScopeSelector, Credential, CredentialHistory, CredentialType, NewOrganizationMembership,
+    OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
+    OrganizationMembershipMutation, OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount,
+    SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent,
 };
 use crate::repo::ApiKeyAuditRecord;
 use anyhow::{Context, Result, bail, ensure};
@@ -214,12 +215,40 @@ fn build_outbox_event(
     after: Option<JsonValue>,
     metadata: JsonValue,
 ) -> Result<ValidatedAuditEvent> {
+    build_outbox_event_for_operation(
+        context,
+        occurred_at,
+        resource,
+        action,
+        operation,
+        before,
+        after,
+        metadata,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_outbox_event_for_operation(
+    context: &TrustedAuditContext,
+    occurred_at: DateTime<Utc>,
+    resource: AuditResource,
+    action: &'static str,
+    operation: AuditOperation,
+    before: Option<JsonValue>,
+    after: Option<JsonValue>,
+    metadata: JsonValue,
+    operation_id: Option<&AuditId>,
+) -> Result<ValidatedAuditEvent> {
     let mut builder = context
         .raw_event_builder(occurred_at)
         .resource(resource)
         .action(action)
         .operation(operation)
         .metadata(metadata);
+    if let Some(operation_id) = operation_id {
+        builder = builder.operation_id(operation_id.clone());
+    }
     if let Some(before) = before {
         builder = builder.before(before);
     }
@@ -707,10 +736,18 @@ impl DbStore for Service {
         profile: Profile,
         credential_type: CredentialType,
         value: &str,
+        membership: Option<NewOrganizationMembership>,
         context: TrustedAuditContext,
     ) -> Result<User> {
         let source = user_event_source(&context)?;
         let mut tx = self.pool.begin().await?;
+
+        if let Some(membership) = &membership {
+            self.organization
+                .get_by_id_for_update(&mut tx, &membership.organization_id)
+                .await?
+                .context("initial membership organization not found")?;
+        }
 
         let user = User::new(profile.email, profile.nickname)
             .given_name(profile.given_name)
@@ -724,7 +761,27 @@ impl DbStore for Service {
         self.credential
             .create(&mut tx, &user_id, credential_type, value)
             .await?;
-        let event = build_outbox_event(
+
+        if let Some(membership) = &membership {
+            self.organization
+                .add_user(
+                    &mut tx,
+                    &user_id,
+                    &membership.organization_id,
+                    &membership.role,
+                )
+                .await?;
+        }
+
+        let operation_id = membership.as_ref().map(|_| AuditId::new());
+        let metadata = match &membership {
+            Some(membership) => serde_json::json!({
+                "source": source,
+                "organization_id": membership.organization_id,
+            }),
+            None => serde_json::json!({ "source": source }),
+        };
+        let event = build_outbox_event_for_operation(
             &context,
             Utc::now(),
             AuditResource::new("user", &record.id),
@@ -732,9 +789,33 @@ impl DbStore for Service {
             AuditOperation::Create,
             None,
             Some(snapshot(UserAuditSnapshot::from(&record))?),
-            serde_json::json!({ "source": source }),
+            metadata,
+            operation_id.as_ref(),
         )?;
         self.outbox.insert(&mut tx, &event).await?;
+
+        if let Some(membership) = &membership {
+            let membership_event = build_outbox_event_for_operation(
+                &context,
+                Utc::now(),
+                AuditResource::new(
+                    "organization_membership",
+                    format!("{}:{user_id}", membership.organization_id),
+                ),
+                "organization.member_added",
+                AuditOperation::Create,
+                None,
+                Some(snapshot(OrganizationMembershipAuditSnapshot {
+                    organization_id: &membership.organization_id,
+                    user_id: &record.id,
+                    role: &membership.role,
+                })?),
+                serde_json::json!({ "source": source }),
+                operation_id.as_ref(),
+            )?;
+            self.outbox.insert(&mut tx, &membership_event).await?;
+        }
+
         tx.commit().await?;
         Ok(record)
     }
@@ -1844,10 +1925,31 @@ impl DbStore for Service {
         user_id: &str,
         org_id: &str,
         role: &str,
+        mutation: OrganizationMembershipMutation,
         context: TrustedAuditContext,
     ) -> Result<()> {
         ensure_admin_control_plane(&context)?;
         let mut tx = self.pool.begin().await?;
+        self.user
+            .get_by_id_for_update(&mut tx, user_id)
+            .await?
+            .context("cannot change a membership for a missing user")?;
+        self.organization
+            .get_by_id_for_update(&mut tx, org_id)
+            .await?
+            .context("cannot change a membership for a missing organization")?;
+        let before = self
+            .organization
+            .get_membership_for_update(&mut tx, user_id, org_id)
+            .await?;
+        ensure!(
+            matches!(
+                (mutation, before.is_some()),
+                (OrganizationMembershipMutation::Create, false)
+                    | (OrganizationMembershipMutation::Update, true)
+            ),
+            "organization membership changed while authorizing the mutation"
+        );
         self.organization
             .add_user(&mut tx, user_id, org_id, role)
             .await?;
@@ -2024,9 +2126,15 @@ mod sqlite_tests {
 
     async fn create_test_user(svc: &Service, tag: &str) -> User {
         let profile = Profile::new(format!("{tag}@example.com"), tag.to_string());
-        svc.create_user(profile, CredentialType::Password, "hash", trusted_ctx())
-            .await
-            .expect("create user")
+        svc.create_user(
+            profile,
+            CredentialType::Password,
+            "hash",
+            None,
+            trusted_ctx(),
+        )
+        .await
+        .expect("create user")
     }
 
     async fn create_test_org(svc: &Service, name: &str) -> Organization {
@@ -2037,14 +2145,154 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
+    async fn create_user_with_initial_membership_commits_one_correlated_operation() {
+        let svc = test_service().await;
+        let org = create_test_org(&svc, "initial-membership-org").await;
+        let profile = Profile::new(
+            "initial-member@example.com".to_string(),
+            "initial-member".to_string(),
+        );
+
+        let user = svc
+            .create_user(
+                profile,
+                CredentialType::Password,
+                "INITIAL_MEMBERSHIP_PASSWORD_HASH",
+                Some(NewOrganizationMembership {
+                    organization_id: org.id.clone(),
+                    role: "admin".to_string(),
+                }),
+                trusted_ctx(),
+            )
+            .await
+            .expect("create user and initial membership");
+
+        let membership = svc
+            .get_user_organization(&user.id, &org.id)
+            .await
+            .expect("query membership")
+            .expect("initial membership exists");
+        assert_eq!(membership.role, "admin");
+        assert!(
+            svc.get_credential(&user.id, CredentialType::Password)
+                .await
+                .expect("query credential")
+                .is_some()
+        );
+
+        let events = audit_payloads(&svc).await;
+        let user_event = events
+            .iter()
+            .find(|event| event["action"] == "user.created" && event["resource"]["id"] == user.id)
+            .expect("user event");
+        let membership_event = events
+            .iter()
+            .find(|event| {
+                event["action"] == "organization.member_added"
+                    && event["after"]["user_id"] == user.id
+            })
+            .expect("membership event");
+        let operation_id = user_event["operation_id"]
+            .as_str()
+            .expect("user event operation id");
+        assert_eq!(
+            membership_event["operation_id"].as_str(),
+            Some(operation_id)
+        );
+        assert_eq!(user_event["metadata"]["organization_id"], org.id);
+        assert_eq!(membership_event["after"]["role"], "admin");
+    }
+
+    #[tokio::test]
+    async fn missing_initial_membership_organization_rolls_back_user_and_outbox() {
+        let svc = test_service().await;
+        let email = "missing-initial-org@example.com";
+
+        let error = svc
+            .create_user(
+                Profile::new(email.to_string(), "missing-initial-org".to_string()),
+                CredentialType::Password,
+                "MISSING_INITIAL_ORG_PASSWORD_HASH",
+                Some(NewOrganizationMembership {
+                    organization_id: "01JZ0000000000000000000000".to_string(),
+                    role: "member".to_string(),
+                }),
+                trusted_ctx(),
+            )
+            .await
+            .expect_err("missing organization must reject creation");
+
+        assert!(error.to_string().contains("organization not found"));
+        assert!(
+            svc.get_user_by_username(email)
+                .await
+                .expect("query rolled-back user")
+                .is_none()
+        );
+        assert!(audit_payloads(&svc).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn initial_membership_and_user_roll_back_when_outbox_validation_fails() {
+        let svc = test_service().await;
+        let org = create_test_org(&svc, "initial-membership-rollback-org").await;
+        let baseline = audit_payloads(&svc).await.len();
+        let email = "initial-membership-rollback@example.com";
+        let invalid_context = TrustedAuditContext::admin_control_plane(
+            TrustedAdminActor::admin("01JZ000000000000000000000A"),
+            TrustedAuditRequest::from_http(
+                ulid::Ulid::generate().to_string(),
+                None,
+                None,
+                Some("x".repeat(513)),
+            ),
+        );
+
+        let error = svc
+            .create_user(
+                Profile::new(email.to_string(), "initial-membership-rollback".to_string()),
+                CredentialType::Password,
+                "INITIAL_MEMBERSHIP_ROLLBACK_PASSWORD_HASH",
+                Some(NewOrganizationMembership {
+                    organization_id: org.id.clone(),
+                    role: "member".to_string(),
+                }),
+                invalid_context,
+            )
+            .await
+            .expect_err("invalid outbox event must roll back creation");
+
+        assert!(error.to_string().contains("request.user_agent exceeds 512"));
+        assert!(
+            svc.get_user_by_username(email)
+                .await
+                .expect("query rolled-back user")
+                .is_none()
+        );
+        assert_eq!(
+            svc.count_organization_users(&org.id)
+                .await
+                .expect("count organization users"),
+            0
+        );
+        assert_eq!(audit_payloads(&svc).await.len(), baseline);
+    }
+
+    #[tokio::test]
     async fn membership_defaults_and_upsert_updates_role_keeping_created_at() {
         let svc = test_service().await;
         let user = create_test_user(&svc, "alice").await;
         let org = create_test_org(&svc, "acme").await;
 
-        svc.add_user_to_organization(&user.id, &org.id, "member", trusted_ctx())
-            .await
-            .expect("add membership");
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .expect("add membership");
 
         let membership = svc
             .get_user_organization(&user.id, &org.id)
@@ -2055,11 +2303,29 @@ mod sqlite_tests {
         assert_eq!(membership.organization.id, org.id);
         let member_since = membership.member_since.expect("member_since set");
 
+        let error = svc
+            .add_user_to_organization(
+                &user.id,
+                &org.id,
+                "owner",
+                OrganizationMembershipMutation::Create,
+                trusted_ctx(),
+            )
+            .await
+            .expect_err("create intent must not update an existing membership");
+        assert!(error.to_string().contains("changed while authorizing"));
+
         // Re-adding upserts the role without duplicating the row or touching
         // the original membership timestamp.
-        svc.add_user_to_organization(&user.id, &org.id, "admin", trusted_ctx())
-            .await
-            .expect("upsert role");
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "admin",
+            OrganizationMembershipMutation::Update,
+            trusted_ctx(),
+        )
+        .await
+        .expect("upsert role");
 
         let membership = svc
             .get_user_organization(&user.id, &org.id)
@@ -2093,15 +2359,33 @@ mod sqlite_tests {
         let acme = create_test_org(&svc, "acme").await;
         let globex = create_test_org(&svc, "globex").await;
 
-        svc.add_user_to_organization(&alice.id, &acme.id, "owner", trusted_ctx())
-            .await
-            .unwrap();
-        svc.add_user_to_organization(&alice.id, &globex.id, "member", trusted_ctx())
-            .await
-            .unwrap();
-        svc.add_user_to_organization(&bob.id, &acme.id, "member", trusted_ctx())
-            .await
-            .unwrap();
+        svc.add_user_to_organization(
+            &alice.id,
+            &acme.id,
+            "owner",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .unwrap();
+        svc.add_user_to_organization(
+            &alice.id,
+            &globex.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .unwrap();
+        svc.add_user_to_organization(
+            &bob.id,
+            &acme.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .unwrap();
 
         let mut alice_orgs = svc.get_user_organizations(&alice.id).await.unwrap();
         alice_orgs.sort_by(|a, b| a.organization.name.cmp(&b.organization.name));
@@ -2128,9 +2412,15 @@ mod sqlite_tests {
         let svc = test_service().await;
         let user = create_test_user(&svc, "alice").await;
         let org = create_test_org(&svc, "acme").await;
-        svc.add_user_to_organization(&user.id, &org.id, "member", trusted_ctx())
-            .await
-            .unwrap();
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .unwrap();
 
         svc.create_user_api_key(
             &user.id,
@@ -2249,6 +2539,7 @@ mod sqlite_tests {
                 profile,
                 CredentialType::Password,
                 create_secret,
+                None,
                 trusted_ctx(),
             )
             .await
@@ -2333,6 +2624,7 @@ mod sqlite_tests {
                 profile,
                 CredentialType::Password,
                 initial_hash,
+                None,
                 anonymous_application_context(),
             )
             .await
@@ -2432,9 +2724,15 @@ mod sqlite_tests {
             )
             .await
             .expect("create organization");
-        svc.add_user_to_organization(&user.id, &org.id, "owner", trusted_ctx())
-            .await
-            .expect("add membership");
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "owner",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .expect("add membership");
         svc.update_organization(
             &org.id,
             "Acme Updated",
@@ -2695,6 +2993,7 @@ mod sqlite_tests {
                 Profile::new(email.to_string(), "rollback".to_string()),
                 CredentialType::Password,
                 "ROLLBACK_PASSWORD_HASH_SECRET",
+                None,
                 context,
             )
             .await;
@@ -2840,9 +3139,15 @@ mod sqlite_tests {
         let svc = test_service().await;
         let user = create_test_user(&svc, "key-owner").await;
         let org = create_test_org(&svc, "key-org").await;
-        svc.add_user_to_organization(&user.id, &org.id, "member", trusted_ctx())
-            .await
-            .expect("add membership");
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .expect("add membership");
         let sa = svc
             .create_service_account(
                 "worker",
@@ -3167,9 +3472,15 @@ mod sqlite_tests {
         let svc = test_service().await;
         let user = create_test_user(&svc, "a6-admin-owner").await;
         let org = create_test_org(&svc, "a6-admin-org").await;
-        svc.add_user_to_organization(&user.id, &org.id, "member", trusted_ctx())
-            .await
-            .expect("add organization member");
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .expect("add organization member");
 
         let client_id = format!("a6-client-{}", ulid::Ulid::generate());
         svc.create_oauth_client(
@@ -3278,9 +3589,15 @@ mod sqlite_tests {
         let svc = test_service().await;
         let user = create_test_user(&svc, "alice").await;
         let org = create_test_org(&svc, "acme").await;
-        svc.add_user_to_organization(&user.id, &org.id, "member", trusted_ctx())
-            .await
-            .unwrap();
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .unwrap();
         svc.create_user_api_key(
             &user.id,
             "hash-bound",
@@ -3323,9 +3640,15 @@ mod sqlite_tests {
         let svc = test_service().await;
         let user = create_test_user(&svc, "alice").await;
         let org = create_test_org(&svc, "acme").await;
-        svc.add_user_to_organization(&user.id, &org.id, "member", trusted_ctx())
-            .await
-            .unwrap();
+        svc.add_user_to_organization(
+            &user.id,
+            &org.id,
+            "member",
+            OrganizationMembershipMutation::Create,
+            trusted_ctx(),
+        )
+        .await
+        .unwrap();
         svc.create_user_api_key(
             &user.id,
             "hash-bound",
@@ -3447,6 +3770,7 @@ mod tests {
             Profile::new(unique_email(), unique_nick()),
             CredentialType::Password,
             "POSTGRES_RELAY_TEST_PASSWORD_HASH",
+            None,
             admin_context(request_id.to_string()),
         )
         .await
@@ -3484,6 +3808,7 @@ mod tests {
             Profile::new(email.clone(), nickname.clone()),
             CredentialType::Password,
             password_secret,
+            None,
             ctx_ok,
         )
         .await
@@ -3515,6 +3840,7 @@ mod tests {
                 Profile::new(email.clone(), unique_nick()),
                 CredentialType::Password,
                 "pw",
+                None,
                 ctx_fail,
             )
             .await;
@@ -3610,6 +3936,7 @@ mod tests {
                 Profile::new(email.clone(), unique_nick()),
                 CredentialType::Password,
                 "POSTGRES_ROLLBACK_PASSWORD_SECRET",
+                None,
                 context,
             )
             .await;
@@ -3670,6 +3997,7 @@ mod tests {
                 Profile::new(unique_email(), unique_nick()),
                 CredentialType::Password,
                 "POSTGRES_A5_USER_PASSWORD_HASH",
+                None,
                 context.clone(),
             )
             .await

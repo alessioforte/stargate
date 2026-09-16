@@ -406,6 +406,25 @@ mod tests {
         assert!(json["paths"]["/admin/access-control/rules"].is_object());
         assert!(json["paths"]["/admin/access-control/rules/validate"].is_object());
         assert!(json["paths"]["/admin/access-control/rules/evaluate"].is_object());
+
+        let permission_values = json["components"]["schemas"]["Permission"]["enum"]
+            .as_array()
+            .expect("Permission is an OpenAPI enum");
+        assert_eq!(
+            permission_values.len(),
+            crate::api::admin::authorization::Permission::ALL.len()
+        );
+        assert!(permission_values.contains(&serde_json::json!("users:create")));
+        assert!(!permission_values.contains(&serde_json::json!("super_admin")));
+        assert!(
+            json["components"]["schemas"]["CreateUserRequest"]["properties"]["membership"]
+                .is_object()
+        );
+        assert!(
+            json["components"]["schemas"]["CreateUserInvitationRequest"]["properties"]
+                ["membership"]
+                .is_object()
+        );
     }
 
     #[tokio::test]

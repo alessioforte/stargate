@@ -1,8 +1,10 @@
-use super::{SUPER_ADMIN, extract_json, extract_path, extract_query};
+use super::{
+    authorization::{self, Permission},
+    extract_json, extract_path, extract_query,
+};
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::msg::{MessageCode, MessageResponse};
-use crate::require_grants;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -11,7 +13,6 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
-const ORG_GRANT: &str = "organizations";
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -75,7 +76,7 @@ pub struct UpdateOrganizationRequest {
     )
 )]
 pub async fn get_organizations(req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
+    authorization::require(&req, Permission::OrganizationsRead)?;
 
     let query: ListOrganizationsQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -125,7 +126,7 @@ pub async fn get_organizations(req: Request) -> Result<Response, ErrorResponse> 
     )
 )]
 pub async fn get_organization(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
+    authorization::require(&req, Permission::OrganizationsRead)?;
 
     let id: String = extract_path(&mut req).await?;
 
@@ -153,7 +154,7 @@ pub async fn get_organization(mut req: Request) -> Result<Response, ErrorRespons
     )
 )]
 pub async fn create_organization(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
+    authorization::require(&req, Permission::OrganizationsCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateOrganizationRequest = extract_json(req).await?;
@@ -190,7 +191,7 @@ pub async fn create_organization(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
+    authorization::require(&req, Permission::OrganizationsUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
@@ -241,7 +242,7 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResponse> {
-    require_grants!(req, SUPER_ADMIN, ORG_GRANT);
+    authorization::require(&req, Permission::OrganizationsDelete)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;

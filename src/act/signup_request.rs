@@ -1,4 +1,5 @@
 use crate::etc::store::use_store;
+use db::ent::NewOrganizationMembership;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use store::{Store, StoreError};
@@ -15,6 +16,8 @@ pub struct PendingSignupProfile {
     pub picture: Option<String>,
     pub phone_number: Option<String>,
     pub attrs: Value,
+    #[serde(default)]
+    pub membership: Option<NewOrganizationMembership>,
 }
 
 impl PendingSignupProfile {
@@ -27,6 +30,7 @@ impl PendingSignupProfile {
             picture: None,
             phone_number: None,
             attrs: Value::Object(serde_json::Map::new()),
+            membership: None,
         }
     }
 }
@@ -61,4 +65,47 @@ pub async fn delete_signup_request(sid: &str) -> Result<bool, store::StoreError>
     let store = use_store();
     let key = format!("{}:{}", KEY_PREFIX, sid);
     store.delete(key.as_str()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PendingSignupProfile;
+
+    #[test]
+    fn pending_profile_without_membership_remains_backward_compatible() {
+        let profile: PendingSignupProfile = serde_json::from_value(serde_json::json!({
+            "email": "legacy@example.com",
+            "givenName": null,
+            "familyName": null,
+            "nickname": null,
+            "picture": null,
+            "phoneNumber": null,
+            "attrs": {}
+        }))
+        .expect("deserialize legacy pending profile");
+
+        assert!(profile.membership.is_none());
+    }
+
+    #[test]
+    fn pending_profile_roundtrips_server_owned_membership() {
+        let profile: PendingSignupProfile = serde_json::from_value(serde_json::json!({
+            "email": "member@example.com",
+            "givenName": null,
+            "familyName": null,
+            "nickname": null,
+            "picture": null,
+            "phoneNumber": null,
+            "attrs": {},
+            "membership": {
+                "organizationId": "01JZ0000000000000000000001",
+                "role": "admin"
+            }
+        }))
+        .expect("deserialize pending membership");
+
+        let membership = profile.membership.expect("membership");
+        assert_eq!(membership.organization_id, "01JZ0000000000000000000001");
+        assert_eq!(membership.role, "admin");
+    }
 }

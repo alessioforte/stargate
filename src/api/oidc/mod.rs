@@ -22,7 +22,7 @@ pub fn router() -> axum::Router {
     let protected = axum::Router::new()
         .route("/oauth/introspect", post(post_introspect))
         .route("/oauth/revoke", post(post_revoke))
-        .layer(from_fn(crate::api::admin::extract_grants));
+        .layer(from_fn(crate::api::admin::extract_authorization));
 
     axum::Router::new()
         .route("/.well-known/jwks.json", get(get_jwks))
