@@ -57,6 +57,7 @@ export const policyKindOptions = [
 
 export const authStrategyOptions = [
   { value: "jwt", label: "JWT" },
+  { value: "oauth", label: "OAuth user" },
   { value: "api_key", label: "API key" },
 ] as const;
 

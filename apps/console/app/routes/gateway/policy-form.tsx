@@ -42,6 +42,7 @@ interface FormValues {
   name: string;
   kind: PolicyKind;
   authStrategies: AuthStrategy[];
+  audience: string;
   resource: string;
   env: EnvProfile;
   rateLimit: string;
@@ -63,6 +64,7 @@ const defaultValues: FormValues = {
   name: "",
   kind: "auth",
   authStrategies: ["jwt"],
+  audience: "",
   resource: "",
   env: "none",
   rateLimit: "",
@@ -86,6 +88,8 @@ function policyToFormValues(
     authStrategies: Array.isArray(selectedValue.strategies)
       ? selectedValue.strategies.filter(isAuthStrategy)
       : defaultValues.authStrategies,
+    audience:
+      typeof selectedValue.audience === "string" ? selectedValue.audience : "",
     resource:
       typeof selectedValue.resource === "string" ? selectedValue.resource : "",
     env: isEnvProfile(selectedValue.env) ? selectedValue.env : "none",
@@ -118,11 +122,18 @@ function formValuesToPolicy(
         return { errorKey: "authStrategiesRequired", value: null };
       }
 
+      if (values.authStrategies.includes("oauth") && !values.audience.trim()) {
+        return { errorKey: "audienceRequired", value: null };
+      }
+
       return {
         errorKey: null,
         value: {
           kind: "auth",
           strategies: values.authStrategies,
+          ...(values.authStrategies.includes("oauth")
+            ? { audience: values.audience.trim() }
+            : {}),
         },
       };
     case "access_control": {
@@ -262,23 +273,35 @@ const PolicyForm: React.FC<Props> = ({
 
       <Stack p="xs" gap="xs">
         {values.kind === "auth" && (
-          <Checkbox.Group
-            label={t("authStrategies")}
-            value={values.authStrategies}
-            onChange={(strategies) =>
-              setField("authStrategies", strategies.filter(isAuthStrategy))
-            }
-          >
-            <Stack mt="xs" gap="xs">
-              {authStrategyOptions.map((strategy) => (
-                <Checkbox
-                  key={strategy.value}
-                  value={strategy.value}
-                  label={strategy.label}
-                />
-              ))}
-            </Stack>
-          </Checkbox.Group>
+          <Stack gap="xs">
+            <Checkbox.Group
+              label={t("authStrategies")}
+              value={values.authStrategies}
+              onChange={(strategies) =>
+                setField("authStrategies", strategies.filter(isAuthStrategy))
+              }
+            >
+              <Stack mt="xs" gap="xs">
+                {authStrategyOptions.map((strategy) => (
+                  <Checkbox
+                    key={strategy.value}
+                    value={strategy.value}
+                    label={strategy.label}
+                  />
+                ))}
+              </Stack>
+            </Checkbox.Group>
+            {values.authStrategies.includes("oauth") && (
+              <TextInput
+                variant="filled"
+                label={t("audience")}
+                value={values.audience}
+                onChange={(event) =>
+                  setField("audience", event.currentTarget.value)
+                }
+              />
+            )}
+          </Stack>
         )}
 
         {values.kind === "access_control" && (

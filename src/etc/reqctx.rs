@@ -306,7 +306,7 @@ fn identity_facts(
     };
 
     match (identity.auth_kind(), &subject.sub_type) {
-        (AuthKind::Jwt, SubjectType::User) => {
+        (AuthKind::Jwt | AuthKind::OAuth, SubjectType::User) => {
             let session_id = identity
                 .session_id()
                 .filter(|value| valid_ulid(value))

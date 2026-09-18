@@ -144,6 +144,11 @@ Supported policy kinds:
 - `rate_limit`
 - `quota`
 
+Auth strategies are `jwt` for native Stargate sessions, `api_key`, and
+`oauth` for Authorization Code user access tokens. OAuth auth policies require
+an exact `audience`; accepted tokens are bound back to the active `sid`, user,
+enabled client, and session `client_ids` link before access-control evaluation.
+
 Gateway rate limiting always falls back to the named `default` limit. A
 non-default router `rate_limit` policy overrides that default for the matched
 resource. Authenticated users/API keys can set `attrs.rate_limit` to a named

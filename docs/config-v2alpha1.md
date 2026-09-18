@@ -398,6 +398,11 @@ http:
       kind: auth
       strategies: [jwt, api_key]
 
+    app-user-auth:
+      kind: auth
+      strategies: [oauth]
+      audience: gateway
+
     reports-read:
       kind: access_control
       resource: financial_reports:read
@@ -410,6 +415,13 @@ http:
       kind: quota
       limit: daily
 ```
+
+`jwt` accepts Stargate native session tokens, `api_key` accepts API keys, and
+`oauth` accepts user access tokens issued by Stargate's Authorization Code
+flow. Every policy containing `oauth` must configure one exact `audience`.
+The OAuth client must be registered for that audience and request it during
+authorization. OAuth client-credentials tokens are not user identities and
+are not accepted by this strategy.
 
 Attach policies on a router:
 

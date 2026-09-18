@@ -275,6 +275,24 @@ Resource servers should:
 6. Check `aud` for the protected resource.
 7. Check `exp`, `iat`, `typ`, and scopes.
 
+Stargate gateway routes can perform these checks and resolve the access token
+back to its active user session with an audience-bound auth policy:
+
+```yaml
+http:
+  policies:
+    app-user-auth:
+      kind: auth
+      strategies: [oauth]
+      audience: gateway
+```
+
+Attach the policy before any `access_control` policy on the route. The OAuth
+client must list `gateway` in `audiences`, and the authorization request must
+request `audience=gateway`. The gateway accepts Authorization Code user access
+tokens only: the token's `sid`, `sub_id`, and `azp` must resolve to an active
+session linked to an enabled OAuth client.
+
 JWT access-token claims include:
 
 - `iss`
@@ -351,5 +369,4 @@ JWT revocation stores revoked `jti` state until token expiry. Invisible or inact
 - OAuth/OIDC error responses still use Stargate's generic error envelope for most non-redirect errors.
 - OAuth AS metadata does not advertise `scopes_supported`; there is no global OAuth scope registry.
 - OAuth clients cannot broadly introspect/revoke API keys; admin grants still handle API-key revocation.
-- Resource-server audience policy is helper-level only; product-level gateway audience config remains future work.
 - Full end-to-end OAuth/OIDC integration tests are still pending.

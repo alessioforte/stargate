@@ -247,6 +247,8 @@ pub enum Middleware {
 pub enum Policy {
     Auth {
         strategies: Vec<AuthStrategy>,
+        #[serde(default)]
+        audience: Option<String>,
     },
     AccessControl {
         resource: String,
@@ -298,6 +300,8 @@ pub enum OnMissingOrg {
 #[serde(rename_all = "snake_case")]
 pub enum AuthStrategy {
     Jwt,
+    #[serde(rename = "oauth")]
+    OAuth,
     ApiKey,
 }
 
@@ -556,15 +560,49 @@ fn compile_policies(
 
     for (name, policy) in policies {
         let node = match policy {
-            Policy::Auth { strategies } => {
+            Policy::Auth {
+                strategies,
+                audience,
+            } => {
                 if strategies.is_empty() {
                     return Err(CompileError::new(
                         format!("http.policies.{}.strategies", name),
                         "at least one auth strategy is required",
                     ));
                 }
+
+                let audience_path = format!("http.policies.{}.audience", name);
+                let audience = match (strategies.contains(&AuthStrategy::OAuth), audience) {
+                    (true, Some(audience))
+                        if audience.trim() == audience
+                            && audience.split_whitespace().count() == 1
+                            && audience.len() <= INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES =>
+                    {
+                        Some(audience.clone())
+                    }
+                    (true, Some(_)) => {
+                        return Err(CompileError::new(
+                            audience_path,
+                            "OAuth audience must be one nonblank value of at most 256 UTF-8 bytes",
+                        ));
+                    }
+                    (true, None) => {
+                        return Err(CompileError::new(
+                            audience_path,
+                            "audience is required for the oauth auth strategy",
+                        ));
+                    }
+                    (false, Some(_)) => {
+                        return Err(CompileError::new(
+                            audience_path,
+                            "audience is only valid with the oauth auth strategy",
+                        ));
+                    }
+                    (false, None) => None,
+                };
                 PolicyNode::Auth {
                     strategies: strategies.clone(),
+                    audience,
                 }
             }
             Policy::AccessControl { resource, env } => {
@@ -1138,10 +1176,65 @@ fn compile_regex(path: String, pattern: &str) -> Result<Regex, CompileError> {
 #[cfg(test)]
 mod tests {
     use super::Config;
-    use crate::graph::{MatchExprNode, MiddlewareNode, PathPredicate, ServiceNode, ValuePredicate};
+    use crate::{
+        cfg::AuthStrategy,
+        graph::{
+            MatchExprNode, MiddlewareNode, PathPredicate, PolicyNode, ServiceNode, ValuePredicate,
+        },
+    };
 
     fn parse_config(yaml: &str) -> Config {
         serde_saphyr::from_str(yaml).expect("config should parse")
+    }
+
+    #[test]
+    fn compiles_oauth_auth_policy_with_exact_audience() {
+        let compiled = parse_config(
+            r#"
+schema: stargate/v2alpha1
+http:
+  policies:
+    app-user:
+      kind: auth
+      strategies: [oauth]
+      audience: gateway
+"#,
+        )
+        .compile()
+        .expect("OAuth auth policy should compile");
+
+        match &compiled.http.policies["app-user"] {
+            PolicyNode::Auth {
+                strategies,
+                audience,
+            } => {
+                assert_eq!(strategies, &[AuthStrategy::OAuth]);
+                assert_eq!(audience.as_deref(), Some("gateway"));
+            }
+            other => panic!("unexpected policy node: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oauth_auth_policy_requires_valid_audience() {
+        for (strategies, audience, expected) in [
+            ("[oauth]", "", "audience is required"),
+            ("[oauth]", "      audience: '   '\n", "OAuth audience"),
+            (
+                "[jwt]",
+                "      audience: gateway\n",
+                "only valid with the oauth",
+            ),
+        ] {
+            let yaml = format!(
+                "schema: stargate/v2alpha1\nhttp:\n  policies:\n    auth:\n      kind: auth\n      strategies: {strategies}\n{audience}"
+            );
+            let error = parse_config(&yaml)
+                .compile()
+                .expect_err("invalid OAuth audience should fail");
+            assert_eq!(error.path, "http.policies.auth.audience");
+            assert!(error.to_string().contains(expected));
+        }
     }
 
     #[test]

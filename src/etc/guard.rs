@@ -17,6 +17,7 @@ thread_local! {
 pub enum AuthKind {
     ApiKey,
     Jwt,
+    OAuth,
     Anonymous,
 }
 
@@ -26,6 +27,11 @@ enum VerifiedAuthentication {
     Jwt {
         session_id: Box<str>,
         auth_time: Option<i64>,
+    },
+    OAuth {
+        session_id: Box<str>,
+        auth_time: i64,
+        audience: Option<Box<str>>,
     },
     Anonymous,
 }
@@ -68,10 +74,30 @@ impl VerifiedIdentity {
         })
     }
 
+    fn oauth(
+        subject: Subject,
+        session_id: String,
+        auth_time: usize,
+        audience: Option<String>,
+    ) -> Option<Self> {
+        if subject.sub_type != crate::etc::sub::SubjectType::User || session_id.trim().is_empty() {
+            return None;
+        }
+        Some(Self {
+            subject: Some(subject),
+            authentication: VerifiedAuthentication::OAuth {
+                session_id: session_id.into_boxed_str(),
+                auth_time: i64::try_from(auth_time).ok()?,
+                audience: audience.map(String::into_boxed_str),
+            },
+        })
+    }
+
     pub fn auth_kind(&self) -> AuthKind {
         match self.authentication {
             VerifiedAuthentication::ApiKey => AuthKind::ApiKey,
             VerifiedAuthentication::Jwt { .. } => AuthKind::Jwt,
+            VerifiedAuthentication::OAuth { .. } => AuthKind::OAuth,
             VerifiedAuthentication::Anonymous => AuthKind::Anonymous,
         }
     }
@@ -82,7 +108,8 @@ impl VerifiedIdentity {
 
     pub fn session_id(&self) -> Option<&str> {
         match &self.authentication {
-            VerifiedAuthentication::Jwt { session_id, .. } => Some(session_id),
+            VerifiedAuthentication::Jwt { session_id, .. }
+            | VerifiedAuthentication::OAuth { session_id, .. } => Some(session_id),
             VerifiedAuthentication::ApiKey | VerifiedAuthentication::Anonymous => None,
         }
     }
@@ -90,7 +117,17 @@ impl VerifiedIdentity {
     pub fn auth_time(&self) -> Option<i64> {
         match self.authentication {
             VerifiedAuthentication::Jwt { auth_time, .. } => auth_time,
+            VerifiedAuthentication::OAuth { auth_time, .. } => Some(auth_time),
             VerifiedAuthentication::ApiKey | VerifiedAuthentication::Anonymous => None,
+        }
+    }
+
+    pub fn oauth_audience(&self) -> Option<&str> {
+        match &self.authentication {
+            VerifiedAuthentication::OAuth { audience, .. } => audience.as_deref(),
+            VerifiedAuthentication::ApiKey
+            | VerifiedAuthentication::Jwt { .. }
+            | VerifiedAuthentication::Anonymous => None,
         }
     }
 
@@ -102,6 +139,16 @@ impl VerifiedIdentity {
     #[cfg(test)]
     pub(crate) fn test_api_key(subject: Subject) -> Self {
         Self::api_key(subject).expect("valid test API-key identity")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_oauth(
+        subject: Subject,
+        session_id: String,
+        auth_time: usize,
+        audience: Option<String>,
+    ) -> Self {
+        Self::oauth(subject, session_id, auth_time, audience).expect("valid test OAuth identity")
     }
 }
 
@@ -178,26 +225,20 @@ pub async fn purge_api_key_subjects(key_hashes: &[String]) {
     }
 }
 
-/// Verify a session JWT and bind its validated session metadata to the current
-/// subject loaded from trusted state.
-pub async fn verify_jwt<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedIdentity> {
-    let token = req.get_token()?;
-
-    let jwt = etc::jwt::jwt_config();
-    let claims = match jwt.validate_session_access_token(&token) {
-        Ok(claims) => claims,
-        Err(_) => {
-            return None;
-        }
-    };
-
-    match crate::act::token_revocation::is_revoked(&claims).await {
-        Ok(false) => {}
-        Ok(true) => return None,
+async fn token_is_active(claims: &jwt::Claims) -> bool {
+    match crate::act::token_revocation::is_revoked(claims).await {
+        Ok(false) => true,
+        Ok(true) => false,
         Err(e) => {
             error!("Failed to check token revocation state: {}", e);
-            return None;
+            false
         }
+    }
+}
+
+async fn verify_session_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> {
+    if !token_is_active(&claims).await {
+        return None;
     }
 
     let store = etc::store::use_store();
@@ -210,6 +251,71 @@ pub async fn verify_jwt<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedIdent
             None
         }
     }
+}
+
+async fn verify_oauth_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> {
+    if !token_is_active(&claims).await {
+        return None;
+    }
+
+    let sid = claims.sid.clone()?;
+    let user_id = claims.sub_id.as_deref()?;
+    let client_id = claims.azp.as_deref()?;
+    let auth_time = claims.auth_time?;
+    if claims.sub != user_id {
+        return None;
+    }
+
+    let client = match crate::db::get_oauth_client_by_client_id(client_id).await {
+        Ok(Some(client)) if client.enabled => client,
+        Ok(_) => return None,
+        Err(e) => {
+            error!("Failed to get OAuth client: {}", e);
+            return None;
+        }
+    };
+    if let Some(audience) = claims.aud.as_deref()
+        && !client.audiences.iter().any(|allowed| allowed == audience)
+    {
+        return None;
+    }
+
+    let session = match crate::act::sessions::get_active_session(&sid, user_id).await {
+        Ok(Some(session)) => session,
+        Ok(None) => return None,
+        Err(e) => {
+            error!("Failed to resolve backing OAuth session: {}", e);
+            return None;
+        }
+    };
+    if !session.client_ids.iter().any(|linked| linked == client_id) {
+        return None;
+    }
+
+    let subject = match etc::store::use_store().get::<Subject>(&sid).await {
+        Ok(Some(subject)) if subject.id == user_id => subject,
+        Ok(_) => return None,
+        Err(e) => {
+            error!("Failed to get OAuth subject from the session store: {}", e);
+            return None;
+        }
+    };
+
+    VerifiedIdentity::oauth(subject, sid, auth_time, claims.aud)
+}
+
+/// Verify a native session JWT or a user-delegated OAuth access token and bind
+/// it to the current subject loaded from trusted session state.
+pub async fn verify_bearer<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedIdentity> {
+    let token = req.get_token()?;
+
+    let jwt = etc::jwt::jwt_config();
+    if let Ok(claims) = jwt.validate_session_access_token(&token) {
+        return verify_session_claims(claims).await;
+    }
+
+    let claims = jwt.validate_oauth_access_token(&token, None).ok()?;
+    verify_oauth_claims(claims).await
 }
 
 #[cfg(test)]
@@ -257,6 +363,27 @@ mod tests {
         assert_eq!(identity.auth_kind(), AuthKind::ApiKey);
         assert_eq!(identity.session_id(), None);
         assert_eq!(identity.auth_time(), None);
+    }
+
+    #[test]
+    fn verified_oauth_identity_keeps_session_and_audience() {
+        let subject = Subject::new(
+            "01JZ000000000000000000000A".to_owned(),
+            SubjectType::User,
+            None,
+        );
+        let identity = VerifiedIdentity::oauth(
+            subject,
+            "01JZ000000000000000000000B".to_owned(),
+            1_784_473_000,
+            Some("gateway".to_owned()),
+        )
+        .unwrap();
+
+        assert_eq!(identity.auth_kind(), AuthKind::OAuth);
+        assert_eq!(identity.session_id(), Some("01JZ000000000000000000000B"));
+        assert_eq!(identity.auth_time(), Some(1_784_473_000));
+        assert_eq!(identity.oauth_audience(), Some("gateway"));
     }
 
     #[test]

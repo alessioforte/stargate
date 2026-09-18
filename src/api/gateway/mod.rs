@@ -48,7 +48,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
         let identity = async {
             match guard::verify_api_key(&auth_req).await {
                 Some(identity) => identity,
-                None => guard::verify_jwt(&auth_req)
+                None => guard::verify_bearer(&auth_req)
                     .await
                     .unwrap_or_else(guard::VerifiedIdentity::anonymous),
             }
@@ -62,6 +62,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             match auth_kind {
                 guard::AuthKind::ApiKey => "api_key",
                 guard::AuthKind::Jwt => "jwt",
+                guard::AuthKind::OAuth => "oauth",
                 guard::AuthKind::Anonymous => "anonymous",
             },
         );
@@ -120,8 +121,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             router,
             &gate,
             &mut req,
-            auth_kind,
-            sub,
+            &identity,
             &client_ip,
             &mut response_headers,
         )

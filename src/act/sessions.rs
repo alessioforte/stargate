@@ -670,6 +670,23 @@ mod index_tests {
     }
 
     #[tokio::test]
+    async fn oauth_client_is_linked_to_active_user_session() {
+        let user = unique("user");
+        let sid = unique("sid");
+        seed_session(&user, &sid, None).await;
+
+        assert!(
+            register_session_client(&sid, &user, "beehive")
+                .await
+                .unwrap()
+        );
+        let record = get_active_session(&sid, &user).await.unwrap().unwrap();
+        assert_eq!(record.client_ids, ["beehive"]);
+
+        revoke_session(&sid).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn first_refresh_safely_initializes_legacy_rotation_state() {
         let sid = unique("sid");
 

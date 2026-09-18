@@ -132,6 +132,7 @@ pub enum MiddlewareNode {
 pub enum PolicyNode {
     Auth {
         strategies: Vec<AuthStrategy>,
+        audience: Option<String>,
     },
     AccessControl {
         resource: String,
