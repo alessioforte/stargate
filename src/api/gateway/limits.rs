@@ -59,7 +59,7 @@ pub async fn apply_limits(
     headers: &mut HeaderMap,
     policies: SelectedLimitPolicies,
 ) -> Result<(), ErrorResponse> {
-    let limiter = gate.limiter.load();
+    let limiter = gate.limiter.load_full();
     let org_id = subject.and_then(|subject| subject.org_id.as_deref());
 
     // One cached lookup per request, only when a route actually carries

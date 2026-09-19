@@ -12,7 +12,7 @@ pub async fn rate_limit_middleware(req: Request, next: Next) -> Response {
         .cloned()
         .expect("Gate extension must be set");
 
-    let limiter = gate.limiter.load();
+    let limiter = gate.limiter.load_full();
     let client_ip = req.get_client_ip();
 
     let mut key = String::with_capacity(4 + client_ip.len());
