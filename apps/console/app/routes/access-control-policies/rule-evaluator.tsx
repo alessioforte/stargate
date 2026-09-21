@@ -6,7 +6,6 @@ import {
   Group,
   Select,
   SimpleGrid,
-  Stack,
   Text,
   TextInput,
   Title,
@@ -108,105 +107,109 @@ const RuleEvaluator: React.FC<Props> = ({
 
   return (
     <form onSubmit={form.onSubmit(handleSubmit)}>
-      <Stack gap="sm">
-        <Box p="xs">
-          <Group justify="space-between">
-            <Title order={5}>{t("ruleEvaluator")}</Title>
-            <Button
-              type="submit"
-              leftSection={<LuTestTube />}
-              loading={loading}
-              size="compact-sm"
-            >
-              {t("evaluate")}
-            </Button>
-          </Group>
-
-          {error && (
-            <Alert color="red" variant="light">
-              {error}
-            </Alert>
-          )}
-          <Group justify="space-between" h={60}>
-            <Group style={{ flex: 1 }} grow>
-              {result && (
-                <SimpleGrid cols={{ base: 1, sm: 4 }} spacing="sm">
-                  <Box>
-                    <Text size="xs" c="dimmed">
-                      {t("allowCount")}
-                    </Text>
-                    <Text fw={700}>{result.allowCount}</Text>
-                  </Box>
-                  <Box>
-                    <Text size="xs" c="dimmed">
-                      {t("denyCount")}
-                    </Text>
-                    <Text fw={700}>{result.denyCount}</Text>
-                  </Box>
-                  <Box>
-                    <Text size="xs" c="dimmed">
-                      {t("matchedPolicies")}
-                    </Text>
-                    <Text fw={700}>
-                      {result.matchedPolicies.join(", ") || "-"}
-                    </Text>
-                  </Box>
-                  <Box>
-                    <Text size="xs" c="dimmed">
-                      {t("appliedPolicies")}
-                    </Text>
-                    <Text fw={700}>
-                      {result.appliedPolicies.join(", ") || "-"}
-                    </Text>
-                  </Box>
-                </SimpleGrid>
-              )}
-            </Group>
-            {result && (
-              <Badge
-                color={result.allowed ? "teal" : "red"}
-                leftSection={result.allowed ? <GoShieldCheck /> : <GoShieldX />}
-              >
-                {result.allowed ? t("allowed") : t("denied")}
-              </Badge>
-            )}
-          </Group>
-
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="xs">
-            <TextInput
-              withAsterisk
-              label={t("subject")}
-              {...form.getInputProps("subject")}
-            />
-            <TextInput
-              withAsterisk
-              label={t("resource")}
-              {...form.getInputProps("resource")}
-            />
-            <Select
-              clearable
-              label={t("action")}
-              data={actionOptions}
-              value={form.values.action || null}
-              onChange={(value) =>
-                form.setFieldValue(
-                  "action",
-                  (value as AccessControlResourceAction | null) ?? "",
-                )
-              }
-            />
-          </SimpleGrid>
-        </Box>
-        <Box px="xs">
-          <Text size="sm" fw={700}>
-            {t("contextJson")}
+      <Group p="xs" justify="space-between">
+        <Box>
+          <Title order={5}>{t("ruleEvaluator")}</Title>
+          <Text size="sm" c="dimmed">
+            {t("ruleEvaluatorHint")}
           </Text>
         </Box>
-        <CodeBox
-          value={form.values.context}
-          onChange={(value) => form.setFieldValue("context", value)}
+        <Button
+          type="submit"
+          leftSection={<LuTestTube />}
+          loading={loading}
+          size="compact-sm"
+        >
+          {t("evaluate")}
+        </Button>
+      </Group>
+
+      {error && (
+        <Alert color="red" variant="light">
+          {error}
+        </Alert>
+      )}
+
+      <SimpleGrid p="xs" cols={{ base: 1, sm: 3 }} spacing="xs">
+        <TextInput
+          withAsterisk
+          label={t("subject")}
+          {...form.getInputProps("subject")}
         />
-      </Stack>
+        <TextInput
+          withAsterisk
+          label={t("resource")}
+          {...form.getInputProps("resource")}
+        />
+        <Select
+          clearable
+          label={t("action")}
+          data={actionOptions}
+          value={form.values.action || null}
+          onChange={(value) =>
+            form.setFieldValue(
+              "action",
+              (value as AccessControlResourceAction | null) ?? "",
+            )
+          }
+        />
+      </SimpleGrid>
+
+      <Group mt="xl" p="xs" justify="space-between">
+        <Text size="sm" fw={700}>
+          {t("contextJson")}
+        </Text>
+        {form.errors.context && (
+          <Text size="xs" c="red">
+            {form.errors.context}
+          </Text>
+        )}
+      </Group>
+      <CodeBox
+        value={form.values.context}
+        onChange={(value) => form.setFieldValue("context", value)}
+      />
+
+      <Group mt="xl" px="xs" justify="space-between" h={60}>
+        <Group style={{ flex: 1 }} grow>
+          {result && (
+            <SimpleGrid cols={{ base: 1, sm: 4 }} spacing="sm">
+              <Box>
+                <Text size="xs" c="dimmed">
+                  {t("allowCount")}
+                </Text>
+                <Text fw={700}>{result.allowCount}</Text>
+              </Box>
+              <Box>
+                <Text size="xs" c="dimmed">
+                  {t("denyCount")}
+                </Text>
+                <Text fw={700}>{result.denyCount}</Text>
+              </Box>
+              <Box>
+                <Text size="xs" c="dimmed">
+                  {t("matchedPolicies")}
+                </Text>
+                <Text fw={700}>{result.matchedPolicies.join(", ") || "-"}</Text>
+              </Box>
+              <Box>
+                <Text size="xs" c="dimmed">
+                  {t("appliedPolicies")}
+                </Text>
+                <Text fw={700}>{result.appliedPolicies.join(", ") || "-"}</Text>
+              </Box>
+            </SimpleGrid>
+          )}
+        </Group>
+        {result && (
+          <Badge
+            color={result.allowed ? "teal" : "red"}
+            leftSection={result.allowed ? <GoShieldCheck /> : <GoShieldX />}
+          >
+            {result.allowed ? t("allowed") : t("denied")}
+          </Badge>
+        )}
+      </Group>
     </form>
   );
 };

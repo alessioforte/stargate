@@ -5,9 +5,11 @@ import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 import type {
   AccessControlRule,
+  EvaluateAccessControlCapabilitiesRequest,
   EvaluateAccessControlRequest,
 } from "@/services/types";
 import AccessControlToolbar from "./access-control-toolbar";
+import CapabilityEvaluator from "./capability-evaluator";
 import { accessControlRuleColumns } from "./columns";
 import DocumentEditor from "./document-editor";
 import RuleEvaluator from "./rule-evaluator";
@@ -20,10 +22,12 @@ const AccessControlPolicies = () => {
     accessControlRules,
     accessControlValidation,
     accessControlEvaluation,
+    accessControlCapabilitiesEvaluation,
     getAccessControlRules,
     updateAccessControlRules,
     validateAccessControlRules,
     evaluateAccessControlRules,
+    evaluateAccessControlCapabilities,
   } = useStore();
 
   const saved = accessControlRules.data ?? null;
@@ -113,6 +117,12 @@ const AccessControlPolicies = () => {
     return evaluateAccessControlRules(request);
   };
 
+  const handleEvaluateCapabilities = async (
+    request: EvaluateAccessControlCapabilitiesRequest,
+  ) => {
+    return evaluateAccessControlCapabilities(request);
+  };
+
   return (
     <Box>
       {confirmModal}
@@ -150,6 +160,7 @@ const AccessControlPolicies = () => {
             </Tabs.Tab>
             <Tabs.Tab value="document">{t("document")}</Tabs.Tab>
             <Tabs.Tab value="evaluator">{t("evaluator")}</Tabs.Tab>
+            <Tabs.Tab value="capabilities">{t("capabilities")}</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="list">
@@ -192,6 +203,23 @@ const AccessControlPolicies = () => {
               loading={accessControlEvaluation.isLoading()}
               result={accessControlEvaluation.data}
               onEvaluate={handleEvaluate}
+            />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="capabilities">
+            <CapabilityEvaluator
+              error={
+                accessControlCapabilitiesEvaluation.isError()
+                  ? accessControlCapabilitiesEvaluation.message
+                  : undefined
+              }
+              loading={accessControlCapabilitiesEvaluation.isLoading()}
+              result={
+                accessControlCapabilitiesEvaluation.isSuccess()
+                  ? accessControlCapabilitiesEvaluation.data
+                  : null
+              }
+              onEvaluate={handleEvaluateCapabilities}
             />
           </Tabs.Panel>
         </Tabs>

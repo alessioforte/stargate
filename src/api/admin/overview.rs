@@ -113,6 +113,7 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
         .await
         .map_err(ErrorResponse::internal)?;
     let graph = gate.http_graph.load();
+    let policies = gate.policy_snapshot.load();
 
     Ok(Json(AdminOverview {
         generated_at: Utc::now().to_rfc3339(),
@@ -149,7 +150,7 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
         },
         gateway: GatewayOverview {
             config_version: crate::etc::gate::get_config_version(),
-            policy_revision: crate::etc::gate::get_policy_revision(),
+            policy_revision: Some(policies.revision.clone()),
             routers: graph.routers.len(),
             services: graph.services.len(),
             upstreams: graph.upstreams.len(),

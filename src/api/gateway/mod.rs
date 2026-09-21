@@ -116,10 +116,13 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             HeaderValue::from_str(&request_id).unwrap(),
         );
 
+        let policies = gate.policy_snapshot.load_full();
         apply_policies(
             &graph,
             router,
             &gate,
+            &policies.engine,
+            &policies.revision,
             &mut req,
             &identity,
             &client_ip,
@@ -141,7 +144,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 &state.original_path,
                 &router.name,
                 &router.service,
-                crate::etc::gate::get_policy_revision(),
+                Some(policies.revision.clone()),
             ) {
                 Ok(draft) => {
                     telemetry::record_propagation_draft("created", draft.actor_label());

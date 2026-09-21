@@ -238,6 +238,38 @@ export interface EvaluateAccessControlResponse {
   matchedPolicies: number[];
 }
 
+export type AccessControlSubjectType = "user" | "api_key";
+
+export interface AccessControlCapabilityEnvironment {
+  cityName?: string;
+  countryCode?: string;
+  countryName?: string;
+  date?: string;
+  dayOfWeek?: string;
+  ipAddress?: string;
+  time?: string;
+  userAgent?: string;
+}
+
+export interface EvaluateAccessControlCapabilitiesRequest {
+  attrs?: { [key: string]: JsonValue };
+  env?: AccessControlCapabilityEnvironment;
+  orgId?: string;
+  orgRole?: string;
+  subject: AccessControlSubjectType;
+}
+
+export interface AccessControlCapability {
+  actions: Exclude<AccessControlResourceAction, "*" | "ANY">[];
+  resource: string;
+  unscopedAllowed: boolean;
+}
+
+export interface EvaluateAccessControlCapabilitiesResponse {
+  capabilities: AccessControlCapability[];
+  revision: string;
+}
+
 export const AdminKeyPermission = {
   UsersRead: "users:read",
   UsersCreate: "users:create",

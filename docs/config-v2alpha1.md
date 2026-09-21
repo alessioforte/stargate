@@ -593,6 +593,67 @@ The admin rule APIs manage this file directly:
 - `PUT /admin/access-control/rules`
 - `POST /admin/access-control/rules/validate`
 - `POST /admin/access-control/rules/evaluate`
+- `POST /admin/access-control/capabilities/evaluate`
+
+The capability evaluator answers which ACE capabilities a hypothetical actor
+has under supplied attributes and request context. It enumerates only resource
+names declared in the active in-memory snapshot compiled from the ACE policy
+file; it does not inspect or intersect gateway routers, services, or
+access-control policy references. The console exposes it under **Access Control
+Policies → Capabilities**.
+
+```json
+{
+  "subject": "user",
+  "attrs": {
+    "role": "analyst",
+    "department": "finance"
+  },
+  "orgId": "01J...",
+  "orgRole": "member",
+  "env": {
+    "countryCode": "IT",
+    "ipAddress": "203.0.113.10",
+    "date": "2026-09-20",
+    "time": "14:30:00"
+  }
+}
+```
+
+Top-level attributes are exposed under the subject namespace (`user.role` or
+`api_key.role`). Organization fields are applied after attributes, so an
+attribute cannot spoof `user.org_id`, `user.org_role`, or `api_key.org_id`.
+Environment fields use the same `env.*` names and date/time normalization as
+gateway evaluation.
+
+The response groups allowed concrete actions by resource and separately reports
+whether action-less evaluation is allowed:
+
+```json
+{
+  "revision": "sha256:...",
+  "capabilities": [
+    {
+      "resource": "financial_reports",
+      "unscopedAllowed": false,
+      "actions": ["READ"]
+    }
+  ]
+}
+```
+
+Resources with no allowed action and no action-less grant are omitted. Results
+use ACE's normal default-deny and explicit-deny precedence. The revision hashes
+the exact policy document used for the evaluation. This endpoint is a policy
+simulation from caller-supplied attributes; it does not load or verify a
+persisted user or API key.
+
+Both evaluation endpoints use the same immutable in-memory policy snapshot as
+gateway authorization. They do not read or parse the policy file per request.
+The snapshot atomically pairs the parsed engine with its revision, so an
+evaluation and the revision returned or propagated for it cannot come from
+different reloads. File changes are strictly parsed before activation; an
+invalid document leaves the previous snapshot active.
 
 `PUT` requires the current `sha256:*` revision returned by `GET`, validates the
 whole document strictly, writes the file atomically, and reloads the live ACE

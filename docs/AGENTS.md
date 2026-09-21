@@ -268,8 +268,16 @@ separately from `config.yaml`:
   engine immediately.
 - `POST /admin/access-control/rules/validate` validates proposed rule content
   without saving.
-- `POST /admin/access-control/rules/evaluate` evaluates the current rule file
-  against a supplied subject/resource/action/context.
+- `POST /admin/access-control/rules/evaluate` evaluates the active in-memory
+  policy snapshot against a supplied subject/resource/action/context.
+- `POST /admin/access-control/capabilities/evaluate` enumerates resource/action
+  capabilities declared in that snapshot for supplied actor attributes,
+  organization context, and environment. It does not inspect gateway routes.
+
+The gateway and both admin evaluation endpoints share one atomically swapped
+snapshot containing the `PolicyEngine` and its `sha256:*` revision. Evaluation
+requests do not read the policy file. Reloads strictly parse the complete
+document and keep the prior snapshot active on failure.
 
 ACE rule metadata can be stored in comments immediately above a rule, for
 example `# @id reports-read-admin`; the ACE parser ignores these comments.

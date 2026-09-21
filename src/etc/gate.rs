@@ -4,7 +4,6 @@ use gate::{
     cfg::{RuntimeConfig, Service},
 };
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     env,
@@ -67,9 +66,10 @@ pub fn init() -> std::sync::Arc<Gate> {
     let config = get_config();
     let config_file_path = get_config_path();
     let policies_path = get_policies_path();
-    refresh_policy_revision(&policies_path);
+    let policies = crate::act::access_control_rules::load_policy_snapshot(&policies_path)
+        .expect("Unable to load access-control policies");
 
-    let gate = Gate::new(Arc::new(store.clone())).build(config.as_ref(), &policies_path);
+    let gate = Gate::new(Arc::new(store.clone())).build(config.as_ref(), policies);
     watch_config_file(&config_file_path, &gate);
     watch_policies_file(&policies_path, &gate);
     Arc::new(gate)
@@ -77,7 +77,6 @@ pub fn init() -> std::sync::Arc<Gate> {
 
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 static CONFIG_CACHE: OnceLock<RwLock<CachedConfig>> = OnceLock::new();
-static POLICY_REVISION: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct CachedConfig {
@@ -253,7 +252,10 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
                         last_content = current_content;
 
                         info!("Policies file changed, reloading...");
-                        reload_policy_engine_from_path(&gate, &file_path).await;
+                        if let Err(error) = reload_policy_engine_from_path(&gate, &file_path) {
+                            telemetry::record_config_reload("policies", "error");
+                            error!(%error, "Policy file changed but did not validate; keeping previous policies");
+                        }
                     }
                     Err(e) => {
                         telemetry::record_config_reload("policies", "error");
@@ -269,34 +271,24 @@ pub fn get_config_version() -> u64 {
     CONFIG_VERSION.load(Ordering::SeqCst)
 }
 
-pub fn get_policy_revision() -> Option<String> {
-    POLICY_REVISION
-        .get()
-        .and_then(|revision| revision.read().ok()?.clone())
-}
-
-fn refresh_policy_revision(path: &str) {
-    let revision = std::fs::read(path)
-        .ok()
-        .map(|content| policy_revision(&content));
-    let cache = POLICY_REVISION.get_or_init(|| RwLock::new(None));
-    *cache.write().expect("Policy revision lock poisoned") = revision;
-}
-
-fn policy_revision(content: &[u8]) -> String {
-    format!("sha256:{}", hex::encode(Sha256::digest(content)))
-}
-
-pub async fn reload_policy_engine(gate: &Gate) {
+pub fn reload_policy_engine(gate: &Gate) -> Result<(), crate::err::ErrorResponse> {
     let policies_path = get_policies_path();
-    reload_policy_engine_from_path(gate, &policies_path).await;
+    reload_policy_engine_from_path(gate, &policies_path).map(|_| ())
 }
 
-async fn reload_policy_engine_from_path(gate: &Gate, policies_path: &str) {
+fn reload_policy_engine_from_path(
+    gate: &Gate,
+    policies_path: &str,
+) -> Result<bool, crate::err::ErrorResponse> {
+    let policies = crate::act::access_control_rules::load_policy_snapshot(policies_path)?;
+    if gate.policy_snapshot.load().revision == policies.revision {
+        return Ok(false);
+    }
+
+    gate.update_policy_snapshot(policies);
     CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-    gate.update_policy_engine(policies_path).await;
-    refresh_policy_revision(policies_path);
     telemetry::record_config_reload("policies", "success");
+    Ok(true)
 }
 
 type HyperConnector = hyper_rustls::HttpsConnector<HttpConnector>;
@@ -449,14 +441,37 @@ fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::policy_revision;
+    use super::reload_policy_engine_from_path;
+    use gate::Gate;
+    use std::{fs, sync::Arc};
+
+    fn policy_path() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "stargate-policy-reload-{}-{}",
+            std::process::id(),
+            ulid::Ulid::generate()
+        ))
+    }
 
     #[test]
-    fn policy_revision_is_a_bounded_content_hash() {
-        assert_eq!(
-            policy_revision(b""),
-            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-        assert_eq!(policy_revision(b"ALLOW user FOR \"orders\";").len(), 71);
+    fn invalid_policy_reload_keeps_the_active_snapshot() {
+        let path = policy_path();
+        let path_str = path.to_str().unwrap();
+        let gate = Gate::new(Arc::new(lim::State::new()));
+
+        fs::write(&path, "ALLOW user FOR \"reports:READ\";").unwrap();
+        assert!(reload_policy_engine_from_path(&gate, path_str).unwrap());
+        let initial_revision = gate.policy_snapshot.load().revision.clone();
+        assert!(!reload_policy_engine_from_path(&gate, path_str).unwrap());
+
+        fs::write(&path, "ALLOW user WHEN invalid;").unwrap();
+        assert!(reload_policy_engine_from_path(&gate, path_str).is_err());
+        assert_eq!(gate.policy_snapshot.load().revision, initial_revision);
+
+        fs::write(&path, "ALLOW user FOR \"dashboard\";").unwrap();
+        assert!(reload_policy_engine_from_path(&gate, path_str).unwrap());
+        assert_ne!(gate.policy_snapshot.load().revision, initial_revision);
+
+        fs::remove_file(path).unwrap();
     }
 }

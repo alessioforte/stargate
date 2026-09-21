@@ -114,6 +114,7 @@ use utoipa::OpenApi;
         crate::api::admin::access_control_rules::update_access_control_rules,
         crate::api::admin::access_control_rules::validate_access_control_rules,
         crate::api::admin::access_control_rules::evaluate_access_control_rules,
+        crate::api::admin::access_control_rules::evaluate_access_control_capabilities,
     ),
     info(
         title = "Stargate APIs ✨",
@@ -406,6 +407,7 @@ mod tests {
         assert!(json["paths"]["/admin/access-control/rules"].is_object());
         assert!(json["paths"]["/admin/access-control/rules/validate"].is_object());
         assert!(json["paths"]["/admin/access-control/rules/evaluate"].is_object());
+        assert!(json["paths"]["/admin/access-control/capabilities/evaluate"].is_object());
 
         let permission_values = json["components"]["schemas"]["Permission"]["enum"]
             .as_array()
@@ -583,6 +585,19 @@ mod tests {
     #[tokio::test]
     async fn admin_access_control_rules_missing_grant_forbidden() {
         let resp = send("/admin/access-control/rules").await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_access_control_capabilities_missing_grant_forbidden() {
+        let resp = send_req(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/admin/access-control/capabilities/evaluate")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

@@ -1,9 +1,16 @@
-use crate::err::{ErrorCode, ErrorResponse};
+use crate::{
+    err::{ErrorCode, ErrorResponse},
+    etc::{
+        ac::{Env, create_context},
+        sub::{Subject, SubjectType},
+    },
+};
 use ace::{Policy, PolicyAction, PolicyEngine, ResourceAction};
+use gate::PolicySnapshot;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -85,6 +92,98 @@ pub struct EvaluateAccessControlResponse {
     pub deny_count: usize,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccessControlCapabilityEnvironment {
+    #[serde(default)]
+    pub ip_address: String,
+    #[serde(default)]
+    pub user_agent: String,
+    #[serde(default)]
+    pub country_code: String,
+    #[serde(default)]
+    pub country_name: String,
+    #[serde(default)]
+    pub city_name: String,
+    #[serde(default)]
+    pub date: String,
+    #[serde(default)]
+    pub time: String,
+    #[serde(default)]
+    pub day_of_week: String,
+}
+
+impl From<AccessControlCapabilityEnvironment> for Env {
+    fn from(value: AccessControlCapabilityEnvironment) -> Self {
+        Self {
+            ip_address: value.ip_address.into(),
+            user_agent: value.user_agent.into(),
+            country_code: value.country_code.into(),
+            country_name: value.country_name.into(),
+            city_name: value.city_name.into(),
+            date: value.date.into(),
+            time: value.time.into(),
+            day_of_week: value.day_of_week.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvaluateAccessControlCapabilitiesRequest {
+    pub subject: SubjectType,
+    #[serde(default)]
+    pub attrs: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub org_id: Option<String>,
+    #[serde(default)]
+    pub org_role: Option<String>,
+    #[serde(default)]
+    pub env: AccessControlCapabilityEnvironment,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum AccessControlCapabilityAction {
+    Read,
+    Write,
+    Delete,
+    Create,
+    Update,
+    Execute,
+    Admin,
+}
+
+impl AccessControlCapabilityAction {
+    fn from_concrete(action: ResourceAction) -> Self {
+        match action {
+            ResourceAction::Read => Self::Read,
+            ResourceAction::Write => Self::Write,
+            ResourceAction::Delete => Self::Delete,
+            ResourceAction::Create => Self::Create,
+            ResourceAction::Update => Self::Update,
+            ResourceAction::Execute => Self::Execute,
+            ResourceAction::Admin => Self::Admin,
+            ResourceAction::Any => unreachable!("ANY is not a concrete capability action"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessControlCapability {
+    pub resource: String,
+    pub unscoped_allowed: bool,
+    pub actions: Vec<AccessControlCapabilityAction>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EvaluateAccessControlCapabilitiesResponse {
+    pub revision: String,
+    pub capabilities: Vec<AccessControlCapability>,
+}
+
 #[derive(Default)]
 struct PendingMetadata {
     id: Option<String>,
@@ -163,22 +262,8 @@ pub fn update_rules(
 
 pub fn evaluate_rules(
     request: EvaluateAccessControlRequest,
+    engine: &PolicyEngine,
 ) -> Result<EvaluateAccessControlResponse, ErrorResponse> {
-    let path = crate::etc::gate::get_policies_path();
-    let content = read_policy_file(&path)?;
-    let parsed = parse_policy_document(&content);
-    if !parsed.diagnostics.is_empty() {
-        return Err(
-            ErrorResponse::new(ErrorCode::AccessControlEvaluationUnavailable)
-                .with_param("diagnostics", format_diagnostics(&parsed.diagnostics)),
-        );
-    }
-
-    let mut engine = PolicyEngine::new();
-    for rule in parsed.rules {
-        engine.add_policy(rule.policy);
-    }
-
     let (resource, action_from_resource) = split_resource_action(&request.resource)?;
     let action = resolve_requested_action(request.action.as_deref(), action_from_resource)?;
     let context = request
@@ -201,6 +286,76 @@ pub fn evaluate_rules(
         allow_count: result.allow_count,
         deny_count: result.deny_count,
     })
+}
+
+pub fn evaluate_capabilities(
+    request: EvaluateAccessControlCapabilitiesRequest,
+    snapshot: &PolicySnapshot,
+) -> EvaluateAccessControlCapabilitiesResponse {
+    evaluate_capabilities_with_engine(request, &snapshot.engine, snapshot.revision.clone())
+}
+
+fn evaluate_capabilities_with_engine(
+    request: EvaluateAccessControlCapabilitiesRequest,
+    engine: &PolicyEngine,
+    revision: String,
+) -> EvaluateAccessControlCapabilitiesResponse {
+    let subject_type = request.subject.as_str().to_string();
+    let resources = engine
+        .get_policies()
+        .iter()
+        .filter(|policy| policy.subject == subject_type)
+        .map(|policy| policy.resource.clone())
+        .collect::<BTreeSet<_>>();
+
+    let attrs = request.attrs.into_iter().collect::<serde_json::Map<_, _>>();
+    let mut subject = Subject::new(
+        "access-control-capability-evaluation".to_string(),
+        request.subject,
+        Some(serde_json::Value::Object(attrs)),
+    );
+    subject.org_id = request.org_id;
+    subject.org_role = request.org_role;
+    let context = create_context(&subject, &request.env.into());
+
+    let capabilities = resources
+        .into_iter()
+        .filter_map(|resource| {
+            let unscoped_allowed = engine.evaluate(&subject_type, &resource, &context);
+            let actions = ResourceAction::CONCRETE
+                .into_iter()
+                .filter(|action| {
+                    engine.evaluate_with_action(&subject_type, &resource, action, &context)
+                })
+                .map(AccessControlCapabilityAction::from_concrete)
+                .collect::<Vec<_>>();
+
+            (unscoped_allowed || !actions.is_empty()).then_some(AccessControlCapability {
+                resource,
+                unscoped_allowed,
+                actions,
+            })
+        })
+        .collect();
+
+    EvaluateAccessControlCapabilitiesResponse {
+        revision,
+        capabilities,
+    }
+}
+
+pub(crate) fn load_policy_snapshot(path: &str) -> Result<PolicySnapshot, ErrorResponse> {
+    let content = read_policy_file(path)?;
+    compile_policy_snapshot(&content)
+}
+
+fn compile_policy_snapshot(content: &str) -> Result<PolicySnapshot, ErrorResponse> {
+    let parsed = parse_evaluable_document(content)?;
+    let mut engine = PolicyEngine::new();
+    for rule in parsed.rules {
+        engine.add_policy(rule.policy);
+    }
+    Ok(PolicySnapshot::new(engine, revision_for(content)))
 }
 
 fn read_policy_file(path: &str) -> Result<String, ErrorResponse> {
@@ -256,6 +411,18 @@ fn parse_policy_document(content: &str) -> ParsedDocument {
     }
 
     ParsedDocument { rules, diagnostics }
+}
+
+fn parse_evaluable_document(content: &str) -> Result<ParsedDocument, ErrorResponse> {
+    let parsed = parse_policy_document(content);
+    if parsed.diagnostics.is_empty() {
+        return Ok(parsed);
+    }
+
+    Err(
+        ErrorResponse::new(ErrorCode::AccessControlEvaluationUnavailable)
+            .with_param("diagnostics", format_diagnostics(&parsed.diagnostics)),
+    )
 }
 
 fn apply_metadata_comment(
@@ -417,6 +584,30 @@ fn temp_path_for(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn capability_request(attrs: serde_json::Value) -> EvaluateAccessControlCapabilitiesRequest {
+        EvaluateAccessControlCapabilitiesRequest {
+            subject: SubjectType::User,
+            attrs: attrs
+                .as_object()
+                .expect("test attributes are an object")
+                .clone()
+                .into_iter()
+                .collect(),
+            org_id: None,
+            org_role: None,
+            env: AccessControlCapabilityEnvironment::default(),
+        }
+    }
+
+    fn evaluate_capability_document(
+        request: EvaluateAccessControlCapabilitiesRequest,
+        content: &str,
+    ) -> Result<EvaluateAccessControlCapabilitiesResponse, ErrorResponse> {
+        let snapshot = compile_policy_snapshot(content)?;
+        Ok(evaluate_capabilities(request, &snapshot))
+    }
 
     #[test]
     fn parses_policy_metadata_and_statement() {
@@ -480,5 +671,116 @@ ALLOW user FOR "reports";
         let err = resolve_requested_action(Some("WRITE"), Some(ResourceAction::Read)).unwrap_err();
 
         assert_eq!(err.status, http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn single_resource_evaluation_uses_the_compiled_snapshot() {
+        let snapshot = compile_policy_snapshot(
+            r#"ALLOW user FOR "reports:READ" WHEN user.role == "analyst";"#,
+        )
+        .unwrap();
+        let response = evaluate_rules(
+            EvaluateAccessControlRequest {
+                subject: "user".to_string(),
+                resource: "reports".to_string(),
+                action: Some("READ".to_string()),
+                context: HashMap::from([("user.role".to_string(), json!("analyst"))]),
+            },
+            &snapshot.engine,
+        )
+        .unwrap();
+
+        assert!(response.allowed);
+        assert_eq!(response.allow_count, 1);
+    }
+
+    #[test]
+    fn evaluates_declared_capabilities_with_action_and_deny_semantics() {
+        let content = r#"
+ALLOW user FOR "dashboard" WHEN user.role == "analyst";
+ALLOW user FOR "reports:READ" WHEN user.role == "analyst";
+ALLOW user FOR "reports:DELETE" WHEN user.role == "analyst";
+DENY user FOR "reports:DELETE" WHEN user.suspended == true;
+DENY user FOR "hidden:READ";
+ALLOW api_key FOR "ingest:WRITE";
+"#;
+
+        let response = evaluate_capability_document(
+            capability_request(json!({ "role": "analyst", "suspended": true })),
+            content,
+        )
+        .unwrap();
+
+        assert!(response.revision.starts_with("sha256:"));
+        assert_eq!(response.capabilities.len(), 2);
+
+        let dashboard = &response.capabilities[0];
+        assert_eq!(dashboard.resource, "dashboard");
+        assert!(dashboard.unscoped_allowed);
+        assert_eq!(
+            dashboard.actions,
+            vec![
+                AccessControlCapabilityAction::Read,
+                AccessControlCapabilityAction::Write,
+                AccessControlCapabilityAction::Delete,
+                AccessControlCapabilityAction::Create,
+                AccessControlCapabilityAction::Update,
+                AccessControlCapabilityAction::Execute,
+                AccessControlCapabilityAction::Admin,
+            ]
+        );
+
+        let reports = &response.capabilities[1];
+        assert_eq!(reports.resource, "reports");
+        assert!(!reports.unscoped_allowed);
+        assert_eq!(reports.actions, vec![AccessControlCapabilityAction::Read]);
+    }
+
+    #[test]
+    fn trusted_organization_context_overrides_spoofed_attributes() {
+        let content = r#"
+ALLOW user FOR "real-org:READ" WHEN user.org_id == "org_real";
+ALLOW user FOR "spoofed-org:READ" WHEN user.org_id == "org_spoofed";
+"#;
+        let mut request = capability_request(json!({ "org_id": "org_spoofed" }));
+        request.org_id = Some("org_real".to_string());
+
+        let response = evaluate_capability_document(request, content).unwrap();
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert_eq!(response.capabilities[0].resource, "real-org");
+        assert_eq!(
+            response.capabilities[0].actions,
+            vec![AccessControlCapabilityAction::Read]
+        );
+    }
+
+    #[test]
+    fn capability_environment_uses_gateway_context_names_and_types() {
+        let content = r#"
+ALLOW user FOR "office:READ" WHEN env.country_code == "IT" AND env.time >= "09:00";
+"#;
+        let mut request = capability_request(json!({}));
+        request.env.country_code = "IT".to_string();
+        request.env.time = "10:30".to_string();
+
+        let response = evaluate_capability_document(request, content).unwrap();
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert_eq!(response.capabilities[0].resource, "office");
+        assert_eq!(
+            response.capabilities[0].actions,
+            vec![AccessControlCapabilityAction::Read]
+        );
+    }
+
+    #[test]
+    fn invalid_policy_document_cannot_be_enumerated() {
+        let error =
+            evaluate_capability_document(capability_request(json!({})), "ALLOW user WHEN invalid;")
+                .unwrap_err();
+
+        assert_eq!(error.status, http::StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, ErrorCode::AccessControlEvaluationUnavailable);
     }
 }

@@ -25,6 +25,8 @@ import type {
   CreateUserInvitationRequest,
   EvaluateAccessControlRequest,
   EvaluateAccessControlResponse,
+  EvaluateAccessControlCapabilitiesRequest,
+  EvaluateAccessControlCapabilitiesResponse,
   List,
   ListAdminSessionsQuery,
   ListOutboxEventsQuery,
@@ -169,6 +171,16 @@ export default class AdminApiService {
   async evaluateAccessControlRules(body: EvaluateAccessControlRequest) {
     return this.request<EvaluateAccessControlResponse>({
       url: this.url("/access-control/rules/evaluate"),
+      method: "POST",
+      data: body,
+    });
+  }
+
+  async evaluateAccessControlCapabilities(
+    body: EvaluateAccessControlCapabilitiesRequest,
+  ) {
+    return this.request<EvaluateAccessControlCapabilitiesResponse>({
+      url: this.url("/access-control/capabilities/evaluate"),
       method: "POST",
       data: body,
     });

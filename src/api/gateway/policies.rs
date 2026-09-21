@@ -19,6 +19,8 @@ pub async fn apply_policies(
     graph: &HttpGraph,
     router: &RouterNode,
     gate: &Arc<Gate>,
+    policy_engine: &ace::PolicyEngine,
+    policy_revision: &str,
     req: &mut Request<Body>,
     identity: &VerifiedIdentity,
     client_ip: &str,
@@ -54,9 +56,9 @@ pub async fn apply_policies(
                 };
 
                 let profile = env.unwrap_or(EnvProfile::Geo);
-                let pe = gate.policy_engine.load();
                 let env = reqctx::build_env_from(req.extensions_mut(), profile);
-                let allowed = access_control(&pe, subject, &env, resource);
+                let allowed =
+                    access_control(policy_engine, policy_revision, subject, &env, resource);
 
                 if !allowed {
                     telemetry::record_gateway_policy("access_control", "denied");

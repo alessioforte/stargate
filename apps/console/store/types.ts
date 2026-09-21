@@ -41,6 +41,8 @@ import type {
   ValidateAccessControlRulesResponse,
   EvaluateAccessControlRequest,
   EvaluateAccessControlResponse,
+  EvaluateAccessControlCapabilitiesRequest,
+  EvaluateAccessControlCapabilitiesResponse,
 } from "@/services/types";
 
 export interface AppMessage {
@@ -97,6 +99,7 @@ export interface State {
   accessControlRules: StoreItem<AccessControlRulesResponse>;
   accessControlValidation: StoreItem<ValidateAccessControlRulesResponse>;
   accessControlEvaluation: StoreItem<EvaluateAccessControlResponse>;
+  accessControlCapabilitiesEvaluation: StoreItem<EvaluateAccessControlCapabilitiesResponse>;
   adminKeys: StoreItem<List<AdminKey>>;
   apiKeys: StoreItem<List<ApiKey>>;
   configuration: StoreItem<Configuration>;
@@ -159,6 +162,9 @@ export interface Actions {
   evaluateAccessControlRules: (
     request: EvaluateAccessControlRequest,
   ) => Promise<EvaluateAccessControlResponse | null>;
+  evaluateAccessControlCapabilities: (
+    request: EvaluateAccessControlCapabilitiesRequest,
+  ) => Promise<EvaluateAccessControlCapabilitiesResponse | null>;
 
   getOAuthClients: (query?: Query) => Promise<void>;
   createOAuthClient: (

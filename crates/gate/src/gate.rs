@@ -12,6 +12,27 @@ use tracing::{error, info};
 
 type DynLoadBalancer = Arc<dyn lb::LoadBalancer + Send + Sync>;
 
+pub struct PolicySnapshot {
+    pub engine: PolicyEngine,
+    pub revision: String,
+}
+
+impl PolicySnapshot {
+    pub fn new(engine: PolicyEngine, revision: String) -> Self {
+        Self { engine, revision }
+    }
+}
+
+impl Default for PolicySnapshot {
+    fn default() -> Self {
+        Self {
+            engine: PolicyEngine::new(),
+            revision: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Gate {
     store: Arc<lim::State>,
@@ -19,7 +40,7 @@ pub struct Gate {
     pub clock: Arc<lim::CachedClock>,
     pub http_graph: Arc<ArcSwap<HttpGraph>>,
     pub http_balancers: Arc<ArcSwap<HashMap<String, DynLoadBalancer>>>,
-    pub policy_engine: Arc<ArcSwap<PolicyEngine>>,
+    pub policy_snapshot: Arc<ArcSwap<PolicySnapshot>>,
     pub limiter: Arc<ArcSwap<lim::Limiter>>,
 }
 
@@ -28,7 +49,7 @@ impl Gate {
         let http_graph = Arc::new(ArcSwap::from_pointee(HttpGraph::default()));
         let http_balancers = Arc::new(ArcSwap::from_pointee(HashMap::new()));
         let liveness_probe = Arc::new(Mutex::new(lb::HealthCheck::new()));
-        let policy_engine = Arc::new(ArcSwap::from_pointee(PolicyEngine::new()));
+        let policy_snapshot = Arc::new(ArcSwap::from_pointee(PolicySnapshot::default()));
         let limiter = Arc::new(ArcSwap::from_pointee(lim::Limiter::new()));
         let clock = lim::CachedClock::new();
         Self {
@@ -37,14 +58,14 @@ impl Gate {
             http_graph,
             http_balancers,
             liveness_probe,
-            policy_engine,
+            policy_snapshot,
             limiter,
         }
     }
 
-    pub fn build(self, config: &RuntimeConfig, policies_path: &str) -> Self {
+    pub fn build(self, config: &RuntimeConfig, policies: PolicySnapshot) -> Self {
         self.build_service(config)
-            .build_policy_engine(policies_path)
+            .build_policy_snapshot(policies)
             .build_limiter(config.limits())
     }
 
@@ -54,9 +75,8 @@ impl Gate {
         self
     }
 
-    fn build_policy_engine(mut self, policies_path: &str) -> Self {
-        let pe = Self::load_policy_engine(policies_path);
-        self.policy_engine = Arc::new(ArcSwap::new(Arc::new(pe)));
+    fn build_policy_snapshot(mut self, policies: PolicySnapshot) -> Self {
+        self.policy_snapshot = Arc::new(ArcSwap::from_pointee(policies));
         self
     }
 
@@ -90,31 +110,15 @@ impl Gate {
         Ok(())
     }
 
-    pub async fn update_policy_engine(&self, policies_path: &str) {
-        let pe = Self::load_policy_engine(policies_path);
-        self.policy_engine.store(Arc::new(pe));
-        info!("Gate policy engine updated");
+    pub fn update_policy_snapshot(&self, policies: PolicySnapshot) {
+        self.policy_snapshot.store(Arc::new(policies));
+        info!("Gate policy snapshot updated");
     }
 
     pub async fn update_limiter(&mut self, limits: &[Limit]) {
         let limiter = Self::create_limiter(limits, &self.store, &self.clock);
         self.limiter.store(Arc::new(limiter));
         info!("Gate limiter updated");
-    }
-
-    fn load_policy_engine(policies_path: &str) -> PolicyEngine {
-        let mut pe = PolicyEngine::new();
-        let content = match std::fs::read_to_string(policies_path) {
-            Ok(c) => c,
-            Err(e) => {
-                error!("Unable to read policy file '{}': {}", policies_path, e);
-                return pe;
-            }
-        };
-        if let Err(e) = pe.parse_file(&content) {
-            error!("Unable to parse policy file '{}': {}", policies_path, e);
-        }
-        pe
     }
 
     fn create_limiter(
@@ -183,7 +187,7 @@ impl Gate {
 
 #[cfg(all(test, feature = "memory"))]
 mod tests {
-    use super::Gate;
+    use super::{Gate, PolicySnapshot};
     use crate::cfg::RuntimeConfig;
     use std::sync::Arc;
 
@@ -217,7 +221,7 @@ http:
         )
         .expect("v2 config should load");
 
-        let gate = Gate::new(Arc::new(lim::State::new())).build(&config, "/tmp/policies");
+        let gate = Gate::new(Arc::new(lim::State::new())).build(&config, PolicySnapshot::default());
         assert_eq!(gate.http_graph.load().routers.len(), 1);
         assert!(gate.http_balancers.load().contains_key("reports"));
     }

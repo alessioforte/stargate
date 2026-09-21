@@ -6,7 +6,7 @@ use std::str::FromStr;
 /// Session subject type
 ///
 /// Should be matched with the subject type in the access control system.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SubjectType {
     User,

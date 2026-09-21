@@ -54,6 +54,8 @@ import type {
   ValidateAccessControlRulesResponse,
   EvaluateAccessControlRequest,
   EvaluateAccessControlResponse,
+  EvaluateAccessControlCapabilitiesRequest,
+  EvaluateAccessControlCapabilitiesResponse,
 } from "@/services/types";
 import Service from "@/services";
 import { showNotification } from "@/components";
@@ -92,6 +94,8 @@ const initialState: State = {
     null,
   ),
   accessControlEvaluation: new StoreItem<EvaluateAccessControlResponse>(null),
+  accessControlCapabilitiesEvaluation:
+    new StoreItem<EvaluateAccessControlCapabilitiesResponse>(null),
   adminKeys: new StoreItem<List<AdminKey>>(null),
   apiKeys: new StoreItem<List<ApiKey>>(null),
   configuration: new StoreItem<Configuration>(null),
@@ -944,6 +948,32 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
 
     set({
       accessControlEvaluation: accessControlEvaluation.setSuccess(data),
+    });
+    return data;
+  },
+
+  evaluateAccessControlCapabilities: async (
+    request: EvaluateAccessControlCapabilitiesRequest,
+  ) => {
+    const evaluation = get().accessControlCapabilitiesEvaluation;
+    set({
+      accessControlCapabilitiesEvaluation: evaluation.setLoading(),
+    });
+
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      Service.admin.evaluateAccessControlCapabilities(request),
+    );
+
+    if (error) {
+      set({
+        accessControlCapabilitiesEvaluation: evaluation.setError(message),
+      });
+      return null;
+    }
+
+    set({
+      accessControlCapabilitiesEvaluation: evaluation.setSuccess(data),
     });
     return data;
   },

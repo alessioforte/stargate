@@ -90,6 +90,20 @@ impl fmt::Display for ResourceAction {
 }
 
 impl ResourceAction {
+    /// Concrete actions that can be requested at evaluation time.
+    ///
+    /// `Any` is a policy matcher, not a concrete capability, so it is
+    /// intentionally excluded from this list.
+    pub const CONCRETE: [Self; 7] = [
+        Self::Read,
+        Self::Write,
+        Self::Delete,
+        Self::Create,
+        Self::Update,
+        Self::Execute,
+        Self::Admin,
+    ];
+
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "READ" => Some(ResourceAction::Read),

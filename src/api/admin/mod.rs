@@ -527,6 +527,10 @@ pub fn router() -> axum::Router {
             "/admin/access-control/rules/evaluate",
             post(access_control_rules::evaluate_access_control_rules),
         )
+        .route(
+            "/admin/access-control/capabilities/evaluate",
+            post(access_control_rules::evaluate_access_control_capabilities),
+        )
         .layer(from_fn(extract_admin_authorization))
 }
 

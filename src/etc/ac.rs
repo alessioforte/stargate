@@ -21,23 +21,24 @@ struct DecisionKey {
     org_id: Option<Box<str>>,
     org_role: Option<Box<str>>,
     attrs_hash: u64,
+    env_hash: u64,
 }
 
 struct DecisionCache {
-    version: u64,
+    revision: Box<str>,
     entries: LruCache<DecisionKey, bool>,
 }
 
 impl DecisionCache {
-    fn new(version: u64) -> Self {
+    fn new(revision: &str) -> Self {
         Self {
-            version,
+            revision: Box::from(revision),
             entries: LruCache::new(NonZeroUsize::new(DECISION_CACHE_CAPACITY).unwrap()),
         }
     }
 
-    fn reset(&mut self, version: u64) {
-        self.version = version;
+    fn reset(&mut self, revision: &str) {
+        self.revision = Box::from(revision);
         self.entries.clear();
     }
 
@@ -51,17 +52,17 @@ impl DecisionCache {
 }
 
 thread_local! {
-    static DECISION_CACHE: RefCell<DecisionCache> = RefCell::new(DecisionCache::new(0));
+    static DECISION_CACHE: RefCell<DecisionCache> = RefCell::new(DecisionCache::new(""));
 }
 
-fn with_cache<F, R>(version: u64, f: F) -> R
+fn with_cache<F, R>(revision: &str, f: F) -> R
 where
     F: FnOnce(&mut DecisionCache) -> R,
 {
     DECISION_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if cache.version != version {
-            cache.reset(version);
+        if cache.revision.as_ref() != revision {
+            cache.reset(revision);
         }
         f(&mut cache)
     })
@@ -69,6 +70,7 @@ where
 
 pub fn access_control(
     policy_engine: &ace::PolicyEngine,
+    policy_revision: &str,
     subject: &Subject,
     env: &Env,
     resource: &str,
@@ -82,10 +84,10 @@ pub fn access_control(
         org_id: subject.org_id.as_deref().map(Box::from),
         org_role: subject.org_role.as_deref().map(Box::from),
         attrs_hash: attrs_hash(subject),
+        env_hash: env_hash(env),
     };
 
-    let version = crate::etc::gate::get_config_version();
-    if let Some(allowed) = with_cache(version, |cache| cache.get(&key)) {
+    if let Some(allowed) = with_cache(policy_revision, |cache| cache.get(&key)) {
         return allowed;
     }
 
@@ -97,7 +99,7 @@ pub fn access_control(
         }
     };
 
-    with_cache(version, |cache| cache.insert(key, allowed));
+    with_cache(policy_revision, |cache| cache.insert(key, allowed));
     allowed
 }
 
@@ -119,6 +121,15 @@ fn attrs_hash(subject: &Subject) -> u64 {
     }
     let mut hasher = DefaultHasher::new();
     hash_json_value(&subject.attrs, &mut hasher);
+    hasher.finish()
+}
+
+fn env_hash(env: &Env) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for (key, value) in env.iter() {
+        key.hash(&mut hasher);
+        value.hash(&mut hasher);
+    }
     hasher.finish()
 }
 
@@ -167,7 +178,7 @@ fn hash_json_value(value: &serde_json::Value, hasher: &mut DefaultHasher) {
     }
 }
 
-fn create_context(sub: &Subject, env: &Env) -> HashMap<String, ace::Value> {
+pub(crate) fn create_context(sub: &Subject, env: &Env) -> HashMap<String, ace::Value> {
     let attrs = sub.attrs.as_object();
     let attrs_len = attrs.map(|a| a.len()).unwrap_or(0);
     let env_len = env.len();
@@ -290,9 +301,9 @@ mod tests {
         let member = user_subject(Some("org_a"), Some("member"));
         let orgless = user_subject(None, None);
 
-        assert!(access_control(&pe, &admin, &env, "reports"));
-        assert!(!access_control(&pe, &member, &env, "reports"));
-        assert!(!access_control(&pe, &orgless, &env, "reports"));
+        assert!(access_control(&pe, "test", &admin, &env, "reports"));
+        assert!(!access_control(&pe, "test", &member, &env, "reports"));
+        assert!(!access_control(&pe, "test", &orgless, &env, "reports"));
     }
 
     /// Identical attrs, different orgs: the second evaluation must not hit
@@ -306,10 +317,10 @@ mod tests {
         let in_org_b = user_subject(Some("org_b"), Some("member"));
 
         // Prime the cache with the allowed decision, then flip org.
-        assert!(access_control(&pe, &in_org_a, &env, "billing"));
-        assert!(!access_control(&pe, &in_org_b, &env, "billing"));
+        assert!(access_control(&pe, "test", &in_org_a, &env, "billing"));
+        assert!(!access_control(&pe, "test", &in_org_b, &env, "billing"));
         // And back: org_a's cached decision is still the right one.
-        assert!(access_control(&pe, &in_org_a, &env, "billing"));
+        assert!(access_control(&pe, "test", &in_org_a, &env, "billing"));
     }
 
     /// The same subject switching org context (same attrs hash) must be
@@ -320,10 +331,10 @@ mod tests {
         let env = Env::default();
 
         let as_owner = user_subject(Some("org_a"), Some("owner"));
-        assert!(access_control(&pe, &as_owner, &env, "exports"));
+        assert!(access_control(&pe, "test", &as_owner, &env, "exports"));
 
         let as_member = user_subject(Some("org_a"), Some("member"));
-        assert!(!access_control(&pe, &as_member, &env, "exports"));
+        assert!(!access_control(&pe, "test", &as_member, &env, "exports"));
     }
 
     #[test]
@@ -335,8 +346,8 @@ mod tests {
         bound.org_id = Some("org_a".to_string());
         let unbound = Subject::new("key_2".to_string(), SubjectType::ApiKey, None);
 
-        assert!(access_control(&pe, &bound, &env, "ingest"));
-        assert!(!access_control(&pe, &unbound, &env, "ingest"));
+        assert!(access_control(&pe, "test", &bound, &env, "ingest"));
+        assert!(!access_control(&pe, "test", &unbound, &env, "ingest"));
     }
 
     /// Org context comes from the validated membership; a subject attr with
@@ -353,6 +364,58 @@ mod tests {
         );
         subject.org_id = Some("org_real".to_string());
 
-        assert!(!access_control(&pe, &subject, &env, "wire"));
+        assert!(!access_control(&pe, "test", &subject, &env, "wire"));
+    }
+
+    #[test]
+    fn decision_cache_resets_when_policy_revision_changes() {
+        let allowed = engine(r#"ALLOW user FOR "reports";"#);
+        let denied = engine(r#"DENY user FOR "reports";"#);
+        let subject = user_subject(None, None);
+        let env = Env::default();
+
+        assert!(access_control(
+            &allowed,
+            "sha256:old",
+            &subject,
+            &env,
+            "reports"
+        ));
+        assert!(!access_control(
+            &denied,
+            "sha256:new",
+            &subject,
+            &env,
+            "reports"
+        ));
+    }
+
+    #[test]
+    fn decision_cache_is_scoped_to_environment() {
+        let policies = engine(r#"ALLOW user FOR "regional" WHEN env.country_code == "IT";"#);
+        let subject = user_subject(None, None);
+        let italy = Env {
+            country_code: "IT".into(),
+            ..Default::default()
+        };
+        let france = Env {
+            country_code: "FR".into(),
+            ..Default::default()
+        };
+
+        assert!(access_control(
+            &policies,
+            "sha256:same",
+            &subject,
+            &italy,
+            "regional"
+        ));
+        assert!(!access_control(
+            &policies,
+            "sha256:same",
+            &subject,
+            &france,
+            "regional"
+        ));
     }
 }
