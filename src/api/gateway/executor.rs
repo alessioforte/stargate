@@ -132,6 +132,7 @@ pub(super) async fn execute_selected_with_request(
                 .transpose()?;
 
             if protocol == "ws" {
+                let uri = websocket_uri(&uri);
                 let result =
                     ws::handler(req, &uri, state.preserve_host, internal_dispatch.as_ref())
                         .instrument(span.clone())
@@ -365,6 +366,16 @@ fn upstream_uri(base_url: &str, state: &RequestState) -> String {
     uri
 }
 
+fn websocket_uri(uri: &str) -> String {
+    if let Some(rest) = uri.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = uri.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        uri.to_owned()
+    }
+}
+
 fn attempt_limit_failure(service: &str, dispatch_kind: &'static str) -> ErrorResponse {
     telemetry::record_internal_context_issue(
         service,
@@ -522,6 +533,22 @@ mod tests {
             headers: HeaderMap::new(),
             body: hyper::body::Bytes::new(),
         }
+    }
+
+    #[test]
+    fn websocket_uri_maps_http_schemes_and_preserves_the_rest() {
+        assert_eq!(
+            websocket_uri("https://upstream.example/socket?token=abc"),
+            "wss://upstream.example/socket?token=abc"
+        );
+        assert_eq!(
+            websocket_uri("ws://upstream.example/socket"),
+            "ws://upstream.example/socket"
+        );
+        assert_eq!(
+            websocket_uri("wss://upstream.example/socket"),
+            "wss://upstream.example/socket"
+        );
     }
 
     #[tokio::test]
