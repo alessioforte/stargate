@@ -647,9 +647,9 @@ Keep each concern in exactly one layer. Data-shaping, the loading/error lifecycl
 
 #### 1. `services/` — raw API (no React, no state)
 
-- `http.ts`: the `Http` class over axios. `authRequest<T>()` attaches bearer auth + `X-Org-Context` and does proactive/reactive token refresh via `TokenManager`; `request<T>()` is for unauthenticated calls. Every call returns a uniform envelope `Response<T> = { data, error?, message?, status?, headers? }` — HTTP/error outcomes are captured into the envelope, never thrown.
-- `api.ts`: `AdminApiService` — one thin method per backend endpoint (`getOrganizations`, `createOrganization`, `updateOrganization`, …), each just building an `AxiosRequestConfig` and returning `Response<T>`. No state, no side effects beyond the HTTP call.
-- `index.ts`: a lazy `Service` singleton (via a `Proxy`) that wires `Http` + `TokenManager` + `AdminApiService`, reads runtime config, and owns token storage. Exported as `default services`.
+- `http.ts`: the `Http` class over axios. `authRequest<T>()` attaches bearer auth and does proactive/reactive token refresh via `TokenManager`; `request<T>()` is for unauthenticated calls. Every call returns a uniform envelope `Response<T> = { data, error?, message?, status?, headers? }` — HTTP/error outcomes are captured into the envelope, never thrown.
+- `api.ts`: `AdminApiService` — thin methods for the endpoints used by the console (`getOrganizations`, `createOrganization`, `updateOrganization`, …), each building an `AxiosRequestConfig` and returning `Response<T>`. No state, no side effects beyond the HTTP call.
+- `index.ts`: a lazy `services.admin` getter that wires `Http` + `TokenManager` + `AdminApiService` and reads runtime config. Tokens are read and persisted through the shared `lib/oauth.ts` helpers, without a separate in-memory token cache. Exported as `default services`.
 - `types.ts`: request/response DTOs (the shared contract). `token-manager.ts`, `jwt.ts`: token lifecycle + JWT decode helpers.
 
 Rule: services speak HTTP only. They never import React or the store.

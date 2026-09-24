@@ -1,16 +1,5 @@
-/**
- * JWT utilities shared across the services package.
- *
- * This module is a leaf dependency: it imports nothing from this package,
- * so it can be safely used by both `index.ts` and `token-manager.ts`
- * without creating circular dependencies.
- */
-
-/**
- * Decode a JWT payload and return the claims as a parsed object.
- * Returns `null` if the token is malformed.
- */
-export function parseJwt(token: string): Record<string, unknown> | null {
+/** Read the expiry for refresh scheduling; this does not verify the token. */
+export function getTokenExpiry(token: string): number | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
@@ -20,31 +9,15 @@ export function parseJwt(token: string): Record<string, unknown> | null {
       .replace(/-/g, "+")
       .replace(/_/g, "/")
       .padEnd(Math.ceil(base64Url.length / 4) * 4, "=");
-    const decoded = atob(base64);
-
-    const jsonPayload = decodeURIComponent(
-      decoded
-        .split("")
-        .map(
-          (character: string) =>
-            `%${`00${character.charCodeAt(0).toString(16)}`.slice(-2)}`,
-        )
-        .join(""),
+    const bytes = Uint8Array.from(atob(base64), (character) =>
+      character.charCodeAt(0),
     );
-
-    return JSON.parse(jsonPayload);
+    const claims = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    );
+    const exp = claims?.exp;
+    return typeof exp === "number" && Number.isFinite(exp) ? exp : null;
   } catch {
     return null;
   }
-}
-
-/**
- * Extract the `exp` claim from a JWT.
- * Returns the expiry as a unix timestamp (seconds), or `null` if invalid.
- */
-export function getTokenExpiry(token: string): number | null {
-  const claims = parseJwt(token);
-  if (!claims) return null;
-  const exp = claims.exp;
-  return typeof exp === "number" ? exp : null;
 }

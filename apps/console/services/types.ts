@@ -164,10 +164,6 @@ export interface UserSessionsRevocationResponse {
   userId: string;
 }
 
-export interface ConfigurationsQuery {
-  format?: string;
-}
-
 export type Configuration = JsonValue;
 
 export type AccessControlEffect = "allow" | "deny";
@@ -446,18 +442,6 @@ export interface UpdateOAuthClientRequest {
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;
 }
 
-export interface PatchOAuthClientRequest {
-  attrs?: JsonValue;
-  audiences?: string[] | null;
-  description?: string | null;
-  grantTypes?: OAuthGrantType[] | null;
-  name?: string | null;
-  redirectUris?: string[] | null;
-  responseTypes?: OAuthResponseType[] | null;
-  scopes?: string[] | null;
-  tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod | null;
-}
-
 export interface RotateOAuthClientSecretResponse extends OAuthClient {
   clientSecret: string;
 }
@@ -558,15 +542,6 @@ export interface CreateUserInvitationRequest {
 
 export interface UpdateUserRequest {
   email: string;
-  familyName?: string | null;
-  givenName?: string | null;
-  nickname?: string | null;
-  phoneNumber?: string | null;
-  picture?: string | null;
-}
-
-export interface PatchUserRequest {
-  email?: string | null;
   familyName?: string | null;
   givenName?: string | null;
   nickname?: string | null;

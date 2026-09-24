@@ -1,5 +1,5 @@
 import type { AxiosRequestConfig } from "axios";
-import { Http, type Response as HttpResponse } from "./http";
+import type { Http, Response as HttpResponse } from "./http";
 import type {
   AccessControlRulesResponse,
   ApiMessageCatalog,
@@ -12,7 +12,6 @@ import type {
   ApiKeyAttrsRequest,
   ApiKeyQuery,
   Configuration,
-  ConfigurationsQuery,
   CreateAdminKeyRequest,
   CreateAdminKeyResponse,
   CreateApiKeyRequest,
@@ -34,8 +33,6 @@ import type {
   OAuthClient,
   Organization,
   OutboxEvent,
-  PatchOAuthClientRequest,
-  PatchUserRequest,
   Query,
   RotateOAuthClientSecretResponse,
   SessionRevocationResponse,
@@ -57,506 +54,393 @@ import type {
 
 export default class AdminApiService {
   private readonly http: Http;
-  private readonly basePath: string;
 
-  constructor(http: Http, basePath = "/admin") {
+  constructor(http: Http) {
     this.http = http;
-    this.basePath = basePath.replace(/\/+$/, "");
   }
 
-  private request<T>(
-    config: AxiosRequestConfig,
-  ): Promise<HttpResponse<T | null>> {
-    return this.http.authRequest<T>(config);
+  private request<T>(config: AxiosRequestConfig): Promise<HttpResponse<T>> {
+    return this.http.authRequest<T>({ ...config, url: `/admin${config.url}` });
   }
 
-  private url(path: string) {
-    return `${this.basePath}${path}`;
-  }
-
-  private pathParam(value: string) {
-    return encodeURIComponent(value);
-  }
-
-  async getApiMessages(locale: string) {
+  getApiMessages(locale: string) {
     return this.http.request<ApiMessageCatalog>({
-      url: `/i18n/${this.pathParam(locale)}`,
+      url: `/i18n/${encodeURIComponent(locale)}`,
       method: "GET",
     });
   }
 
-  async getAdminHealth() {
+  getAdminHealth() {
     return this.request<AdminHealth>({
-      url: this.url("/health"),
+      url: "/health",
       method: "GET",
       validateStatus: (status) => status === 200 || status === 503,
     });
   }
 
-  async getAdminMe() {
+  getAdminMe() {
     return this.request<AdminMe>({
-      url: this.url("/me"),
+      url: "/me",
       method: "GET",
     });
   }
 
-  async getAdminOverview() {
+  getAdminOverview() {
     return this.request<AdminOverview>({
-      url: this.url("/overview"),
+      url: "/overview",
       method: "GET",
     });
   }
 
-  async getAdminSessions(query?: ListAdminSessionsQuery) {
+  getAdminSessions(query?: ListAdminSessionsQuery) {
     return this.request<List<AdminSession>>({
-      url: this.url("/sessions"),
+      url: "/sessions",
       method: "GET",
       params: query,
     });
   }
 
-  async revokeAdminSession(sessionId: string) {
+  revokeAdminSession(sessionId: string) {
     return this.request<SessionRevocationResponse>({
-      url: this.url(`/sessions/${this.pathParam(sessionId)}`),
+      url: `/sessions/${encodeURIComponent(sessionId)}`,
       method: "DELETE",
     });
   }
 
-  async revokeUserSessions(userId: string) {
+  revokeUserSessions(userId: string) {
     return this.request<UserSessionsRevocationResponse>({
-      url: this.url(`/users/${this.pathParam(userId)}/sessions`),
+      url: `/users/${encodeURIComponent(userId)}/sessions`,
       method: "DELETE",
     });
   }
 
-  async getConfigurations(query?: ConfigurationsQuery) {
-    return this.request<Configuration | string>({
-      url: this.url("/configurations"),
+  getConfigurations() {
+    return this.request<Configuration>({
+      url: "/configurations",
       method: "GET",
-      params: query,
     });
   }
 
-  async updateConfigurations(configuration: Configuration) {
+  updateConfigurations(configuration: Configuration) {
     return this.request<void>({
-      url: this.url("/configurations"),
+      url: "/configurations",
       method: "PUT",
       data: configuration,
     });
   }
 
-  async getAccessControlRules() {
+  getAccessControlRules() {
     return this.request<AccessControlRulesResponse>({
-      url: this.url("/access-control/rules"),
+      url: "/access-control/rules",
       method: "GET",
     });
   }
 
-  async updateAccessControlRules(body: UpdateAccessControlRulesRequest) {
+  updateAccessControlRules(body: UpdateAccessControlRulesRequest) {
     return this.request<AccessControlRulesResponse>({
-      url: this.url("/access-control/rules"),
+      url: "/access-control/rules",
       method: "PUT",
       data: body,
     });
   }
 
-  async validateAccessControlRules(body: ValidateAccessControlRulesRequest) {
+  validateAccessControlRules(body: ValidateAccessControlRulesRequest) {
     return this.request<ValidateAccessControlRulesResponse>({
-      url: this.url("/access-control/rules/validate"),
+      url: "/access-control/rules/validate",
       method: "POST",
       data: body,
     });
   }
 
-  async evaluateAccessControlRules(body: EvaluateAccessControlRequest) {
+  evaluateAccessControlRules(body: EvaluateAccessControlRequest) {
     return this.request<EvaluateAccessControlResponse>({
-      url: this.url("/access-control/rules/evaluate"),
+      url: "/access-control/rules/evaluate",
       method: "POST",
       data: body,
     });
   }
 
-  async evaluateAccessControlCapabilities(
+  evaluateAccessControlCapabilities(
     body: EvaluateAccessControlCapabilitiesRequest,
   ) {
     return this.request<EvaluateAccessControlCapabilitiesResponse>({
-      url: this.url("/access-control/capabilities/evaluate"),
+      url: "/access-control/capabilities/evaluate",
       method: "POST",
       data: body,
     });
   }
 
-  async getAdminKeys(query?: Query) {
+  getAdminKeys(query?: Query) {
     return this.request<List<AdminKey>>({
-      url: this.url("/admin-keys"),
+      url: "/admin-keys",
       method: "GET",
       params: query,
     });
   }
 
-  async createAdminKey(body: CreateAdminKeyRequest) {
+  createAdminKey(body: CreateAdminKeyRequest) {
     return this.request<CreateAdminKeyResponse>({
-      url: this.url("/admin-keys"),
+      url: "/admin-keys",
       method: "POST",
       data: body,
     });
   }
 
-  async getAdminKey(id: string) {
-    return this.request<AdminKey>({
-      url: this.url(`/admin-keys/${this.pathParam(id)}`),
-      method: "GET",
-    });
-  }
-
-  async deleteAdminKey(id: string) {
-    return this.request<MessageResponse>({
-      url: this.url(`/admin-keys/${this.pathParam(id)}`),
-      method: "DELETE",
-    });
-  }
-
-  async updateAdminKeyPermissions(
+  updateAdminKeyPermissions(
     id: string,
     body: UpdateAdminKeyPermissionsRequest,
   ) {
     return this.request<AdminKey>({
-      url: this.url(`/admin-keys/${this.pathParam(id)}/permissions`),
+      url: `/admin-keys/${encodeURIComponent(id)}/permissions`,
       method: "PUT",
       data: body,
     });
   }
 
-  async revokeAdminKey(id: string) {
+  revokeAdminKey(id: string) {
     return this.request<MessageResponse>({
-      url: this.url(`/admin-keys/${this.pathParam(id)}/revoke`),
+      url: `/admin-keys/${encodeURIComponent(id)}/revoke`,
       method: "PUT",
     });
   }
 
-  async getApiKeys(query?: ApiKeyQuery) {
+  getApiKeys(query?: ApiKeyQuery) {
     return this.request<List<ApiKey>>({
-      url: this.url("/api-keys"),
+      url: "/api-keys",
       method: "GET",
       params: query,
     });
   }
 
-  async createApiKey(body: CreateApiKeyRequest) {
+  createApiKey(body: CreateApiKeyRequest) {
     return this.request<CreateApiKeyResponse>({
-      url: this.url("/api-keys"),
+      url: "/api-keys",
       method: "POST",
       data: body,
     });
   }
 
-  async getApiKey(id: string) {
-    return this.request<ApiKey>({
-      url: this.url(`/api-keys/${this.pathParam(id)}`),
-      method: "GET",
-    });
-  }
-
-  async deleteApiKey(id: string) {
+  deleteApiKey(id: string) {
     return this.request<MessageResponse>({
-      url: this.url(`/api-keys/${this.pathParam(id)}`),
+      url: `/api-keys/${encodeURIComponent(id)}`,
       method: "DELETE",
     });
   }
 
-  async updateApiKeyAttrs(id: string, body: ApiKeyAttrsRequest) {
+  updateApiKeyAttrs(id: string, body: ApiKeyAttrsRequest) {
     return this.request<ApiKey>({
-      url: this.url(`/api-keys/${this.pathParam(id)}/attrs`),
+      url: `/api-keys/${encodeURIComponent(id)}/attrs`,
       method: "PUT",
       data: body,
     });
   }
 
-  async patchApiKeyAttrs(id: string, body: ApiKeyAttrsRequest) {
-    return this.request<ApiKey>({
-      url: this.url(`/api-keys/${this.pathParam(id)}/attrs`),
-      method: "PATCH",
-      data: body,
-    });
-  }
-
-  async revokeApiKey(id: string) {
+  revokeApiKey(id: string) {
     return this.request<MessageResponse>({
-      url: this.url(`/api-keys/${this.pathParam(id)}/revoke`),
+      url: `/api-keys/${encodeURIComponent(id)}/revoke`,
       method: "PUT",
     });
   }
 
-  async getOAuthClients(query?: Query) {
+  getOAuthClients(query?: Query) {
     return this.request<List<OAuthClient>>({
-      url: this.url("/oauth/clients"),
+      url: "/oauth/clients",
       method: "GET",
       params: query,
     });
   }
 
-  async createOAuthClient(body: CreateOAuthClientRequest) {
+  createOAuthClient(body: CreateOAuthClientRequest) {
     return this.request<CreateOAuthClientResponse>({
-      url: this.url("/oauth/clients"),
+      url: "/oauth/clients",
       method: "POST",
       data: body,
     });
   }
 
-  async getOAuthClient(clientId: string) {
+  updateOAuthClient(clientId: string, body: UpdateOAuthClientRequest) {
     return this.request<OAuthClient>({
-      url: this.url(`/oauth/clients/${this.pathParam(clientId)}`),
-      method: "GET",
-    });
-  }
-
-  async updateOAuthClient(clientId: string, body: UpdateOAuthClientRequest) {
-    return this.request<OAuthClient>({
-      url: this.url(`/oauth/clients/${this.pathParam(clientId)}`),
+      url: `/oauth/clients/${encodeURIComponent(clientId)}`,
       method: "PUT",
       data: body,
     });
   }
 
-  async patchOAuthClient(clientId: string, body: PatchOAuthClientRequest) {
-    return this.request<OAuthClient>({
-      url: this.url(`/oauth/clients/${this.pathParam(clientId)}`),
-      method: "PATCH",
-      data: body,
-    });
-  }
-
-  async deleteOAuthClient(clientId: string) {
+  deleteOAuthClient(clientId: string) {
     return this.request<MessageResponse>({
-      url: this.url(`/oauth/clients/${this.pathParam(clientId)}`),
+      url: `/oauth/clients/${encodeURIComponent(clientId)}`,
       method: "DELETE",
     });
   }
 
-  async disableOAuthClient(clientId: string) {
+  disableOAuthClient(clientId: string) {
     return this.request<OAuthClient>({
-      url: this.url(`/oauth/clients/${this.pathParam(clientId)}/disable`),
+      url: `/oauth/clients/${encodeURIComponent(clientId)}/disable`,
       method: "PUT",
     });
   }
 
-  async enableOAuthClient(clientId: string) {
+  enableOAuthClient(clientId: string) {
     return this.request<OAuthClient>({
-      url: this.url(`/oauth/clients/${this.pathParam(clientId)}/enable`),
+      url: `/oauth/clients/${encodeURIComponent(clientId)}/enable`,
       method: "PUT",
     });
   }
 
-  async rotateOAuthClientSecret(clientId: string) {
+  rotateOAuthClientSecret(clientId: string) {
     return this.request<RotateOAuthClientSecretResponse>({
-      url: this.url(`/oauth/clients/${this.pathParam(clientId)}/rotate-secret`),
+      url: `/oauth/clients/${encodeURIComponent(clientId)}/rotate-secret`,
       method: "PUT",
     });
   }
 
-  async getOrganizations(query?: Query) {
+  getOrganizations(query?: Query) {
     return this.request<List<Organization>>({
-      url: this.url("/organizations"),
+      url: "/organizations",
       method: "GET",
       params: query,
     });
   }
 
-  async createOrganization(body: CreateOrganizationRequest) {
+  createOrganization(body: CreateOrganizationRequest) {
     return this.request<Organization>({
-      url: this.url("/organizations"),
+      url: "/organizations",
       method: "POST",
       data: body,
     });
   }
 
-  async getOrganization(id: string) {
+  updateOrganization(id: string, body: UpdateOrganizationRequest) {
     return this.request<Organization>({
-      url: this.url(`/organizations/${this.pathParam(id)}`),
-      method: "GET",
-    });
-  }
-
-  async updateOrganization(id: string, body: UpdateOrganizationRequest) {
-    return this.request<Organization>({
-      url: this.url(`/organizations/${this.pathParam(id)}`),
+      url: `/organizations/${encodeURIComponent(id)}`,
       method: "PUT",
       data: body,
     });
   }
 
-  async deleteOrganization(id: string) {
-    return this.request<void>({
-      url: this.url(`/organizations/${this.pathParam(id)}`),
-      method: "DELETE",
-    });
-  }
-
-  async getServiceAccounts(query?: Query) {
+  getServiceAccounts(query?: Query) {
     return this.request<List<ServiceAccount>>({
-      url: this.url("/service-accounts"),
+      url: "/service-accounts",
       method: "GET",
       params: query,
     });
   }
 
-  async createServiceAccount(body: CreateServiceAccountRequest) {
+  createServiceAccount(body: CreateServiceAccountRequest) {
     return this.request<ServiceAccount>({
-      url: this.url("/service-accounts"),
+      url: "/service-accounts",
       method: "POST",
       data: body,
     });
   }
 
-  async getServiceAccount(id: string) {
+  updateServiceAccount(id: string, body: UpdateServiceAccountRequest) {
     return this.request<ServiceAccount>({
-      url: this.url(`/service-accounts/${this.pathParam(id)}`),
-      method: "GET",
-    });
-  }
-
-  async updateServiceAccount(id: string, body: UpdateServiceAccountRequest) {
-    return this.request<ServiceAccount>({
-      url: this.url(`/service-accounts/${this.pathParam(id)}`),
+      url: `/service-accounts/${encodeURIComponent(id)}`,
       method: "PUT",
       data: body,
     });
   }
 
-  async deleteServiceAccount(id: string) {
+  deleteServiceAccount(id: string) {
     return this.request<MessageResponse>({
-      url: this.url(`/service-accounts/${this.pathParam(id)}`),
+      url: `/service-accounts/${encodeURIComponent(id)}`,
       method: "DELETE",
     });
   }
 
-  async getUsers(query?: Query) {
+  getUsers(query?: Query) {
     return this.request<List<User>>({
-      url: this.url("/users"),
+      url: "/users",
       method: "GET",
       params: query,
     });
   }
 
-  async getSuperAdminUsers() {
+  getSuperAdminUsers() {
     return this.request<List<User>>({
-      url: this.url("/users/super-admins"),
+      url: "/users/super-admins",
       method: "GET",
     });
   }
 
-  async createUser(body: CreateUserRequest) {
+  createUser(body: CreateUserRequest) {
     return this.request<User>({
-      url: this.url("/users"),
+      url: "/users",
       method: "POST",
       data: body,
     });
   }
 
-  async inviteUser(body: CreateUserInvitationRequest) {
+  inviteUser(body: CreateUserInvitationRequest) {
     return this.request<MessageResponse>({
-      url: this.url("/users/invitations"),
+      url: "/users/invitations",
       method: "POST",
       data: body,
     });
   }
 
-  async getOrganizationUsers(orgId: string, query?: Query) {
-    return this.request<List<User>>({
-      url: this.url(`/users/organizations/${this.pathParam(orgId)}`),
-      method: "GET",
-      params: query,
-    });
-  }
-
-  async getUser(id: string) {
+  updateUser(id: string, body: UpdateUserRequest) {
     return this.request<User>({
-      url: this.url(`/users/${this.pathParam(id)}`),
-      method: "GET",
-    });
-  }
-
-  async updateUser(id: string, body: UpdateUserRequest) {
-    return this.request<User>({
-      url: this.url(`/users/${this.pathParam(id)}`),
+      url: `/users/${encodeURIComponent(id)}`,
       method: "PUT",
       data: body,
     });
   }
 
-  async patchUser(id: string, body: PatchUserRequest) {
-    return this.request<User>({
-      url: this.url(`/users/${this.pathParam(id)}`),
-      method: "PATCH",
-      data: body,
-    });
-  }
-
-  async deleteUser(id: string) {
+  deleteUser(id: string) {
     return this.request<MessageResponse>({
-      url: this.url(`/users/${this.pathParam(id)}`),
+      url: `/users/${encodeURIComponent(id)}`,
       method: "DELETE",
     });
   }
 
-  async updateUserAttrs(id: string, body: UserAttrsRequest) {
+  updateUserAttrs(id: string, body: UserAttrsRequest) {
     return this.request<User>({
-      url: this.url(`/users/${this.pathParam(id)}/attrs`),
+      url: `/users/${encodeURIComponent(id)}/attrs`,
       method: "PUT",
       data: body,
     });
   }
 
-  async patchUserAttrs(id: string, body: UserAttrsRequest) {
-    return this.request<User>({
-      url: this.url(`/users/${this.pathParam(id)}/attrs`),
-      method: "PATCH",
-      data: body,
-    });
-  }
-
-  async getUserOrganizations(id: string) {
+  getUserOrganizations(id: string) {
     return this.request<UserOrganization[]>({
-      url: this.url(`/users/${this.pathParam(id)}/organizations`),
+      url: `/users/${encodeURIComponent(id)}/organizations`,
       method: "GET",
     });
   }
 
   /** Upsert: adds the membership or updates the role of an existing one. */
-  async addUserToOrganization(
+  addUserToOrganization(
     id: string,
     orgId: string,
     body?: OrganizationMembershipRequest,
   ) {
     return this.request<MessageResponse>({
-      url: this.url(
-        `/users/${this.pathParam(id)}/organizations/${this.pathParam(orgId)}`,
-      ),
+      url: `/users/${encodeURIComponent(id)}/organizations/${encodeURIComponent(orgId)}`,
       method: "PUT",
       data: body,
     });
   }
 
-  async removeUserFromOrganization(id: string, orgId: string) {
+  removeUserFromOrganization(id: string, orgId: string) {
     return this.request<MessageResponse>({
-      url: this.url(
-        `/users/${this.pathParam(id)}/organizations/${this.pathParam(orgId)}`,
-      ),
+      url: `/users/${encodeURIComponent(id)}/organizations/${encodeURIComponent(orgId)}`,
       method: "DELETE",
     });
   }
 
-  async getOutboxEvents(query?: ListOutboxEventsQuery) {
+  getOutboxEvents(query?: ListOutboxEventsQuery) {
     return this.request<List<OutboxEvent>>({
-      url: this.url("/outbox-events"),
+      url: "/outbox-events",
       method: "GET",
       params: query,
     });
   }
 
-  async getOutboxEvent(eventId: string) {
+  getOutboxEvent(eventId: string) {
     return this.request<OutboxEvent>({
-      url: this.url(`/outbox-events/${this.pathParam(eventId)}`),
+      url: `/outbox-events/${encodeURIComponent(eventId)}`,
       method: "GET",
     });
   }

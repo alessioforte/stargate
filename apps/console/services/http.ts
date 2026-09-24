@@ -1,6 +1,6 @@
-import axios, { type AxiosRequestConfig, type AxiosError } from "axios";
+import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios";
 import type { ApiMessageParams } from "./types";
-import { TokenManager } from "./token-manager";
+import type { TokenManager } from "./token-manager";
 
 export interface Response<T> {
   error?: boolean;
@@ -25,135 +25,90 @@ interface ErrorResponse {
 }
 
 export class Http {
-  private tokenManager: TokenManager | null = null;
-  private apiKey: string;
-  private orgId: string | null;
-  private readonly baseURL: string;
+  private readonly client: AxiosInstance;
+  private readonly tokenManager: TokenManager;
 
-  constructor(apiKey: string, orgId: string | null = null, baseURL: string) {
-    this.apiKey = apiKey;
-    this.orgId = orgId;
-    this.baseURL = baseURL;
-  }
-
-  public setTokenManager(tokenManager: TokenManager) {
+  constructor(baseURL: string, tokenManager: TokenManager) {
+    this.client = axios.create({
+      baseURL,
+      headers: { "Content-Type": "application/json" },
+    });
     this.tokenManager = tokenManager;
   }
 
-  public async authRequest<T>(
-    config: AxiosRequestConfig,
-  ): Promise<Response<T | null>> {
-    // Proactive refresh — ensure token is valid before making the request
-    if (this.tokenManager) {
-      const isValid = await this.tokenManager.ensureValidToken();
-      if (!isValid) {
+  async authRequest<T>(config: AxiosRequestConfig): Promise<Response<T>> {
+    try {
+      if (!(await this.tokenManager.ensureValidToken())) {
         return {
           error: true,
           data: null,
-          headers: null,
           message: "Unauthorized",
           status: 401,
         };
       }
-      // Update apiKey with the (possibly refreshed) token
-      const freshToken = this.tokenManager.getAccessToken();
-      if (freshToken) {
-        this.apiKey = freshToken;
-      }
-    }
 
-    try {
-      const response = await axios({
-        baseURL: this.baseURL,
-        ...config,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-          ...(this.orgId ? { "X-Org-Context": this.orgId } : {}),
-          ...config.headers,
-        },
-      });
+      const accessToken = this.tokenManager.getAccessToken();
+      const response = await this.requestWithToken<T>(config, accessToken);
+      if (!response.error || response.status !== 401) {
+        return response;
+      }
+
+      // Another request may already have refreshed the rejected token.
+      const currentToken = this.tokenManager.getAccessToken();
+      if (
+        (currentToken && currentToken !== accessToken) ||
+        (await this.tokenManager.refresh())
+      ) {
+        return this.requestWithToken<T>(
+          config,
+          this.tokenManager.getAccessToken(),
+        );
+      }
+
       return response;
-    } catch (err: unknown) {
-      const axiosError = err as AxiosError;
-
-      // Reactive refresh — if we got a 401, try refreshing and retry once
-      if (axiosError.response?.status === 401 && this.tokenManager) {
-        const refreshed = await this.tokenManager.handleUnauthorized();
-        if (refreshed) {
-          // Update apiKey with the new token
-          const freshToken = this.tokenManager.getAccessToken();
-          if (freshToken) {
-            this.apiKey = freshToken;
-          }
-
-          // Retry the original request with the new token
-          try {
-            const retryResponse = await axios({
-              baseURL: this.baseURL,
-              ...config,
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${this.apiKey}`,
-                ...(this.orgId ? { "X-Org-Context": this.orgId } : {}),
-                ...config.headers,
-              },
-            });
-            return retryResponse;
-          } catch (retryErr: unknown) {
-            return this.handleError(retryErr as AxiosError);
-          }
-        }
-      }
-
-      return this.handleError(axiosError);
+    } catch (error: unknown) {
+      return this.handleError<T>(error);
     }
   }
 
-  async request<T>(config: AxiosRequestConfig): Promise<Response<T | null>> {
+  async request<T>(config: AxiosRequestConfig): Promise<Response<T>> {
     try {
-      return await axios({
-        baseURL: this.baseURL,
-        headers: {
-          "Content-Type": "application/json",
-          ...config.headers,
-        },
-        ...config,
-      });
-    } catch (err: unknown) {
-      return this.handleError<T>(err as AxiosError);
+      const { data, status, headers } = await this.client.request<T>(config);
+      return { data, status, headers };
+    } catch (error: unknown) {
+      return this.handleError<T>(error);
     }
   }
 
-  private handleError<T>(err: AxiosError): Response<T> {
-    const data = err.response?.data as ErrorResponse;
-    const message = data?.error_description ?? data?.message ?? err.message;
+  private requestWithToken<T>(
+    config: AxiosRequestConfig,
+    accessToken: string | null,
+  ): Promise<Response<T>> {
+    return this.request<T>({
+      ...config,
+      headers: { ...config.headers, Authorization: `Bearer ${accessToken}` },
+    });
+  }
+
+  private handleError<T>(error: unknown): Response<T> {
+    const response = axios.isAxiosError<ErrorResponse>(error)
+      ? error.response
+      : undefined;
+    const data = response?.data;
+
     return {
       error: true,
-      message,
+      message:
+        data?.error_description ??
+        data?.message ??
+        (error instanceof Error ? error.message : "Request failed"),
       data: null,
-      status: err.response?.status,
-      headers: err.response?.headers || null,
+      status: response?.status,
+      headers: response?.headers,
       code: data?.code ?? data?.error,
       type: data?.type,
       link: data?.link,
       params: data?.params,
     };
-  }
-
-  public setApiKey(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  public getApiKey(): string {
-    return this.apiKey;
-  }
-
-  public setOrgId(orgId: string | null) {
-    this.orgId = orgId;
-  }
-
-  public getOrgId(): string | null {
-    return this.orgId;
   }
 }
