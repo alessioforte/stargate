@@ -439,7 +439,7 @@ fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
         .expect("Unable to create MTLS client config")
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::reload_policy_engine_from_path;
     use gate::Gate;
