@@ -111,7 +111,7 @@ variable "public_url" {
 }
 
 variable "gateway_config_file" {
-  description = "Path to a valid stargate/v2alpha1 gateway configuration."
+  description = "Path to a valid stargate/v1 gateway configuration."
   type        = string
 }
 

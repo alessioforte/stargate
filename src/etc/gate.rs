@@ -53,12 +53,13 @@ pub fn get_policies_path() -> String {
 }
 
 fn load_config() -> RuntimeConfig {
-    let config_file_path = get_config_path();
-    let config =
-        RuntimeConfig::from_file(&config_file_path).expect("Unable to load gateway config");
-    internal_context::preflight_config(&config)
-        .expect("Gateway config failed internal-context preflight");
-    config
+    load_config_from_path(&get_config_path()).expect("Unable to load gateway config")
+}
+
+fn load_config_from_path(path: &str) -> anyhow::Result<RuntimeConfig> {
+    let config = RuntimeConfig::from_file(path)?;
+    internal_context::preflight_config(&config)?;
+    Ok(config)
 }
 
 pub fn init() -> std::sync::Arc<Gate> {
@@ -196,24 +197,16 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         }
                         last_content = current_content;
 
-                        let config = match RuntimeConfig::from_file(&file_path) {
-                            Ok(config) => config,
+                        match reload_gateway_config_from_path(&mut gate, &file_path).await {
+                            Ok(config_version) => {
+                                info!(config_version, "Configuration file changed, reloaded");
+                                telemetry::record_config_reload("gateway_config", "success");
+                            }
                             Err(error) => {
                                 telemetry::record_config_reload("gateway_config", "error");
                                 error!(%error, "Configuration file changed but did not validate; keeping previous config");
-                                continue;
                             }
-                        };
-                        if let Err(error) = internal_context::preflight_config(&config) {
-                            telemetry::record_config_reload("gateway_config", "error");
-                            error!(%error, "Configuration file changed but failed internal-context preflight; keeping previous config");
-                            continue;
                         }
-                        let config_version = update_cached_config(config.clone());
-                        CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-                        info!(config_version, "Configuration file changed, reloading...");
-                        gate.update_config(&config).await;
-                        telemetry::record_config_reload("gateway_config", "success");
                     }
                     Err(e) => {
                         telemetry::record_config_reload("gateway_config", "error");
@@ -223,6 +216,14 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
             }
         });
     });
+}
+
+async fn reload_gateway_config_from_path(gate: &mut Gate, path: &str) -> anyhow::Result<u64> {
+    let config = load_config_from_path(path)?;
+    let version = update_cached_config(config.clone());
+    CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
+    gate.update_config(&config).await;
+    Ok(version)
 }
 
 fn watch_policies_file(file_path: &str, gate: &Gate) {
@@ -441,8 +442,13 @@ fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
 
 #[cfg(all(test, feature = "memory"))]
 mod tests {
-    use super::reload_policy_engine_from_path;
-    use gate::Gate;
+    use super::{
+        load_config_from_path, reload_gateway_config_from_path, reload_policy_engine_from_path,
+    };
+    use gate::{
+        Gate, PolicySnapshot,
+        cfg::{RuntimeConfig, SCHEMA},
+    };
     use std::{fs, sync::Arc};
 
     fn policy_path() -> std::path::PathBuf {
@@ -451,6 +457,60 @@ mod tests {
             std::process::id(),
             ulid::Ulid::generate()
         ))
+    }
+
+    #[tokio::test]
+    async fn unsupported_schema_reload_keeps_the_active_runtime() {
+        let path = policy_path();
+        let path_str = path.to_str().unwrap();
+        fs::write(
+            &path,
+            r#"
+schema: stargate/v1
+http:
+  services:
+    healthy:
+      kind: direct_response
+      status: 200
+      body:
+        text: ready
+  routers:
+    healthy:
+      match:
+        path:
+          prefix: /
+      service: healthy
+"#,
+        )
+        .unwrap();
+        let config = load_config_from_path(path_str).unwrap();
+        let mut gate =
+            Gate::new(Arc::new(lim::State::new())).build(&config, PolicySnapshot::default());
+        let graph = gate.http_graph.load_full();
+        let balancers = gate.http_balancers.load_full();
+        let limiter = gate.limiter.load_full();
+        assert_eq!(graph.routers[0].service, "healthy");
+
+        for yaml in [
+            "schema: stargate/v2alpha1\nhttp: {}\n",
+            "schema: stargate/v2\nhttp: {}\n",
+            "http: {}\n",
+        ] {
+            fs::write(&path, yaml).unwrap();
+            assert!(load_config_from_path(path_str).is_err());
+            let error = reload_gateway_config_from_path(&mut gate, path_str)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(SCHEMA));
+            assert!(Arc::ptr_eq(&gate.http_graph.load_full(), &graph));
+            assert!(Arc::ptr_eq(&gate.http_balancers.load_full(), &balancers));
+            assert!(Arc::ptr_eq(&gate.limiter.load_full(), &limiter));
+        }
+        assert_eq!(
+            RuntimeConfig::from_raw(config.raw).unwrap().compiled.schema,
+            SCHEMA
+        );
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

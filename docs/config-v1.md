@@ -1,12 +1,21 @@
-# Stargate Config v2alpha1
+# Stargate Config v1
 
-Stargate now expects `config.yaml` to use the explicit v2 schema:
+Stargate now expects `config.yaml` to use the explicit v1 schema:
 
 ```yaml
-schema: stargate/v2alpha1
+schema: stargate/v1
 ```
 
-Legacy config without `schema: stargate/v2alpha1` is rejected at load time. Hot reload compiles the new file first; invalid config is logged and the previous in-memory graph stays active.
+Every supplied YAML document and admin JSON submission must explicitly contain
+`schema: stargate/v1`. Missing and unsupported identifiers are rejected; there is
+no compatibility parser or automatic conversion. Generated defaults use this
+identifier too. Hot reload compiles the new file first; invalid config is logged
+and the previous in-memory graph stays active. Invalid admin submissions are not
+saved.
+
+This is the first gateway configuration format, not an application release
+version. Signed internal-context and other independently versioned contracts
+retain their own version identifiers.
 
 ## Model
 
@@ -24,7 +33,7 @@ Routers are sorted by descending `priority`. Ties keep declaration order. Use hi
 ## Minimal Example
 
 ```yaml
-schema: stargate/v2alpha1
+schema: stargate/v1
 
 limits:
   default:
@@ -663,7 +672,7 @@ share the same policy file storage; otherwise the endpoint is node-local.
 ## Full Routing Example
 
 ```yaml
-schema: stargate/v2alpha1
+schema: stargate/v1
 
 limits:
   default:

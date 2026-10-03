@@ -196,7 +196,7 @@ The breaker is driven by **two independent signals**:
    - any other received response → `mark_alive`
    - mirror (shadow) traffic is excluded, so it cannot eject real upstreams
 
-Breaker threshold and cooldown are exposed per upstream in the v2 gateway config (`crates/gate`):
+Breaker threshold and cooldown are exposed per upstream in the v1 gateway config (`crates/gate`):
 
 ```yaml
 http:

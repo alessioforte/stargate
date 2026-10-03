@@ -199,7 +199,13 @@ Cross-field validation that JSON Schema cannot express.
   {{- fail "set gatewayConfig.create=true or provide gatewayConfig.existingConfigMap" -}}
 {{- end -}}
 {{- if and .Values.gatewayConfig.create (empty .Values.gatewayConfig.config) -}}
-  {{- fail "gatewayConfig.config must contain a stargate/v2alpha1 configuration" -}}
+  {{- fail "gatewayConfig.config must contain a stargate/v1 configuration" -}}
+{{- end -}}
+{{- if .Values.gatewayConfig.create -}}
+  {{- $gatewayConfig := tpl .Values.gatewayConfig.config . | fromYaml -}}
+  {{- if ne (toString (get $gatewayConfig "schema")) "stargate/v1" -}}
+    {{- fail "gatewayConfig.config requires an explicit schema of stargate/v1" -}}
+  {{- end -}}
 {{- end -}}
 
 {{- if and (eq $mode "edge") .Values.persistence.enabled (ne .Values.persistence.mountPath "/app/.stargate") -}}

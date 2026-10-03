@@ -91,14 +91,15 @@ controller's restart integration.
 
 ## Gateway configuration
 
-`gatewayConfig.config` must be a valid `stargate/v2alpha1` document. The chart
+`gatewayConfig.config` must be a valid `stargate/v1` document. The chart
 also creates the initial `policies` file and mounts both files read-only at
-`/etc/stargate`.
+`/etc/stargate`. Chart rendering rejects missing or unsupported schema
+identifiers; Stargate validates the full configuration at startup.
 
 ```yaml
 gatewayConfig:
   config: |
-    schema: stargate/v2alpha1
+    schema: stargate/v1
     http:
       services:
         not-found:

@@ -1,6 +1,7 @@
 import { Badge, Button, Group, Title } from "@mantine/core";
 import { FiRefreshCw, FiRotateCcw, FiSave } from "react-icons/fi";
 import { useTranslations } from "@/i18n";
+import { GATEWAY_SCHEMA } from "./config-utils";
 
 interface Props {
   dirty: boolean;
@@ -28,7 +29,7 @@ const GatewayToolbar: React.FC<Props> = ({
       <Group gap="xs">
         <Title order={4}>{t("gatewayConfiguration")}</Title>
         {schema && (
-          <Badge color={schema === "stargate/v2alpha1" ? "cyan" : "yellow"}>
+          <Badge color={schema === GATEWAY_SCHEMA ? "cyan" : "yellow"}>
             {schema}
           </Badge>
         )}

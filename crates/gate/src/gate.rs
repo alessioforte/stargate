@@ -192,10 +192,10 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn v2_runtime_builds_load_balancers_for_leaf_services() {
+    fn v1_runtime_builds_load_balancers_for_leaf_services() {
         let config = RuntimeConfig::from_yaml_str(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 limits:
   default:
     strategy: gcra
@@ -219,7 +219,7 @@ http:
       service: reports
 "#,
         )
-        .expect("v2 config should load");
+        .expect("v1 config should load");
 
         let gate = Gate::new(Arc::new(lim::State::new())).build(&config, PolicySnapshot::default());
         assert_eq!(gate.http_graph.load().routers.len(), 1);

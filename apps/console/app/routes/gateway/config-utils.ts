@@ -1,5 +1,7 @@
 import type { JsonValue } from "@/services/types";
 
+export const GATEWAY_SCHEMA = "stargate/v1";
+
 export type JsonRecord = Record<string, JsonValue>;
 
 export interface GatewaySection {

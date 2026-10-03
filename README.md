@@ -73,8 +73,8 @@ them.
 
 ### Run the edge image
 
-Create a valid v2 gateway configuration first; see
-[docs/config-v2alpha1.md](docs/config-v2alpha1.md). The bind-mounted file must
+Create a valid v1 gateway configuration first; see
+[docs/config-v1.md](docs/config-v1.md). The bind-mounted file must
 exist before starting the container. Copy `.env.example` to `.env.docker` and
 adjust its public URLs, signing configuration, SMTP settings, and secrets.
 
@@ -164,15 +164,15 @@ backend set and fails fast if they do not match.
 
 ## Gateway Config
 
-`config.yaml` uses the v2 schema:
+`config.yaml` uses the v1 schema:
 
 ```yaml
-schema: stargate/v2alpha1
+schema: stargate/v1
 ```
 
-The v2 format models `upstreams`, `services`, `middlewares`, `policies`, and `routers` separately. It supports header/query/cookie/source-IP routing, regex and template paths, explicit route priority, fallback direct responses, path rewriting, weighted services, mirror traffic, and failover on selected response status codes.
+The v1 format models `upstreams`, `services`, `middlewares`, `policies`, and `routers` separately. It supports header/query/cookie/source-IP routing, regex and template paths, explicit route priority, fallback direct responses, path rewriting, weighted services, mirror traffic, and failover on selected response status codes.
 
-See [docs/config-v2alpha1.md](docs/config-v2alpha1.md) for examples and runtime notes.
+See [docs/config-v1.md](docs/config-v1.md) for examples and runtime notes.
 
 ## CLI
 

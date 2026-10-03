@@ -1,6 +1,6 @@
 import type { JsonValue } from "@/services/types";
 import type { GatewaySection, JsonRecord } from "./config-utils";
-import { isRecord } from "./config-utils";
+import { GATEWAY_SCHEMA, isRecord } from "./config-utils";
 
 export function cloneJson<T extends JsonValue>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -8,7 +8,7 @@ export function cloneJson<T extends JsonValue>(value: T): T {
 
 export function createEmptyGatewayConfig(): JsonRecord {
   return {
-    schema: "stargate/v2alpha1",
+    schema: GATEWAY_SCHEMA,
     limits: {},
     http: {
       upstreams: {},
@@ -24,10 +24,6 @@ export function normalizeGatewayConfig(config: JsonValue | undefined | null) {
   if (!isRecord(config)) return createEmptyGatewayConfig();
 
   const next = cloneJson(config);
-  if (typeof next.schema !== "string") {
-    next.schema = "stargate/v2alpha1";
-  }
-
   if (!isRecord(next.http)) {
     next.http = {};
   }

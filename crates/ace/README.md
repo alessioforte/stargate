@@ -367,7 +367,7 @@ These are conventions, not requirements — any key works.
 
 ## Integration with Stargate
 
-The ACE engine powers the `access_control` policy kind in the v2 gateway router pipeline (`docs/config-v2alpha1.md`) and is also used for admin/IAM access decisions. Policy files are hot-reloadable via the gateway's config watcher.
+The ACE engine powers the `access_control` policy kind in the v1 gateway router pipeline (`docs/config-v1.md`) and is also used for admin/IAM access decisions. Policy files are hot-reloadable via the gateway's config watcher.
 
 ## License
 

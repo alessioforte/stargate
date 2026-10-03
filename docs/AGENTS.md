@@ -6,7 +6,9 @@ IAM server + API gateway in Rust. Single binary, two deployment profiles:
 - **Edge**: SQLite + in-memory store (single node)
 - **Cluster**: PostgreSQL + Redis (horizontally scalable)
 
-The gateway is under active development and now uses the explicit `stargate/v2alpha1` configuration model. Legacy gateway config without that schema is intentionally rejected.
+The gateway is under active development and uses only the explicit `stargate/v1`
+configuration model. Supplied YAML and admin JSON must declare this schema;
+missing or unsupported identifiers are rejected without conversion.
 
 ## Workspace Structure
 
@@ -42,7 +44,7 @@ stargate/
 │   ├── auth/          # Hosted login / auth-flow UI (same stack + layering)
 │   └── mail/          # Transactional email templates (react-email)
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
-├── docs/              # Config docs, including config-v2alpha1.md
+├── docs/              # Config docs, including config-v1.md
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks
 ```
@@ -66,7 +68,7 @@ stargate/
 Mounted as Axum `fallback_service`. Current request flow:
 1. Load active `Gate` from request extensions.
 2. Pre-check API key/JWT and capture subject/auth kind.
-3. Match the request against compiled v2 routers, sorted by descending priority.
+3. Match the request against compiled v1 routers, sorted by descending priority.
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
 5. Apply selected policies in fixed runtime order: auth, access control, rate limit, quota.
 6. Build an execution plan from the selected service: load-balanced upstream, weighted split, mirror, failover, or direct response.
@@ -84,12 +86,12 @@ Gateway modules:
 - `headers.rs`, `path.rs`, `responses.rs`, `limits.rs`, `types.rs`: focused helpers and shared types.
 - `http.rs`, `ws.rs`: protocol-specific proxy implementations.
 
-### Gateway Config v2alpha1
+### Gateway Config v1
 
 `config.yaml` must contain:
 
 ```yaml
-schema: stargate/v2alpha1
+schema: stargate/v1
 ```
 
 The config compiler uses named objects:
@@ -159,7 +161,7 @@ Quota is independent from rate limiting. A router `quota` policy or subject
 `attrs.quota` selects a named `quota_tracker` limit. If both rate limit and
 quota are configured for a request, both checks run with separate tracker keys.
 
-Full schema notes and examples: `docs/config-v2alpha1.md`. Internal-context
+Full schema notes and examples: `docs/config-v1.md`. Internal-context
 consumers follow `docs/internal-context-consumer-guide.md`; the protocol is
 defined in `docs/internal-context-contract-v1.md`.
 
@@ -253,11 +255,11 @@ remain subject to their normal JWT expiry.
 `notify` watches `config.yaml` and policy files. Content hash prevents false positives.
 
 Hot reload behavior:
-- Parse and compile the new v2 config first.
+- Parse and compile the new v1 config first.
 - If valid, atomically swap the active gateway graph/balancers/policies.
 - If invalid, log the error and keep the previous in-memory config active.
 
-Admin config endpoints validate v2 config before saving.
+Admin config endpoints validate v1 config before saving.
 
 Admin access-control endpoints manage the ACE rule file (`.stargate/policies`)
 separately from `config.yaml`:
@@ -713,7 +715,7 @@ Following the arrows keeps each concern in exactly one place.
 - Thread-local LRU caches for ACE decisions are version-aware and invalidated on policy change.
 - WebSocket proxying is supported in the gateway via `hyper-tungstenite`.
 - HTTP proxying strips hop-by-hop headers and supports preserve-host behavior.
-- GeoIP is available via MaxMind GeoLite2-City, but geo-aware routing is not yet first-class in v2 matchers.
+- GeoIP is available via MaxMind GeoLite2-City, but geo-aware routing is not yet first-class in v1 matchers.
 - OpenAPI docs use `utoipa` with `utoipa-axum` + `utoipa-swagger-ui`.
 - `api::server_router` applies rate limiting to IAM/admin APIs and merges probe routes outside that layer; `main.rs` adds security headers, tracing, CORS, compression, and normalize-path.
 - TLS server uses a custom hyper-util connection loop with per-connection graceful shutdown and drain deadline.

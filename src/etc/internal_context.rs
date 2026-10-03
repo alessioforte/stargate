@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn absent_block_skips_key_preflight() {
-        let config = config("schema: stargate/v2alpha1\nhttp: {}\n");
+        let config = config("schema: stargate/v1\nhttp: {}\n");
         preflight_config_with(&config, || panic!("loader must not run")).unwrap();
     }
 
@@ -679,7 +679,7 @@ mod tests {
     fn reload_candidate_failure_occurs_before_activation() {
         let config = config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     orders:
@@ -698,7 +698,7 @@ http:
     fn valid_present_block_passes_preflight() {
         let config = config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     orders:

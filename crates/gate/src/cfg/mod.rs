@@ -3,12 +3,12 @@ pub mod graph;
 mod limit;
 mod load_balancer;
 mod mtls;
-mod v2alpha1;
+mod v1;
 
 pub use limit::{Limit, LimitSpec};
 pub use load_balancer::LoadBalancer;
 pub use mtls::MtlsConfig;
-pub use v2alpha1::{
+pub use v1::{
     AuthStrategy, Config, EnvProfile, InternalContext, LimitScope, OnMissingOrg, Service, Upstream,
     UpstreamProtocol,
 };
@@ -20,9 +20,11 @@ use std::fmt::{Display, Formatter};
 use std::path::Path;
 use tracing::info;
 
+pub const SCHEMA: &str = "stargate/v1";
+
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    pub raw: v2alpha1::Config,
+    pub raw: v1::Config,
     pub compiled: CompiledConfig,
 }
 
@@ -34,7 +36,7 @@ pub enum ConfigLoadError {
     },
     Parse(serde_saphyr::Error),
     Compile(graph::CompileError),
-    MissingV2Schema,
+    InvalidSchema,
 }
 
 impl Display for ConfigLoadError {
@@ -45,8 +47,8 @@ impl Display for ConfigLoadError {
             }
             ConfigLoadError::Parse(source) => write!(f, "unable to parse config: {}", source),
             ConfigLoadError::Compile(source) => write!(f, "unable to compile config: {}", source),
-            ConfigLoadError::MissingV2Schema => {
-                write!(f, "config schema must be 'stargate/v2alpha1'")
+            ConfigLoadError::InvalidSchema => {
+                write!(f, "config requires an explicit schema of '{}'", SCHEMA)
             }
         }
     }
@@ -58,7 +60,7 @@ impl Error for ConfigLoadError {
             ConfigLoadError::Io { source, .. } => Some(source),
             ConfigLoadError::Parse(source) => Some(source),
             ConfigLoadError::Compile(source) => Some(source),
-            ConfigLoadError::MissingV2Schema => None,
+            ConfigLoadError::InvalidSchema => None,
         }
     }
 }
@@ -66,8 +68,8 @@ impl Error for ConfigLoadError {
 impl RuntimeConfig {
     pub fn from_file(path: &str) -> Result<Self, ConfigLoadError> {
         if !Path::new(path).exists() {
-            info!("Creating v2alpha1 gate configuration yaml file");
-            let raw = v2alpha1::Config::default();
+            info!(schema = SCHEMA, "Creating gate configuration yaml file");
+            let raw = v1::Config::default();
             raw.to_file(path);
             return Self::from_raw(raw);
         }
@@ -80,12 +82,12 @@ impl RuntimeConfig {
     }
 
     pub fn from_yaml_str(yaml: &str) -> Result<Self, ConfigLoadError> {
-        ensure_v2alpha1_schema(yaml)?;
-        let raw: v2alpha1::Config = serde_saphyr::from_str(yaml).map_err(ConfigLoadError::Parse)?;
+        ensure_schema(yaml)?;
+        let raw: v1::Config = serde_saphyr::from_str(yaml).map_err(ConfigLoadError::Parse)?;
         Self::from_raw(raw)
     }
 
-    pub fn from_raw(raw: v2alpha1::Config) -> Result<Self, ConfigLoadError> {
+    pub fn from_raw(raw: v1::Config) -> Result<Self, ConfigLoadError> {
         let compiled = raw.compile().map_err(ConfigLoadError::Compile)?;
         Ok(Self { raw, compiled })
     }
@@ -102,33 +104,43 @@ impl RuntimeConfig {
         &self.compiled
     }
 
-    pub fn raw(&self) -> &v2alpha1::Config {
+    pub fn raw(&self) -> &v1::Config {
         &self.raw
     }
 }
 
-fn ensure_v2alpha1_schema(yaml: &str) -> Result<(), ConfigLoadError> {
+fn ensure_schema(yaml: &str) -> Result<(), ConfigLoadError> {
     let value = serde_saphyr::from_str::<Value>(yaml).map_err(ConfigLoadError::Parse)?;
     let Some(schema) = value
         .as_object()
         .and_then(|mapping| mapping.get("schema"))
         .and_then(Value::as_str)
     else {
-        return Err(ConfigLoadError::MissingV2Schema);
+        return Err(ConfigLoadError::InvalidSchema);
     };
-    if schema == "stargate/v2alpha1" {
+    if schema == SCHEMA {
         Ok(())
     } else {
-        Err(ConfigLoadError::MissingV2Schema)
+        Err(ConfigLoadError::InvalidSchema)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RuntimeConfig;
+    use super::{Config, ConfigLoadError, RuntimeConfig, SCHEMA};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn config_path() -> std::path::PathBuf {
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+        std::env::temp_dir().join(format!(
+            "stargate-config-{}-{}.yaml",
+            std::process::id(),
+            NEXT_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
 
     #[test]
-    fn runtime_config_rejects_missing_v2_schema() {
+    fn runtime_config_rejects_missing_schema() {
         let error = RuntimeConfig::from_yaml_str(
             r#"
 limits:
@@ -141,14 +153,14 @@ services: []
 "#,
         );
 
-        assert!(error.is_err());
+        assert!(matches!(error, Err(ConfigLoadError::InvalidSchema)));
     }
 
     #[test]
-    fn runtime_config_loads_v2alpha1_schema() {
+    fn runtime_config_loads_v1_schema() {
         let config = RuntimeConfig::from_yaml_str(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams: {}
   services: {}
@@ -157,8 +169,79 @@ http:
   routers: {}
 "#,
         )
-        .expect("v2 config should load");
+        .expect("v1 config should load");
 
-        assert_eq!(config.raw.schema, "stargate/v2alpha1");
+        assert_eq!(config.raw.schema, SCHEMA);
+        assert_eq!(config.compiled.schema, SCHEMA);
+        let yaml = serde_saphyr::to_string(&config.raw).unwrap();
+        assert!(yaml.contains("schema: stargate/v1"));
+        assert_eq!(
+            RuntimeConfig::from_yaml_str(&yaml).unwrap().raw.schema,
+            SCHEMA
+        );
+    }
+
+    #[test]
+    fn external_config_loaders_reject_unsupported_schemas() {
+        let path = config_path();
+        let path_str = path.to_str().unwrap();
+        for schema in ["stargate/v2alpha1", "stargate/v2", "other/v1", ""] {
+            let yaml = format!("schema: '{schema}'\nhttp: {{}}\n");
+            let error = RuntimeConfig::from_yaml_str(&yaml).unwrap_err();
+            assert!(matches!(error, ConfigLoadError::InvalidSchema));
+            assert!(error.to_string().contains(SCHEMA));
+
+            std::fs::write(&path, &yaml).unwrap();
+            assert!(matches!(
+                RuntimeConfig::from_file(path_str),
+                Err(ConfigLoadError::InvalidSchema)
+            ));
+
+            let raw: Config = serde_json::from_value(serde_json::json!({
+                "schema": schema,
+                "http": {},
+            }))
+            .unwrap();
+            assert!(raw.compile().unwrap_err().to_string().contains(SCHEMA));
+            assert!(matches!(
+                RuntimeConfig::from_raw(raw),
+                Err(ConfigLoadError::Compile(_))
+            ));
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn external_config_loaders_require_an_explicit_schema() {
+        let path = config_path();
+        let path_str = path.to_str().unwrap();
+        for yaml in ["http: {}\n", "schema: null\n", "schema: 1\n"] {
+            std::fs::write(&path, yaml).unwrap();
+            assert!(matches!(
+                RuntimeConfig::from_file(path_str),
+                Err(ConfigLoadError::InvalidSchema)
+            ));
+            if let Ok(raw) = serde_saphyr::from_str::<Config>(yaml) {
+                assert!(raw.compile().is_err());
+            }
+        }
+        assert!(serde_saphyr::from_str::<Config>("http: {}\n").is_err());
+        assert!(serde_json::from_value::<Config>(serde_json::json!({ "http": {} })).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn generated_default_file_uses_the_supported_schema() {
+        let path = config_path();
+        let config = RuntimeConfig::from_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.raw.schema, SCHEMA);
+        assert_eq!(config.compiled.schema, SCHEMA);
+        let yaml = std::fs::read_to_string(&path).unwrap();
+        assert!(yaml.contains("schema: stargate/v1"));
+        assert_eq!(
+            RuntimeConfig::from_yaml_str(&yaml).unwrap().raw.schema,
+            SCHEMA
+        );
+        std::fs::remove_file(path).unwrap();
     }
 }

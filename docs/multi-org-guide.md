@@ -6,7 +6,7 @@ most **one** organization at a time — its *org context* — which drives
 per-org access control and org-level rate limits/quotas at the gateway.
 
 Gateway configuration for org-scoped limits:
-[`config-v2alpha1.md`](config-v2alpha1.md) ("Org-scoped limits").
+[`config-v1.md`](config-v1.md) ("Org-scoped limits").
 
 ## Which org a session acts in
 
@@ -111,7 +111,7 @@ role in server-side pending state and use the same transaction when accepted.
 ## What the org context feeds
 
 - **ACE policies**: `user.org_id`, `user.org_role`, `api_key.org_id`
-  condition variables (see the ACE section in `config-v2alpha1.md`).
+  condition variables (see the ACE section in `config-v1.md`).
 - **Gateway limits**: `scope: org` rate limits and quotas consume the
   org's shared bucket; orgs override the named limit via
   `organizations.attrs.rate_limit` / `attrs.quota`.

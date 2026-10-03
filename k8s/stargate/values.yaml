@@ -161,7 +161,7 @@ gatewayConfig:
   fileName: config.yaml
   policiesFileName: policies
   config: |
-    schema: stargate/v2alpha1
+    schema: stargate/v1
   policies: ""
 
 # Edge-only state. No static PersistentVolume is created: a PVC uses the

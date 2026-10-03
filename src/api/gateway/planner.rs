@@ -198,7 +198,7 @@ mod tests {
     fn selected_leaf_carries_its_compiled_audience_not_its_target_url() {
         let config = RuntimeConfig::from_yaml_str(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     orders-pool:
@@ -242,7 +242,7 @@ http:
     fn failover_and_mirror_plans_retain_each_leaf_audience() {
         let config = RuntimeConfig::from_yaml_str(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     primary-pool:
@@ -340,7 +340,7 @@ http:
     fn weighted_selection_keeps_the_chosen_leaf_audience() {
         let config = RuntimeConfig::from_yaml_str(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     blue-pool:

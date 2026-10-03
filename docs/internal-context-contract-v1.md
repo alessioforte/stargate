@@ -9,7 +9,7 @@ behavior implemented by Stargate.
 
 Related documentation:
 
-- [Config v2alpha1](config-v2alpha1.md) explains how to enable internal context
+- [Config v1](config-v1.md) explains how to enable internal context
   for an upstream.
 - [Consumer integration guide](internal-context-consumer-guide.md) shows how a
   receiving service integrates the verifier boundary.

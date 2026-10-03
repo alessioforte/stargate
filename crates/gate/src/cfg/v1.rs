@@ -4,20 +4,17 @@ use super::graph::{
     ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode,
     UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
 };
-use super::{Limit, LimitSpec, LoadBalancer, MtlsConfig};
+use super::{Limit, LimitSpec, LoadBalancer, MtlsConfig, SCHEMA};
 use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 
-const SCHEMA: &str = "stargate/v2alpha1";
 const INTERNAL_CONTEXT_HEADER: &str = "stargate-context";
 const INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default = "default_schema")]
     pub schema: String,
     #[serde(default)]
     pub limits: IndexMap<String, LimitSpec>,
@@ -30,7 +27,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            schema: default_schema(),
+            schema: SCHEMA.to_string(),
             limits: IndexMap::new(),
             mtls: None,
             http: HttpConfig::default(),
@@ -39,19 +36,6 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn from_file(path: &str) -> Self {
-        if !Path::new(path).exists() {
-            tracing::info!("Creating v2alpha1 gate configuration yaml file");
-            let config = Config::default();
-            let config_str = serde_saphyr::to_string(&config).expect("Unable to serialize config");
-            std::fs::write(path, config_str).expect("Unable to write config file");
-            return config;
-        }
-
-        let file = std::fs::read_to_string(path).expect("Unable to read config file");
-        serde_saphyr::from_str(&file).expect("Unable to parse config file")
-    }
-
     pub fn to_file(&self, path: &str) {
         let config_str = serde_saphyr::to_string(self).expect("Unable to serialize config");
         std::fs::write(path, config_str).expect("Unable to write config file");
@@ -378,10 +362,6 @@ pub struct NamedValueMatch {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceIpMatch {
     pub cidrs: Vec<String>,
-}
-
-fn default_schema() -> String {
-    SCHEMA.to_string()
 }
 
 fn compile_limits(limits: &IndexMap<String, LimitSpec>) -> Result<Vec<Limit>, CompileError> {
@@ -1191,7 +1171,7 @@ mod tests {
     fn compiles_oauth_auth_policy_with_exact_audience() {
         let compiled = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   policies:
     app-user:
@@ -1227,7 +1207,7 @@ http:
             ),
         ] {
             let yaml = format!(
-                "schema: stargate/v2alpha1\nhttp:\n  policies:\n    auth:\n      kind: auth\n      strategies: {strategies}\n{audience}"
+                "schema: stargate/v1\nhttp:\n  policies:\n    auth:\n      kind: auth\n      strategies: {strategies}\n{audience}"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1241,7 +1221,7 @@ http:
     fn compiles_named_entities_and_sorts_routers() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 limits:
   default:
     strategy: gcra
@@ -1360,7 +1340,7 @@ http:
     fn compiles_org_scoped_limit_policies_with_defaults() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 limits:
   default:
     strategy: gcra
@@ -1440,7 +1420,7 @@ http:
     fn rejects_on_missing_with_subject_scope() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 limits:
   default:
     strategy: gcra
@@ -1476,7 +1456,7 @@ http:
     fn rejects_zero_router_quota_cost() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   services:
     ok:
@@ -1500,7 +1480,7 @@ http:
     fn rejects_unknown_refs() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 limits:
   default:
     strategy: gcra
@@ -1533,7 +1513,7 @@ http:
     fn rejects_service_cycles() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   services:
     a:
@@ -1558,7 +1538,7 @@ http:
     fn rejects_ambiguous_match_operator() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     reports:
@@ -1586,7 +1566,7 @@ http:
     fn compiles_regex_matchers() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     reports:
@@ -1618,7 +1598,7 @@ http:
     fn compiles_value_predicates() {
         let config = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     reports:
@@ -1652,7 +1632,7 @@ http:
     fn internal_context_is_optional_and_compiles_when_present() {
         let absent = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     orders:
@@ -1666,7 +1646,7 @@ http:
 
         let present = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     orders:
@@ -1702,7 +1682,7 @@ http:
                 .map(|value| format!("        audience: '{value}'\n"))
                 .unwrap_or_else(|| "        {}\n".to_owned());
             let yaml = format!(
-                "schema: stargate/v2alpha1\nhttp:\n  upstreams:\n    orders:\n      targets:\n        - url: http://orders:8080\n      internal_context:\n{audience}"
+                "schema: stargate/v1\nhttp:\n  upstreams:\n    orders:\n      targets:\n        - url: http://orders:8080\n      internal_context:\n{audience}"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1719,7 +1699,7 @@ http:
     fn rejects_unknown_internal_context_fields() {
         let error = serde_saphyr::from_str::<Config>(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   upstreams:
     orders:
@@ -1775,7 +1755,7 @@ http:
             ),
         ] {
             let yaml = format!(
-                "schema: stargate/v2alpha1\nhttp:\n  middlewares:\n    headers:\n      kind: {kind}\n      {operation}:\n{value}\n"
+                "schema: stargate/v1\nhttp:\n  middlewares:\n    headers:\n      kind: {kind}\n      {operation}:\n{value}\n"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1791,7 +1771,7 @@ http:
     fn reserves_internal_context_header_in_direct_responses() {
         let error = parse_config(
             r#"
-schema: stargate/v2alpha1
+schema: stargate/v1
 http:
   services:
     response:
