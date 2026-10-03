@@ -398,6 +398,29 @@ Mirror and response-status failover replay the request body. Replay buffering is
 
 WebSocket proxying uses the first selected upstream. Mirror traffic and response-status failover do not replay upgraded WebSocket streams.
 
+Discarded HTTP responses (status failover and completed mirror requests) are
+drained frame by frame with a fixed **64 KiB** data-byte budget and a **250 ms
+absolute deadline per body**. Progress does not reset this deadline. At the
+first byte limit, timeout, or body error, Stargate drops the body; failover then
+advances to its next eligible attempt. Small finite bodies can finish draining
+and permit connection reuse. No discarded body is collected into a buffer.
+One already-received frame can cross the byte budget; its bytes are counted and
+no subsequent frame is read. These fixed disposal defaults are independent of
+the request replay cap. The deadline begins at body disposal, after upstream
+response headers arrive.
+
+`stargate.gateway.response.disposals` counts completed disposal outcomes;
+`stargate.gateway.response.disposal.bytes` and
+`stargate.gateway.response.disposal.duration` record observed data bytes and
+elapsed milliseconds. Their only dimensions are `stargate.disposal.kind`
+(`failover`, `mirror`) and `stargate.outcome` (`drained`, `byte_limit`, `timeout`,
+`body_error`). They contain no target URLs, credentials, or body contents.
+`stargate.gateway.mirrors` records `dispatched` at task creation and a final
+`success`, `abandoned`, `timeout`, `body_error`, or `error` after execution and
+disposal finish. `abandoned` means the byte budget was reached; `error` means
+execution failed before a disposable response was available. Shadow outcomes
+never change primary upstream health.
+
 ## Policies
 
 ```yaml

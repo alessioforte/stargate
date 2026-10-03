@@ -253,6 +253,9 @@ pub struct Metrics {
     gateway_upstream_duration: Histogram<f64>,
     gateway_failovers: Counter<u64>,
     gateway_mirrors: Counter<u64>,
+    gateway_response_disposals: Counter<u64>,
+    gateway_response_disposal_bytes: Histogram<u64>,
+    gateway_response_disposal_duration: Histogram<f64>,
     gateway_replay_bytes: Histogram<u64>,
     gateway_policy_decisions: Counter<u64>,
     gateway_propagation_drafts: Counter<u64>,
@@ -305,7 +308,21 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
             .build(),
         gateway_mirrors: meter
             .u64_counter("stargate.gateway.mirrors")
-            .with_description("Gateway mirror dispatches")
+            .with_description("Gateway mirror dispatches and completed outcomes")
+            .build(),
+        gateway_response_disposals: meter
+            .u64_counter("stargate.gateway.response.disposals")
+            .with_description("Discarded gateway response body outcomes")
+            .build(),
+        gateway_response_disposal_bytes: meter
+            .u64_histogram("stargate.gateway.response.disposal.bytes")
+            .with_description("Response data bytes observed during bounded disposal")
+            .with_unit("By")
+            .build(),
+        gateway_response_disposal_duration: meter
+            .f64_histogram("stargate.gateway.response.disposal.duration")
+            .with_description("Discarded response body disposal duration")
+            .with_unit("ms")
             .build(),
         gateway_replay_bytes: meter
             .u64_histogram("stargate.gateway.replay.bytes")
@@ -421,6 +438,25 @@ pub fn record_gateway_mirror(outcome: &str) {
     METRICS
         .gateway_mirrors
         .add(1, &[KeyValue::new("stargate.outcome", outcome.to_string())]);
+}
+
+pub fn record_gateway_response_disposal(
+    kind: &'static str,
+    outcome: &'static str,
+    bytes: usize,
+    elapsed: Duration,
+) {
+    let attrs = [
+        KeyValue::new("stargate.disposal.kind", kind),
+        KeyValue::new("stargate.outcome", outcome),
+    ];
+    METRICS.gateway_response_disposals.add(1, &attrs);
+    METRICS
+        .gateway_response_disposal_bytes
+        .record(bytes as u64, &attrs);
+    METRICS
+        .gateway_response_disposal_duration
+        .record(duration_ms(elapsed), &attrs);
 }
 
 pub fn record_gateway_replay_bytes(bytes: usize) {

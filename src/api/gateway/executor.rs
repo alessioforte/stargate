@@ -1,5 +1,6 @@
 use super::{
     dispatch::InternalDispatch,
+    disposal::{DisposalOutcome, discard_response},
     http,
     responses::build_direct_response,
     types::{DynLoadBalancer, ExecutionPlan, ReplayRequest, RequestState, SelectedService},
@@ -10,7 +11,6 @@ use crate::etc::{ext::RequestExt, gate::get_client, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::{body::Body, response::Response};
 use ctx::DispatchKind;
-use http_body_util::BodyExt;
 use std::{collections::HashMap, time::Instant};
 use tracing::Instrument;
 
@@ -311,9 +311,7 @@ pub(super) async fn execute_plan_from_replay(
                 attempt = dispatch_attempt.map(|attempt| attempt.number),
                 "Failing over response by status"
             );
-            if let Err(error) = response.into_body().collect().await {
-                tracing::warn!(%status, %error, "Failover response drain failed");
-            }
+            discard_response(response, "failover").await;
             continue;
         }
         return Ok(response);
@@ -334,26 +332,31 @@ pub(super) fn spawn_mirrors(
         let span = tracing::debug_span!("gateway.mirror");
         tokio::spawn(
             async move {
-                // Mirror traffic is shadow traffic: its outcomes must not feed the
-                // circuit breaker, so pass no balancers.
-                match execute_plan_from_replay(&mirror, &replay, &state, None, DispatchKind::Shadow)
-                    .await
-                {
-                    Ok(response) => {
-                        telemetry::record_gateway_mirror("success");
-                        let status = response.status();
-                        if let Err(error) = response.into_body().collect().await {
-                            tracing::warn!(%status, %error, "Mirror response drain failed");
-                        }
-                    }
-                    Err(error) => {
-                        telemetry::record_gateway_mirror("error");
-                        tracing::warn!(%error, "Mirror request failed");
-                    }
-                }
+                let outcome = execute_mirror(&mirror, &replay, &state).await;
+                telemetry::record_gateway_mirror(outcome);
             }
             .instrument(span),
         );
+    }
+}
+
+async fn execute_mirror(
+    mirror: &ExecutionPlan,
+    replay: &ReplayRequest,
+    state: &RequestState,
+) -> &'static str {
+    // Shadow outcomes never feed the circuit breaker, including during failover.
+    match execute_plan_from_replay(mirror, replay, state, None, DispatchKind::Shadow).await {
+        Ok(response) => match discard_response(response, "mirror").await {
+            DisposalOutcome::Drained => "success",
+            DisposalOutcome::ByteLimit => "abandoned",
+            DisposalOutcome::Timeout => "timeout",
+            DisposalOutcome::BodyError => "body_error",
+        },
+        Err(error) => {
+            tracing::warn!(%error, "Mirror request failed");
+            "error"
+        }
     }
 }
 
@@ -469,6 +472,10 @@ fn record_attempt_metrics(
 }
 
 #[cfg(test)]
+#[path = "executor_disposal_tests.rs"]
+mod disposal_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::etc::reqctx::INTERNAL_CONTEXT_HEADER;
@@ -477,7 +484,7 @@ mod tests {
 
     // Single-upstream balancer with the given open-after threshold and a long
     // cooldown, so a tripped breaker stays open for the test.
-    fn single_upstream(
+    pub(super) fn single_upstream(
         service: &str,
         url: &str,
         threshold: usize,
@@ -510,11 +517,11 @@ mod tests {
         Err(ErrorResponse::new(ErrorCode::UpstreamConnectionFailed))
     }
 
-    fn available(balancers: &HashMap<String, DynLoadBalancer>, service: &str) -> bool {
+    pub(super) fn available(balancers: &HashMap<String, DynLoadBalancer>, service: &str) -> bool {
         balancers.get(service).unwrap().select(&ctx()).is_some()
     }
 
-    fn replay_state() -> RequestState {
+    pub(super) fn replay_state() -> RequestState {
         RequestState {
             original_path: "/orders".to_owned(),
             path: "/orders".to_owned(),
@@ -526,7 +533,7 @@ mod tests {
         }
     }
 
-    fn replay_request() -> ReplayRequest {
+    pub(super) fn replay_request() -> ReplayRequest {
         ReplayRequest {
             method: ::http::Method::GET,
             version: ::http::Version::HTTP_11,

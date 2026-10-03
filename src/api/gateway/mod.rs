@@ -1,4 +1,5 @@
 mod dispatch;
+mod disposal;
 mod executor;
 mod headers;
 mod http;

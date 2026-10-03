@@ -81,6 +81,8 @@ Gateway modules:
 - `policies.rs`: auth, ACE, rate limit, quota policy execution.
 - `planner.rs`: service graph expansion into an execution plan.
 - `executor.rs`: upstream/direct-response execution, mirror dispatch, failover execution.
+- `disposal.rs`: frame-by-frame disposal of discarded responses, bounded by
+  64 KiB of data and a 250 ms absolute deadline per body, with completion metrics.
 - `dispatch.rs`: shared internal-context sanitization, trace injection, and per-attempt signing boundary.
 - `replay.rs`: request buffering and replay body limits.
 - `headers.rs`, `path.rs`, `responses.rs`, `limits.rs`, `types.rs`: focused helpers and shared types.
@@ -170,6 +172,8 @@ defined in `docs/internal-context-contract-v1.md`.
 Implemented:
 - Weighted traffic splitting between services.
 - Shadow / mirror traffic with discarded mirror responses.
+- Bounded disposal of mirror and status-failover response bodies; mirror
+  completion metrics distinguish drained, abandoned, timed-out, and broken bodies.
 - Failover on transport error.
 - Failover on selected response status codes.
 - Direct response routes.
