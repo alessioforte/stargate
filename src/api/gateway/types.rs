@@ -15,6 +15,7 @@ pub(super) struct ResponseHeaderMutations {
 
 #[derive(Debug, Clone)]
 pub(super) struct RequestState {
+    pub(super) execution: super::lifecycle::Execution,
     pub(super) original_path: String,
     pub(super) path: String,
     pub(super) query: String,
@@ -54,10 +55,6 @@ pub(super) struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
-    pub(super) fn requires_replay(&self) -> bool {
-        !self.mirrors.is_empty() || self.attempts.len() > 1
-    }
-
     pub(super) fn needs_failover_replay(&self) -> bool {
         self.attempts.len() > 1
     }

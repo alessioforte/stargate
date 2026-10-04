@@ -257,6 +257,9 @@ pub struct Metrics {
     gateway_response_disposal_bytes: Histogram<u64>,
     gateway_response_disposal_duration: Histogram<f64>,
     gateway_replay_bytes: Histogram<u64>,
+    gateway_resources: opentelemetry::metrics::UpDownCounter<i64>,
+    gateway_rejections: Counter<u64>,
+    gateway_timeouts: Counter<u64>,
     gateway_policy_decisions: Counter<u64>,
     gateway_propagation_drafts: Counter<u64>,
     gateway_internal_context_issues: Counter<u64>,
@@ -324,6 +327,14 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
             .with_description("Discarded response body disposal duration")
             .with_unit("ms")
             .build(),
+        gateway_resources: meter
+            .i64_up_down_counter("stargate.gateway.resources.active")
+            .with_description(
+                "Active primary requests, mirror tasks, and reserved replay bytes (kind)",
+            )
+            .build(),
+        gateway_rejections: meter.u64_counter("stargate.gateway.rejections").build(),
+        gateway_timeouts: meter.u64_counter("stargate.gateway.timeouts").build(),
         gateway_replay_bytes: meter
             .u64_histogram("stargate.gateway.replay.bytes")
             .with_description("Gateway replay-buffered request body size")
@@ -623,4 +634,20 @@ mod audit_trace_tests {
 
         provider.shutdown().unwrap();
     }
+}
+
+pub fn record_gateway_resource(kind: &'static str, delta: i64) {
+    METRICS
+        .gateway_resources
+        .add(delta, &[KeyValue::new("kind", kind)]);
+}
+pub fn record_gateway_rejection(kind: &'static str) {
+    METRICS
+        .gateway_rejections
+        .add(1, &[KeyValue::new("kind", kind)]);
+}
+pub fn record_gateway_timeout(phase: &'static str) {
+    METRICS
+        .gateway_timeouts
+        .add(1, &[KeyValue::new("phase", phase)]);
 }

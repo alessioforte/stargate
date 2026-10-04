@@ -1,5 +1,5 @@
 use crate::cfg::{
-    Limit, LoadBalancer, MtlsConfig,
+    CompiledRuntimeSettings, Limit, LoadBalancer, MtlsConfig, ResponseMode,
     {AuthStrategy, EnvProfile, LimitScope, OnMissingOrg, UpstreamProtocol},
 };
 use indexmap::IndexMap;
@@ -10,6 +10,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug, Clone)]
 pub struct CompiledConfig {
     pub schema: String,
+    pub runtime: CompiledRuntimeSettings,
     pub limits: Vec<Limit>,
     pub mtls: Option<MtlsConfig>,
     pub http: HttpGraph,
@@ -152,6 +153,7 @@ pub enum PolicyNode {
 
 #[derive(Debug, Clone)]
 pub struct RouterNode {
+    pub response_mode: ResponseMode,
     pub name: String,
     pub priority: i32,
     pub order: usize,

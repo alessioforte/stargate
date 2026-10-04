@@ -38,6 +38,7 @@ interface FormValues {
   middlewares: string[];
   policies: string[];
   quotaCost: number | string;
+  responseMode: "finite" | "stream";
 }
 
 interface BuildContext {
@@ -69,6 +70,7 @@ function routerToFormValues(
       middlewares: [],
       policies: [],
       quotaCost: "",
+      responseMode: "finite",
     };
   }
 
@@ -81,6 +83,8 @@ function routerToFormValues(
       typeof selectedValue.service === "string" ? selectedValue.service : "",
     middlewares: stringsToForm(selectedValue.middlewares),
     policies: stringsToForm(selectedValue.policies),
+    responseMode:
+      selectedValue.response_mode === "stream" ? "stream" : "finite",
     quotaCost:
       typeof selectedValue.quota_cost === "number"
         ? selectedValue.quota_cost
@@ -123,6 +127,7 @@ function formValuesToRouter(
   if (!match.value) return match;
 
   const router: JsonRecord = {
+    response_mode: values.responseMode,
     match: match.value,
     service,
     middlewares: values.middlewares,
@@ -222,6 +227,19 @@ const RouterForm: React.FC<Props> = ({
           label={t("priority")}
           value={values.priority}
           onChange={(priority) => setField("priority", priority)}
+        />
+        <Select
+          variant="filled"
+          label={t("responseMode")}
+          description={t("responseModeDescription")}
+          value={values.responseMode}
+          data={[
+            { value: "finite", label: t("responseModeFinite") },
+            { value: "stream", label: t("responseModeStream") },
+          ]}
+          onChange={(mode) =>
+            setField("responseMode", mode === "stream" ? "stream" : "finite")
+          }
         />
         <NumberInput
           min={1}

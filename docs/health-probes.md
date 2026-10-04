@@ -53,9 +53,10 @@ returns `200` and `/readyz` and `/health` return `503` without dependency I/O.
 An in-flight readiness check rechecks the lifecycle before returning success.
 
 After the delay, the server closes listeners and drains active connections,
-then stops the audit relay and persists the edge memory store. TLS connections
-have the existing `SERVER_SHUTDOWN_TIMEOUT_SECS` deadline (default `25`). Plain
-HTTP uses Axum's graceful shutdown and has no application-level drain deadline.
+and cancels active gateway requests, mirrors, and WebSockets. HTTP and TLS
+connections share the `SERVER_SHUTDOWN_TIMEOUT_SECS` deadline (default `25`);
+remaining connection tasks are cancelled when it expires. Tracked gateway tasks
+are drained before the audit relay stops and the edge memory store is persisted.
 The deployment termination grace period remains the final process deadline.
 
 Allow room in the pod's `terminationGracePeriodSeconds` for the delay,

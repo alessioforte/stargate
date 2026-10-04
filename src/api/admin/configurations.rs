@@ -182,7 +182,14 @@ mod tests {
         invalid_probe["http"]["upstreams"]["secure"]["load_balancer"]["liveness_probe"] =
             serde_json::json!({"path": "/health", "interval": "0s"});
 
+        let mut invalid_runtime = valid.clone();
+        invalid_runtime.runtime.response_header_timeout = "0s".into();
+        let mut invalid_budget = valid.clone();
+        invalid_budget.runtime.primary_concurrency = 0;
+
         for candidate in [
+            invalid_runtime,
+            invalid_budget,
             missing_key,
             mismatched_key,
             serde_json::from_value(invalid_duration).unwrap(),

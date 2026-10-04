@@ -99,7 +99,7 @@ http:
 
 ## HTTP transport and client TLS
 
-`http.upstreams.<name>.transport.connect_timeout` defaults to `30s`. A supplied
+`http.upstreams.<name>.transport.connect_timeout` defaults to `runtime.connect_timeout` (`5s`). A supplied
 value must be a positive, representable integer duration with one of the units
 `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, or `w`. Zero, malformed, negative, and
 overflowing values are rejected, including on upstreams that no service uses.
@@ -453,30 +453,127 @@ http:
         text: maintenance
 ```
 
-Mirror and response-status failover replay the request body. Replay buffering is capped by `GATEWAY_REPLAY_BODY_LIMIT`, default `2MiB`. Accepted units: bytes, `KB`/`KiB`, `MB`/`MiB`, and `GB`/`GiB`. If only mirror traffic needs replay and `Content-Length` exceeds the cap, Stargate skips the mirror and forwards the primary request without buffering. If response-status failover needs replay and the body exceeds the cap, Stargate returns `413`.
+HTTP mirrors and multi-attempt failover plans replay the request body, including
+transport-only failover. The per-request cap is `runtime.replay_body_bytes`
+(default `2097152`, or 2 MiB). `GATEWAY_REPLAY_BODY_LIMIT` has been removed.
+When only mirrors need replay, an oversized `Content-Length` skips mirrors and
+streams the primary request. A buffered body crossing the per-request cap
+returns `413 gateway.replay_payload_too_large`.
 
-WebSocket proxying uses the first selected upstream. Mirror traffic and response-status failover do not replay upgraded WebSocket streams.
+Discarded responses are consumed frame by frame, without collecting them, up to
+`runtime.discarded_body_bytes` (default 64 KiB) and an absolute
+`runtime.discarded_body_timeout` (default 250 ms). Progress cannot reset that
+absolute deadline. The remaining request/mirror budget can end disposal sooner.
+An already-received frame may cross the byte cap; no subsequent frame is read.
+Small bodies can drain fully and allow connection reuse.
 
-Discarded HTTP responses (status failover and completed mirror requests) are
-drained frame by frame with a fixed **64 KiB** data-byte budget and a **250 ms
-absolute deadline per body**. Progress does not reset this deadline. At the
-first byte limit, timeout, or body error, Stargate drops the body; failover then
-advances to its next eligible attempt. Small finite bodies can finish draining
-and permit connection reuse. No discarded body is collected into a buffer.
-One already-received frame can cross the byte budget; its bytes are counted and
-no subsequent frame is read. These fixed disposal defaults are independent of
-the request replay cap. The deadline begins at body disposal, after upstream
-response headers arrive.
+## Runtime deadlines and resource budgets
+
+All settings below are optional. Durations must be positive and representable;
+capacities and byte counts must be positive bounded integers. Unknown `runtime`
+fields are rejected. `replay_body_bytes` cannot exceed `replay_memory_bytes`.
+These defaults are a finite baseline for the later capacity measurements.
+
+```yaml
+runtime:
+  primary_concurrency: 1024
+  mirror_concurrency: 64
+  replay_body_bytes: 2097152
+  replay_memory_bytes: 67108864
+  upload_idle_timeout: 15s
+  connect_timeout: 5s
+  response_header_timeout: 30s
+  response_body_idle_timeout: 30s
+  discarded_body_timeout: 250ms
+  discarded_body_bytes: 65536
+  mirror_timeout: 5s
+  request_timeout: 60s
+```
+
+Primary admission uses a process-wide permit before authentication and route
+matching. Exhaustion returns `503 gateway.overloaded` promptly. A permit stays
+with the response body through completion, failure, or drop, and with an
+upgraded WebSocket task until the session ends. Mirror permits are acquired
+before buffering/spawning; excess candidates are skipped without waiting tasks.
+If mirrors are the only reason to buffer, exhausted mirror or memory capacity
+skips mirroring and streams the primary. If failover requires buffering,
+exhausted memory returns `503 gateway.replay_memory_exhausted`.
+
+Each replay buffer reserves its full per-request cap before allocation, keeping
+allocated replay capacity within the aggregate budget. Immutable bytes share
+that reservation across primary attempts, mirror tasks, and rebuilt outbound
+bodies. It is released when the last byte owner drops. This budget covers replay
+storage, not Hyper/TLS/network buffers. With the defaults, up to 32 full replay
+reservations fit within 64 MiB; the 64 mirror slots also cover other phases.
+
+`primary_concurrency`, `mirror_concurrency`, and `replay_memory_bytes` are fixed
+at startup. Reloads share the same process controller; candidates changing these
+capacities are rejected and leave the previous snapshot active. Restart to apply
+capacity changes. Other settings are validated, published, and pinned with the
+request's snapshot.
+
+A finite request has one absolute `request_timeout` beginning at admission,
+covering authentication, policy work, upload, all failover attempts, disposal,
+and response body forwarding. Each attempt also has a response-header deadline
+from dispatch, including connection and upload. The HTTP connection deadline
+covers DNS, TCP, and TLS together, using the upstream override when supplied.
+An upload with no nonempty data or trailers for `upload_idle_timeout` returns
+`408 gateway.upload_timeout`. The same idle policy applies to replay buffering
+and directly streamed uploads; empty frames cannot keep an upload alive.
+
+Long-lived HTTP responses require an explicit route policy:
+
+```yaml
+http:
+  routers:
+    events:
+      match: { path: { prefix: /events } }
+      service: event-service
+      response_mode: stream  # default: finite
+```
+
+`stream` retains the finite budget through response headers, then uses
+`response_body_idle_timeout` and primary concurrency admission without a fixed
+response lifetime. Nonempty data and trailers count as progress. WebSocket
+sessions always follow the stream policy. HTTP uploads remain finite and
+use the upload idle and request budgets, including on response-stream routes. Their upstream handshake is bounded
+by the smaller global connection/header timeout, the downstream upgrade by the
+remaining header/total budget, and frame receipt/forwarding by the body idle
+policy. WebSockets use the first selected upstream and do not replay or mirror
+frames. Per-upstream WebSocket transport alignment is handled in Step 9.
+
+Before headers, deadline expiry returns `504 gateway.timeout` with a bounded
+`phase` parameter, and shutdown cancellation returns `503 gateway.cancelled`.
+After headers, expiry/cancellation terminates the body/session; it cannot replace
+the committed status with JSON or start a retry. Local timeout/cancellation does
+not eject a target from the circuit breaker. Transport failure remains
+`502 upstream.connection_failed` and retains its existing failover behavior.
+
+Mirror tasks have an independent absolute `mirror_timeout`, including every
+attempt and disposal; they may finish after the primary. Both mirrors and
+WebSocket tasks are tracked. After the shutdown readiness delay, the shared
+controller rejects new admission and cancels active gateway work. HTTP and TLS
+listeners stop, connections drain within `SERVER_SHUTDOWN_TIMEOUT_SECS`, remaining
+connections are cancelled, and tracked gateway tasks are drained before hooks.
+
+`stargate.gateway.resources.active` is an up/down counter with only `kind`:
+`primary` (requests/sessions), `mirror` (reserved slots/tasks), and `replay_memory`
+(reserved bytes). `stargate.gateway.rejections` uses the same bounded capacity
+labels; `stargate.gateway.timeouts` uses bounded phase labels (`total`, `upload`,
+`connect`, `response_headers`, `response_body`, `disposal`,
+`websocket_handshake`, `websocket_idle`). None contain URLs, credentials, or
+request IDs.
 
 `stargate.gateway.response.disposals` counts completed disposal outcomes;
 `stargate.gateway.response.disposal.bytes` and
 `stargate.gateway.response.disposal.duration` record observed data bytes and
 elapsed milliseconds. Their only dimensions are `stargate.disposal.kind`
 (`failover`, `mirror`) and `stargate.outcome` (`drained`, `byte_limit`, `timeout`,
-`body_error`). They contain no target URLs, credentials, or body contents.
+`body_error`, `cancelled`). They contain no target URLs, credentials, or body contents.
 `stargate.gateway.mirrors` records `dispatched` at task creation and a final
-`success`, `abandoned`, `timeout`, `body_error`, or `error` after execution and
-disposal finish. `abandoned` means the byte budget was reached; `error` means
+`success`, `abandoned`, `timeout`, `body_error`, `cancelled`, or `error` after execution and
+disposal finish. Skipped candidates use `skipped_capacity`, `skipped_memory`,
+`skipped_payload`, or `skipped_shutdown`. `abandoned` means the byte budget was reached; `error` means
 execution failed before a disposable response was available. Shadow outcomes
 never change primary upstream health.
 

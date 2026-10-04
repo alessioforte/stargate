@@ -6,6 +6,10 @@ pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super:
     let core = gate::Runtime::prepare(prepared.config.compiled.http, lim::Limiter::new()).unwrap();
     std::sync::Arc::new(super::RuntimeSnapshot {
         core,
+        resources: super::resources::ProcessResources::new(
+            prepared.config.compiled.runtime.budgets,
+        ),
+        settings: prepared.config.compiled.runtime,
         transports: prepared.transports,
         version: 0,
     })

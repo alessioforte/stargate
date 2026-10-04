@@ -1,10 +1,11 @@
-use crate::etc::telemetry;
+use super::lifecycle::Execution;
+use crate::{err::ErrorCode, etc::telemetry};
 use axum::{body::Body, response::Response};
 use http_body_util::BodyExt;
 use std::time::Duration;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::Instant;
 
-pub(super) const MAX_DISCARDED_BODY_BYTES: usize = 64 * 1024;
+#[cfg(test)]
 pub(super) const DISCARDED_BODY_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +14,7 @@ pub(super) enum DisposalOutcome {
     ByteLimit,
     Timeout,
     BodyError,
+    Cancelled,
 }
 
 impl DisposalOutcome {
@@ -22,6 +24,7 @@ impl DisposalOutcome {
             Self::ByteLimit => "byte_limit",
             Self::Timeout => "timeout",
             Self::BodyError => "body_error",
+            Self::Cancelled => "cancelled",
         }
     }
 }
@@ -32,13 +35,19 @@ struct DisposalResult {
     bytes: usize,
 }
 
-pub(super) async fn discard_response(response: Response, kind: &'static str) -> DisposalOutcome {
+pub(super) async fn discard_response(
+    response: Response,
+    kind: &'static str,
+    settings: &gate::cfg::CompiledRuntimeSettings,
+    execution: &super::lifecycle::Execution,
+) -> DisposalOutcome {
     let status = response.status().as_u16();
     let started = Instant::now();
     let result = discard_body(
         response.into_body(),
-        MAX_DISCARDED_BODY_BYTES,
-        DISCARDED_BODY_TIMEOUT,
+        settings.discarded_body_bytes,
+        settings.discarded_body_timeout,
+        execution.clone(),
     )
     .await;
     telemetry::record_gateway_response_disposal(
@@ -59,17 +68,30 @@ pub(super) async fn discard_response(response: Response, kind: &'static str) -> 
     result.outcome
 }
 
-async fn discard_body(mut body: Body, max_bytes: usize, timeout: Duration) -> DisposalResult {
+async fn discard_body(
+    mut body: Body,
+    max_bytes: usize,
+    timeout: Duration,
+    execution: Execution,
+) -> DisposalResult {
     let deadline = Instant::now() + timeout;
     let mut bytes = 0_usize;
     let outcome = loop {
-        // Always-ready empty frames must yield too; timeout_at polls its inner
-        // future first, so check the absolute deadline before every frame.
+        // Always-ready empty frames must yield too, and progress cannot reset
+        // the absolute disposal deadline.
         tokio::task::consume_budget().await;
         if Instant::now() >= deadline {
+            execution.timeout("disposal");
             break DisposalOutcome::Timeout;
         }
-        match timeout_at(deadline, body.frame()).await {
+        match execution
+            .run(
+                "disposal",
+                deadline.saturating_duration_since(Instant::now()),
+                body.frame(),
+            )
+            .await
+        {
             Ok(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {
                     bytes = bytes.saturating_add(data.len());
@@ -81,7 +103,16 @@ async fn discard_body(mut body: Body, max_bytes: usize, timeout: Duration) -> Di
                 }
             }
             Ok(None) => break DisposalOutcome::Drained,
-            Ok(Some(Err(_))) => break DisposalOutcome::BodyError,
+            Ok(Some(Err(_))) => {
+                break if execution.failure().is_some() {
+                    DisposalOutcome::Timeout
+                } else {
+                    DisposalOutcome::BodyError
+                };
+            }
+            Err(error) if error.code == ErrorCode::GatewayCancelled => {
+                break DisposalOutcome::Cancelled;
+            }
             Err(_) => break DisposalOutcome::Timeout,
         }
     };
@@ -169,7 +200,7 @@ mod tests {
             ],
             Tail::End,
         );
-        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT).await;
+        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT, Execution::default()).await;
         assert_eq!(
             result,
             DisposalResult {
@@ -180,9 +211,14 @@ mod tests {
         assert_eq!(polls.load(Ordering::SeqCst), 4);
         assert!(dropped.load(Ordering::SeqCst));
         assert_eq!(
-            discard_body(Body::empty(), 64, DISCARDED_BODY_TIMEOUT)
-                .await
-                .outcome,
+            discard_body(
+                Body::empty(),
+                64,
+                DISCARDED_BODY_TIMEOUT,
+                Execution::default()
+            )
+            .await
+            .outcome,
             DisposalOutcome::Drained
         );
     }
@@ -192,7 +228,8 @@ mod tests {
         for (limit, expected_bytes, expected_polls) in [(8, 8, 2), (9, 12, 3), (1, 4, 1)] {
             let (body, polls, dropped) =
                 tracked(Vec::new(), Tail::Repeat(Bytes::from_static(b"data")));
-            let result = discard_body(body, limit, DISCARDED_BODY_TIMEOUT).await;
+            let result =
+                discard_body(body, limit, DISCARDED_BODY_TIMEOUT, Execution::default()).await;
             assert_eq!(
                 result,
                 DisposalResult {
@@ -214,7 +251,13 @@ mod tests {
             .body(body)
             .unwrap();
         assert_eq!(
-            discard_response(response, "failover").await,
+            discard_response(
+                response,
+                "failover",
+                &gate::cfg::RuntimeSettings::default().compile().unwrap(),
+                &super::super::lifecycle::Execution::default()
+            )
+            .await,
             DisposalOutcome::ByteLimit
         );
         assert_eq!(polls.load(Ordering::SeqCst), 64);
@@ -225,7 +268,7 @@ mod tests {
     async fn stalled_body_times_out_and_is_dropped() {
         let (body, _, dropped) = tracked(Vec::new(), Tail::Pending);
         let started = Instant::now();
-        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT).await;
+        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT, Execution::default()).await;
         assert_eq!(
             result,
             DisposalResult {
@@ -244,7 +287,7 @@ mod tests {
             Some((Ok::<_, io::Error>(Bytes::from_static(b"x")), ()))
         }));
         let started = Instant::now();
-        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT).await;
+        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT, Execution::default()).await;
         assert_eq!(result.outcome, DisposalOutcome::Timeout);
         assert_eq!(result.bytes, 6);
         assert_eq!(started.elapsed(), DISCARDED_BODY_TIMEOUT);
@@ -253,7 +296,12 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn always_ready_empty_frames_cannot_starve_the_deadline() {
         let (body, polls, dropped) = tracked(Vec::new(), Tail::Repeat(Bytes::new()));
-        let task = tokio::spawn(discard_body(body, 64, DISCARDED_BODY_TIMEOUT));
+        let task = tokio::spawn(discard_body(
+            body,
+            64,
+            DISCARDED_BODY_TIMEOUT,
+            Execution::default(),
+        ));
         tokio::task::yield_now().await;
         assert!(polls.load(Ordering::SeqCst) > 0);
         tokio::time::advance(DISCARDED_BODY_TIMEOUT).await;
@@ -271,7 +319,7 @@ mod tests {
             ],
             Tail::End,
         );
-        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT).await;
+        let result = discard_body(body, 64, DISCARDED_BODY_TIMEOUT, Execution::default()).await;
         assert_eq!(
             result,
             DisposalResult {
@@ -286,7 +334,12 @@ mod tests {
     #[tokio::test]
     async fn cancellation_drops_a_stalled_body() {
         let (body, polls, dropped) = tracked(Vec::new(), Tail::Pending);
-        let task = tokio::spawn(discard_body(body, 64, DISCARDED_BODY_TIMEOUT));
+        let task = tokio::spawn(discard_body(
+            body,
+            64,
+            DISCARDED_BODY_TIMEOUT,
+            Execution::default(),
+        ));
         tokio::task::yield_now().await;
         assert!(polls.load(Ordering::SeqCst) > 0);
         task.abort();

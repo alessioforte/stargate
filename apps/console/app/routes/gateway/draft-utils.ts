@@ -9,6 +9,7 @@ export function cloneJson<T extends JsonValue>(value: T): T {
 export function createEmptyGatewayConfig(): JsonRecord {
   return {
     schema: GATEWAY_SCHEMA,
+    runtime: {},
     limits: {},
     http: {
       upstreams: {},

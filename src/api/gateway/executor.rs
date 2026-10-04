@@ -8,7 +8,9 @@ use super::{
 };
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{ext::RequestExt, gate::RuntimeSnapshot, telemetry};
-use ::http::{HeaderMap, Request};
+#[cfg(test)]
+use ::http::HeaderMap;
+use ::http::Request;
 use axum::{body::Body, response::Response};
 use ctx::DispatchKind;
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -59,7 +61,8 @@ fn record_upstream_health(
         return;
     };
     let healthy = match result {
-        Err(_) => false,
+        Err(error) if error.code == ErrorCode::UpstreamConnectionFailed => false,
+        Err(_) => return,
         Ok(response) => !UNHEALTHY_STATUSES.contains(&response.status().as_u16()),
     };
     if healthy {
@@ -75,6 +78,7 @@ pub(super) async fn execute_selected_with_request(
     req: Request<Body>,
     state: &RequestState,
 ) -> Result<Response, ErrorResponse> {
+    state.execution.check()?;
     match selected {
         SelectedService::DirectResponse {
             status,
@@ -139,6 +143,7 @@ pub(super) async fn execute_selected_with_request(
                     &uri,
                     state.preserve_host,
                     internal_dispatch.as_ref(),
+                    &state.execution,
                 )
                 .instrument(span.clone())
                 .await;
@@ -162,14 +167,14 @@ pub(super) async fn execute_selected_with_request(
             let client = runtime
                 .client(service_name)
                 .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
-            let empty_headers = HeaderMap::new();
             let result = http::handler(
                 req,
-                &empty_headers,
                 &uri,
                 &client,
                 state.preserve_host,
                 internal_dispatch.as_ref(),
+                &runtime.settings,
+                &state.execution,
             )
             .instrument(span.clone())
             .await;
@@ -199,6 +204,7 @@ async fn execute_selected_from_replay(
     state: &RequestState,
     dispatch_attempt: Option<DispatchAttempt>,
 ) -> Result<Response, ErrorResponse> {
+    state.execution.check()?;
     match selected {
         SelectedService::DirectResponse {
             status,
@@ -262,14 +268,14 @@ async fn execute_selected_from_replay(
                 );
             }
             let started = Instant::now();
-            let empty_headers = HeaderMap::new();
             let result = http::handler(
                 req,
-                &empty_headers,
                 &uri,
                 &client,
                 state.preserve_host,
                 internal_dispatch.as_ref(),
+                &runtime.settings,
+                &state.execution,
             )
             .instrument(span.clone())
             .await;
@@ -333,7 +339,7 @@ pub(super) async fn execute_plan_from_replay(
                 attempt = dispatch_attempt.map(|attempt| attempt.number),
                 "Failing over response by status"
             );
-            discard_response(response, "failover").await;
+            discard_response(response, "failover", &runtime.settings, &state.execution).await;
             continue;
         }
         return Ok(response);
@@ -342,25 +348,52 @@ pub(super) async fn execute_plan_from_replay(
     Err(ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))
 }
 
+pub(super) fn admit_mirrors(
+    runtime: &RuntimeSnapshot,
+    mirrors: &[ExecutionPlan],
+) -> Vec<(ExecutionPlan, crate::etc::gate::resources::ResourcePermit)> {
+    mirrors
+        .iter()
+        .filter_map(|mirror| {
+            let permit = runtime.resources.admit_mirror();
+            if permit.is_none() {
+                telemetry::record_gateway_mirror("skipped_capacity");
+            }
+            permit.map(|permit| (mirror.clone(), permit))
+        })
+        .collect()
+}
+
 pub(super) fn spawn_mirrors(
     runtime: Arc<RuntimeSnapshot>,
-    mirrors: Vec<ExecutionPlan>,
+    mirrors: Vec<(ExecutionPlan, crate::etc::gate::resources::ResourcePermit)>,
     replay: ReplayRequest,
     state: RequestState,
 ) {
-    for mirror in mirrors {
-        telemetry::record_gateway_mirror("dispatched");
+    for (mirror, permit) in mirrors {
+        let resources = runtime.resources.clone();
         let runtime = runtime.clone();
         let replay = replay.clone();
-        let state = state.clone();
+        let mut state = state.clone();
+        // Mirrors have their own total budget and never retain primary admission.
+        state.execution = super::lifecycle::Execution::new(
+            runtime.settings.mirror_timeout,
+            resources.shutdown.child_token(),
+        );
         let span = tracing::debug_span!("gateway.mirror");
-        tokio::spawn(
+        let spawned = resources.spawn(
             async move {
                 let outcome = execute_mirror(&runtime, &mirror, &replay, &state).await;
                 telemetry::record_gateway_mirror(outcome);
+                drop(permit);
             }
             .instrument(span),
         );
+        telemetry::record_gateway_mirror(if spawned {
+            "dispatched"
+        } else {
+            "skipped_shutdown"
+        });
     }
 }
 
@@ -372,15 +405,22 @@ async fn execute_mirror(
 ) -> &'static str {
     // Shadow outcomes never feed the circuit breaker, including during failover.
     match execute_plan_from_replay(runtime, mirror, replay, state, DispatchKind::Shadow).await {
-        Ok(response) => match discard_response(response, "mirror").await {
-            DisposalOutcome::Drained => "success",
-            DisposalOutcome::ByteLimit => "abandoned",
-            DisposalOutcome::Timeout => "timeout",
-            DisposalOutcome::BodyError => "body_error",
-        },
+        Ok(response) => {
+            match discard_response(response, "mirror", &runtime.settings, &state.execution).await {
+                DisposalOutcome::Drained => "success",
+                DisposalOutcome::ByteLimit => "abandoned",
+                DisposalOutcome::Timeout => "timeout",
+                DisposalOutcome::BodyError => "body_error",
+                DisposalOutcome::Cancelled => "cancelled",
+            }
+        }
         Err(error) => {
             tracing::warn!(%error, "Mirror request failed");
-            "error"
+            match error.code {
+                ErrorCode::GatewayTimeout | ErrorCode::GatewayUploadTimeout => "timeout",
+                ErrorCode::GatewayCancelled => "cancelled",
+                _ => "error",
+            }
         }
     }
 }
@@ -570,6 +610,7 @@ http:
 
     pub(super) fn replay_state() -> RequestState {
         RequestState {
+            execution: crate::api::gateway::lifecycle::Execution::default(),
             original_path: "/orders".to_owned(),
             path: "/orders".to_owned(),
             query: String::new(),
@@ -616,6 +657,7 @@ http:
             body: None,
         };
         let state = RequestState {
+            execution: crate::api::gateway::lifecycle::Execution::default(),
             original_path: "/direct".to_owned(),
             path: "/direct".to_owned(),
             query: String::new(),

@@ -94,21 +94,32 @@ pub async fn run() -> std::io::Result<()> {
     let signal = fun::shutdown_signal()?;
 
     lifecycle.mark_ready();
-    let shutdown = fun::drain_on_shutdown(
-        signal,
-        lifecycle,
-        std::time::Duration::from_secs(fun::server_drain_delay_secs()),
-    );
+    let gateway_resources = gate.resources.clone();
+    let shutdown = async move {
+        fun::drain_on_shutdown(
+            signal,
+            lifecycle,
+            std::time::Duration::from_secs(fun::server_drain_delay_secs()),
+        )
+        .await;
+        gateway_resources.begin_shutdown();
+    };
 
     info!("Server listening on {}", addr);
 
     let result = if tls_enabled {
         run::tls(app, addr, shutdown, shutdown_timeout_secs).await
     } else {
-        run::plain(app, addr, shutdown).await
+        run::plain(app, addr, shutdown, shutdown_timeout_secs).await
     };
 
     info!("Server stopped, running shutdown hooks...");
+    gate.resources.begin_shutdown();
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(shutdown_timeout_secs),
+        gate.resources.wait(),
+    )
+    .await;
     aud::shutdown().await;
     store::save().await;
     info!("Shutdown complete");

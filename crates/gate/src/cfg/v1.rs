@@ -4,7 +4,7 @@ use super::graph::{
     ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode,
     UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
 };
-use super::{Limit, LimitSpec, LoadBalancer, MtlsConfig, SCHEMA};
+use super::{Limit, LimitSpec, LoadBalancer, MtlsConfig, ResponseMode, RuntimeSettings, SCHEMA};
 use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,8 @@ const INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES: usize = 256;
 pub struct Config {
     pub schema: String,
     #[serde(default)]
+    pub runtime: RuntimeSettings,
+    #[serde(default)]
     pub limits: IndexMap<String, LimitSpec>,
     #[serde(default)]
     pub mtls: Option<MtlsConfig>,
@@ -28,6 +30,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             schema: SCHEMA.to_string(),
+            runtime: RuntimeSettings::default(),
             limits: IndexMap::new(),
             mtls: None,
             http: HttpConfig::default(),
@@ -46,6 +49,7 @@ impl Config {
             return Err(CompileError::new("schema", format!("expected {}", SCHEMA)));
         }
 
+        let runtime = self.runtime.compile()?;
         let limits = compile_limits(&self.limits)?;
         let limit_names = limits
             .iter()
@@ -66,6 +70,7 @@ impl Config {
 
         Ok(CompiledConfig {
             schema: self.schema.clone(),
+            runtime,
             limits,
             mtls: self.mtls.clone(),
             http: HttpGraph {
@@ -291,6 +296,8 @@ pub enum AuthStrategy {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Router {
+    #[serde(default)]
+    pub response_mode: ResponseMode,
     #[serde(default)]
     pub priority: Option<i32>,
     #[serde(rename = "match")]
@@ -907,6 +914,7 @@ fn compile_routers(
 
         out.push(RouterNode {
             name: name.clone(),
+            response_mode: router.response_mode,
             priority: router.priority.unwrap_or(0),
             order,
             matcher: compile_match_expr(&router.matcher, format!("http.routers.{}.match", name))?,

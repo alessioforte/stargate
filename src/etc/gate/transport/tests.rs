@@ -106,16 +106,16 @@ fn duration_validation_rejects_zero_invalid_and_overflowing_values() {
         "99999999999999999999999d",
     ] {
         assert!(matches!(
-            connect_timeout("secure", Some(value)),
+            connect_timeout("secure", Some(value), Duration::from_secs(5)),
             Err(TransportPreparationError::ConnectTimeout { .. })
         ));
     }
     assert_eq!(
-        connect_timeout("secure", None).unwrap(),
-        Duration::from_secs(30)
+        connect_timeout("secure", None, Duration::from_secs(5)).unwrap(),
+        Duration::from_secs(5)
     );
     assert_eq!(
-        connect_timeout("secure", Some("500ms")).unwrap(),
+        connect_timeout("secure", Some("500ms"), Duration::from_secs(5)).unwrap(),
         Duration::from_millis(500)
     );
 }

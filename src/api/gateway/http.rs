@@ -1,4 +1,8 @@
-use super::{dispatch::InternalDispatch, headers::strip_internal_context_response};
+use super::{
+    dispatch::InternalDispatch,
+    headers::strip_internal_context_response,
+    lifecycle::{Execution, guarded_body},
+};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
@@ -9,12 +13,15 @@ use http::header::{
 
 pub async fn handler(
     mut req: http::Request<Body>,
-    headers: &http::HeaderMap,
     uri: &str,
     client: &crate::etc::gate::HyperClient,
     preserve_host: bool,
     internal_dispatch: Option<&InternalDispatch>,
+    settings: &gate::cfg::CompiledRuntimeSettings,
+    execution: &Execution,
 ) -> Result<Response, ErrorResponse> {
+    req.extensions_mut()
+        .remove::<std::sync::Arc<crate::etc::gate::resources::Admission>>();
     let upstream_uri = uri.parse::<http::Uri>().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid upstream URI");
         ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
@@ -30,25 +37,51 @@ pub async fn handler(
         telemetry::inject_context(req.headers_mut());
     }
 
-    let response = client.request(req).await.map_err(|error| {
-        tracing::error!("Error forwarding request to backend: {}", error);
-        ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
-    })?;
+    let (parts, body) = req.into_parts();
+    let req = http::Request::from_parts(
+        parts,
+        guarded_body(
+            body,
+            execution.clone(),
+            settings.upload_idle_timeout,
+            "upload",
+            None,
+        ),
+    );
+    let response = execution
+        .run(
+            "response_headers",
+            settings.response_header_timeout,
+            client.request(req),
+        )
+        .await?
+        .map_err(|error| {
+            if let Some(failure) = execution.failure() {
+                return failure;
+            }
+            if crate::etc::gate::connection_timed_out(&error) {
+                return execution.timeout("connect");
+            }
+            tracing::error!("Error forwarding request to backend: {}", error);
+            ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
+        })?;
 
     let (parts, body) = response.into_parts();
     let mut upstream_headers = parts.headers;
     strip_hop_by_hop_headers(&mut upstream_headers);
     strip_internal_context_response(&mut upstream_headers);
 
-    let mut proxied = Response::new(Body::new(body));
+    let mut proxied = Response::new(guarded_body(
+        Body::new(body),
+        execution.response(),
+        settings.response_body_idle_timeout,
+        "response_body",
+        None,
+    ));
     *proxied.status_mut() = parts.status;
     *proxied.version_mut() = parts.version;
     *proxied.extensions_mut() = parts.extensions;
     *proxied.headers_mut() = upstream_headers;
-
-    for (name, value) in headers {
-        proxied.headers_mut().insert(name, value.clone());
-    }
 
     Ok(proxied)
 }
@@ -185,7 +218,10 @@ mod tests {
             .enable_http1()
             .enable_http2()
             .wrap_connector(connector);
-        Client::builder(TokioExecutor::new()).build(https)
+        Client::builder(TokioExecutor::new()).build(crate::etc::gate::DeadlineConnector::new(
+            https,
+            std::time::Duration::from_secs(5),
+        ))
     }
 
     fn test_runtime() -> Arc<InternalContextRuntime> {
@@ -308,11 +344,12 @@ mod tests {
 
         let response = handler(
             req,
-            &http::HeaderMap::new(),
             &target,
             &test_client(),
             false,
             Some(&dispatch),
+            &gate::cfg::RuntimeSettings::default().compile().unwrap(),
+            &Execution::default(),
         )
         .instrument(client_span.clone())
         .await
@@ -401,11 +438,12 @@ mod tests {
 
         let error = handler(
             req,
-            &http::HeaderMap::new(),
             &format!("{base_url}/v1/orders"),
             &test_client(),
             false,
             Some(&dispatch),
+            &gate::cfg::RuntimeSettings::default().compile().unwrap(),
+            &Execution::default(),
         )
         .await
         .unwrap_err();
@@ -432,11 +470,12 @@ mod tests {
 
         let response = handler(
             req,
-            &http::HeaderMap::new(),
             &format!("{base_url}/external?token=still-forwarded&keep=1"),
             &test_client(),
             false,
             None,
+            &gate::cfg::RuntimeSettings::default().compile().unwrap(),
+            &Execution::default(),
         )
         .await
         .unwrap();

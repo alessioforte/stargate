@@ -3,11 +3,13 @@ pub mod graph;
 mod limit;
 mod load_balancer;
 mod mtls;
+mod runtime;
 mod v1;
 
 pub use limit::{Limit, LimitSpec};
 pub use load_balancer::LoadBalancer;
 pub use mtls::MtlsConfig;
+pub use runtime::{CompiledRuntimeSettings, ProcessBudgets, ResponseMode, RuntimeSettings};
 pub use v1::{
     AuthStrategy, Config, EnvProfile, InternalContext, LimitScope, OnMissingOrg, Service, Upstream,
     UpstreamProtocol,

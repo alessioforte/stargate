@@ -11,7 +11,58 @@ use rustls::{
 use std::{collections::HashMap, fs::File, io::BufReader, sync::Arc, time::Duration};
 
 type HyperConnector = hyper_rustls::HttpsConnector<HttpConnector>;
-pub type HyperClient = Client<HyperConnector, axum::body::Body>;
+pub type HyperClient = Client<DeadlineConnector, axum::body::Body>;
+
+#[derive(Clone)]
+pub struct DeadlineConnector {
+    inner: HyperConnector,
+    timeout: Duration,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("upstream connection deadline exceeded")]
+struct ConnectionTimeout;
+
+pub fn connection_timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if error.is::<ConnectionTimeout>() {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
+impl DeadlineConnector {
+    pub(crate) fn new(inner: HyperConnector, timeout: Duration) -> Self {
+        Self { inner, timeout }
+    }
+}
+
+impl tower::Service<http::Uri> for DeadlineConnector {
+    type Response = <HyperConnector as tower::Service<http::Uri>>::Response;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    type Future =
+        std::pin::Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, uri: http::Uri) -> Self::Future {
+        let future = self.inner.call(uri);
+        let timeout = self.timeout;
+        Box::pin(async move {
+            tokio::time::timeout(timeout, future)
+                .await
+                .map_err(|_| Box::new(ConnectionTimeout) as Self::Error)?
+        })
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransportPreparationError {
@@ -75,6 +126,7 @@ pub(super) fn prepare(
                 .transport
                 .as_ref()
                 .and_then(|transport| transport.connect_timeout.as_deref()),
+            config.compiled.runtime.connect_timeout,
         )?;
         let tls = if upstream
             .targets
@@ -105,9 +157,10 @@ pub(super) fn prepare(
 fn connect_timeout(
     upstream: &str,
     value: Option<&str>,
+    default: Duration,
 ) -> Result<Duration, TransportPreparationError> {
     let Some(value) = value else {
-        return Ok(Duration::from_secs(30));
+        return Ok(default);
     };
     let duration = tools::parse_duration(value)
         .ok()
@@ -143,14 +196,13 @@ fn build_hyper_client(
     }
     let mut connector = HttpConnector::new();
     connector.enforce_http(false);
-    connector.set_connect_timeout(Some(timeout));
     let https = HttpsConnectorBuilder::new()
         .with_tls_config(tls.clone())
         .https_or_http()
         .enable_http1()
         .enable_http2()
         .wrap_connector(connector);
-    Ok(Client::builder(TokioExecutor::new()).build(https))
+    Ok(Client::builder(TokioExecutor::new()).build(DeadlineConnector::new(https, timeout)))
 }
 
 fn reader(path: &str, kind: &'static str) -> Result<BufReader<File>, TransportPreparationError> {

@@ -67,7 +67,8 @@ stargate/
 
 Mounted as Axum `fallback_service`. Current request flow:
 1. Load application `Gate` from request extensions and pin its `RuntimeSnapshot`
-   plus the independent ACE engine/revision pair before authentication.
+   plus the independent ACE engine/revision pair, then acquire shared process
+   admission before authentication.
 2. Pre-check API key/JWT and capture subject/auth kind.
 3. Match the request against compiled v1 routers, sorted by descending priority.
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
@@ -83,9 +84,12 @@ Gateway modules:
 - `planner.rs`: service graph expansion into an execution plan.
 - `executor.rs`: upstream/direct-response execution, mirror dispatch, failover execution.
 - `disposal.rs`: frame-by-frame disposal of discarded responses, bounded by
-  64 KiB of data and a 250 ms absolute deadline per body, with completion metrics.
+  configurable data and absolute time budgets (defaults 64 KiB / 250 ms),
+  capped by the remaining request/mirror budget, with completion metrics.
 - `dispatch.rs`: shared internal-context sanitization, trace injection, and per-attempt signing boundary.
-- `replay.rs`: request buffering and replay body limits.
+- `replay.rs`: upload-idle enforcement and shared replay storage reservations.
+- `lifecycle.rs`: absolute execution budgets and guarded streaming bodies.
+- `src/etc/gate/resources.rs`: process admission, memory permits, and tracked tasks.
 - `headers.rs`, `path.rs`, `responses.rs`, `limits.rs`, `types.rs`: focused helpers and shared types.
 - `http.rs`, `ws.rs`: protocol-specific proxy implementations.
 
@@ -188,12 +192,18 @@ Implemented:
 - Direct response routes.
 - Fallback routes via low-priority catch-all routers.
 - Request replay buffering for mirrors and all multi-attempt failover plans.
-- Replay body cap via `GATEWAY_REPLAY_BODY_LIMIT` (default `2MiB`).
+- Validated `runtime` settings: 1024 primary slots, 64 mirror slots, 2 MiB
+  replay cap / 64 MiB reserved storage by default. Shared storage retains its
+  reservation through the last byte owner. Process capacities require restart.
 
 Partially implemented:
 - Circuit breaker is wired to both active liveness probes and live proxy traffic: transport errors and `502`/`503`/`504` responses trip it, mirror traffic does not. Per-upstream `fail_threshold`/`cooldown` are config-exposed via `load_balancer.circuit_breaker`. Breaker state is per-process (not shared across cluster nodes), and tripping on arbitrary response statuses is not configurable.
 - HTTP/2 client support is enabled in the shared hyper client, but per-upstream protocol policy is not fully enforced.
-- Upstream `transport.connect_timeout` exists. Read/idle/request timeout config is not complete.
+- Finite requests share a 60s total budget across upload, attempts, disposal,
+  and response bodies. Defaults: upload idle 15s, full HTTP connection 5s,
+  response headers 30s, body idle 30s, mirror total 5s. Route
+  `response_mode: stream` removes the total response lifetime after headers;
+  WebSockets always use stream idle/concurrency policy. Tasks cancel on shutdown.
 
 Missing:
 - Retry with backoff.
@@ -487,9 +497,8 @@ the same logical outbox columns.
 | `CORS_ORIGINS` | - | Allowed origins |
 | `TRUSTED_ORIGINS` | - | Trusted browser origins for sensitive IAM endpoints |
 | `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
-| `GATEWAY_REPLAY_BODY_LIMIT` | 2MiB | Max buffered body for mirror/failover replay |
 | `SERVER_DRAIN_DELAY_SECS` | 5 | Time with readiness disabled before listeners close; 0 disables the delay |
-| `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | TLS connection drain deadline after listeners close |
+| `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | HTTP/TLS connection drain deadline after listeners close |
 | `EMAIL_OTP_PEPPER` | - | Server-side HMAC pepper for email/message OTP records |
 | `EMAIL_OTP_LENGTH` | 6 | Email OTP code length |
 | `EMAIL_OTP_TTL_SECS` | 300 | Email OTP challenge TTL |
@@ -630,7 +639,7 @@ HTTP codes currently used include: 400, 401, 403, 404, 409, 413, 429, 500, 502, 
 SIGTERM/SIGINT -> disable readiness -> wait `SERVER_DRAIN_DELAY_SECS` (5s) ->
 close listeners and drain requests -> stop audit relay -> save in-memory state.
 TLS draining has a 25s default deadline (`SERVER_SHUTDOWN_TIMEOUT_SECS`);
-plain HTTP uses Axum graceful shutdown without an application drain deadline.
+plain HTTP uses the same tracked Hyper connection loop and drain deadline.
 
 Probe routes are mounted outside authentication and rate limiting. `/livez`
 stays successful while the listener responds, including the shutdown delay.
@@ -744,7 +753,9 @@ Following the arrows keeps each concern in exactly one place.
 - GeoIP is available via MaxMind GeoLite2-City, but geo-aware routing is not yet first-class in v1 matchers.
 - OpenAPI docs use `utoipa` with `utoipa-axum` + `utoipa-swagger-ui`.
 - `api::server_router` applies rate limiting to IAM/admin APIs and merges probe routes outside that layer; `main.rs` adds security headers, tracing, CORS, compression, and normalize-path.
-- TLS server uses a custom hyper-util connection loop with per-connection graceful shutdown and drain deadline.
+- HTTP and TLS share a tracked hyper-util connection loop with graceful shutdown
+  and a drain deadline. Gateway admission closes and active work cancels after
+  the readiness delay; mirror/WebSocket tasks are drained before shutdown hooks.
 - OAuth/OIDC browser consent UI is not implemented; third-party clients without stored consent receive `consent_required`.
 - OAuth/OIDC non-redirect errors still use Stargate's generic error envelope rather than full RFC-shaped error bodies.
 - OTP/MFA API modules are intentionally thin Axum/OpenAPI bindings; workflow changes should usually go in `src/act/otp`.

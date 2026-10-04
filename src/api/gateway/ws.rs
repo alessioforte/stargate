@@ -1,4 +1,4 @@
-use super::dispatch::InternalDispatch;
+use super::{dispatch::InternalDispatch, lifecycle::Execution};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
@@ -9,10 +9,7 @@ use http::header::{
     TRANSFER_ENCODING, UPGRADE,
 };
 use hyper_tungstenite::HyperWebsocket;
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{self, client::IntoClientRequest},
-};
+use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
 
 pub async fn handler(
     runtime: std::sync::Arc<crate::etc::gate::RuntimeSnapshot>,
@@ -20,6 +17,7 @@ pub async fn handler(
     uri: &str,
     preserve_host: bool,
     internal_dispatch: Option<&InternalDispatch>,
+    execution: &Execution,
 ) -> Result<Response, ErrorResponse> {
     if !hyper_tungstenite::is_upgrade_request(&req) {
         return Err(ErrorResponse::new(
@@ -29,8 +27,17 @@ pub async fn handler(
 
     let upstream_request =
         build_upstream_request(uri, req.headers(), preserve_host, internal_dispatch)?;
-    let (upstream_ws, upstream_response) =
-        connect_async(upstream_request).await.map_err(|error| {
+    let (upstream_ws, upstream_response) = execution
+        .run(
+            "websocket_handshake",
+            runtime
+                .settings
+                .connect_timeout
+                .min(runtime.settings.response_header_timeout),
+            connect_async(upstream_request),
+        )
+        .await?
+        .map_err(|error| {
             tracing::error!(%uri, %error, "WebSocket upstream connect failed");
             ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
         })?;
@@ -50,12 +57,31 @@ pub async fn handler(
     // Internal context authenticates only the completed HTTP handshake. The
     // accepted connection then proxies frames without reminting or replacing
     // the identity for its lifetime.
-    tokio::spawn(async move {
-        if let Err(error) = proxy_websocket(websocket, upstream_ws).await {
+    let admission = req
+        .extensions()
+        .get::<std::sync::Arc<crate::etc::gate::resources::Admission>>()
+        .cloned();
+    let mut execution = execution.clone();
+    execution.stream = true;
+    let resources = runtime.resources.clone();
+    let spawned = resources.spawn(async move {
+        if let Err(error) = proxy_websocket(
+            websocket,
+            upstream_ws,
+            &execution,
+            runtime.settings.response_body_idle_timeout,
+            runtime.settings.response_header_timeout,
+        )
+        .await
+        {
             tracing::warn!(%error, "WebSocket proxy closed with error");
         }
+        drop(admission);
         drop(runtime);
     });
+    if !spawned {
+        return Err(ErrorResponse::new(ErrorCode::GatewayCancelled));
+    }
 
     Ok(response.map(Body::new))
 }
@@ -112,53 +138,38 @@ async fn proxy_websocket(
     mut upstream: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
-) -> Result<(), tungstenite::Error> {
-    let mut downstream = match websocket.await {
-        Ok(websocket) => websocket,
-        Err(error) => {
-            let _ = upstream.close(None).await;
-            return Err(error);
-        }
-    };
-
+    execution: &Execution,
+    idle: std::time::Duration,
+    handshake: std::time::Duration,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut downstream = execution
+        .run("websocket_handshake", handshake, websocket)
+        .await??;
+    let execution = execution.response();
     loop {
-        tokio::select! {
-            inbound = downstream.next() => {
-                match inbound {
-                    Some(Ok(message)) => {
-                        let should_close = message.is_close();
-                        upstream.send(message).await?;
-                        if should_close {
-                            break;
-                        }
-                    }
-                    Some(Err(error)) => return Err(error),
-                    None => {
-                        let _ = upstream.close(None).await;
-                        break;
-                    }
+        // Both receipt and forwarding must make progress; a blocked sink also expires.
+        let should_close = execution.run("websocket_idle", idle, async {
+            tokio::select! {
+                inbound = downstream.next() => {
+                    let Some(message) = inbound else { return Ok::<_, tokio_tungstenite::tungstenite::Error>(true); };
+                    let message = message?;
+                    let close = message.is_close();
+                    upstream.send(message).await?;
+                    Ok(close)
+                }
+                outbound = upstream.next() => {
+                    let Some(message) = outbound else { return Ok::<_, tokio_tungstenite::tungstenite::Error>(true); };
+                    let message = message?;
+                    let close = message.is_close();
+                    downstream.send(message).await?;
+                    Ok(close)
                 }
             }
-            outbound = upstream.next() => {
-                match outbound {
-                    Some(Ok(message)) => {
-                        let should_close = message.is_close();
-                        downstream.send(message).await?;
-                        if should_close {
-                            break;
-                        }
-                    }
-                    Some(Err(error)) => return Err(error),
-                    None => {
-                        let _ = downstream.close(None).await;
-                        break;
-                    }
-                }
-            }
+        }).await??;
+        if should_close {
+            return Ok(());
         }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

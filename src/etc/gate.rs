@@ -1,3 +1,4 @@
+pub mod resources;
 mod transport;
 
 #[cfg(test)]
@@ -7,7 +8,9 @@ pub(crate) mod test_support;
 #[path = "gate/reload_tests.rs"]
 mod reload_tests;
 
-pub use transport::HyperClient;
+#[cfg(test)]
+pub(crate) use transport::DeadlineConnector;
+pub use transport::{HyperClient, connection_timed_out};
 
 use crate::etc::{internal_context, store::use_store, telemetry};
 use arc_swap::ArcSwap;
@@ -39,12 +42,18 @@ pub(crate) enum GatewayPreparationError {
     Core(#[from] gate::graph::CompileError),
     #[error("gateway configuration version exhausted")]
     VersionExhausted,
+    #[error(
+        "process gateway budgets cannot change on reload; restart the process to apply runtime capacities"
+    )]
+    BudgetChange,
 }
 
 impl GatewayPreparationError {
     fn reload_outcome(&self) -> &'static str {
         match self {
-            Self::Config(_) | Self::Core(_) | Self::VersionExhausted => "error",
+            Self::Config(_) | Self::Core(_) | Self::VersionExhausted | Self::BudgetChange => {
+                "error"
+            }
             Self::InternalContext(_) => "internal_context_error",
             Self::Transport(_) => "transport_error",
         }
@@ -59,6 +68,8 @@ pub(crate) struct PreparedConfig {
 pub struct RuntimeSnapshot {
     pub core: gate::Runtime,
     pub version: u64,
+    pub settings: gate::cfg::CompiledRuntimeSettings,
+    pub resources: Arc<resources::ProcessResources>,
     transports: PreparedTransports,
 }
 
@@ -105,6 +116,7 @@ pub struct Gate {
     runtime: ArcSwap<RuntimeSnapshot>,
     activation: Mutex<()>,
     pub policy_snapshot: ArcSwap<PolicySnapshot>,
+    pub resources: Arc<resources::ProcessResources>,
 }
 
 impl Gate {
@@ -115,14 +127,19 @@ impl Gate {
     ) -> Result<Self, GatewayPreparationError> {
         let builder = RuntimeBuilder::new(store);
         let core = builder.prepare(&prepared.config)?;
+        let settings = prepared.config.compiled.runtime.clone();
+        let resources = resources::ProcessResources::new(settings.budgets);
         let runtime = Arc::new(RuntimeSnapshot {
             core,
+            settings,
+            resources: resources.clone(),
             transports: prepared.transports,
             version: 0,
         });
         runtime.core.start_probes();
         Ok(Self {
             builder,
+            resources,
             runtime: ArcSwap::from(runtime),
             activation: Mutex::new(()),
             policy_snapshot: ArcSwap::from_pointee(policies),
@@ -137,6 +154,9 @@ impl Gate {
         &self,
         prepared: PreparedConfig,
     ) -> Result<u64, GatewayPreparationError> {
+        if prepared.config.compiled.runtime.budgets != self.resources.budgets {
+            return Err(GatewayPreparationError::BudgetChange);
+        }
         let core = self.builder.prepare(&prepared.config)?;
         // Serialize only activation: file reads, TLS and core construction all
         // finish before touching the active generation or its probes.
@@ -149,6 +169,8 @@ impl Gate {
             .ok_or(GatewayPreparationError::VersionExhausted)?;
         let runtime = Arc::new(RuntimeSnapshot {
             core,
+            settings: prepared.config.compiled.runtime.clone(),
+            resources: self.resources.clone(),
             transports: prepared.transports,
             version,
         });
