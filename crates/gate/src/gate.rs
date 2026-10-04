@@ -193,14 +193,14 @@ http:
     fn invalid_limits_and_probe_intervals_fail_before_runtime_construction() {
         for (burst, duration) in [(0, "1s"), (1, "0s"), (1, "invalid"), (u32::MAX, "1000000d")] {
             let yaml = format!(
-                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\n  broken:\n    strategy: gcra\n    params:\n      max_burst: {burst}\n      replenish_1_per: {duration}\n"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  default:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 1s\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\n  broken:\n    strategy: gcra\n    params:\n      max_burst: {burst}\n      replenish_1_per: {duration}\n"
             );
             let error = RuntimeConfig::from_yaml_str(&yaml).unwrap_err();
             assert!(error.to_string().contains("limits.broken"));
         }
         for interval in ["0s", "bad", "9223372036854775807s"] {
             let yaml = format!(
-                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  upstreams:\n    broken:\n      targets:\n        - url: http://localhost:1\n      load_balancer:\n        strategy: round_robin\n        liveness_probe:\n          path: /health\n          interval: {interval}\n"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  default:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 1s\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  upstreams:\n    broken:\n      targets:\n        - url: http://localhost:1\n      load_balancer:\n        strategy: round_robin\n        liveness_probe:\n          path: /health\n          interval: {interval}\n"
             );
             assert!(
                 RuntimeConfig::from_yaml_str(&yaml)

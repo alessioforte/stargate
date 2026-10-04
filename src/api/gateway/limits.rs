@@ -1,9 +1,11 @@
+use crate::act::orgs::OrgLimitOverrides;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::gate::RuntimeSnapshot;
+use crate::etc::limits::{attribute_name, configuration_error, validate_limit};
 use crate::etc::{sub::Subject, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::cfg::OnMissingOrg;
-use lim::{Limiter, RateLimitDecision};
+use lim::{LimitKind, Limiter, RateLimitDecision};
 
 const DEFAULT_RATE_LIMIT: &str = "default";
 
@@ -14,7 +16,10 @@ pub(super) async fn apply_ingress_limit(
 ) -> Result<(), ErrorResponse> {
     let limiter = &runtime.core.limiter;
     let ingress = &runtime.ingress;
-    if !limiter.has_limit(&ingress.limit) {
+    if limiter
+        .validate_limit(&ingress.limit, LimitKind::Rate)
+        .is_err()
+    {
         telemetry::record_gateway_policy("ingress", "error");
         return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable));
     }
@@ -122,118 +127,140 @@ pub async fn apply_limits(
     headers: &mut HeaderMap,
     policies: SelectedLimitPolicies,
 ) -> Result<(), ErrorResponse> {
-    let limiter = &runtime.core.limiter;
     let org_id = subject.and_then(|subject| subject.org_id.as_deref());
 
     // One cached lookup per request, only when a route actually carries
     // org-scoped policies and the subject acts in an org.
     let org_overrides = match org_id {
         Some(org_id) if policies.org_rate.is_some() || policies.org_quota.is_some() => {
-            crate::act::orgs::limit_overrides(org_id).await
+            crate::act::orgs::limit_overrides(org_id).await?
         }
         _ => Default::default(),
     };
 
+    apply_selected_limits(
+        runtime,
+        subject,
+        client_ip,
+        headers,
+        policies,
+        &org_overrides,
+    )
+    .await
+}
+
+struct LimitCheck {
+    name: String,
+    key: String,
+    kind: LimitKind,
+    scope: &'static str,
+}
+
+fn org_check(
+    org_id: Option<&str>,
+    client_ip: &str,
+    policy: Option<&OrgScopedLimit>,
+    override_name: Option<&str>,
+    kind: LimitKind,
+) -> Result<Option<LimitCheck>, ErrorResponse> {
+    let Some(policy) = policy else {
+        return Ok(None);
+    };
+    let (prefix, policy_kind) = match kind {
+        LimitKind::Rate => ("lim", "rate_limit"),
+        LimitKind::Quota => ("quota", "quota"),
+    };
+    let (name, key, scope) = match org_target(org_id, policy.on_missing, policy_kind)? {
+        Some(OrgTarget::Org(id)) => (
+            override_name.unwrap_or(&policy.limit),
+            format!("{prefix}:org:{id}"),
+            "org",
+        ),
+        Some(OrgTarget::Ip) => (
+            policy.limit.as_str(),
+            format!("{prefix}:orgip:{client_ip}"),
+            "ip",
+        ),
+        None => return Ok(None),
+    };
+    Ok(Some(LimitCheck {
+        name: name.into(),
+        key,
+        kind,
+        scope,
+    }))
+}
+
+async fn apply_selected_limits(
+    runtime: &RuntimeSnapshot,
+    subject: Option<&Subject>,
+    client_ip: &str,
+    headers: &mut HeaderMap,
+    policies: SelectedLimitPolicies,
+    overrides: &OrgLimitOverrides,
+) -> Result<(), ErrorResponse> {
     let selected = select_limits(
         subject,
         client_ip,
         policies.subject_rate.as_deref(),
         policies.subject_quota.as_deref(),
-    );
-
-    // ── Rate limits: org bucket first (the coarser gate), then subject ──────
-    let mut rate_checks: Vec<(RateLimitDecision, &'static str)> = Vec::with_capacity(2);
-
-    if let Some(org_rate) = &policies.org_rate {
-        match org_target(org_id, org_rate.on_missing, "rate_limit")? {
-            Some(OrgTarget::Org(org_id)) => {
-                let name = org_overrides
-                    .rate_limit
-                    .as_deref()
-                    .unwrap_or(&org_rate.limit);
-                let key = format!("lim:org:{org_id}");
-                tracing::debug!(name, key, "org rate check");
-                let decision = run_check(&limiter, name, &key, None, "rate_limit").await?;
-                push_rate_check(&mut rate_checks, decision, "org")?;
-            }
-            Some(OrgTarget::Ip) => {
-                let key = format!("lim:orgip:{client_ip}");
-                let decision =
-                    run_check(&limiter, &org_rate.limit, &key, None, "rate_limit").await?;
-                push_rate_check(&mut rate_checks, decision, "ip")?;
-            }
-            None => {}
+    )?;
+    let org_id = subject.and_then(|subject| subject.org_id.as_deref());
+    let limiter = &runtime.core.limiter;
+    let mut checks = Vec::with_capacity(4);
+    if let Some(check) = org_check(
+        org_id,
+        client_ip,
+        policies.org_rate.as_ref(),
+        overrides.rate_limit.as_deref(),
+        LimitKind::Rate,
+    )? {
+        checks.push(check);
+    }
+    checks.push(LimitCheck {
+        name: selected.rate_limit_name,
+        key: format!("lim:{}", selected.subject_key),
+        kind: LimitKind::Rate,
+        scope: "subject",
+    });
+    if let Some(check) = org_check(
+        org_id,
+        client_ip,
+        policies.org_quota.as_ref(),
+        overrides.quota.as_deref(),
+        LimitKind::Quota,
+    )? {
+        checks.push(check);
+    }
+    if let Some(name) = selected.quota_name {
+        checks.push(LimitCheck {
+            name,
+            key: format!("quota:{}", selected.subject_key),
+            kind: LimitKind::Quota,
+            scope: "subject",
+        });
+    }
+    // All selected references must be valid before any consuming check runs.
+    // Config/attribute mistakes must not charge unrelated valid buckets.
+    for check in &checks {
+        validate_limit(limiter, &check.name, check.kind, check.scope)?;
+    }
+    let mut rate_checks = Vec::with_capacity(2);
+    let mut quota_checks = Vec::with_capacity(2);
+    for check in checks {
+        let cost = (check.kind == LimitKind::Quota).then_some(policies.quota_cost);
+        let decision = run_check(limiter, &check, cost).await?;
+        match check.kind {
+            LimitKind::Rate => push_rate_check(&mut rate_checks, decision, check.scope)?,
+            LimitKind::Quota => push_quota_check(&mut quota_checks, decision, check.scope)?,
         }
     }
-
-    {
-        let mut key = String::with_capacity(4 + selected.subject_key.len());
-        key.push_str("lim:");
-        key.push_str(&selected.subject_key);
-        let decision = run_check(
-            &limiter,
-            &selected.rate_limit_name,
-            &key,
-            None,
-            "rate_limit",
-        )
-        .await?;
-        push_rate_check(&mut rate_checks, decision, "subject")?;
-    }
-
     if let Some((decision, scope)) = binding_check(&rate_checks) {
         insert_limit_headers(headers, decision, scope, "x-ratelimit");
     }
-
-    // ── Quotas: same scope order. A denial after an earlier consuming check
-    // leaves that earlier bucket charged for a rejected request — accepted
-    // imprecision with consume-on-check strategies. ──────────────────────────
-    let mut quota_checks: Vec<(RateLimitDecision, &'static str)> = Vec::with_capacity(2);
-
-    if let Some(org_quota) = &policies.org_quota {
-        match org_target(org_id, org_quota.on_missing, "quota")? {
-            Some(OrgTarget::Org(org_id)) => {
-                let name = org_overrides.quota.as_deref().unwrap_or(&org_quota.limit);
-                let key = format!("quota:org:{org_id}");
-                let decision =
-                    run_check(&limiter, name, &key, Some(policies.quota_cost), "quota").await?;
-                push_quota_check(&mut quota_checks, decision, "org")?;
-            }
-            Some(OrgTarget::Ip) => {
-                let key = format!("quota:orgip:{client_ip}");
-                let decision = run_check(
-                    &limiter,
-                    &org_quota.limit,
-                    &key,
-                    Some(policies.quota_cost),
-                    "quota",
-                )
-                .await?;
-                push_quota_check(&mut quota_checks, decision, "ip")?;
-            }
-            None => {}
-        }
-    }
-
-    if let Some(quota_name) = &selected.quota_name {
-        let mut key = String::with_capacity(6 + selected.subject_key.len());
-        key.push_str("quota:");
-        key.push_str(&selected.subject_key);
-        let decision = run_check(
-            &limiter,
-            quota_name,
-            &key,
-            Some(policies.quota_cost),
-            "quota",
-        )
-        .await?;
-        push_quota_check(&mut quota_checks, decision, "subject")?;
-    }
-
     if let Some((decision, scope)) = binding_check(&quota_checks) {
         insert_limit_headers(headers, decision, scope, "x-quota");
     }
-
     Ok(())
 }
 
@@ -259,16 +286,24 @@ fn org_target<'a>(
 
 async fn run_check(
     limiter: &Limiter,
-    name: &str,
-    key: &str,
+    check: &LimitCheck,
     cost: Option<u64>,
-    policy_kind: &'static str,
 ) -> Result<RateLimitDecision, ErrorResponse> {
-    limiter.check(name, key, cost).await.map_err(|error| {
-        telemetry::record_gateway_policy(policy_kind, "error");
-        tracing::error!("{policy_kind} limiter error: {error}");
-        ErrorResponse::new(ErrorCode::GatewayLimiterUnavailable)
-    })
+    limiter
+        .check(&check.name, &check.key, cost)
+        .await
+        .map_err(|error| {
+            if matches!(
+                error,
+                lim::RateLimitError::UnknownLimit(_)
+                    | lim::RateLimitError::IncompatibleLimit { .. }
+            ) {
+                return configuration_error(&check.name, check.kind, check.scope, &error);
+            }
+            telemetry::record_gateway_policy(&check.kind.to_string(), "error");
+            tracing::error!(policy_type = %check.kind, "Limiter error: {error}");
+            ErrorResponse::new(ErrorCode::GatewayLimiterUnavailable)
+        })
 }
 
 fn push_rate_check(
@@ -335,16 +370,12 @@ fn limited_response(
 }
 
 /// The check to report in response headers: the one closest to exhaustion.
-/// Checks against an unconfigured limit name report `limit == 0` and are
-/// ignored unless they are all there is.
 fn binding_check<'a>(
     checks: &'a [(RateLimitDecision, &'static str)],
 ) -> Option<(&'a RateLimitDecision, &'static str)> {
     checks
         .iter()
-        .filter(|(decision, _)| decision.limit > 0)
         .min_by_key(|(decision, _)| decision.remaining)
-        .or_else(|| checks.last())
         .map(|(decision, scope)| (decision, *scope))
 }
 
@@ -377,7 +408,7 @@ fn select_limits(
     client_ip: &str,
     rate_limit_override: Option<&str>,
     quota_override: Option<&str>,
-) -> SelectedLimits {
+) -> Result<SelectedLimits, ErrorResponse> {
     let mut rate_limit_name = rate_limit_override
         .unwrap_or(DEFAULT_RATE_LIMIT)
         .to_string();
@@ -386,15 +417,15 @@ fn select_limits(
 
     if let Some(subject) = subject {
         if rate_limit_name == DEFAULT_RATE_LIMIT
-            && let Some(rate_limit) = subject
-                .get_attr("rate_limit")
-                .and_then(|value| value.as_str())
+            && let Some(rate_limit) =
+                attribute_name(&subject.attrs, "rate_limit", LimitKind::Rate, "subject")?
         {
             rate_limit_name = rate_limit.to_string();
         }
 
         if quota_name.is_none()
-            && let Some(quota) = subject.get_attr("quota").and_then(|value| value.as_str())
+            && let Some(quota) =
+                attribute_name(&subject.attrs, "quota", LimitKind::Quota, "subject")?
         {
             quota_name = Some(quota.to_string());
         }
@@ -402,11 +433,11 @@ fn select_limits(
         subject_key = subject.id.clone();
     }
 
-    SelectedLimits {
+    Ok(SelectedLimits {
         subject_key,
         rate_limit_name,
         quota_name,
-    }
+    })
 }
 
 fn retry_after_header_value(retry_after: std::time::Duration) -> String {
@@ -442,7 +473,7 @@ mod tests {
 
     #[test]
     fn selects_default_rate_limit_for_anonymous_requests() {
-        let selected = select_limits(None, "203.0.113.10", None, None);
+        let selected = select_limits(None, "203.0.113.10", None, None).unwrap();
 
         assert_eq!(selected.subject_key, "203.0.113.10");
         assert_eq!(selected.rate_limit_name, "default");
@@ -456,7 +487,7 @@ mod tests {
             "quota": "monthly-premium"
         }));
 
-        let selected = select_limits(Some(&subject), "203.0.113.10", None, None);
+        let selected = select_limits(Some(&subject), "203.0.113.10", None, None).unwrap();
 
         assert_eq!(selected.subject_key, "sub_123");
         assert_eq!(selected.rate_limit_name, "premium");
@@ -469,7 +500,8 @@ mod tests {
             "rate_limit": "premium"
         }));
 
-        let selected = select_limits(Some(&subject), "203.0.113.10", Some("default"), None);
+        let selected =
+            select_limits(Some(&subject), "203.0.113.10", Some("default"), None).unwrap();
 
         assert_eq!(selected.rate_limit_name, "premium");
     }
@@ -480,7 +512,8 @@ mod tests {
             "rate_limit": "premium"
         }));
 
-        let selected = select_limits(Some(&subject), "203.0.113.10", Some("reports"), None);
+        let selected =
+            select_limits(Some(&subject), "203.0.113.10", Some("reports"), None).unwrap();
 
         assert_eq!(selected.rate_limit_name, "reports");
     }
@@ -491,7 +524,8 @@ mod tests {
             "quota": "monthly-premium"
         }));
 
-        let selected = select_limits(Some(&subject), "203.0.113.10", None, Some("daily-reports"));
+        let selected =
+            select_limits(Some(&subject), "203.0.113.10", None, Some("daily-reports")).unwrap();
 
         assert_eq!(selected.rate_limit_name, "default");
         assert_eq!(selected.quota_name, Some("daily-reports".to_string()));
@@ -506,25 +540,6 @@ mod tests {
         let (decision, scope) = binding_check(&checks).unwrap();
         assert_eq!(scope, "subject");
         assert_eq!(decision.remaining, 2);
-    }
-
-    #[test]
-    fn binding_check_ignores_unconfigured_limits_when_possible() {
-        let checks = vec![
-            // Unconfigured limiter name: allowed with limit 0.
-            (RateLimitDecision::allowed(0, 0, None), "org"),
-            (RateLimitDecision::allowed(50, 49, None), "subject"),
-        ];
-        let (decision, scope) = binding_check(&checks).unwrap();
-        assert_eq!(scope, "subject");
-        assert_eq!(decision.limit, 50);
-
-        let only_unconfigured = vec![(RateLimitDecision::allowed(0, 0, None), "subject")];
-        let (decision, scope) = binding_check(&only_unconfigured).unwrap();
-        assert_eq!(scope, "subject");
-        assert_eq!(decision.limit, 0);
-
-        assert!(binding_check(&[]).is_none());
     }
 
     #[test]
@@ -544,3 +559,7 @@ mod tests {
         assert!(org_target(None, OnMissingOrg::Deny, "rate_limit").is_err());
     }
 }
+
+#[cfg(all(test, feature = "memory"))]
+#[path = "limit_validation_tests.rs"]
+mod validation_tests;

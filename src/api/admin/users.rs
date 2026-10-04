@@ -358,7 +358,9 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     authorization.require(Permission::UsersCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: CreateUserRequest = extract_json(req).await?;
+    super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
     let membership = normalize_initial_membership(payload.membership)?;
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
     let organization = get_membership_organization(membership.as_ref()).await?;
@@ -425,7 +427,9 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
     let authorization = authorization::get(&req)?.clone();
     authorization.require(Permission::UsersInvite)?;
 
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: CreateUserInvitationRequest = extract_json(req).await?;
+    super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
     let membership = normalize_initial_membership(payload.membership)?;
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
     get_membership_organization(membership.as_ref()).await?;
@@ -592,7 +596,9 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: UserAttrsRequest = extract_json(req).await?;
+    super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
 
     let mut existing = crate::db::get_user_by_id(&id)
         .await
@@ -628,6 +634,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: UserAttrsRequest = extract_json(req).await?;
 
     let mut existing = crate::db::get_user_by_id(&id)
@@ -645,6 +652,8 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
         }
         _ => payload.attrs.clone(),
     };
+
+    super::limit_attrs::validate(&runtime.core.limiter, &existing.attrs, false)?;
 
     let user = crate::db::update_user(existing, ctx)
         .await

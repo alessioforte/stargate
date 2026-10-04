@@ -219,7 +219,11 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     authorization::require(&req, Permission::ApiKeysCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: CreateApiKeyRequest = extract_json(req).await?;
+    if let Some(attrs) = &payload.attrs {
+        super::limit_attrs::validate(&runtime.core.limiter, attrs, false)?;
+    }
 
     if payload.user_id.is_none() && payload.service_account_id.is_none() {
         return Err(ErrorResponse::new(ErrorCode::ApiKeyOwnerRequired));
@@ -381,7 +385,9 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
+    super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
 
     let mut existing = crate::db::get_api_key_by_id(&id)
         .await
@@ -419,6 +425,7 @@ pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResp
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
 
     let mut existing = crate::db::get_api_key_by_id(&id)
@@ -438,6 +445,8 @@ pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResp
         }
         _ => payload.attrs.clone(),
     };
+
+    super::limit_attrs::validate(&runtime.core.limiter, &existing.attrs, false)?;
 
     let updated = crate::db::update_api_key(existing, ctx)
         .await

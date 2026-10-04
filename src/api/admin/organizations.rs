@@ -157,7 +157,11 @@ pub async fn create_organization(mut req: Request) -> Result<Response, ErrorResp
     authorization::require(&req, Permission::OrganizationsCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: CreateOrganizationRequest = extract_json(req).await?;
+    if let Some(attrs) = &payload.attrs {
+        super::limit_attrs::validate(&runtime.core.limiter, attrs, true)?;
+    }
 
     if payload.name.trim().is_empty() {
         return Err(ErrorResponse::new(ErrorCode::OrganizationNameRequired));
@@ -195,7 +199,11 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    let runtime = super::limit_attrs::runtime(&req)?;
     let payload: UpdateOrganizationRequest = extract_json(req).await?;
+    if let Some(attrs) = &payload.attrs {
+        super::limit_attrs::validate(&runtime.core.limiter, attrs, true)?;
+    }
 
     if payload.name.trim().is_empty() {
         return Err(ErrorResponse::new(ErrorCode::OrganizationNameRequired));

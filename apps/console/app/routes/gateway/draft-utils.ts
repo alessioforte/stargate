@@ -12,6 +12,10 @@ export function createEmptyGatewayConfig(): JsonRecord {
     runtime: {},
     ingress: { limit: "ingress", timeout: "250ms" },
     limits: {
+      default: {
+        strategy: "gcra",
+        params: { max_burst: 100, replenish_1_per: "1s" },
+      },
       ingress: {
         strategy: "gcra",
         params: { max_burst: 100, replenish_1_per: "100ms" },

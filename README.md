@@ -172,6 +172,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -185,6 +190,11 @@ The required `ingress.limit` checks each client IP before authentication and
 routing, including invalid credentials and unmatched routes. Its store deadline
 defaults to `250ms`; probes remain exempt. Named ingress limits use separate
 buckets from resource policies.
+
+Supplied configs also require `limits.default` for resource and IAM/admin rate
+checks. Selected unknown names or rate/quota strategy mismatches return
+`500 gateway.limit_configuration_invalid` before resource buckets are charged.
+Quota absence and explicit organization skip policies remain optional checks.
 
 Automatic failover replays only `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, and
 `DELETE`. `POST`/`PATCH` and unrecognized methods receive one dispatch attempt;

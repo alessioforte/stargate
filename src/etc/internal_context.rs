@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn absent_block_skips_key_preflight() {
         let config = config(
-            "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp: {}\n",
+            "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  default:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 1s\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp: {}\n",
         );
         preflight_config_with(&config, || panic!("loader must not run")).unwrap();
     }
@@ -686,6 +686,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -714,6 +719,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:

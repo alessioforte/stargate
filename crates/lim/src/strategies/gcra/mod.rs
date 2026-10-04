@@ -88,6 +88,10 @@ impl Gcra {
 #[cfg(feature = "memory")]
 #[async_trait]
 impl RateLimit for Gcra {
+    fn kind(&self) -> crate::strategies::LimitKind {
+        crate::strategies::LimitKind::Rate
+    }
+
     async fn check(&self, key: &str, _cost: u64) -> Result<RateLimitDecision> {
         let t0 = self.clock.now_micros();
 
@@ -199,6 +203,10 @@ impl Gcra {
 #[cfg(feature = "redis")]
 #[async_trait]
 impl RateLimit for Gcra {
+    fn kind(&self) -> crate::strategies::LimitKind {
+        crate::strategies::LimitKind::Rate
+    }
+
     async fn check(&self, key: &str, _cost: u64) -> Result<RateLimitDecision> {
         let mut con = self.store.get_connection();
 

@@ -12,7 +12,8 @@ Async rate-limiting and quota crate. Pluggable strategies (GCRA, token bucket, f
 - **Cached clock** — `CachedClock` updates every 10ms in a background thread; avoids per-call `SystemTime::now()`.
 - **Quota windows** — second / minute / hour / day / week / month / year / custom.
 - **Rich decision** — limit, remaining, retry_after, reset, plus helpers for HTTP `Retry-After` headers.
-- **Fail-open on missing limit** — `Limiter::check` returns `allowed` if no limit is registered under the name (prevents 5xx on partial config).
+- **Strict named references** — `Limiter::check` returns `RateLimitError::UnknownLimit` for an unregistered name. Skipping a check is an explicit caller decision.
+- **Typed strategies** — every strategy exposes `LimitKind::Rate` or `LimitKind::Quota`; `Limiter::validate_limit` rejects unknown or incompatible references without consuming state.
 
 ## Backend Selection
 

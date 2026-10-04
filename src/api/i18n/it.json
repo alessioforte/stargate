@@ -105,6 +105,7 @@
     "gateway.http_client_unavailable": "Il client HTTP del gateway non è disponibile",
     "gateway.no_healthy_upstream": "Nessun servizio upstream disponibile",
     "gateway.organization_context_required": "Il contesto dell'organizzazione è obbligatorio",
+    "gateway.limit_configuration_invalid": "La configurazione del limite selezionato del gateway non è valida",
     "gateway.limiter_unavailable": "Il limitatore del gateway non è disponibile",
     "gateway.rate_limit_exceeded": "Limite di richieste del gateway superato",
     "gateway.quota_exceeded": "Quota del gateway superata",

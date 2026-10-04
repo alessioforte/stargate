@@ -35,7 +35,8 @@ import {
 } from "./schema-options";
 
 interface Props extends GatewayNamedFormProps {
-  limitNames: string[];
+  rateLimitNames: string[];
+  quotaLimitNames: string[];
 }
 
 interface FormValues {
@@ -52,7 +53,8 @@ interface FormValues {
 }
 
 interface BuildContext {
-  limitNames: string[];
+  rateLimitNames: string[];
+  quotaLimitNames: string[];
 }
 
 interface BuildResult {
@@ -153,7 +155,7 @@ function formValuesToPolicy(
     }
     case "rate_limit": {
       const limit = values.rateLimit.trim();
-      const limitError = validateLimitReference(limit, context.limitNames);
+      const limitError = validateLimitReference(limit, context.rateLimitNames);
       if (limitError) return { errorKey: limitError, value: null };
 
       const policy: JsonRecord = {
@@ -172,7 +174,7 @@ function formValuesToPolicy(
     }
     case "quota": {
       const limit = values.quotaLimit.trim();
-      const limitError = validateLimitReference(limit, context.limitNames);
+      const limitError = validateLimitReference(limit, context.quotaLimitNames);
       if (limitError) return { errorKey: limitError, value: null };
 
       const policy: JsonRecord = {
@@ -195,7 +197,8 @@ function formValuesToPolicy(
 const PolicyForm: React.FC<Props> = ({
   canDelete,
   existingNames,
-  limitNames,
+  rateLimitNames,
+  quotaLimitNames,
   selectedName,
   selectedValue,
   onApply,
@@ -206,7 +209,11 @@ const PolicyForm: React.FC<Props> = ({
     policyToFormValues(selectedName, selectedValue),
   );
   const [error, setError] = useState<string | null>(null);
-  const limitOptions = useMemo(() => nameOptions(limitNames), [limitNames]);
+  const limitOptions = useMemo(
+    () =>
+      nameOptions(values.kind === "quota" ? quotaLimitNames : rateLimitNames),
+    [values.kind, rateLimitNames, quotaLimitNames],
+  );
 
   useEffect(() => {
     setValues(policyToFormValues(selectedName, selectedValue));
@@ -232,7 +239,10 @@ const PolicyForm: React.FC<Props> = ({
       return;
     }
 
-    const result = formValuesToPolicy(values, { limitNames });
+    const result = formValuesToPolicy(values, {
+      rateLimitNames,
+      quotaLimitNames,
+    });
     if (!result.value) {
       setError(t(result.errorKey ?? "invalidPolicyConfig"));
       return;

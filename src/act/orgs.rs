@@ -30,23 +30,30 @@ fn ctx_key(org_id: &str) -> String {
 /// Extract the gateway-relevant subset from org attrs. Accepts snake_case
 /// (canonical, matching subject attrs) and camelCase (matching the
 /// `password_policy`/`passwordPolicy` precedent).
-pub fn overrides_from_attrs(attrs: &serde_json::Value) -> OrgLimitOverrides {
-    let get = |key: &str| attrs.get(key).and_then(|v| v.as_str()).map(str::to_string);
-    OrgLimitOverrides {
-        rate_limit: get("rate_limit").or_else(|| get("rateLimit")),
-        quota: get("quota"),
-    }
+pub fn overrides_from_attrs(
+    attrs: &serde_json::Value,
+) -> Result<OrgLimitOverrides, crate::err::ErrorResponse> {
+    use crate::etc::limits::attribute_name;
+    let rate_limit = match attribute_name(attrs, "rate_limit", lim::LimitKind::Rate, "org")? {
+        Some(name) => Some(name),
+        None => attribute_name(attrs, "rateLimit", lim::LimitKind::Rate, "org")?,
+    };
+    let quota = attribute_name(attrs, "quota", lim::LimitKind::Quota, "org")?;
+    Ok(OrgLimitOverrides {
+        rate_limit: rate_limit.map(str::to_string),
+        quota: quota.map(str::to_string),
+    })
 }
 
 /// The org's limit-name overrides, from the store cache or the DB on miss.
-/// Fails open to empty overrides (the policy-configured limit names still
-/// apply); DB failures are not cached.
-pub async fn limit_overrides(org_id: &str) -> OrgLimitOverrides {
+/// Cache failures fall back to the DB. DB failures stop the selected checks;
+/// substituting empty overrides could select a more permissive policy.
+pub async fn limit_overrides(org_id: &str) -> Result<OrgLimitOverrides, crate::err::ErrorResponse> {
     let store = use_store();
     let key = ctx_key(org_id);
 
     match store.get::<OrgLimitOverrides>(&key).await {
-        Ok(Some(cached)) => return cached,
+        Ok(Some(cached)) => return Ok(cached),
         Ok(None) => {}
         Err(error) => {
             tracing::warn!(org_id, "failed to read org ctx cache: {error}");
@@ -54,13 +61,15 @@ pub async fn limit_overrides(org_id: &str) -> OrgLimitOverrides {
     }
 
     let overrides = match crate::db::get_organization_by_id(org_id).await {
-        Ok(Some(org)) => overrides_from_attrs(&org.attrs),
+        Ok(Some(org)) => overrides_from_attrs(&org.attrs)?,
         // A deleted org has no overrides; cache the empty value so a burst
         // of stale-session traffic doesn't hammer the DB.
         Ok(None) => OrgLimitOverrides::default(),
         Err(error) => {
             tracing::warn!(org_id, "failed to load org for limit overrides: {error}");
-            return OrgLimitOverrides::default();
+            return Err(crate::err::ErrorResponse::new(
+                crate::err::ErrorCode::GatewayLimiterUnavailable,
+            ));
         }
     };
 
@@ -68,7 +77,7 @@ pub async fn limit_overrides(org_id: &str) -> OrgLimitOverrides {
         tracing::warn!(org_id, "failed to cache org ctx: {error}");
     }
 
-    overrides
+    Ok(overrides)
 }
 
 /// Drop the cached org context so the next request re-reads fresh attrs.
@@ -87,7 +96,7 @@ mod tests {
     #[test]
     fn extracts_limit_overrides_from_attrs() {
         let attrs = json!({ "rate_limit": "org-premium", "quota": "org-monthly" });
-        let overrides = overrides_from_attrs(&attrs);
+        let overrides = overrides_from_attrs(&attrs).unwrap();
         assert_eq!(overrides.rate_limit.as_deref(), Some("org-premium"));
         assert_eq!(overrides.quota.as_deref(), Some("org-monthly"));
     }
@@ -95,19 +104,21 @@ mod tests {
     #[test]
     fn accepts_camel_case_rate_limit() {
         let attrs = json!({ "rateLimit": "org-premium" });
-        let overrides = overrides_from_attrs(&attrs);
+        let overrides = overrides_from_attrs(&attrs).unwrap();
         assert_eq!(overrides.rate_limit.as_deref(), Some("org-premium"));
     }
 
     #[test]
-    fn ignores_non_string_and_missing_values() {
+    fn absent_and_null_attributes_disable_overrides_but_other_types_are_invalid() {
         assert_eq!(
-            overrides_from_attrs(&json!({})),
+            overrides_from_attrs(&json!({})).unwrap(),
             OrgLimitOverrides::default()
         );
         assert_eq!(
-            overrides_from_attrs(&json!({ "rate_limit": 5, "quota": null })),
+            overrides_from_attrs(&json!({ "rate_limit": null, "quota": null })).unwrap(),
             OrgLimitOverrides::default()
         );
+        assert!(overrides_from_attrs(&json!({"rate_limit":5})).is_err());
+        assert!(overrides_from_attrs(&json!({"quota":false})).is_err());
     }
 }

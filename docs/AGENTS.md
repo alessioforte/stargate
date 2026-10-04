@@ -125,6 +125,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -198,11 +203,24 @@ are accepted only from `TRUSTED_PROXIES`; credentials cannot select an ingress
 bucket. `/livez`, `/readyz`, and `/health` stay exempt; IAM/admin keep their
 existing `default` middleware instead of gateway ingress admission.
 
-Gateway resource rate limiting always falls back to the named `default` limit. A
+Every supplied config must provide the named `default` rate limit (GCRA or a
+positive, representable token bucket). Generated defaults use burst 100 and
+replenishment `1s`. Resource rate limiting and IAM/admin middleware select this
+required default; absence is a compile error. A
 non-default router `rate_limit` policy overrides that default for the matched
 resource. Authenticated users/API keys can set `attrs.rate_limit` to a named
 limit; that overrides the implicit default and an explicit `limit: default`, but
 not a non-default resource policy.
+
+Selected subject/org names and their rate/quota strategy types are validated
+against the pinned runtime before charging any resource buckets. Unknown names
+or incompatible strategies return `500 gateway.limit_configuration_invalid`;
+there is no allow-on-missing or default-substitution behavior. Quota absence and
+`on_missing: skip` are explicit skipped checks. Selected malformed attributes
+fail too; null attributes remove an override. Admin user/invitation/API key/org
+writes validate names/types and return `400 request.invalid` with the field.
+Config reloads may remove dynamic names, so runtime validation remains mandatory.
+Org cache errors retry the DB; DB errors stop checks rather than discard overrides.
 
 Quota is independent from rate limiting. A router `quota` policy or subject
 `attrs.quota` selects a named `quota_tracker` limit. If both rate limit and

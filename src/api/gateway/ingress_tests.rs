@@ -318,6 +318,10 @@ impl Drop for PendingCheck {
 
 #[async_trait::async_trait]
 impl lim::RateLimit for AdmissionBackend {
+    fn kind(&self) -> lim::LimitKind {
+        lim::LimitKind::Rate
+    }
+
     async fn check(&self, key: &str, cost: u64) -> lim::Result<lim::RateLimitDecision> {
         assert_eq!(key, "ingress:ingress:ip:203.0.113.8");
         assert_eq!(cost, 1);

@@ -217,7 +217,7 @@ fn generation_config(
         "schema": gate::cfg::SCHEMA,
         "ingress": {"limit": "ingress", "timeout": "250ms"},
         "mtls": mtls,
-        "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}, limit.clone(): {"strategy": "token_bucket", "params": {"capacity": if name == "old" {11} else {22}, "refill_rate": 1}}},
+        "limits": {"default": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "1s"}}, "ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}, limit.clone(): {"strategy": "token_bucket", "params": {"capacity": if name == "old" {11} else {22}, "refill_rate": 1}}},
         "http": {
             "upstreams": {
                 primary.clone(): {"targets": [{"url": format!("{url}/primary")}], "load_balancer": {"strategy": "round_robin", "circuit_breaker": {"fail_threshold": 1, "cooldown": "3600s"}}},

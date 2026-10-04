@@ -159,6 +159,10 @@ impl TokenBucket {
 #[cfg(feature = "memory")]
 #[async_trait]
 impl RateLimit for TokenBucket {
+    fn kind(&self) -> crate::strategies::LimitKind {
+        crate::strategies::LimitKind::Rate
+    }
+
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
         let now_micros = self.clock.now_micros();
         let capacity = self.capacity;
@@ -262,6 +266,10 @@ impl TokenBucket {
 #[cfg(feature = "redis")]
 #[async_trait]
 impl RateLimit for TokenBucket {
+    fn kind(&self) -> crate::strategies::LimitKind {
+        crate::strategies::LimitKind::Rate
+    }
+
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
         let mut con = self.store.get_connection();
 

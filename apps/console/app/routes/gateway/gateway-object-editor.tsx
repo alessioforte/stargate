@@ -2,7 +2,7 @@ import { Badge, Box, Paper, Stack, Text } from "@mantine/core";
 import { useTranslations } from "@/i18n";
 import type { JsonValue } from "@/services/types";
 import type { GatewaySection } from "./config-utils";
-import { getPathRecord, stringifyJson } from "./config-utils";
+import { getPathRecord, isRecord, stringifyJson } from "./config-utils";
 import LimitForm from "./limit-form";
 import MiddlewareForm from "./middleware-form";
 import PolicyForm from "./policy-form";
@@ -32,7 +32,22 @@ const GatewayObjectEditor: React.FC<Props> = ({
   onDelete,
 }) => {
   const t = useTranslations();
-  const limitNames = Object.keys(getPathRecord(config, ["limits"])).sort();
+  const limits = getPathRecord(config, ["limits"]);
+  const rateLimitNames = Object.keys(limits)
+    .filter((name) => {
+      const spec = limits[name];
+      return (
+        isRecord(spec) &&
+        (spec.strategy === "gcra" || spec.strategy === "token_bucket")
+      );
+    })
+    .sort();
+  const quotaLimitNames = Object.keys(limits)
+    .filter((name) => {
+      const spec = limits[name];
+      return isRecord(spec) && spec.strategy === "quota_tracker";
+    })
+    .sort();
   const upstreamNames = Object.keys(
     getPathRecord(config, ["http", "upstreams"]),
   ).sort();
@@ -105,7 +120,8 @@ const GatewayObjectEditor: React.FC<Props> = ({
       <PolicyForm
         canDelete={canDelete}
         existingNames={existingNames}
-        limitNames={limitNames}
+        rateLimitNames={rateLimitNames}
+        quotaLimitNames={quotaLimitNames}
         selectedName={selectedName}
         selectedValue={selectedValue}
         onApply={onApply}

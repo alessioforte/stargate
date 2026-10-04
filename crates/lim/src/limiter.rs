@@ -1,6 +1,6 @@
 use crate::decision::RateLimitDecision;
 use crate::error::{RateLimitError, Result};
-use crate::strategies::RateLimit;
+use crate::strategies::{LimitKind, RateLimit};
 use std::collections::HashMap;
 
 #[cfg(all(test, feature = "memory"))]
@@ -108,6 +108,21 @@ impl Limiter {
         self.limits.contains_key(name)
     }
 
+    pub fn validate_limit(&self, name: &str, expected: LimitKind) -> Result<()> {
+        let limit = self
+            .get_limit(name)
+            .ok_or_else(|| RateLimitError::UnknownLimit(name.into()))?;
+        let actual = limit.kind();
+        if actual != expected {
+            return Err(RateLimitError::IncompatibleLimit {
+                name: name.into(),
+                expected,
+                actual,
+            });
+        }
+        Ok(())
+    }
+
     pub async fn check(
         &self,
         limiter_name: &str,
@@ -117,19 +132,32 @@ impl Limiter {
         if key.is_empty() || key.len() > 256 {
             return Err(RateLimitError::InvalidConfig("Invalid key".to_string()));
         }
-        if let Some(limiter) = self.limits.get(limiter_name) {
-            let cost = cost.unwrap_or(1);
-            // Namespace the stored state by limit name: two named limits
-            // checking the same key (e.g. a subject or org whose attrs
-            // switch them to a different named limit) must not share
-            // replenish state — a strict limit's TAT would keep throttling
-            // long after the switch to a permissive one.
-            let state_key = format!("{limiter_name}:{key}");
-            limiter.check(&state_key, cost).await
-        } else {
-            // No limit configured for this name — allow the request through.
-            // This prevents 500 errors on clean boot when limits config is null.
-            Ok(RateLimitDecision::allowed(0, 0, None))
+        let limiter = self
+            .get_limit(limiter_name)
+            .ok_or_else(|| RateLimitError::UnknownLimit(limiter_name.into()))?;
+        let cost = cost.unwrap_or(1);
+        // Namespace the stored state by limit name: two named limits
+        // checking the same key (e.g. a subject or org whose attrs
+        // switch them to a different named limit) must not share
+        // replenish state — a strict limit's TAT would keep throttling
+        // long after the switch to a permissive one.
+        let state_key = format!("{limiter_name}:{key}");
+        limiter.check(&state_key, cost).await
+    }
+}
+
+#[cfg(test)]
+mod configuration_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unknown_selected_names_are_typed_errors_even_without_any_limits() {
+        let limiter = Limiter::new();
+        for name in ["default", "typo", ""] {
+            assert!(matches!(limiter.check(name, "valid-key", None).await,
+                Err(RateLimitError::UnknownLimit(missing)) if missing == name));
+            assert!(matches!(limiter.validate_limit(name, LimitKind::Rate),
+                Err(RateLimitError::UnknownLimit(missing)) if missing == name));
         }
     }
 }

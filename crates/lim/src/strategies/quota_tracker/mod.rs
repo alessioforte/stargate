@@ -43,6 +43,10 @@ impl QuotaTracker {
 #[cfg(feature = "memory")]
 #[async_trait]
 impl RateLimit for QuotaTracker {
+    fn kind(&self) -> crate::strategies::LimitKind {
+        crate::strategies::LimitKind::Quota
+    }
+
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
         let now = self.clock.now_secs();
         let window = self.window;
@@ -144,6 +148,10 @@ impl QuotaTracker {
 #[cfg(feature = "redis")]
 #[async_trait]
 impl RateLimit for QuotaTracker {
+    fn kind(&self) -> crate::strategies::LimitKind {
+        crate::strategies::LimitKind::Quota
+    }
+
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
         let mut con = self.store.get_connection();
 

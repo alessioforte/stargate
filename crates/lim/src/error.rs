@@ -5,6 +5,16 @@ use thiserror::Error;
 /// Error types that can occur during rate limiting operations
 #[derive(Error, Debug)]
 pub enum RateLimitError {
+    #[error("Unknown limit: {0}")]
+    UnknownLimit(String),
+
+    #[error("Limit '{name}' is {actual}, expected {expected}")]
+    IncompatibleLimit {
+        name: String,
+        expected: crate::strategies::LimitKind,
+        actual: crate::strategies::LimitKind,
+    },
+
     /// Rate limit has been exceeded
     #[error("Rate limit exceeded")]
     RateLimitExceeded,

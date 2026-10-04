@@ -89,7 +89,7 @@ impl TlsFiles {
         serde_json::from_value(serde_json::json!({
             "schema": SCHEMA,
             "ingress": {"limit": "ingress", "timeout": "250ms"},
-            "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}},
+            "limits": {"default": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "1s"}}, "ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}},
             "mtls": self.mtls(),
             "http": {
                 "upstreams": { "secure": { "targets": [{ "url": url }] } },

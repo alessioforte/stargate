@@ -4,6 +4,7 @@ pub mod api_keys;
 pub mod authorization;
 pub mod configurations;
 pub mod health;
+mod limit_attrs;
 pub mod me;
 pub mod oauth_clients;
 pub mod organizations;

@@ -35,7 +35,10 @@ impl Default for Config {
             schema: SCHEMA.to_string(),
             runtime: RuntimeSettings::default(),
             ingress: Ingress::default(),
-            limits: IndexMap::from([("ingress".into(), LimitSpec::ingress_default())]),
+            limits: IndexMap::from([
+                ("ingress".into(), LimitSpec::ingress_default()),
+                ("default".into(), LimitSpec::resource_default()),
+            ]),
             mtls: None,
             http: HttpConfig::default(),
         }
@@ -56,13 +59,18 @@ impl Config {
         let runtime = self.runtime.compile()?;
         let limits = compile_limits(&self.limits)?;
         let ingress = self.ingress.compile(&self.limits)?;
-        let limit_names = limits
-            .iter()
-            .map(|limit| limit.name.clone())
-            .collect::<HashSet<_>>();
+        let default = self.limits.get("default").ok_or_else(|| {
+            CompileError::new(
+                "limits.default",
+                "a configured default rate limit is required",
+            )
+        })?;
+        default
+            .validate_rate()
+            .map_err(|message| CompileError::new("limits.default", message))?;
         let upstreams = compile_upstreams(&self.http.upstreams)?;
         let middlewares = compile_middlewares(&self.http.middlewares)?;
-        let policies = compile_policies(&self.http.policies, &limit_names)?;
+        let policies = compile_policies(&self.http.policies, &self.limits)?;
 
         validate_service_refs(&self.http.services, &upstreams)?;
         let services = compile_services(&self.http.services)?;
@@ -555,7 +563,7 @@ fn compile_middlewares(
 
 fn compile_policies(
     policies: &IndexMap<String, Policy>,
-    limit_names: &HashSet<String>,
+    limits: &IndexMap<String, LimitSpec>,
 ) -> Result<IndexMap<String, PolicyNode>, CompileError> {
     let mut out = IndexMap::new();
 
@@ -623,7 +631,7 @@ fn compile_policies(
                 scope,
                 on_missing,
             } => {
-                ensure_limit_exists(name, limit, limit_names, "rate limit")?;
+                validate_policy_limit(name, limit, limits, lim::LimitKind::Rate)?;
                 let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
                 PolicyNode::RateLimit {
                     limit: limit.clone(),
@@ -636,7 +644,7 @@ fn compile_policies(
                 scope,
                 on_missing,
             } => {
-                ensure_limit_exists(name, limit, limit_names, "quota")?;
+                validate_policy_limit(name, limit, limits, lim::LimitKind::Quota)?;
                 let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
                 PolicyNode::Quota {
                     limit: limit.clone(),
@@ -666,17 +674,25 @@ fn resolve_on_missing(
     }
 }
 
-fn ensure_limit_exists(
+fn validate_policy_limit(
     policy_name: &str,
     limit: &str,
-    limit_names: &HashSet<String>,
-    kind: &str,
+    limits: &IndexMap<String, LimitSpec>,
+    expected: lim::LimitKind,
 ) -> Result<(), CompileError> {
-    if !limit_names.contains(limit) {
+    let path = format!("http.policies.{policy_name}.limit");
+    let spec = limits
+        .get(limit)
+        .ok_or_else(|| CompileError::new(&path, format!("unknown {expected} '{limit}'")))?;
+    if spec.kind() != expected {
         return Err(CompileError::new(
-            format!("http.policies.{}.limit", policy_name),
-            format!("unknown {} '{}'", kind, limit),
+            path,
+            format!("must reference a {expected} limit"),
         ));
+    }
+    if expected == lim::LimitKind::Rate {
+        spec.validate_rate()
+            .map_err(|message| CompileError::new(path, message))?;
     }
     Ok(())
 }
@@ -1198,6 +1214,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1238,7 +1259,7 @@ http:
             ),
         ] {
             let yaml = format!(
-                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  policies:\n    auth:\n      kind: auth\n      strategies: {strategies}\n{audience}"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  default:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 1s\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  policies:\n    auth:\n      kind: auth\n      strategies: {strategies}\n{audience}"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1516,6 +1537,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1590,6 +1616,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1624,6 +1655,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1661,6 +1697,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1702,6 +1743,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1745,6 +1791,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1768,6 +1819,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1808,7 +1864,7 @@ http:
                 .map(|value| format!("        audience: '{value}'\n"))
                 .unwrap_or_else(|| "        {}\n".to_owned());
             let yaml = format!(
-                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  upstreams:\n    orders:\n      targets:\n        - url: http://orders:8080\n      internal_context:\n{audience}"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  default:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 1s\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  upstreams:\n    orders:\n      targets:\n        - url: http://orders:8080\n      internal_context:\n{audience}"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1830,6 +1886,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1890,7 +1951,7 @@ http:
             ),
         ] {
             let yaml = format!(
-                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  middlewares:\n    headers:\n      kind: {kind}\n      {operation}:\n{value}\n"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  default:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 1s\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  middlewares:\n    headers:\n      kind: {kind}\n      {operation}:\n{value}\n"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1911,6 +1972,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -1929,5 +1995,65 @@ http:
         .compile()
         .expect_err("compile should fail");
         assert_eq!(error.path, "http.services.response.headers[0].name");
+    }
+}
+
+#[cfg(test)]
+mod limit_validation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn default_is_a_required_rate_reference_and_never_an_implicit_disable() {
+        let valid = serde_json::to_value(Config::default()).unwrap();
+        for spec in [
+            None,
+            Some(json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}})),
+            Some(json!({"strategy":"token_bucket","params":{"capacity":0,"refill_rate":1}})),
+        ] {
+            let mut value = valid.clone();
+            match spec {
+                None => {
+                    value["limits"].as_object_mut().unwrap().remove("default");
+                }
+                Some(spec) => value["limits"]["default"] = spec,
+            }
+            let config: Config = serde_json::from_value(value).unwrap();
+            assert_eq!(config.compile().unwrap_err().path, "limits.default");
+        }
+    }
+
+    #[test]
+    fn policies_require_existing_limits_of_the_right_strategy_kind() {
+        for (kind, name) in [
+            ("rate_limit", "missing"),
+            ("quota", "missing"),
+            ("rate_limit", "daily"),
+            ("quota", "default"),
+        ] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] =
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}});
+            value["http"]["policies"] = json!({"selected":{"kind":kind,"limit":name}});
+            let config: Config = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                config.compile().unwrap_err().path,
+                "http.policies.selected.limit"
+            );
+        }
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        value["limits"]["daily"] =
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}});
+        value["http"]["policies"] = json!({
+            "rate":{"kind":"rate_limit","limit":"default"},
+            "quota":{"kind":"quota","limit":"daily"},
+            "skipped-org":{"kind":"quota","limit":"daily","scope":"org","on_missing":"skip"}
+        });
+        assert!(
+            serde_json::from_value::<Config>(value)
+                .unwrap()
+                .compile()
+                .is_ok()
+        );
     }
 }

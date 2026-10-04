@@ -169,6 +169,11 @@ ingress:
   limit: ingress
   timeout: 250ms
 limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
   ingress:
     strategy: gcra
     params:
@@ -763,6 +768,14 @@ http:
       limit: reports
 ```
 
+Every supplied config must include `limits.default`, using GCRA or a positive,
+representable token bucket. The implicit resource check and IAM/admin middleware
+select this default by name; deleting it is a compile error. Generated configs
+provide GCRA burst `100` replenishing one request per `1s`, alongside the separate
+mandatory ingress limit. There is no allow-on-missing or resource rate-limit
+disable switch. Rate policies must reference rate strategies, and quota policies
+must reference `quota_tracker`.
+
 Authenticated users and API keys can also select a rate limit by setting
 `attrs.rate_limit` to a named limit. This overrides the implicit default, and
 also overrides an explicit router policy whose limit is `default`. A non-default
@@ -771,6 +784,29 @@ router policy still wins, so endpoint-specific limits stay enforced.
 Quota is selected independently from rate limiting. A router `quota` policy or
 subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
 limit and quota are selected, both checks run.
+
+Selected subject and organization override names are validated against the
+request's pinned runtime before any resource rate or quota bucket is charged.
+Unknown names, incompatible strategies, and malformed selected attributes return
+`500 gateway.limit_configuration_invalid`; the request cannot substitute a more
+permissive default. Diagnostics include the policy type, scope, and a limit name
+truncated to 64 Unicode characters (or the invalid attribute field); names never
+become metric labels. Ingress remains the earlier, independent admission gate.
+
+Quota is intentionally absent when neither the route nor subject selects it.
+Missing or `null` override attributes leave policy selection unchanged; other
+attribute types are invalid. An org check with `on_missing: skip` and no org
+context is explicitly skipped. These cases do not perform a failed lookup or
+manufacture an allowed decision. Valid names retain their existing independent
+state namespaces and selection precedence.
+
+Admin user, invitation, API key, and organization attribute writes reject unknown
+or incompatible names with `400 request.invalid` and an `attrs.*` field parameter.
+Runtime validation still applies to stored/session overrides: after a reload
+removes an attribute-referenced limit, new requests fail while requests already
+in flight keep their valid pinned runtime. Organization cache failures retry the
+DB; a DB failure stops the checks instead of discarding stored overrides and
+using a potentially more permissive route default.
 
 The per-request cost is a property of the **route**, not the policy: routers
 accept a `quota_cost` (default `1`) that says how many quota units one request

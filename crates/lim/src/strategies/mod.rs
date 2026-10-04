@@ -6,8 +6,25 @@ use crate::decision::RateLimitDecision;
 use crate::error::Result;
 
 use async_trait::async_trait;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitKind {
+    Rate,
+    Quota,
+}
+
+impl std::fmt::Display for LimitKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Rate => "rate_limit",
+            Self::Quota => "quota",
+        })
+    }
+}
+
 #[async_trait]
 pub trait RateLimit: Send + Sync {
+    fn kind(&self) -> LimitKind;
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision>;
 }
 

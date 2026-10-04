@@ -38,7 +38,7 @@ impl Ingress {
         let spec = limits.get(&self.limit).ok_or_else(|| {
             CompileError::new("ingress.limit", "must reference a configured rate limit")
         })?;
-        spec.validate_ingress()
+        spec.validate_rate()
             .map_err(|message| CompileError::new("ingress.limit", message))?;
         let timeout = tools::parse_duration(&self.timeout)
             .ok()

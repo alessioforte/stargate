@@ -34,6 +34,20 @@ runtimeSecret:
 gatewayConfig:
   config: |
     schema: stargate/v1
+    ingress:
+      limit: ingress
+      timeout: 250ms
+    limits:
+      default:
+        strategy: gcra
+        params:
+          max_burst: 100
+          replenish_1_per: 1s
+      ingress:
+        strategy: gcra
+        params:
+          max_burst: 100
+          replenish_1_per: 100ms
 
 podDisruptionBudget:
   enabled: true

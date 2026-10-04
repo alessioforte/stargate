@@ -21,6 +21,11 @@ pub async fn rate_limit_middleware(mut req: Request, next: Next) -> Response {
     key.push_str("lim:");
     key.push_str(&client_ip);
 
+    if let Err(error) =
+        crate::etc::limits::validate_limit(limiter, "default", lim::LimitKind::Rate, "ip")
+    {
+        return error.into_response();
+    }
     let decision = match limiter.check("default", &key, None).await {
         Ok(d) => d,
         Err(e) => {
