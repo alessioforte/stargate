@@ -1,4 +1,5 @@
 {
+  "failoverReplayDescription": "I tentativi automatici usano GET, HEAD, OPTIONS, TRACE, PUT e DELETE. Gli altri metodi vengono inviati una sola volta, anche con Idempotency-Key. I target non disponibili possono essere saltati prima dell’invio.",
   "ingressLimit": "Limite di ingresso",
   "ingressLimitDescription": "Controllo obbligatorio per IP prima di autenticazione e routing.",
   "ingressTimeout": "Timeout del controllo di ingresso",

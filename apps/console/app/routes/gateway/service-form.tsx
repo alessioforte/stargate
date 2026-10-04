@@ -836,6 +836,9 @@ const ServiceForm: React.FC<Props> = ({
       {values.kind === "failover" && (
         <>
           <Stack p="xs" gap="xs">
+            <Text size="sm" c="dimmed">
+              {t("failoverReplayDescription")}
+            </Text>
             <Select
               searchable
               variant="filled"

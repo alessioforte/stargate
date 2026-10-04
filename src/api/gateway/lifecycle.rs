@@ -43,6 +43,7 @@ impl Execution {
         ErrorResponse::new(match phase {
             "cancelled" => ErrorCode::GatewayCancelled,
             "upload" => ErrorCode::GatewayUploadTimeout,
+            "upload_body" => ErrorCode::GatewayRequestBodyFailed,
             _ => ErrorCode::GatewayTimeout,
         })
         .with_param("phase", phase)
@@ -190,6 +191,14 @@ impl hyper::body::Body for ProgressBody {
                 if this.body.as_ref().unwrap().is_end_stream() {
                     this.finish();
                 }
+            }
+            Poll::Ready(Some(Err(_))) if this.phase == "upload" => {
+                *this
+                    .execution
+                    .failure
+                    .lock()
+                    .expect("Execution failure lock poisoned") = Some("upload_body");
+                this.finish();
             }
             Poll::Ready(_) => this.finish(),
             Poll::Pending => this.ready_frames = 0,

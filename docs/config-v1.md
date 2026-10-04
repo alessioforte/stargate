@@ -488,13 +488,14 @@ http:
           percent: 100
 ```
 
-Failover by transport error and selected response status:
+Failover by transport error and selected response status for eligible operations:
 
 ```yaml
 http:
   services:
     api-resilient:
       kind: failover
+      # Automatic replay uses the eligible methods listed below; POST/PATCH dispatch once.
       service: api-primary
       failovers: [api-backup]
       on_status: [502, 503, 504]
@@ -515,8 +516,8 @@ http:
         text: maintenance
 ```
 
-HTTP mirrors and multi-attempt failover plans replay the request body, including
-transport-only failover. The per-request cap is `runtime.replay_body_bytes`
+HTTP mirrors and eligible multi-attempt failover plans buffer the request body,
+including transport-only failover. The per-request cap is `runtime.replay_body_bytes`
 (default `2097152`, or 2 MiB). `GATEWAY_REPLAY_BODY_LIMIT` has been removed.
 When only mirrors need replay, an oversized `Content-Length` skips mirrors and
 streams the primary request. A buffered body crossing the per-request cap
@@ -528,6 +529,42 @@ Discarded responses are consumed frame by frame, without collecting them, up to
 absolute deadline. The remaining request/mirror budget can end disposal sooner.
 An already-received frame may cross the byte cap; no subsequent frame is read.
 Small bodies can drain fully and allow connection reuse.
+
+## Automatic replay and mutations
+
+Automatic failover is eligible only for `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`,
+and `DELETE`, following [RFC 9110 §9.2.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.2).
+The same eligibility decision governs transport-error and configured
+`on_status` failover, including shadow plans. `POST`, `PATCH`, `CONNECT`, and
+unrecognized methods receive one dispatch attempt: after an attempted dispatch,
+a connection failure returns the error and a configured failure status returns
+that response with its body intact. The backend might have committed before the
+connection failed, so an absent response is insufficient evidence to retry.
+
+An `Idempotency-Key` header does not establish idempotent semantics. There is no
+route override or mutation-retry switch. A future extension for idempotent
+operations on other methods would require an explicit operation contract and
+integration proof of deduplication shared by every possible target. Clients
+should reconcile uncertain mutation outcomes using their application's own
+operation contract before deciding whether to submit another request.
+
+Unavailable/unhealthy candidates may still be skipped during service selection,
+before any dispatch. Thus a mutation can go directly to an available fallback
+without repeating an attempted operation. Signing/preparation failures and
+client-body errors terminate the request instead of triggering failover or
+penalizing upstream health. The prepared HTTP clients disable hidden transport
+retries; the executor owns every automatic retry and issues fresh context per
+eligible network attempt, with the selected audience and attempt number.
+
+Eligibility is determined before reserving replay storage or reading the body.
+A mutation without admitted mirrors streams beyond `runtime.replay_body_bytes`,
+even if its service has alternatives or the replay-memory budget is occupied.
+Eligible multi-attempt plans retain their required replay cap and reservation.
+Mirrors are deliberate shadow copies and still require their existing buffer
+and budgets; buffering a mutation for a mirror does not make its primary or
+shadow failover eligible. For optional mirrors, known oversized bodies or
+reservation failures skip the mirrors as before; an unknown-length body that
+exceeds an admitted mirror buffer is rejected before any dispatch.
 
 ## Runtime deadlines and resource budgets
 
@@ -609,7 +646,8 @@ Before headers, deadline expiry returns `504 gateway.timeout` with a bounded
 After headers, expiry/cancellation terminates the body/session; it cannot replace
 the committed status with JSON or start a retry. Local timeout/cancellation does
 not eject a target from the circuit breaker. Transport failure remains
-`502 upstream.connection_failed` and retains its existing failover behavior.
+`502 upstream.connection_failed`; automatic failover requires an eligible
+operation and an available alternative.
 
 Mirror tasks have an independent absolute `mirror_timeout`, including every
 attempt and disposal; they may finish after the primary. Both mirrors and
@@ -961,6 +999,7 @@ http:
       upstream: shadow
     reports-v2-resilient:
       kind: failover
+      # Status and transport retries require an eligible idempotent method.
       service: reports-v2
       failovers: [reports-v1]
       on_status: [503]

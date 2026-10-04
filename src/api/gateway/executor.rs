@@ -3,7 +3,10 @@ use super::{
     disposal::{DisposalOutcome, discard_response},
     http,
     responses::build_direct_response,
-    types::{DynLoadBalancer, ExecutionPlan, ReplayRequest, RequestState, SelectedService},
+    types::{
+        DynLoadBalancer, ExecutionPlan, ReplayEligibility, ReplayRequest, RequestState,
+        SelectedService,
+    },
     ws,
 };
 use crate::err::{ErrorCode, ErrorResponse};
@@ -302,6 +305,7 @@ pub(super) async fn execute_plan_from_replay(
     dispatch_kind: DispatchKind,
 ) -> Result<Response, ErrorResponse> {
     let last_idx = plan.attempts.len().saturating_sub(1);
+    let eligibility = ReplayEligibility::for_method(&replay.method);
     let mut network_attempt = 0_u16;
     for (idx, selected) in plan.attempts.iter().enumerate() {
         let dispatch_attempt =
@@ -319,7 +323,11 @@ pub(super) async fn execute_plan_from_replay(
                 .await;
         let response = match result {
             Ok(response) => response,
-            Err(error) if idx < last_idx && error.status == ::http::StatusCode::BAD_GATEWAY => {
+            Err(error)
+                if eligibility == ReplayEligibility::Idempotent
+                    && idx < last_idx
+                    && error.code == ErrorCode::UpstreamConnectionFailed =>
+            {
                 telemetry::record_gateway_failover("transport", None);
                 tracing::warn!(
                     plan_index = idx + 1,
@@ -330,7 +338,10 @@ pub(super) async fn execute_plan_from_replay(
             }
             Err(error) => return Err(error),
         };
-        if idx < last_idx && plan.should_failover_response(response.status()) {
+        if eligibility == ReplayEligibility::Idempotent
+            && idx < last_idx
+            && plan.should_failover_response(response.status())
+        {
             let status = response.status();
             telemetry::record_gateway_failover("status", Some(status.as_u16()));
             tracing::warn!(
@@ -724,7 +735,7 @@ http:
             attempts: vec![
                 SelectedService::Upstream {
                     service_name: "unreachable".to_owned(),
-                    upstream_base_url: "http://[".to_owned(),
+                    upstream_base_url: "http://127.0.0.1:1".to_owned(),
                     internal_context: None,
                 },
                 SelectedService::DirectResponse {

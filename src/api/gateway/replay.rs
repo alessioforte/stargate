@@ -1,7 +1,7 @@
 use super::types::ReplayRequest;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::reqctx::INTERNAL_CONTEXT_HEADER;
-use ::http::{HeaderMap, Request, Uri, header::CONTENT_LENGTH};
+use ::http::{HeaderMap, Request, header::CONTENT_LENGTH};
 use axum::body::Body;
 use http_body_util::BodyExt;
 use hyper::body::Bytes;
@@ -16,10 +16,7 @@ pub(super) fn content_length_exceeds(headers: &HeaderMap, limit: usize) -> bool 
 
 impl ReplayRequest {
     pub(super) fn build(&self, uri: &str) -> Result<Request<Body>, ErrorResponse> {
-        let uri = uri.parse::<Uri>().map_err(|error| {
-            tracing::error!(%uri, %error, "Invalid upstream URI");
-            ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
-        })?;
+        let uri = super::http::parse_upstream_uri(uri)?;
 
         let mut req = Request::new(Body::from(self.body.clone()));
         *req.method_mut() = self.method.clone();
@@ -174,7 +171,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(plan.needs_failover_replay());
+        assert!(plan.needs_failover_replay(super::super::types::ReplayEligibility::Idempotent));
+        assert!(
+            !plan.needs_failover_replay(super::super::types::ReplayEligibility::SingleDispatch)
+        );
     }
     fn small_runtime() -> std::sync::Arc<crate::etc::gate::RuntimeSnapshot> {
         let mut config = gate::cfg::Config::default();

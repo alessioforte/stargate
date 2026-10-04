@@ -186,6 +186,12 @@ routing, including invalid credentials and unmatched routes. Its store deadline
 defaults to `250ms`; probes remain exempt. Named ingress limits use separate
 buckets from resource policies.
 
+Automatic failover replays only `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, and
+`DELETE`. `POST`/`PATCH` and unrecognized methods receive one dispatch attempt;
+an `Idempotency-Key` header does not enable retries. An unavailable primary may
+still be skipped before dispatch. Mutations stream without a failover buffer
+unless selected mirror traffic requires one.
+
 See [docs/config-v1.md](docs/config-v1.md) for examples and runtime notes.
 
 ## CLI

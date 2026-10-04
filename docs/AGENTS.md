@@ -78,7 +78,10 @@ Mounted as Axum `fallback_service`. Current request flow:
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
 5. Apply selected policies in fixed runtime order: auth, access control, rate limit, quota.
 6. Build an execution plan from the selected service: load-balanced upstream, weighted split, mirror, failover, or direct response.
-7. Buffer replayable requests for mirror traffic and every multi-attempt failover plan.
+7. Determine replay eligibility from the method before buffering: `GET`, `HEAD`,
+   `OPTIONS`, `TRACE`, `PUT`, and `DELETE` may fail over; other methods get one
+   dispatch regardless of `Idempotency-Key`. Buffer eligible multi-attempt plans
+   and admitted mirror traffic; mutations without mirrors stream past the cap.
 8. Execute HTTP, WebSocket, or direct response and apply gateway/response headers.
 
 Gateway modules:
@@ -213,7 +216,11 @@ Implemented:
 - Failover on selected response status codes.
 - Direct response routes.
 - Fallback routes via low-priority catch-all routers.
-- Request replay buffering for mirrors and all multi-attempt failover plans.
+- Request replay buffering for admitted mirrors and eligible multi-attempt
+  failover plans. Non-idempotent requests may select an available fallback before
+  dispatch, but cannot retry after dispatch on transport errors or status codes.
+  Local body/preparation/signing errors never trigger failover; the prepared
+  Hyper clients leave retry decisions to the gateway executor.
 - Validated `runtime` settings: 1024 primary slots, 64 mirror slots, 2 MiB
   replay cap / 64 MiB reserved storage by default. Shared storage retains its
   reservation through the last byte owner. Process capacities require restart.

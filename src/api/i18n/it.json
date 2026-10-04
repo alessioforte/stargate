@@ -114,6 +114,7 @@
     "gateway.replay_memory_exhausted": "Il budget di memoria del gateway è esaurito",
     "gateway.timeout": "Il termine del gateway è stato superato",
     "gateway.upload_timeout": "Il caricamento della richiesta è scaduto",
+    "gateway.request_body_failed": "Impossibile leggere il corpo della richiesta",
     "gateway.cancelled": "La richiesta del gateway è stata annullata",
     "gateway.replay_buffer_failed": "Non è stato possibile memorizzare il corpo della richiesta per la ripetizione",
     "gateway.replay_payload_too_large": "Il corpo della richiesta supera il limite di ripetizione del gateway",

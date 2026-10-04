@@ -22,10 +22,16 @@ pub async fn handler(
 ) -> Result<Response, ErrorResponse> {
     req.extensions_mut()
         .remove::<std::sync::Arc<crate::etc::gate::resources::Admission>>();
-    let upstream_uri = uri.parse::<http::Uri>().map_err(|error| {
-        tracing::error!(%uri, %error, "Invalid upstream URI");
-        ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
-    })?;
+    let upstream_uri = parse_upstream_uri(uri)?;
+    if !matches!(
+        req.version(),
+        http::Version::HTTP_10 | http::Version::HTTP_11 | http::Version::HTTP_2
+    ) || (req.version() == http::Version::HTTP_10 && req.method() == http::Method::CONNECT)
+    {
+        return Err(ErrorResponse::new(
+            ErrorCode::GatewayRequestPreparationFailed,
+        ));
+    }
     *req.uri_mut() = upstream_uri;
     strip_hop_by_hop_headers(req.headers_mut());
     if !preserve_host {
@@ -62,6 +68,9 @@ pub async fn handler(
             if crate::etc::gate::connection_timed_out(&error) {
                 return execution.timeout("connect");
             }
+            if request_preparation_failed(&error) {
+                return ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed);
+            }
             tracing::error!("Error forwarding request to backend: {}", error);
             ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
         })?;
@@ -84,6 +93,33 @@ pub async fn handler(
     *proxied.headers_mut() = upstream_headers;
 
     Ok(proxied)
+}
+
+fn request_preparation_failed(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if error
+            .downcast_ref::<hyper::Error>()
+            .is_some_and(hyper::Error::is_user)
+        {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
+pub(super) fn parse_upstream_uri(uri: &str) -> Result<http::Uri, ErrorResponse> {
+    let parsed = uri.parse::<http::Uri>().map_err(|error| {
+        tracing::error!(%error, "Invalid upstream URI");
+        ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
+    })?;
+    if !matches!(parsed.scheme_str(), Some("http" | "https")) || parsed.authority().is_none() {
+        return Err(ErrorResponse::new(
+            ErrorCode::GatewayRequestPreparationFailed,
+        ));
+    }
+    Ok(parsed)
 }
 
 fn strip_hop_by_hop_headers(headers: &mut http::HeaderMap) {

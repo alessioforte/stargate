@@ -1,4 +1,5 @@
 {
+  "failoverReplayDescription": "Automatic retries use GET, HEAD, OPTIONS, TRACE, PUT, and DELETE. Other methods dispatch once, even with an Idempotency-Key. Unavailable targets can be skipped before dispatch.",
   "ingressLimit": "Ingress rate limit",
   "ingressLimitDescription": "Required per-IP admission before authentication and routing.",
   "ingressTimeout": "Ingress store timeout",

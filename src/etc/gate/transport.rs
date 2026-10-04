@@ -202,7 +202,10 @@ fn build_hyper_client(
         .enable_http1()
         .enable_http2()
         .wrap_connector(connector);
-    Ok(Client::builder(TokioExecutor::new()).build(DeadlineConnector::new(https, timeout)))
+    // The gateway executor owns replay eligibility and per-attempt signing.
+    Ok(Client::builder(TokioExecutor::new())
+        .retry_canceled_requests(false)
+        .build(DeadlineConnector::new(https, timeout)))
 }
 
 fn reader(path: &str, kind: &'static str) -> Result<BufReader<File>, TransportPreparationError> {

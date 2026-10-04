@@ -6,6 +6,32 @@ use std::sync::Arc;
 
 pub(super) use gate::DynLoadBalancer;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReplayEligibility {
+    Idempotent,
+    SingleDispatch,
+}
+
+impl ReplayEligibility {
+    pub(super) fn for_method(method: &Method) -> Self {
+        // RFC 9110 sections 9.2.1–9.2.2: safe methods, PUT, and DELETE are
+        // idempotent. Headers alone cannot establish an operation contract.
+        if matches!(
+            *method,
+            Method::GET
+                | Method::HEAD
+                | Method::OPTIONS
+                | Method::TRACE
+                | Method::PUT
+                | Method::DELETE
+        ) {
+            Self::Idempotent
+        } else {
+            Self::SingleDispatch
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub(super) struct ResponseHeaderMutations {
     pub(super) add: Vec<HeaderValueNode>,
@@ -55,8 +81,8 @@ pub(super) struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
-    pub(super) fn needs_failover_replay(&self) -> bool {
-        self.attempts.len() > 1
+    pub(super) fn needs_failover_replay(&self, eligibility: ReplayEligibility) -> bool {
+        eligibility == ReplayEligibility::Idempotent && self.attempts.len() > 1
     }
 
     pub(super) fn should_failover_response(&self, status: StatusCode) -> bool {

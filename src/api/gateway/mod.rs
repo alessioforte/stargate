@@ -15,6 +15,8 @@ mod path;
 mod planner;
 mod policies;
 mod replay;
+#[cfg(test)]
+mod replay_tests;
 mod responses;
 mod routing;
 mod types;
@@ -39,7 +41,7 @@ use replay::{buffer_request, content_length_exceeds};
 use routing::router_matches;
 use std::{convert::Infallible, sync::Arc, time::Instant};
 use tracing::Instrument;
-use types::{RequestState, ResponseHeaderMutations};
+use types::{ReplayEligibility, RequestState, ResponseHeaderMutations};
 
 #[cfg(all(test, feature = "memory"))]
 #[derive(Clone)]
@@ -244,6 +246,8 @@ async fn handle_request(
     };
 
     let is_websocket = req.get_protocol() == "ws";
+    let eligibility = ReplayEligibility::for_method(req.method());
+    let needs_failover_replay = plan.needs_failover_replay(eligibility);
     let mirrors = if is_websocket {
         Vec::new()
     } else {
@@ -261,26 +265,26 @@ async fn handle_request(
                 stargate.service = %router.service,
             ))
             .await?
-    } else if plan.needs_failover_replay() || !mirrors.is_empty() {
+    } else if needs_failover_replay || !mirrors.is_empty() {
         let limit = runtime.settings.replay_body_bytes;
-        let reservation =
-            if !plan.needs_failover_replay() && content_length_exceeds(req.headers(), limit) {
-                for _ in &mirrors {
-                    telemetry::record_gateway_mirror("skipped_payload");
-                }
-                None
-            } else {
-                match runtime.resources.reserve_replay(limit) {
-                    Ok(reservation) => Some(reservation),
-                    Err(_) if !plan.needs_failover_replay() => {
-                        for _ in &mirrors {
-                            telemetry::record_gateway_mirror("skipped_memory");
-                        }
-                        None
+        let reservation = if !needs_failover_replay && content_length_exceeds(req.headers(), limit)
+        {
+            for _ in &mirrors {
+                telemetry::record_gateway_mirror("skipped_payload");
+            }
+            None
+        } else {
+            match runtime.resources.reserve_replay(limit) {
+                Ok(reservation) => Some(reservation),
+                Err(_) if !needs_failover_replay => {
+                    for _ in &mirrors {
+                        telemetry::record_gateway_mirror("skipped_memory");
                     }
-                    Err(error) => return Err(error),
+                    None
                 }
-            };
+                Err(error) => return Err(error),
+            }
+        };
         if let Some(reservation) = reservation {
             let replay = buffer_request(req, &runtime, &state.execution, reservation).await?;
             telemetry::record_gateway_replay_bytes(replay.body.len());

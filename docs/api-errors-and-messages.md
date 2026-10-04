@@ -87,6 +87,7 @@ different condition once clients depend on it.
 | `gateway.ingress_unavailable` | 503 | The ingress limiter is missing, fails, or exceeds its store deadline |
 | `gateway.replay_memory_exhausted` | 503 | Required failover replay cannot reserve storage |
 | `gateway.upload_timeout` | 408 | Upload/replay buffering makes no data progress |
+| `gateway.request_body_failed` | 400 | The client request body fails during streaming or replay buffering |
 | `gateway.timeout` | 504 | Connection, headers, or absolute finite budget expires |
 | `gateway.cancelled` | 503 | Gateway work is cancelled during shutdown |
 
@@ -99,3 +100,9 @@ Ingress throttling includes integer-second `Retry-After`, `X-RateLimit-Limit`,
 `X-RateLimit-Remaining`, and `X-RateLimit-Scope: ingress`. An allowed admission
 leaves response limit headers to the selected resource policies. Probes bypass
 both ingress admission and IAM rate-limit middleware.
+
+Request-body failures and `gateway.request_preparation_failed` (500), including
+invalid upstream URIs and internal-context failures, stop dispatch without
+failover or upstream-health penalties. Eligible operations may fail over on
+`upstream.connection_failed` (502) or configured upstream response statuses;
+ordinary mutations return the first result. See [replay eligibility](config-v1.md#automatic-replay-and-mutations).
