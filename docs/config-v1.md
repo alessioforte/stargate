@@ -9,9 +9,11 @@ schema: stargate/v1
 Every supplied YAML document and admin JSON submission must explicitly contain
 `schema: stargate/v1`. Missing and unsupported identifiers are rejected; there is
 no compatibility parser or automatic conversion. Generated defaults use this
-identifier too. Hot reload compiles the new file first; invalid config is logged
-and the previous in-memory graph stays active. Invalid admin submissions are not
-saved.
+identifier too. Startup, hot reload, and admin writes compile the candidate and
+prepare its HTTP/TLS transports and internal-context signer requirements first.
+Invalid reloads leave the previous routes and transports active. Invalid admin
+submissions are not saved, and invalid initial preparation stops startup before
+readiness.
 
 This is the first gateway configuration format, not an application release
 version. Signed internal-context and other independently versioned contracts
@@ -74,6 +76,43 @@ http:
       service: users
       policies: [auth, default-rate]
 ```
+
+## HTTP transport and client TLS
+
+`http.upstreams.<name>.transport.connect_timeout` defaults to `30s`. A supplied
+value must be a positive, representable integer duration with one of the units
+`ns`, `us`, `ms`, `s`, `m`, `h`, `d`, or `w`. Zero, malformed, negative, and
+overflowing values are rejected, including on upstreams that no service uses.
+This setting bounds connection establishment; request and response lifecycle
+deadlines are separate concerns.
+
+HTTPS uses the bundled WebPKI roots by default. The optional top-level `mtls`
+block supplies a custom server trust store and a client identity for HTTPS
+upstreams:
+
+```yaml
+schema: stargate/v1
+mtls:
+  ca_cert_path: /etc/stargate/upstream-ca.pem
+  client_cert_path: /etc/stargate/client-chain.pem
+  client_key_path: /etc/stargate/client-key.pem
+```
+
+Both certificate files must contain at least one valid PEM-encoded X.509
+certificate. Put the client leaf certificate first, followed by any
+intermediates. The key file must contain exactly one supported, unencrypted
+PKCS#1, PKCS#8, or SEC1 private key matching the leaf certificate. Missing,
+empty, malformed, and mismatched material rejects the whole candidate; there is
+no fallback to another identity. A supplied `mtls` block is checked even when
+the candidate has no HTTPS upstreams. Server identity, trust, and validity are
+still verified during each TLS handshake.
+
+Clients are built before activation. Request-time lookup only clones a prepared
+client and performs no credential-file reads or TLS construction. Replacing
+credential files alone does not reload the clients: change the gateway
+configuration content to trigger preparation. If a candidate fails, fix its
+files and save that candidate again; existing prepared clients remain usable
+throughout.
 
 ## Routing
 

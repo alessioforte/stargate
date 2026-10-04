@@ -80,7 +80,7 @@ pub async fn run() -> std::io::Result<()> {
 
     aud::spawn()?;
 
-    let gate = gate::init();
+    let gate = gate::init().map_err(std::io::Error::other)?;
     let lifecycle = etc::health::Lifecycle::default();
 
     let app = api::server_router(lifecycle.clone())

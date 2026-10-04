@@ -66,12 +66,12 @@ pub fn parse_duration(input: &str) -> Result<Duration, ParseDurationError> {
         match unit.as_str() {
             "ns" => Ok(Duration::nanoseconds(value)),
             "us" => Ok(Duration::microseconds(value)),
-            "ms" => Ok(Duration::milliseconds(value)),
-            "s" => Ok(Duration::seconds(value)),
-            "m" => Ok(Duration::minutes(value)),
-            "h" => Ok(Duration::hours(value)),
-            "d" => Ok(Duration::days(value)),
-            "w" => Ok(Duration::weeks(value)),
+            "ms" => Duration::try_milliseconds(value).ok_or(ParseDurationError::InvalidNumber),
+            "s" => Duration::try_seconds(value).ok_or(ParseDurationError::InvalidNumber),
+            "m" => Duration::try_minutes(value).ok_or(ParseDurationError::InvalidNumber),
+            "h" => Duration::try_hours(value).ok_or(ParseDurationError::InvalidNumber),
+            "d" => Duration::try_days(value).ok_or(ParseDurationError::InvalidNumber),
+            "w" => Duration::try_weeks(value).ok_or(ParseDurationError::InvalidNumber),
             _ => Err(ParseDurationError::UnknownUnit),
         }
     } else {
@@ -82,6 +82,19 @@ pub fn parse_duration(input: &str) -> Result<Duration, ParseDurationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overflowing_durations_return_errors_without_panicking() {
+        for unit in ["ms", "s", "m", "h", "d", "w"] {
+            // Milliseconds at i64::MAX are valid; every larger unit overflows.
+            let value = if unit == "ms" {
+                "9223372036854775808"
+            } else {
+                "9223372036854775807"
+            };
+            assert!(parse_duration(&format!("{value}{unit}")).is_err());
+        }
+    }
 
     #[test]
     fn testparse_duration() {

@@ -88,6 +88,10 @@ Gateway modules:
 - `headers.rs`, `path.rs`, `responses.rs`, `limits.rs`, `types.rs`: focused helpers and shared types.
 - `http.rs`, `ws.rs`: protocol-specific proxy implementations.
 
+`src/etc/gate/transport.rs` prepares HTTP clients and fallible rustls/mTLS
+configuration before activation. Client lookup only clones a prepared client;
+it never reads TLS files or constructs clients on the request path.
+
 ### Gateway Config v1
 
 `config.yaml` must contain:
@@ -234,6 +238,7 @@ the state-store/SQL boundary.
 - JWT config
 - GeoIP database
 - Gateway runtime config and compiled HTTP graph
+- Prepared HTTP client pool (published with the validated runtime config)
 - Gateway load balancers
 - ACE policy engine
 - Limiter/quota service
@@ -259,11 +264,18 @@ remain subject to their normal JWT expiry.
 `notify` watches `config.yaml` and policy files. Content hash prevents false positives.
 
 Hot reload behavior:
-- Parse and compile the new v1 config first.
-- If valid, atomically swap the active gateway graph/balancers/policies.
-- If invalid, log the error and keep the previous in-memory config active.
+- Parse and compile the new v1 config, preflight internal-context requirements,
+  and prepare all HTTP clients and TLS material before publishing any changes.
+- On success, publish the prepared config/client pool and update the gateway
+  graph, balancers, and limiter. Those updates still use separate publications;
+  a single request-pinned runtime snapshot is planned in remediation Step 3.
+- On failure, record a bounded reload outcome, log the preparation error, and
+  retain the previous routes and prepared transports. Only successful content
+  is remembered, so a failed candidate can be retried after fixing its TLS files.
 
-Admin config endpoints validate v1 config before saving.
+Startup completes the same preparation before marking readiness. Admin config
+endpoints use that preparation before saving, on a blocking worker. TLS files
+are read during preparation; replacing them alone does not trigger a reload.
 
 Admin access-control endpoints manage the ACE rule file (`.stargate/policies`)
 separately from `config.yaml`:

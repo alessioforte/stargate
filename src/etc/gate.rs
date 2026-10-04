@@ -1,11 +1,21 @@
+mod transport;
+
+#[cfg(test)]
+pub(crate) mod test_support;
+
+#[cfg(all(test, feature = "memory"))]
+#[path = "gate/reload_tests.rs"]
+mod reload_tests;
+
+pub use transport::HyperClient;
+
 use crate::etc::{internal_context, store::use_store, telemetry};
 use gate::{
     Gate,
-    cfg::{RuntimeConfig, Service},
+    cfg::{Config, RuntimeConfig},
 };
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use std::{
-    collections::HashMap,
     env,
     path::Path,
     sync::{
@@ -13,30 +23,60 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
     thread,
-    time::Duration,
 };
 use tokio::runtime::Handle;
 use tracing::{error, info};
 
-use hyper_rustls::HttpsConnectorBuilder;
-use hyper_util::{
-    client::legacy::{Client, connect::HttpConnector},
-    rt::TokioExecutor,
-};
-use rustls::{ClientConfig, RootCertStore};
-use rustls_pemfile::{certs, pkcs8_private_keys};
+use transport::{PreparedTransports, TransportPreparationError};
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum GatewayPreparationError {
+    #[error(transparent)]
+    Config(#[from] gate::cfg::ConfigLoadError),
+    #[error(transparent)]
+    InternalContext(#[from] internal_context::InternalContextError),
+    #[error(transparent)]
+    Transport(#[from] TransportPreparationError),
+}
+
+impl GatewayPreparationError {
+    fn reload_outcome(&self) -> &'static str {
+        match self {
+            Self::Config(_) => "error",
+            Self::InternalContext(_) => "internal_context_error",
+            Self::Transport(_) => "transport_error",
+        }
+    }
+}
+
+pub(crate) struct PreparedConfig {
+    pub(crate) config: RuntimeConfig,
+    transports: PreparedTransports,
+}
+
+pub(crate) fn prepare_config(raw: Config) -> Result<PreparedConfig, GatewayPreparationError> {
+    prepare_runtime_config(RuntimeConfig::from_raw(raw)?)
+}
+
+fn prepare_runtime_config(
+    config: RuntimeConfig,
+) -> Result<PreparedConfig, GatewayPreparationError> {
+    internal_context::preflight_config(&config)?;
+    let transports = transport::prepare(&config)?;
+    Ok(PreparedConfig { config, transports })
+}
 
 fn get_config_dir() -> String {
     env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string())
 }
 
-fn get_config_path() -> String {
+fn get_config_path() -> std::io::Result<String> {
     let dir = get_config_dir();
     if !Path::new(&dir).exists() {
-        std::fs::create_dir(&dir).expect("Unable to create config directory");
+        std::fs::create_dir_all(&dir)?;
     }
     let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
-    format!("{}/{}", dir, filename)
+    Ok(format!("{}/{}", dir, filename))
 }
 
 pub fn get_policies_path() -> String {
@@ -52,82 +92,50 @@ pub fn get_policies_path() -> String {
     path
 }
 
-fn load_config() -> RuntimeConfig {
-    load_config_from_path(&get_config_path()).expect("Unable to load gateway config")
+fn load_config_from_path(path: &str) -> Result<PreparedConfig, GatewayPreparationError> {
+    prepare_runtime_config(RuntimeConfig::from_file(path)?)
 }
 
-fn load_config_from_path(path: &str) -> anyhow::Result<RuntimeConfig> {
-    let config = RuntimeConfig::from_file(path)?;
-    internal_context::preflight_config(&config)?;
-    Ok(config)
-}
-
-pub fn init() -> std::sync::Arc<Gate> {
+pub fn init() -> anyhow::Result<Arc<Gate>> {
+    let config_file_path = get_config_path()?;
+    let prepared = load_config_from_path(&config_file_path)?;
     let store = use_store();
-    let config = get_config();
-    let config_file_path = get_config_path();
     let policies_path = get_policies_path();
     let policies = crate::act::access_control_rules::load_policy_snapshot(&policies_path)
-        .expect("Unable to load access-control policies");
+        .map_err(|error| anyhow::anyhow!("Unable to load access-control policies: {error}"))?;
 
-    let gate = Gate::new(Arc::new(store.clone())).build(config.as_ref(), policies);
+    let gate = Gate::new(Arc::new(store.clone())).build(&prepared.config, policies);
+    update_cached_config(config_cache(), prepared);
     watch_config_file(&config_file_path, &gate);
     watch_policies_file(&policies_path, &gate);
-    Arc::new(gate)
+    Ok(Arc::new(gate))
 }
 
 static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
-static CONFIG_CACHE: OnceLock<RwLock<CachedConfig>> = OnceLock::new();
+static CONFIG_CACHE: OnceLock<RwLock<Option<CachedConfig>>> = OnceLock::new();
 
-#[derive(Clone)]
 struct CachedConfig {
     version: u64,
-    config: Arc<RuntimeConfig>,
+    prepared: PreparedConfig,
 }
 
-fn config_cache() -> &'static RwLock<CachedConfig> {
-    CONFIG_CACHE.get_or_init(|| {
-        RwLock::new(CachedConfig {
-            version: 0,
-            config: Arc::new(load_config()),
-        })
-    })
+fn config_cache() -> &'static RwLock<Option<CachedConfig>> {
+    CONFIG_CACHE.get_or_init(|| RwLock::new(None))
 }
 
-fn get_config() -> Arc<RuntimeConfig> {
-    let cache = config_cache().read().expect("Config cache lock poisoned");
-    cache.config.clone()
-}
-
-fn get_config_snapshot() -> CachedConfig {
-    config_cache()
-        .read()
-        .expect("Config cache lock poisoned")
-        .clone()
-}
-
-fn update_cached_config(config: RuntimeConfig) -> u64 {
-    let mut cache = config_cache().write().expect("Config cache lock poisoned");
-    cache.version += 1;
-    cache.config = Arc::new(config);
-    cache.version
+fn update_cached_config(cache: &RwLock<Option<CachedConfig>>, prepared: PreparedConfig) -> u64 {
+    let mut cache = cache.write().expect("Config cache lock poisoned");
+    let version = cache.as_ref().map_or(0, |active| active.version + 1);
+    *cache = Some(CachedConfig { version, prepared });
+    version
 }
 
 #[cfg(test)]
 #[allow(dead_code)]
 pub(crate) fn set_config_for_test(config: RuntimeConfig) {
-    CONFIG_CACHE.get_or_init(|| {
-        RwLock::new(CachedConfig {
-            version: 0,
-            config: Arc::new(config.clone()),
-        })
-    });
-    let version = update_cached_config(config);
+    let prepared = prepare_runtime_config(config).expect("Invalid test gateway configuration");
+    let version = update_cached_config(config_cache(), prepared);
     CONFIG_VERSION.store(version, Ordering::SeqCst);
-    let mut pool = hyper_client_pool()
-        .write()
-        .expect("Hyper client pool lock poisoned");
-    *pool = None;
 }
 
 fn file_content(path: &str) -> Option<Vec<u8>> {
@@ -201,15 +209,14 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         if current_content == last_content {
                             continue;
                         }
-                        last_content = current_content;
-
-                        match reload_gateway_config_from_path(&mut gate, &file_path).await {
+                        match reload_gateway_config_from_path(&mut gate, &file_path, config_cache()).await {
                             Ok(config_version) => {
+                                last_content = current_content;
                                 info!(config_version, "Configuration file changed, reloaded");
                                 telemetry::record_config_reload("gateway_config", "success");
                             }
                             Err(error) => {
-                                telemetry::record_config_reload("gateway_config", "error");
+                                telemetry::record_config_reload("gateway_config", error.reload_outcome());
                                 error!(%error, "Configuration file changed but did not validate; keeping previous config");
                             }
                         }
@@ -224,11 +231,15 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
     });
 }
 
-async fn reload_gateway_config_from_path(gate: &mut Gate, path: &str) -> anyhow::Result<u64> {
-    let config = load_config_from_path(path)?;
-    let version = update_cached_config(config.clone());
+async fn reload_gateway_config_from_path(
+    gate: &mut Gate,
+    path: &str,
+    cache: &RwLock<Option<CachedConfig>>,
+) -> Result<u64, GatewayPreparationError> {
+    let prepared = load_config_from_path(path)?;
+    gate.update_config(&prepared.config).await;
+    let version = update_cached_config(cache, prepared);
     CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-    gate.update_config(&config).await;
     Ok(version)
 }
 
@@ -298,158 +309,21 @@ fn reload_policy_engine_from_path(
     Ok(true)
 }
 
-type HyperConnector = hyper_rustls::HttpsConnector<HttpConnector>;
-pub type HyperClient = Client<HyperConnector, axum::body::Body>;
-
-#[derive(Clone)]
-struct SharedHyperClients {
-    version: u64,
-    clients: HashMap<String, HyperClient>,
-}
-
-static HYPER_CLIENT_POOL: OnceLock<RwLock<Option<SharedHyperClients>>> = OnceLock::new();
-
-fn hyper_client_pool() -> &'static RwLock<Option<SharedHyperClients>> {
-    HYPER_CLIENT_POOL.get_or_init(|| RwLock::new(None))
-}
-
-struct BuiltHyperClients {
-    clients: HashMap<String, HyperClient>,
-}
-
-fn build_hyper_client(timeout: Duration, tls_config: Option<&ClientConfig>) -> HyperClient {
-    crate::etc::tls::install_crypto_provider();
-
-    let mut connector = HttpConnector::new();
-    connector.enforce_http(false);
-    connector.set_connect_timeout(Some(timeout));
-
-    let https = match tls_config {
-        Some(tls_config) => HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config.clone())
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(connector),
-        None => HttpsConnectorBuilder::new()
-            .with_webpki_roots()
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(connector),
-    };
-
-    Client::builder(TokioExecutor::new()).build(https)
-}
-
-fn build_hyper_clients(config: &RuntimeConfig) -> BuiltHyperClients {
-    let mut clients = HashMap::new();
-
-    let tls_config = config.mtls().map(build_mtls);
-
-    for (name, service) in &config.raw.http.services {
-        let Service::LoadBalancer { upstream } = service else {
-            continue;
-        };
-        let Some(upstream) = config.raw.http.upstreams.get(upstream) else {
-            continue;
-        };
-
-        let timeout = upstream
-            .transport
-            .as_ref()
-            .and_then(|transport| transport.connect_timeout.as_deref())
-            .and_then(|duration| tools::parse_duration(duration).ok())
-            .and_then(|duration| duration.to_std().ok())
-            .unwrap_or_else(|| Duration::from_secs(30));
-        let use_tls = tls_config.is_some()
-            && upstream
-                .targets
-                .iter()
-                .any(|target| target.url.starts_with("https://"));
-        let tls = use_tls.then_some(tls_config.as_ref()).flatten();
-
-        let client = build_hyper_client(timeout, tls);
-        clients.insert(name.clone(), client);
-    }
-
-    BuiltHyperClients { clients }
-}
-
-fn update_clients_if_needed() {
-    let config_snapshot = get_config_snapshot();
-    let mut pool = hyper_client_pool()
-        .write()
-        .expect("Hyper client pool lock poisoned");
-
-    let needs_update = match &*pool {
-        Some(shared_clients) => shared_clients.version != config_snapshot.version,
-        None => true,
-    };
-
-    if needs_update {
-        let built = build_hyper_clients(config_snapshot.config.as_ref());
-        *pool = Some(SharedHyperClients {
-            version: config_snapshot.version,
-            clients: built.clients,
-        });
-    }
-}
-
 pub fn get_client(service_name: &str) -> Option<HyperClient> {
-    update_clients_if_needed();
-    hyper_client_pool()
+    config_cache()
         .read()
-        .expect("Hyper client pool lock poisoned")
-        .as_ref()
-        .and_then(|pool| pool.clients.get(service_name))
-        .cloned()
-}
-
-fn build_mtls(mtls: &gate::cfg::MtlsConfig) -> ClientConfig {
-    let mut ca_cert_file = std::io::BufReader::new(
-        std::fs::File::open(&mtls.ca_cert_path).expect("Unable to open CA cert file"),
-    );
-
-    let ca_certs = certs(&mut ca_cert_file)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Unable to read CA certs");
-
-    let mut root_store = RootCertStore::empty();
-    for cert in ca_certs {
-        root_store
-            .add(cert)
-            .expect("Unable to add CA cert to root store");
-    }
-
-    let mut client_cert_file = std::io::BufReader::new(
-        std::fs::File::open(&mtls.client_cert_path).expect("Unable to open client cert file"),
-    );
-    let client_certs = certs(&mut client_cert_file)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Unable to read client certs");
-
-    let mut client_key_file = std::io::BufReader::new(
-        std::fs::File::open(&mtls.client_key_path).expect("Unable to open client key file"),
-    );
-    let mut client_keys = pkcs8_private_keys(&mut client_key_file)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Unable to read client private keys");
-
-    if client_keys.is_empty() {
-        panic!("No client private keys found");
-    }
-
-    ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_client_auth_cert(client_certs, client_keys.remove(0).into())
-        .expect("Unable to create MTLS client config")
+        .expect("Config cache lock poisoned")
+        .as_ref()?
+        .prepared
+        .transports
+        .get(service_name)
 }
 
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::{
         load_config_from_path, reload_gateway_config_from_path, reload_policy_engine_from_path,
+        update_cached_config,
     };
     use gate::{
         Gate, PolicySnapshot,
@@ -489,7 +363,10 @@ http:
 "#,
         )
         .unwrap();
-        let config = load_config_from_path(path_str).unwrap();
+        let prepared = load_config_from_path(path_str).unwrap();
+        let config = prepared.config.clone();
+        let cache = std::sync::RwLock::new(None);
+        update_cached_config(&cache, prepared);
         let mut gate =
             Gate::new(Arc::new(lim::State::new())).build(&config, PolicySnapshot::default());
         let graph = gate.http_graph.load_full();
@@ -504,7 +381,7 @@ http:
         ] {
             fs::write(&path, yaml).unwrap();
             assert!(load_config_from_path(path_str).is_err());
-            let error = reload_gateway_config_from_path(&mut gate, path_str)
+            let error = reload_gateway_config_from_path(&mut gate, path_str, &cache)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains(SCHEMA));
