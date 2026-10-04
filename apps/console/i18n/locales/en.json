@@ -1,4 +1,8 @@
 {
+  "ingressLimit": "Ingress rate limit",
+  "ingressLimitDescription": "Required per-IP admission before authentication and routing.",
+  "ingressTimeout": "Ingress store timeout",
+  "ingressTimeoutDescription": "Maximum wait for the admission check, for example 250ms.",
   "admin": "Admin",
   "adminKeys": "Admin Keys",
   "adminKey": "Admin Key",

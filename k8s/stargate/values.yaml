@@ -162,6 +162,15 @@ gatewayConfig:
   policiesFileName: policies
   config: |
     schema: stargate/v1
+    ingress:
+      limit: ingress
+      timeout: 250ms
+    limits:
+      ingress:
+        strategy: gcra
+        params:
+          max_burst: 100
+          replenish_1_per: 100ms
     # Process capacities in runtime require a pod restart; deadlines can reload.
     runtime: {}
   policies: ""

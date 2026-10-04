@@ -7,6 +7,70 @@ use lim::{Limiter, RateLimitDecision};
 
 const DEFAULT_RATE_LIMIT: &str = "default";
 
+pub(super) async fn apply_ingress_limit(
+    runtime: &RuntimeSnapshot,
+    client_ip: &str,
+    execution: &super::lifecycle::Execution,
+) -> Result<(), ErrorResponse> {
+    let limiter = &runtime.core.limiter;
+    let ingress = &runtime.ingress;
+    if !limiter.has_limit(&ingress.limit) {
+        telemetry::record_gateway_policy("ingress", "error");
+        return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable));
+    }
+    // This namespace never intersects subject/org rate or quota buckets, even
+    // when the ingress and resource policies reference the same named limit.
+    let key = format!("ingress:ip:{client_ip}");
+    let decision = match execution
+        .run(
+            "ingress",
+            ingress.timeout,
+            limiter.check(&ingress.limit, &key, None),
+        )
+        .await
+    {
+        Ok(Ok(decision)) => decision,
+        Ok(Err(error)) => {
+            telemetry::record_gateway_policy("ingress", "error");
+            tracing::error!(%error, "Ingress limiter failed");
+            return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable));
+        }
+        Err(error)
+            if error.code == ErrorCode::GatewayTimeout
+                && error
+                    .params
+                    .get("phase")
+                    .is_some_and(|phase| phase == "ingress") =>
+        {
+            telemetry::record_gateway_policy("ingress", "timeout");
+            return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable)
+                .with_param("phase", "ingress"));
+        }
+        Err(error) => return Err(error),
+    };
+    if decision.is_allowed() {
+        telemetry::record_gateway_policy("ingress", "allowed");
+        return Ok(());
+    }
+    telemetry::record_gateway_policy("ingress", "denied");
+    telemetry::record_gateway_rejection("ingress");
+    let retry = decision
+        .retry_after
+        .unwrap_or(std::time::Duration::from_secs(60));
+    // RFC 9110 section 10.2.3: delay-seconds is a nonnegative decimal integer.
+    let retry_seconds = retry
+        .as_secs()
+        .saturating_add(u64::from(retry.subsec_nanos() > 0))
+        .max(1);
+    let mut error = ErrorResponse::new(ErrorCode::GatewayIngressRateLimitExceeded);
+    error
+        .insert_header("Retry-After", &retry_seconds.to_string())
+        .insert_header("X-RateLimit-Limit", &decision.limit.to_string())
+        .insert_header("X-RateLimit-Remaining", &decision.remaining.to_string())
+        .insert_header("X-RateLimit-Scope", "ingress");
+    Err(error)
+}
+
 /// Limit policies selected by a route: at most one rate limit and one quota
 /// per scope. Org-scoped checks run against the subject's active org bucket
 /// alongside (before) the subject-scoped ones. `quota_cost` comes from the

@@ -6,6 +6,7 @@ import useStore from "@/store";
 import GatewayEditorDrawer from "./gateway-editor-drawer";
 import GatewaySectionTable from "./gateway-section-table";
 import GatewayToolbar from "./gateway-toolbar";
+import GatewayIngressSettings from "./gateway-ingress-settings";
 import { useGatewayConfigBuilder } from "./use-gateway-config-builder";
 
 const GatewayPage = () => {
@@ -63,6 +64,11 @@ const GatewayPage = () => {
             {configuration.message}
           </Alert>
         )}
+
+        <GatewayIngressSettings
+          config={builder.config}
+          onChange={builder.updateIngress}
+        />
 
         <GatewaySectionTable
           loading={configuration.isLoading()}

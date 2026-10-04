@@ -13,7 +13,8 @@ from service traffic without restarting it.
 | `GET /admin/health` | `200` with component status, latency, backend kinds, and timestamp | `503` with component diagnostics | Authenticated operator diagnostics |
 
 The three public endpoints also support `HEAD`, return `Cache-Control: no-store`,
-and bypass authentication, API rate limiting, and gateway routing policies.
+and bypass authentication, API rate limiting, gateway ingress/process admission,
+and gateway routing policies.
 They use the normal HTTP or HTTPS listener; no extra port is required.
 Dependency errors and latency details appear only in `/admin/health`, which
 retains its super-admin authorization and normal API middleware.

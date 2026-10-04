@@ -83,6 +83,8 @@ different condition once clients depend on it.
 | Code | HTTP status | Condition |
 | --- | --- | --- |
 | `gateway.overloaded` | 503 | No primary concurrency permit is available |
+| `gateway.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its gateway ingress allowance, before authentication or routing |
+| `gateway.ingress_unavailable` | 503 | The ingress limiter is missing, fails, or exceeds its store deadline |
 | `gateway.replay_memory_exhausted` | 503 | Required failover replay cannot reserve storage |
 | `gateway.upload_timeout` | 408 | Upload/replay buffering makes no data progress |
 | `gateway.timeout` | 504 | Connection, headers, or absolute finite budget expires |
@@ -92,3 +94,8 @@ Timeout/cancellation responses may contain a safe `phase` parameter. Once header
 have been sent, a body/session timeout closes the stream instead of sending a
 second JSON response or retrying. Mirror capacity/memory saturation skips optional
 mirror traffic. See [runtime budgets](config-v1.md#runtime-deadlines-and-resource-budgets).
+
+Ingress throttling includes integer-second `Retry-After`, `X-RateLimit-Limit`,
+`X-RateLimit-Remaining`, and `X-RateLimit-Scope: ingress`. An allowed admission
+leaves response limit headers to the selected resource policies. Probes bypass
+both ingress admission and IAM rate-limit middleware.

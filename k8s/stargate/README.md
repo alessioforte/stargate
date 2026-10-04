@@ -96,10 +96,26 @@ also creates the initial `policies` file and mounts both files read-only at
 `/etc/stargate`. Chart rendering rejects missing or unsupported schema
 identifiers; Stargate validates the full configuration at startup.
 
+Bind the mandatory `ingress.limit` to a named rate limit. The chart defaults
+allow a burst of 100 per resolved client IP and replenish 10 requests/s, with
+a `250ms` store deadline. Gateway fallback requests consume this allowance
+before authentication/routing. Probes remain exempt, and IAM/admin keep their
+existing middleware. Configure `TRUSTED_PROXIES` for actual proxy peer CIDRs
+when Stargate receives forwarded client addresses.
+
 ```yaml
 gatewayConfig:
   config: |
     schema: stargate/v1
+    ingress:
+      limit: ingress
+      timeout: 250ms
+    limits:
+      ingress:
+        strategy: gcra
+        params:
+          max_burst: 100
+          replenish_1_per: 100ms
     http:
       services:
         not-found:

@@ -6,6 +6,7 @@ pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super:
     let core = gate::Runtime::prepare(prepared.config.compiled.http, lim::Limiter::new()).unwrap();
     std::sync::Arc::new(super::RuntimeSnapshot {
         core,
+        ingress: prepared.config.compiled.ingress,
         resources: super::resources::ProcessResources::new(
             prepared.config.compiled.runtime.budgets,
         ),
@@ -23,6 +24,24 @@ pub(crate) fn gate(config: Config) -> super::Gate {
         gate::PolicySnapshot::default(),
     )
     .unwrap()
+}
+
+#[cfg(feature = "memory")]
+pub(crate) fn gate_with_limiter(config: Config, limiter: lim::Limiter) -> super::Gate {
+    let gate = gate(config.clone());
+    let prepared = super::prepare_config(config).unwrap();
+    let core = gate::Runtime::prepare(prepared.config.compiled.http, limiter).unwrap();
+    let runtime = std::sync::Arc::new(super::RuntimeSnapshot {
+        core,
+        ingress: prepared.config.compiled.ingress,
+        settings: prepared.config.compiled.runtime,
+        resources: gate.resources.clone(),
+        transports: prepared.transports,
+        version: 0,
+    });
+    gate.runtime.store(runtime.clone());
+    runtime.core.start_probes();
+    gate
 }
 
 pub(crate) const CA: &[u8] = include_bytes!("fixtures/ca.pem");
@@ -69,6 +88,8 @@ impl TlsFiles {
     pub(crate) fn config(&self, url: &str) -> Config {
         serde_json::from_value(serde_json::json!({
             "schema": SCHEMA,
+            "ingress": {"limit": "ingress", "timeout": "250ms"},
+            "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}},
             "mtls": self.mtls(),
             "http": {
                 "upstreams": { "secure": { "targets": [{ "url": url }] } },

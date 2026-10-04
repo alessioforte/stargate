@@ -73,7 +73,8 @@ mod tests {
     fn config(capacity: u64) -> gate::cfg::Config {
         serde_json::from_value(serde_json::json!({
             "schema": gate::cfg::SCHEMA,
-            "limits": {"default": {"strategy": "token_bucket", "params": {"capacity": capacity, "refill_rate": 1}}},
+            "ingress": {"limit": "ingress", "timeout": "250ms"},
+            "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}, "default": {"strategy": "token_bucket", "params": {"capacity": capacity, "refill_rate": 1}}},
         })).unwrap()
     }
 

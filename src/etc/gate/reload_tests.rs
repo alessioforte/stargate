@@ -215,8 +215,9 @@ fn generation_config(
     let limit = format!("{name}-rate");
     serde_json::from_value(serde_json::json!({
         "schema": gate::cfg::SCHEMA,
+        "ingress": {"limit": "ingress", "timeout": "250ms"},
         "mtls": mtls,
-        "limits": {limit.clone(): {"strategy": "token_bucket", "params": {"capacity": if name == "old" {11} else {22}, "refill_rate": 1}}},
+        "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}, limit.clone(): {"strategy": "token_bucket", "params": {"capacity": if name == "old" {11} else {22}, "refill_rate": 1}}},
         "http": {
             "upstreams": {
                 primary.clone(): {"targets": [{"url": format!("{url}/primary")}], "load_balancer": {"strategy": "round_robin", "circuit_breaker": {"fail_threshold": 1, "cooldown": "3600s"}}},

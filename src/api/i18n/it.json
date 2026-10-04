@@ -108,6 +108,8 @@
     "gateway.limiter_unavailable": "Il limitatore del gateway non è disponibile",
     "gateway.rate_limit_exceeded": "Limite di richieste del gateway superato",
     "gateway.quota_exceeded": "Quota del gateway superata",
+    "gateway.ingress_rate_limit_exceeded": "Il limite di accesso per IP del gateway è stato superato",
+    "gateway.ingress_unavailable": "Il controllo di accesso per IP del gateway non è disponibile",
     "gateway.overloaded": "Il budget di concorrenza del gateway è esaurito",
     "gateway.replay_memory_exhausted": "Il budget di memoria del gateway è esaurito",
     "gateway.timeout": "Il termine del gateway è stato superato",

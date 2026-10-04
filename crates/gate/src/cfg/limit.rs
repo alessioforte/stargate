@@ -58,6 +58,46 @@ impl Default for LimitSpec {
 }
 
 impl LimitSpec {
+    pub(super) fn ingress_default() -> Self {
+        Self {
+            params: Strategy::Gcra {
+                max_burst: 100,
+                replenish_1_per: "100ms".into(),
+            },
+        }
+    }
+
+    pub(super) fn validate_ingress(&self) -> Result<(), &'static str> {
+        match &self.params {
+            Strategy::Gcra { .. } => self.validate(),
+            Strategy::TokenBucket {
+                capacity,
+                refill_rate,
+            } => {
+                if *capacity == 0 || *refill_rate == 0 {
+                    return Err(
+                        "ingress token-bucket capacity and refill_rate must be greater than zero",
+                    );
+                }
+                // Both backends retain bucket state for refill time + 60s.
+                // Reject an overflowing lifetime before constructing a bucket.
+                capacity
+                    .checked_div(*refill_rate)
+                    .and_then(|seconds| seconds.checked_add(60))
+                    .filter(|seconds| {
+                        std::time::Instant::now()
+                            .checked_add(std::time::Duration::from_secs(*seconds))
+                            .is_some()
+                    })
+                    .ok_or("ingress token-bucket lifetime exceeds the supported range")?;
+                Ok(())
+            }
+            Strategy::QuotaTracker { .. } => {
+                Err("ingress must reference a gcra or token_bucket rate limit")
+            }
+        }
+    }
+
     pub(super) fn validate(&self) -> Result<(), &'static str> {
         if let Strategy::Gcra {
             max_burst,

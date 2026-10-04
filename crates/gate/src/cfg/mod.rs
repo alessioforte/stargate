@@ -1,11 +1,13 @@
 mod endpoint;
 pub mod graph;
+mod ingress;
 mod limit;
 mod load_balancer;
 mod mtls;
 mod runtime;
 mod v1;
 
+pub use ingress::{CompiledIngress, Ingress};
 pub use limit::{Limit, LimitSpec};
 pub use load_balancer::LoadBalancer;
 pub use mtls::MtlsConfig;
@@ -163,6 +165,15 @@ services: []
         let config = RuntimeConfig::from_yaml_str(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams: {}
   services: {}
@@ -199,11 +210,10 @@ http:
                 Err(ConfigLoadError::InvalidSchema)
             ));
 
-            let raw: Config = serde_json::from_value(serde_json::json!({
-                "schema": schema,
-                "http": {},
-            }))
-            .unwrap();
+            let raw = Config {
+                schema: schema.to_string(),
+                ..Config::default()
+            };
             assert!(raw.compile().unwrap_err().to_string().contains(SCHEMA));
             assert!(matches!(
                 RuntimeConfig::from_raw(raw),

@@ -566,6 +566,15 @@ mod tests {
         let config = gate::cfg::RuntimeConfig::from_yaml_str(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     test:

@@ -1,4 +1,8 @@
 {
+  "ingressLimit": "Limite di ingresso",
+  "ingressLimitDescription": "Controllo obbligatorio per IP prima di autenticazione e routing.",
+  "ingressTimeout": "Timeout del controllo di ingresso",
+  "ingressTimeoutDescription": "Attesa massima per il controllo, ad esempio 250ms.",
   "admin": "Admin",
   "adminKeys": "Chiavi Admin",
   "adminKey": "Chiave Admin",

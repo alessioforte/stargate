@@ -4,7 +4,9 @@ use super::graph::{
     ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode,
     UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
 };
-use super::{Limit, LimitSpec, LoadBalancer, MtlsConfig, ResponseMode, RuntimeSettings, SCHEMA};
+use super::{
+    Ingress, Limit, LimitSpec, LoadBalancer, MtlsConfig, ResponseMode, RuntimeSettings, SCHEMA,
+};
 use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -16,6 +18,7 @@ const INTERNAL_CONTEXT_AUDIENCE_MAX_BYTES: usize = 256;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub schema: String,
+    pub ingress: Ingress,
     #[serde(default)]
     pub runtime: RuntimeSettings,
     #[serde(default)]
@@ -31,7 +34,8 @@ impl Default for Config {
         Self {
             schema: SCHEMA.to_string(),
             runtime: RuntimeSettings::default(),
-            limits: IndexMap::new(),
+            ingress: Ingress::default(),
+            limits: IndexMap::from([("ingress".into(), LimitSpec::ingress_default())]),
             mtls: None,
             http: HttpConfig::default(),
         }
@@ -51,6 +55,7 @@ impl Config {
 
         let runtime = self.runtime.compile()?;
         let limits = compile_limits(&self.limits)?;
+        let ingress = self.ingress.compile(&self.limits)?;
         let limit_names = limits
             .iter()
             .map(|limit| limit.name.clone())
@@ -71,6 +76,7 @@ impl Config {
         Ok(CompiledConfig {
             schema: self.schema.clone(),
             runtime,
+            ingress,
             limits,
             mtls: self.mtls.clone(),
             http: HttpGraph {
@@ -1188,6 +1194,15 @@ mod tests {
         let compiled = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   policies:
     app-user:
@@ -1223,7 +1238,7 @@ http:
             ),
         ] {
             let yaml = format!(
-                "schema: stargate/v1\nhttp:\n  policies:\n    auth:\n      kind: auth\n      strategies: {strategies}\n{audience}"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  policies:\n    auth:\n      kind: auth\n      strategies: {strategies}\n{audience}"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1238,7 +1253,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
 limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
   default:
     strategy: gcra
     params:
@@ -1357,7 +1380,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
 limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
   default:
     strategy: gcra
     params:
@@ -1437,7 +1468,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
 limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
   default:
     strategy: gcra
     params:
@@ -1473,6 +1512,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   services:
     ok:
@@ -1497,7 +1545,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
 limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
   default:
     strategy: gcra
     params:
@@ -1530,6 +1586,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   services:
     a:
@@ -1555,6 +1620,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     reports:
@@ -1583,6 +1657,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     reports:
@@ -1615,6 +1698,15 @@ http:
         let config = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     reports:
@@ -1649,6 +1741,15 @@ http:
         let absent = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     orders:
@@ -1663,6 +1764,15 @@ http:
         let present = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     orders:
@@ -1698,7 +1808,7 @@ http:
                 .map(|value| format!("        audience: '{value}'\n"))
                 .unwrap_or_else(|| "        {}\n".to_owned());
             let yaml = format!(
-                "schema: stargate/v1\nhttp:\n  upstreams:\n    orders:\n      targets:\n        - url: http://orders:8080\n      internal_context:\n{audience}"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  upstreams:\n    orders:\n      targets:\n        - url: http://orders:8080\n      internal_context:\n{audience}"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1716,6 +1826,15 @@ http:
         let error = serde_saphyr::from_str::<Config>(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     orders:
@@ -1771,7 +1890,7 @@ http:
             ),
         ] {
             let yaml = format!(
-                "schema: stargate/v1\nhttp:\n  middlewares:\n    headers:\n      kind: {kind}\n      {operation}:\n{value}\n"
+                "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp:\n  middlewares:\n    headers:\n      kind: {kind}\n      {operation}:\n{value}\n"
             );
             let error = parse_config(&yaml)
                 .compile()
@@ -1788,6 +1907,15 @@ http:
         let error = parse_config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   services:
     response:

@@ -1,8 +1,11 @@
+mod authentication;
 mod dispatch;
 mod disposal;
 mod executor;
 mod headers;
 mod http;
+#[cfg(all(test, feature = "memory"))]
+mod ingress_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
@@ -111,17 +114,13 @@ async fn handle_request(
     }
     let graph = &runtime.core.graph;
 
-    let auth_req = auth_request(&req);
-    let identity = async {
-        match guard::verify_api_key(&auth_req).await {
-            Some(identity) => identity,
-            None => guard::verify_bearer(&auth_req)
-                .await
-                .unwrap_or_else(guard::VerifiedIdentity::anonymous),
-        }
-    }
-    .instrument(tracing::debug_span!("gateway.authenticate"))
-    .await;
+    let client_ip = req.get_client_ip();
+    limits::apply_ingress_limit(&runtime, &client_ip, execution)
+        .instrument(tracing::debug_span!("gateway.ingress"))
+        .await?;
+    let identity = authentication::authenticate(authentication::auth_request(&req))
+        .instrument(tracing::debug_span!("gateway.authenticate"))
+        .await;
     let auth_kind = identity.auth_kind();
     let sub = identity.subject();
     tracing::Span::current().record(
@@ -175,7 +174,6 @@ async fn handle_request(
     }
 
     let request_id = reqctx::request_id_from(req.extensions());
-    let client_ip = req.get_client_ip();
 
     let mut response_headers = HeaderMap::new();
     response_headers.insert(
@@ -341,21 +339,14 @@ pub async fn service(req: Request<Body>) -> Result<Response, Infallible> {
     }
 }
 
-fn auth_request(req: &Request<Body>) -> Request<()> {
-    let mut auth_req = Request::builder().uri(req.uri().clone()).body(()).unwrap();
-    *auth_req.headers_mut() = req.headers().clone();
-    auth_req
-}
-
 #[cfg(test)]
 mod tests {
-    use super::auth_request;
+    use super::authentication::auth_request;
     use axum::body::Body;
     use http::Request;
 
     #[cfg(feature = "memory")]
     use super::service;
-    #[cfg(feature = "memory")]
     #[cfg(feature = "memory")]
     use http::{StatusCode, header::CONTENT_TYPE};
     #[cfg(feature = "memory")]

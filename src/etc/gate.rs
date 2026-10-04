@@ -68,6 +68,7 @@ pub(crate) struct PreparedConfig {
 pub struct RuntimeSnapshot {
     pub core: gate::Runtime,
     pub version: u64,
+    pub ingress: gate::cfg::CompiledIngress,
     pub settings: gate::cfg::CompiledRuntimeSettings,
     pub resources: Arc<resources::ProcessResources>,
     transports: PreparedTransports,
@@ -131,6 +132,7 @@ impl Gate {
         let resources = resources::ProcessResources::new(settings.budgets);
         let runtime = Arc::new(RuntimeSnapshot {
             core,
+            ingress: prepared.config.compiled.ingress.clone(),
             settings,
             resources: resources.clone(),
             transports: prepared.transports,
@@ -169,6 +171,7 @@ impl Gate {
             .ok_or(GatewayPreparationError::VersionExhausted)?;
         let runtime = Arc::new(RuntimeSnapshot {
             core,
+            ingress: prepared.config.compiled.ingress.clone(),
             settings: prepared.config.compiled.runtime.clone(),
             resources: self.resources.clone(),
             transports: prepared.transports,
@@ -427,6 +430,15 @@ mod tests {
             &path,
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   services:
     healthy:
@@ -507,6 +519,15 @@ http:
         let config = RuntimeConfig::from_yaml_str(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   services:
     local:

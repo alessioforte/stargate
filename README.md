@@ -168,9 +168,23 @@ backend set and fails fast if they do not match.
 
 ```yaml
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 ```
 
 The v1 format models `upstreams`, `services`, `middlewares`, `policies`, and `routers` separately. It supports header/query/cookie/source-IP routing, regex and template paths, explicit route priority, fallback direct responses, path rewriting, weighted services, mirror traffic, and failover on selected response status codes.
+
+The required `ingress.limit` checks each client IP before authentication and
+routing, including invalid credentials and unmatched routes. Its store deadline
+defaults to `250ms`; probes remain exempt. Named ingress limits use separate
+buckets from resource policies.
 
 See [docs/config-v1.md](docs/config-v1.md) for examples and runtime notes.
 

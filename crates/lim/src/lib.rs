@@ -50,6 +50,11 @@ pub use decision::RateLimitDecision;
     all(feature = "memory", not(feature = "redis")),
     all(feature = "redis", not(feature = "memory")),
 ))]
+pub use error::{RateLimitError, Result};
+#[cfg(any(
+    all(feature = "memory", not(feature = "redis")),
+    all(feature = "redis", not(feature = "memory")),
+))]
 pub use limiter::Limiter;
 #[cfg(any(
     all(feature = "memory", not(feature = "redis")),

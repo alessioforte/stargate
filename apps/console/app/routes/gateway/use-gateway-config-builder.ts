@@ -6,6 +6,7 @@ import {
   getPathRecord,
   getSchema,
   stringifyJson,
+  type JsonRecord,
 } from "./config-utils";
 import {
   deleteSectionObject,
@@ -78,6 +79,13 @@ export function useGatewayConfigBuilder(savedConfig: JsonValue | undefined) {
   const resetDraft = useCallback(() => {
     setDraftConfig(normalizeGatewayConfig(savedConfig));
   }, [savedConfig]);
+
+  const updateIngress = useCallback((ingress: JsonRecord) => {
+    setDraftConfig((current) => ({
+      ...normalizeGatewayConfig(current),
+      ingress,
+    }));
+  }, []);
 
   const closeEditor = useCallback(() => {
     setDraftObjectName("");
@@ -160,5 +168,6 @@ export function useGatewayConfigBuilder(savedConfig: JsonValue | undefined) {
     selectedRows,
     selectedSection,
     selectedSectionKey,
+    updateIngress,
   };
 }

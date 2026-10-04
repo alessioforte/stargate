@@ -48,6 +48,8 @@ impl Upstream {
 fn config(url: &str) -> gate::cfg::Config {
     serde_json::from_value(serde_json::json!({
         "schema": gate::cfg::SCHEMA,
+        "ingress": {"limit": "ingress", "timeout": "250ms"},
+        "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}},
         "runtime": {
             "primary_concurrency": 2, "mirror_concurrency": 1,
             "replay_body_bytes": 1024, "replay_memory_bytes": 2048,

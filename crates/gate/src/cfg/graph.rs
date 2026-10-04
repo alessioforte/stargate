@@ -1,5 +1,5 @@
 use crate::cfg::{
-    CompiledRuntimeSettings, Limit, LoadBalancer, MtlsConfig, ResponseMode,
+    CompiledIngress, CompiledRuntimeSettings, Limit, LoadBalancer, MtlsConfig, ResponseMode,
     {AuthStrategy, EnvProfile, LimitScope, OnMissingOrg, UpstreamProtocol},
 };
 use indexmap::IndexMap;
@@ -10,6 +10,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug, Clone)]
 pub struct CompiledConfig {
     pub schema: String,
+    pub ingress: CompiledIngress,
     pub runtime: CompiledRuntimeSettings,
     pub limits: Vec<Limit>,
     pub mtls: Option<MtlsConfig>,

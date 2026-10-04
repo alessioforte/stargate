@@ -91,6 +91,8 @@ async fn mock_upstream(mode: BodyMode) -> MockUpstream {
     let config = RuntimeConfig::from_raw(
         serde_json::from_value(serde_json::json!({
             "schema": gate::cfg::SCHEMA,
+            "ingress": {"limit": "ingress", "timeout": "250ms"},
+            "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}},
             "http": {
                 "upstreams": {SERVICE: {"targets": [{"url": url}], "load_balancer": {"strategy": "round_robin", "circuit_breaker": {"fail_threshold": 1, "cooldown": "3600s"}}}},
                 "services": {SERVICE: {"kind": "load_balancer", "upstream": SERVICE}},

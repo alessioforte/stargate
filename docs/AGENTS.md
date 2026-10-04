@@ -69,7 +69,11 @@ Mounted as Axum `fallback_service`. Current request flow:
 1. Load application `Gate` from request extensions and pin its `RuntimeSnapshot`
    plus the independent ACE engine/revision pair, then acquire shared process
    admission before authentication.
-2. Pre-check API key/JWT and capture subject/auth kind.
+2. Resolve the client IP with the trusted-proxy rules and check the required
+   `ingress.limit` in its dedicated IP bucket, bounded by `ingress.timeout`
+   (default `250ms`). Return `429` on denial or `503` on store failure/timeout
+   before API key/JWT verification, database lookup, or route matching. Then
+   capture the verified subject/auth kind.
 3. Match the request against compiled v1 routers, sorted by descending priority.
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
 5. Apply selected policies in fixed runtime order: auth, access control, rate limit, quota.
@@ -107,6 +111,15 @@ and upgraded WebSocket tasks retain the snapshot until they finish or drop.
 
 ```yaml
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 ```
 
 The config compiler uses named objects:
@@ -166,7 +179,16 @@ Auth strategies are `jwt` for native Stargate sessions, `api_key`, and
 an exact `audience`; accepted tokens are bound back to the active `sid`, user,
 enabled client, and session `client_ids` link before access-control evaluation.
 
-Gateway rate limiting always falls back to the named `default` limit. A
+Supplied gateway configs must explicitly bind `ingress.limit` to a configured
+GCRA or positive token-bucket rate limit. Generated configs include `ingress`
+with burst 100 and replenishment every `100ms` (10/s). This mandatory per-IP
+gate covers invalid credentials, denied policies, and nonexistent routes. Its
+keys never overlap resource subject/org rate or quota buckets. Forwarding headers
+are accepted only from `TRUSTED_PROXIES`; credentials cannot select an ingress
+bucket. `/livez`, `/readyz`, and `/health` stay exempt; IAM/admin keep their
+existing `default` middleware instead of gateway ingress admission.
+
+Gateway resource rate limiting always falls back to the named `default` limit. A
 non-default router `rate_limit` policy overrides that default for the matched
 resource. Authenticated users/API keys can set `attrs.rate_limit` to a named
 limit; that overrides the implicit default and an explicit `limit: default`, but

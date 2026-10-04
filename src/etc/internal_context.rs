@@ -671,7 +671,9 @@ mod tests {
 
     #[test]
     fn absent_block_skips_key_preflight() {
-        let config = config("schema: stargate/v1\nhttp: {}\n");
+        let config = config(
+            "schema: stargate/v1\ningress:\n  limit: ingress\n  timeout: 250ms\nlimits:\n  ingress:\n    strategy: gcra\n    params:\n      max_burst: 100\n      replenish_1_per: 100ms\nhttp: {}\n",
+        );
         preflight_config_with(&config, || panic!("loader must not run")).unwrap();
     }
 
@@ -680,6 +682,15 @@ mod tests {
         let config = config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     orders:
@@ -699,6 +710,15 @@ http:
         let config = config(
             r#"
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 http:
   upstreams:
     orders:

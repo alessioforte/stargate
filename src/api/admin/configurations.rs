@@ -107,12 +107,15 @@ mod tests {
 
     #[tokio::test]
     async fn admin_input_requires_the_supported_explicit_schema() {
-        for payload in [
+        let defaults = serde_json::to_value(Config::default()).unwrap();
+        for mut payload in [
             serde_json::json!({ "http": {} }),
             serde_json::json!({ "schema": null }),
             serde_json::json!({ "schema": "stargate/v2alpha1" }),
             serde_json::json!({ "schema": "stargate/v2" }),
         ] {
+            payload["ingress"] = defaults["ingress"].clone();
+            payload["limits"] = defaults["limits"].clone();
             let mut req = Request::builder()
                 .method("PUT")
                 .uri("/admin/configurations")
@@ -153,6 +156,15 @@ mod tests {
             let error = save_configuration(config, path_str).unwrap_err();
             assert_eq!(error.status, StatusCode::BAD_REQUEST);
             assert!(error.message.contains(SCHEMA));
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+        }
+        for (limit, timeout) in [("missing", "250ms"), ("ingress", "0s")] {
+            let mut config = Config::default();
+            config.ingress.limit = limit.into();
+            config.ingress.timeout = timeout.into();
+            let error = save_configuration(config, path_str).unwrap_err();
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert!(error.message.contains("ingress"));
             assert_eq!(std::fs::read(&path).unwrap(), original);
         }
         std::fs::remove_file(path).unwrap();

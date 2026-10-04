@@ -124,6 +124,8 @@ fn duration_validation_rejects_zero_invalid_and_overflowing_values() {
 fn durations_on_unused_upstreams_are_validated() {
     let config: gate::cfg::Config = serde_json::from_value(serde_json::json!({
         "schema": gate::cfg::SCHEMA,
+        "ingress": {"limit": "ingress", "timeout": "250ms"},
+        "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}},
         "http": { "upstreams": { "unused": { "targets": [{ "url": "http://localhost:8443" }], "transport": { "connect_timeout": "bad" } } } },
     })).unwrap();
     assert!(matches!(

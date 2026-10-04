@@ -43,7 +43,8 @@ errors also reject admin saves.
 
 The gateway config is split into named objects:
 
-- `limits`: named rate-limit and quota strategies referenced by policies.
+- `ingress`: mandatory pre-authentication rate-limit binding and store deadline.
+- `limits`: named rate-limit and quota strategies referenced by ingress and policies.
 - `upstreams`: physical target pools.
 - `services`: traffic actions that point to upstreams or compose other services.
 - `middlewares`: request/response transforms.
@@ -57,7 +58,16 @@ Routers are sorted by descending `priority`. Ties keep declaration order. Use hi
 ```yaml
 schema: stargate/v1
 
+ingress:
+  limit: ingress
+  timeout: 250ms
+
 limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
   default:
     strategy: gcra
     params:
@@ -97,6 +107,49 @@ http:
       policies: [auth, default-rate]
 ```
 
+## Ingress admission
+
+Every supplied YAML config and admin JSON submission must contain `ingress.limit`
+referencing an existing named `gcra` or `token_bucket` rate limit. There is no
+implicit binding or disable switch. Quota trackers, missing/blank references,
+zero token-bucket capacity/refill rate, overflowing bucket lifetimes, and invalid durations reject startup,
+reload, and admin saves. `ingress.timeout` defaults to `250ms` and must be a
+positive, representable duration. Generated configs and the Helm defaults use
+burst 100 with one request replenished every `100ms` (10/s); tune these values
+for the traffic sharing each client IP.
+
+Gateway requests first acquire process admission, then resolve the client IP and
+consume its ingress allowance, before credential verification, database lookup,
+or route matching. Invalid API keys/bearer tokens, rejected auth/access policies,
+and nonexistent routes all consume allowance. Keys use the resolved IP only;
+changing credentials or client headers cannot choose another bucket. Existing
+`TRUSTED_PROXIES` rules accept `X-Forwarded-For`/`X-Real-IP` only from trusted
+peers; an untrusted peer is keyed by its socket address. Without a peer address,
+requests share the conservative `unknown` bucket. Keep trusted-proxy CIDRs
+restricted to the deployment's actual proxy peers.
+
+Ingress uses its own key namespace, distinct from resource subject/org rate and
+quota buckets even when both reference the same named limit. After admission,
+authentication and selected resource policies still enforce their own limits
+and `quota_cost`. Ingress allowances persist through reloads of the same named
+limit because generations share limiter state; each request pins its ingress
+binding and deadline with its runtime snapshot.
+
+Ingress denial returns `429 gateway.ingress_rate_limit_exceeded` with integer
+seconds in `Retry-After` and `X-RateLimit-Scope: ingress`. Missing runtime limits,
+backend failures, or an ingress-store timeout fail closed with
+`503 gateway.ingress_unavailable`; the enclosing total request deadline still
+returns `504 gateway.timeout` if it expires first. Process exhaustion retains
+`503 gateway.overloaded`. Allowed ingress checks do not overwrite resource
+response headers.
+
+`/livez`, `/readyz`, and `/health` bypass gateway admission and IAM rate limiting.
+Explicit IAM/admin endpoints retain their existing `default` rate-limit
+middleware; gateway ingress applies only to the gateway fallback. The console's
+gateway page exposes the mandatory ingress limit and store timeout. Editing
+named objects preserves this top-level binding; when renaming/removing its
+selected limit, select an existing replacement before saving.
+
 ## HTTP transport and client TLS
 
 `http.upstreams.<name>.transport.connect_timeout` defaults to `runtime.connect_timeout` (`5s`). A supplied
@@ -112,6 +165,15 @@ upstreams:
 
 ```yaml
 schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
 mtls:
   ca_cert_path: /etc/stargate/upstream-ca.pem
   client_cert_path: /etc/stargate/client-chain.pem
@@ -853,7 +915,16 @@ share the same policy file storage; otherwise the endpoint is node-local.
 ```yaml
 schema: stargate/v1
 
+ingress:
+  limit: ingress
+  timeout: 250ms
+
 limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
   default:
     strategy: gcra
     params:
