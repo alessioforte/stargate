@@ -1,8 +1,7 @@
-use super::{
-    execute_mirror, execute_plan_from_replay,
-    tests::{available, replay_request, replay_state},
+use super::tests::{available, replay_request, replay_state};
+use crate::api::gateway::{
+    execution::execute_plan_from_replay, mirrors::execute_mirror, types::ExecutionPlan,
 };
-use crate::api::gateway::types::{ExecutionPlan, SelectedService};
 use axum::{body::Body, response::Response};
 use ctx::DispatchKind;
 use futures_util::stream;
@@ -140,23 +139,24 @@ fn generated_body(mode: BodyMode, guard: BodyGuard) -> Body {
     Body::from_stream(body)
 }
 
-fn plan(url: &str, failover: bool) -> ExecutionPlan {
-    let mut attempts = vec![SelectedService::Upstream {
+fn plan(failover: bool) -> ExecutionPlan {
+    let upstream = ExecutionPlan::Upstream {
         service_name: SERVICE.to_string(),
-        upstream_base_url: url.to_string(),
         internal_context: None,
-    }];
-    if failover {
-        attempts.push(SelectedService::DirectResponse {
-            status: 204,
-            headers: Vec::new(),
-            body: None,
-        });
+    };
+    if !failover {
+        return upstream;
     }
-    ExecutionPlan {
-        attempts,
-        failover_on_status: vec![503],
-        mirrors: Vec::new(),
+    ExecutionPlan::Failover {
+        services: vec![
+            upstream,
+            ExecutionPlan::DirectResponse {
+                status: 204,
+                headers: Vec::new(),
+                body: None,
+            },
+        ],
+        on_status: vec![503],
     }
 }
 
@@ -184,7 +184,7 @@ async fn failover_advances_after_small_endless_stalled_and_broken_responses() {
             Duration::from_secs(2),
             execute_plan_from_replay(
                 &upstream.runtime,
-                &plan(&upstream.url, true),
+                &plan(true),
                 &replay_request(),
                 &replay_state(),
                 DispatchKind::Primary,
@@ -216,7 +216,7 @@ async fn mirror_completion_distinguishes_disposal_outcomes_without_changing_heal
             Duration::from_secs(2),
             execute_mirror(
                 &upstream.runtime,
-                &plan(&upstream.url, false),
+                &plan(false),
                 &replay_request(),
                 &replay_state(),
             ),
@@ -239,7 +239,7 @@ async fn small_discarded_responses_allow_http_connection_reuse() {
         assert_eq!(
             execute_mirror(
                 &upstream.runtime,
-                &plan(&upstream.url, false),
+                &plan(false),
                 &replay_request(),
                 &replay_state()
             )
@@ -261,9 +261,12 @@ async fn large_response_disposal_workload() {
     assert!(bytes > 1024 * 1024);
     let upstream = mock_upstream(BodyMode::Large(bytes)).await;
     for iteration in 0..32 {
+        // This workload measures disposal, so re-enable its target between
+        // primary failures and shadow dispatches rather than testing cooldown.
+        upstream.runtime.core.balancers[SERVICE].mark_alive(&upstream.url);
         let response = execute_plan_from_replay(
             &upstream.runtime,
-            &plan(&upstream.url, true),
+            &plan(true),
             &replay_request(),
             &replay_state(),
             DispatchKind::Primary,
@@ -271,10 +274,11 @@ async fn large_response_disposal_workload() {
         .await
         .unwrap();
         assert_eq!(response.status(), 204);
+        upstream.runtime.core.balancers[SERVICE].mark_alive(&upstream.url);
         assert_eq!(
             execute_mirror(
                 &upstream.runtime,
-                &plan(&upstream.url, false),
+                &plan(false),
                 &replay_request(),
                 &replay_state()
             )

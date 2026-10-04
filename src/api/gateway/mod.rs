@@ -1,6 +1,7 @@
 mod authentication;
 mod dispatch;
 mod disposal;
+mod execution;
 mod executor;
 mod headers;
 mod http;
@@ -11,6 +12,7 @@ mod lifecycle;
 mod lifecycle_tests;
 mod limits;
 mod middlewares;
+mod mirrors;
 mod path;
 mod planner;
 mod policies;
@@ -28,20 +30,17 @@ use crate::etc::{ext::RequestExt, guard, reqctx, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue, Request};
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
-use executor::{
-    admit_mirrors, execute_plan_from_replay, execute_selected_with_request, spawn_mirrors,
-};
+use execution::execute_plan_with_request;
 use headers::{
     apply_gateway_headers, apply_response_header_mutations, strip_internal_context_response,
 };
 use middlewares::apply_middlewares;
 use planner::{build_execution_plan, selection_error_response};
 use policies::apply_policies;
-use replay::{buffer_request, content_length_exceeds};
 use routing::router_matches;
 use std::{convert::Infallible, sync::Arc, time::Instant};
 use tracing::Instrument;
-use types::{ReplayEligibility, RequestState, ResponseHeaderMutations};
+use types::{RequestState, ResponseHeaderMutations};
 
 #[cfg(all(test, feature = "memory"))]
 #[derive(Clone)]
@@ -156,6 +155,8 @@ async fn handle_request(
             execution.stream = router.response_mode == gate::cfg::ResponseMode::Stream;
             execution
         },
+        client_ip: client_ip.clone(),
+        load_balancer_key: sub.map(|sub| sub.id.clone()),
         original_path: req.uri().path().to_string(),
         path: req.uri().path().to_string(),
         query: req.uri().query().unwrap_or("").to_string(),
@@ -226,14 +227,6 @@ async fn handle_request(
         tracing::warn!(reason = "request_context", "Propagation draft rejected");
     }
 
-    let ctx = lb::RequestContext {
-        client_ip: &client_ip,
-        path: &state.path,
-        method: method.as_str(),
-        key: sub.map(|sub| sub.id.as_str()),
-    };
-
-    let balancers = &runtime.core.balancers;
     let plan = {
         let _span = tracing::debug_span!(
             "gateway.build_execution_plan",
@@ -241,83 +234,17 @@ async fn handle_request(
             stargate.service = %router.service,
         )
         .entered();
-        build_execution_plan(&graph, balancers, &router.service, &ctx, &request_id)
+        build_execution_plan(&graph, &router.service, &request_id)
             .map_err(selection_error_response)?
     };
 
-    let is_websocket = req.get_protocol() == "ws";
-    let eligibility = ReplayEligibility::for_method(req.method());
-    let needs_failover_replay = plan.needs_failover_replay(eligibility);
-    let mirrors = if is_websocket {
-        Vec::new()
-    } else {
-        admit_mirrors(&runtime, &plan.mirrors)
-    };
-    let mut response = if is_websocket {
-        let selected = plan
-            .attempts
-            .first()
-            .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
-        execute_selected_with_request(&runtime, selected, req, &state)
-            .instrument(tracing::info_span!(
-                "gateway.execute",
-                stargate.router = %router.name,
-                stargate.service = %router.service,
-            ))
-            .await?
-    } else if needs_failover_replay || !mirrors.is_empty() {
-        let limit = runtime.settings.replay_body_bytes;
-        let reservation = if !needs_failover_replay && content_length_exceeds(req.headers(), limit)
-        {
-            for _ in &mirrors {
-                telemetry::record_gateway_mirror("skipped_payload");
-            }
-            None
-        } else {
-            match runtime.resources.reserve_replay(limit) {
-                Ok(reservation) => Some(reservation),
-                Err(_) if !needs_failover_replay => {
-                    for _ in &mirrors {
-                        telemetry::record_gateway_mirror("skipped_memory");
-                    }
-                    None
-                }
-                Err(error) => return Err(error),
-            }
-        };
-        if let Some(reservation) = reservation {
-            let replay = buffer_request(req, &runtime, &state.execution, reservation).await?;
-            telemetry::record_gateway_replay_bytes(replay.body.len());
-            spawn_mirrors(runtime.clone(), mirrors, replay.clone(), state.clone());
-            execute_plan_from_replay(&runtime, &plan, &replay, &state, ctx::DispatchKind::Primary)
-                .instrument(tracing::info_span!("gateway.execute", stargate.router = %router.name, stargate.service = %router.service))
-                .await?
-        } else {
-            let selected = plan
-                .attempts
-                .first()
-                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
-            execute_selected_with_request(&runtime, selected, req, &state)
-                .instrument(tracing::info_span!(
-                    "gateway.execute",
-                    stargate.router = %router.name,
-                    stargate.service = %router.service,
-                ))
-                .await?
-        }
-    } else {
-        let selected = plan
-            .attempts
-            .first()
-            .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
-        execute_selected_with_request(&runtime, selected, req, &state)
-            .instrument(tracing::info_span!(
-                "gateway.execute",
-                stargate.router = %router.name,
-                stargate.service = %router.service,
-            ))
-            .await?
-    };
+    let mut response = execute_plan_with_request(&runtime, &plan, req, &state)
+        .instrument(tracing::info_span!(
+            "gateway.execute",
+            stargate.router = %router.name,
+            stargate.service = %router.service,
+        ))
+        .await?;
 
     // This is global gateway-owned response hygiene, including upstreams
     // without internal context and direct responses.

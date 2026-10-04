@@ -516,12 +516,36 @@ http:
         text: maintenance
 ```
 
-HTTP mirrors and eligible multi-attempt failover plans buffer the request body,
-including transport-only failover. The per-request cap is `runtime.replay_body_bytes`
+Admitted mirrors and eligible upstream attempts with possible later failover
+branches buffer the request body, including transport-only failover. A chain of
+local direct responses does not need a failover buffer. The per-request cap is `runtime.replay_body_bytes`
 (default `2097152`, or 2 MiB). `GATEWAY_REPLAY_BODY_LIMIT` has been removed.
 When only mirrors need replay, an oversized `Content-Length` skips mirrors and
 streams the primary request. A buffered body crossing the per-request cap
 returns `413 gateway.replay_payload_too_large`.
+
+Nested services retain their execution boundaries. A child completes its own
+failover chain before its parent examines the resulting response or transport
+error. Each failover service applies only its own `on_status` list: a parent's
+`[503]` does not adopt a fallback child's `[404]`. Weighted choices remain
+deterministic for the request seed; an unavailable chosen branch can be skipped
+by its enclosing failover without selecting another weighted choice.
+
+Upstreams are selected when execution enters their leaf, so unused fallback
+branches do not advance a balancer or reserve a half-open circuit probe. If all
+remaining branches are unavailable, the last response (including its body) or
+transport error is returned. Direct responses and unavailable leaves do not
+increment network attempt numbers; nested network dispatches share the primary
+counter, and each shadow task starts its own counter at one.
+
+Mirrors belong to the service branch that declares them. Each entered mirror
+boundary dispatches its sampled, admitted shadows once, when its main branch
+reaches an available upstream or direct response. Shadows of unused or entirely
+unavailable branches receive no traffic and reserve no capacity. A mirror
+around a failover runs once for that branch; a mirror inside a selected fallback
+runs only when that fallback is entered. Shadow plans follow the same nested
+rules, replay eligibility, and shared resource budgets. An unused fallback's
+mirrors cannot require a mutation's body to buffer.
 
 Discarded responses are consumed frame by frame, without collecting them, up to
 `runtime.discarded_body_bytes` (default 64 KiB) and an absolute

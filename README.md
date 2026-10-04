@@ -190,7 +190,9 @@ Automatic failover replays only `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, and
 `DELETE`. `POST`/`PATCH` and unrecognized methods receive one dispatch attempt;
 an `Idempotency-Key` header does not enable retries. An unavailable primary may
 still be skipped before dispatch. Mutations stream without a failover buffer
-unless selected mirror traffic requires one.
+unless selected mirror traffic requires one. Nested services keep their own
+failover rules; mirrors run only for branches that execution enters, and unused fallback
+upstreams remain unselected.
 
 See [docs/config-v1.md](docs/config-v1.md) for examples and runtime notes.
 

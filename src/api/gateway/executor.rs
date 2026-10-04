@@ -1,12 +1,8 @@
 use super::{
     dispatch::InternalDispatch,
-    disposal::{DisposalOutcome, discard_response},
     http,
     responses::build_direct_response,
-    types::{
-        DynLoadBalancer, ExecutionPlan, ReplayEligibility, ReplayRequest, RequestState,
-        SelectedService,
-    },
+    types::{DynLoadBalancer, ReplayRequest, RequestState, SelectedService},
     ws,
 };
 use crate::err::{ErrorCode, ErrorResponse};
@@ -26,7 +22,7 @@ use tracing::Instrument;
 const UNHEALTHY_STATUSES: [u16; 3] = [502, 503, 504];
 
 #[derive(Clone, Copy)]
-struct DispatchAttempt {
+pub(super) struct DispatchAttempt {
     kind: DispatchKind,
     number: u16,
 }
@@ -200,7 +196,7 @@ pub(super) async fn execute_selected_with_request(
     }
 }
 
-async fn execute_selected_from_replay(
+pub(super) async fn execute_selected_from_replay(
     runtime: &Arc<RuntimeSnapshot>,
     selected: &SelectedService,
     replay: &ReplayRequest,
@@ -297,145 +293,6 @@ async fn execute_selected_from_replay(
     }
 }
 
-pub(super) async fn execute_plan_from_replay(
-    runtime: &Arc<RuntimeSnapshot>,
-    plan: &ExecutionPlan,
-    replay: &ReplayRequest,
-    state: &RequestState,
-    dispatch_kind: DispatchKind,
-) -> Result<Response, ErrorResponse> {
-    let last_idx = plan.attempts.len().saturating_sub(1);
-    let eligibility = ReplayEligibility::for_method(&replay.method);
-    let mut network_attempt = 0_u16;
-    for (idx, selected) in plan.attempts.iter().enumerate() {
-        let dispatch_attempt =
-            next_dispatch_attempt(selected, dispatch_kind, &mut network_attempt)?;
-        let result =
-            execute_selected_from_replay(runtime, selected, replay, state, dispatch_attempt)
-                .instrument(tracing::debug_span!(
-                    "gateway.replay_attempt",
-                    plan_index = idx + 1,
-                    attempt = dispatch_attempt.map(|attempt| attempt.number),
-                    dispatch_kind = dispatch_attempt.map(DispatchAttempt::kind_label),
-                    stargate.service = %selected_service_name(selected),
-                    stargate.target_kind = selected_target_kind(selected),
-                ))
-                .await;
-        let response = match result {
-            Ok(response) => response,
-            Err(error)
-                if eligibility == ReplayEligibility::Idempotent
-                    && idx < last_idx
-                    && error.code == ErrorCode::UpstreamConnectionFailed =>
-            {
-                telemetry::record_gateway_failover("transport", None);
-                tracing::warn!(
-                    plan_index = idx + 1,
-                    attempt = dispatch_attempt.map(|attempt| attempt.number),
-                    "Failing over after upstream transport error"
-                );
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
-        if eligibility == ReplayEligibility::Idempotent
-            && idx < last_idx
-            && plan.should_failover_response(response.status())
-        {
-            let status = response.status();
-            telemetry::record_gateway_failover("status", Some(status.as_u16()));
-            tracing::warn!(
-                status = status.as_u16(),
-                plan_index = idx + 1,
-                attempt = dispatch_attempt.map(|attempt| attempt.number),
-                "Failing over response by status"
-            );
-            discard_response(response, "failover", &runtime.settings, &state.execution).await;
-            continue;
-        }
-        return Ok(response);
-    }
-
-    Err(ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))
-}
-
-pub(super) fn admit_mirrors(
-    runtime: &RuntimeSnapshot,
-    mirrors: &[ExecutionPlan],
-) -> Vec<(ExecutionPlan, crate::etc::gate::resources::ResourcePermit)> {
-    mirrors
-        .iter()
-        .filter_map(|mirror| {
-            let permit = runtime.resources.admit_mirror();
-            if permit.is_none() {
-                telemetry::record_gateway_mirror("skipped_capacity");
-            }
-            permit.map(|permit| (mirror.clone(), permit))
-        })
-        .collect()
-}
-
-pub(super) fn spawn_mirrors(
-    runtime: Arc<RuntimeSnapshot>,
-    mirrors: Vec<(ExecutionPlan, crate::etc::gate::resources::ResourcePermit)>,
-    replay: ReplayRequest,
-    state: RequestState,
-) {
-    for (mirror, permit) in mirrors {
-        let resources = runtime.resources.clone();
-        let runtime = runtime.clone();
-        let replay = replay.clone();
-        let mut state = state.clone();
-        // Mirrors have their own total budget and never retain primary admission.
-        state.execution = super::lifecycle::Execution::new(
-            runtime.settings.mirror_timeout,
-            resources.shutdown.child_token(),
-        );
-        let span = tracing::debug_span!("gateway.mirror");
-        let spawned = resources.spawn(
-            async move {
-                let outcome = execute_mirror(&runtime, &mirror, &replay, &state).await;
-                telemetry::record_gateway_mirror(outcome);
-                drop(permit);
-            }
-            .instrument(span),
-        );
-        telemetry::record_gateway_mirror(if spawned {
-            "dispatched"
-        } else {
-            "skipped_shutdown"
-        });
-    }
-}
-
-async fn execute_mirror(
-    runtime: &Arc<RuntimeSnapshot>,
-    mirror: &ExecutionPlan,
-    replay: &ReplayRequest,
-    state: &RequestState,
-) -> &'static str {
-    // Shadow outcomes never feed the circuit breaker, including during failover.
-    match execute_plan_from_replay(runtime, mirror, replay, state, DispatchKind::Shadow).await {
-        Ok(response) => {
-            match discard_response(response, "mirror", &runtime.settings, &state.execution).await {
-                DisposalOutcome::Drained => "success",
-                DisposalOutcome::ByteLimit => "abandoned",
-                DisposalOutcome::Timeout => "timeout",
-                DisposalOutcome::BodyError => "body_error",
-                DisposalOutcome::Cancelled => "cancelled",
-            }
-        }
-        Err(error) => {
-            tracing::warn!(%error, "Mirror request failed");
-            match error.code {
-                ErrorCode::GatewayTimeout | ErrorCode::GatewayUploadTimeout => "timeout",
-                ErrorCode::GatewayCancelled => "cancelled",
-                _ => "error",
-            }
-        }
-    }
-}
-
 fn upstream_uri(base_url: &str, state: &RequestState) -> String {
     let mut uri = format!("{}{}", base_url, state.path);
     if !state.query.is_empty() {
@@ -474,7 +331,7 @@ fn attempt_limit_failure(service: &str, dispatch_kind: &'static str) -> ErrorRes
     ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
 }
 
-fn next_dispatch_attempt(
+pub(super) fn next_dispatch_attempt(
     selected: &SelectedService,
     kind: DispatchKind,
     network_attempt: &mut u16,
@@ -489,20 +346,6 @@ fn next_dispatch_attempt(
         kind,
         number: *network_attempt,
     }))
-}
-
-fn selected_service_name(selected: &SelectedService) -> &str {
-    match selected {
-        SelectedService::Upstream { service_name, .. } => service_name,
-        SelectedService::DirectResponse { .. } => "direct_response",
-    }
-}
-
-fn selected_target_kind(selected: &SelectedService) -> &str {
-    match selected {
-        SelectedService::Upstream { .. } => "upstream",
-        SelectedService::DirectResponse { .. } => "direct_response",
-    }
 }
 
 fn result_status(result: &Result<Response, ErrorResponse>) -> Option<u16> {
@@ -554,6 +397,7 @@ mod disposal_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::gateway::{execution::execute_plan_from_replay, types::ExecutionPlan};
     use crate::etc::reqctx::INTERNAL_CONTEXT_HEADER;
     use gate::graph::{HeaderValueNode, InternalContextNode};
     use std::collections::HashMap;
@@ -631,6 +475,8 @@ http:
     pub(super) fn replay_state() -> RequestState {
         RequestState {
             execution: crate::api::gateway::lifecycle::Execution::default(),
+            client_ip: "127.0.0.1".into(),
+            load_balancer_key: None,
             original_path: "/orders".to_owned(),
             path: "/orders".to_owned(),
             query: String::new(),
@@ -678,6 +524,8 @@ http:
         };
         let state = RequestState {
             execution: crate::api::gateway::lifecycle::Execution::default(),
+            client_ip: "127.0.0.1".into(),
+            load_balancer_key: None,
             original_path: "/direct".to_owned(),
             path: "/direct".to_owned(),
             query: String::new(),
@@ -699,21 +547,20 @@ http:
 
     #[tokio::test]
     async fn status_failover_advances_to_the_next_plan_entry() {
-        let plan = ExecutionPlan {
-            attempts: vec![
-                SelectedService::DirectResponse {
+        let plan = ExecutionPlan::Failover {
+            services: vec![
+                ExecutionPlan::DirectResponse {
                     status: 503,
                     headers: Vec::new(),
                     body: None,
                 },
-                SelectedService::DirectResponse {
+                ExecutionPlan::DirectResponse {
                     status: 204,
                     headers: Vec::new(),
                     body: None,
                 },
             ],
-            failover_on_status: vec![503],
-            mirrors: Vec::new(),
+            on_status: vec![503],
         };
 
         let response = execute_plan_from_replay(
@@ -731,20 +578,19 @@ http:
 
     #[tokio::test]
     async fn transport_failure_advances_even_without_status_rules() {
-        let plan = ExecutionPlan {
-            attempts: vec![
-                SelectedService::Upstream {
+        let plan = ExecutionPlan::Failover {
+            services: vec![
+                ExecutionPlan::Upstream {
                     service_name: "unreachable".to_owned(),
-                    upstream_base_url: "http://127.0.0.1:1".to_owned(),
                     internal_context: None,
                 },
-                SelectedService::DirectResponse {
+                ExecutionPlan::DirectResponse {
                     status: 204,
                     headers: Vec::new(),
                     body: None,
                 },
             ],
-            ..Default::default()
+            on_status: Vec::new(),
         };
 
         let response = execute_plan_from_replay(
@@ -762,22 +608,21 @@ http:
 
     #[tokio::test]
     async fn internal_context_failure_never_fails_over() {
-        let plan = ExecutionPlan {
-            attempts: vec![
-                SelectedService::Upstream {
+        let plan = ExecutionPlan::Failover {
+            services: vec![
+                ExecutionPlan::Upstream {
                     service_name: "orders".to_owned(),
-                    upstream_base_url: "http://orders.test".to_owned(),
                     internal_context: Some(InternalContextNode {
                         audience: "urn:stargate:service:orders".to_owned(),
                     }),
                 },
-                SelectedService::DirectResponse {
+                ExecutionPlan::DirectResponse {
                     status: 204,
                     headers: Vec::new(),
                     body: None,
                 },
             ],
-            ..Default::default()
+            on_status: Vec::new(),
         };
 
         let error = execute_plan_from_replay(

@@ -77,11 +77,18 @@ Mounted as Axum `fallback_service`. Current request flow:
 3. Match the request against compiled v1 routers, sorted by descending priority.
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
 5. Apply selected policies in fixed runtime order: auth, access control, rate limit, quota.
-6. Build an execution plan from the selected service: load-balanced upstream, weighted split, mirror, failover, or direct response.
+6. Build an execution tree retaining each service's failover rules and mirrors.
+   Weighted choices and mirror sampling are deterministic for the request seed;
+   upstream selection waits until execution enters a leaf.
 7. Determine replay eligibility from the method before buffering: `GET`, `HEAD`,
    `OPTIONS`, `TRACE`, `PUT`, and `DELETE` may fail over; other methods get one
-   dispatch regardless of `Idempotency-Key`. Buffer eligible multi-attempt plans
-   and admitted mirror traffic; mutations without mirrors stream past the cap.
+   dispatch regardless of `Idempotency-Key`. Buffer eligible upstream attempts
+   with possible later fallbacks and mirrors admitted on an entered branch;
+   mutations without active mirrors stream past the cap. A child finishes under
+   its own rules before its parent applies its own `on_status`. Entered mirrors
+   run once; unused/unavailable branches reserve no shadow capacity or upstream
+   probes. Network attempt numbers span nesting, excluding direct responses and
+   unhealthy leaves; each shadow task starts at one.
 8. Execute HTTP, WebSocket, or direct response and apply gateway/response headers.
 
 Gateway modules:

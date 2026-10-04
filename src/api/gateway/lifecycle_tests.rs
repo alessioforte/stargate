@@ -1,8 +1,8 @@
 use super::{
-    executor::{
-        admit_mirrors, execute_plan_from_replay, execute_selected_with_request, spawn_mirrors,
-    },
+    execution::execute_plan_from_replay,
+    executor::execute_selected_with_request,
     lifecycle::Execution,
+    mirrors::{admit_mirrors, spawn_mirrors},
     replay::buffer_request,
     types::{ExecutionPlan, ReplayRequest, RequestState, SelectedService},
 };
@@ -74,12 +74,20 @@ fn selected(url: &str) -> SelectedService {
         internal_context: None,
     }
 }
+fn planned() -> ExecutionPlan {
+    ExecutionPlan::Upstream {
+        service_name: "leaf".into(),
+        internal_context: None,
+    }
+}
 fn state(runtime: &RuntimeSnapshot) -> RequestState {
     RequestState {
         execution: Execution::new(
             runtime.settings.request_timeout,
             runtime.resources.shutdown.child_token(),
         ),
+        client_ip: "127.0.0.1".into(),
+        load_balancer_key: None,
         original_path: "/orders".into(),
         path: "/orders".into(),
         query: String::new(),
@@ -216,10 +224,9 @@ async fn response_body_idle_timeout_never_starts_failover() {
     }))
     .await;
     let runtime = runtime(config(&upstream.url));
-    let plan = ExecutionPlan {
-        attempts: vec![selected(&upstream.url), selected(&upstream.url)],
-        failover_on_status: vec![503],
-        mirrors: Vec::new(),
+    let plan = ExecutionPlan::Failover {
+        services: vec![planned(); 2],
+        on_status: vec![503],
     };
     let mut response = execute_plan_from_replay(
         &runtime,
@@ -259,11 +266,19 @@ async fn failover_chain_does_not_reset_total_deadline() {
     .await;
     let mut raw = config(&upstream.url);
     raw.runtime.request_timeout = "250ms".into();
+    raw.http
+        .upstreams
+        .get_mut("leaf")
+        .unwrap()
+        .load_balancer
+        .circuit_breaker
+        .as_mut()
+        .unwrap()
+        .fail_threshold = Some(3);
     let runtime = runtime(raw);
-    let plan = ExecutionPlan {
-        attempts: vec![selected(&upstream.url); 3],
-        failover_on_status: vec![503],
-        mirrors: Vec::new(),
+    let plan = ExecutionPlan::Failover {
+        services: vec![planned(); 3],
+        on_status: vec![503],
     };
     let error = execute_plan_from_replay(
         &runtime,
@@ -298,10 +313,7 @@ async fn mirror_saturation_is_bounded_and_shutdown_releases_replay_storage() {
     )
     .await
     .unwrap();
-    let plan = ExecutionPlan {
-        attempts: vec![selected(&upstream.url)],
-        ..Default::default()
-    };
+    let plan = planned();
     spawn_mirrors(
         runtime.clone(),
         admit_mirrors(&runtime, &vec![plan; 100]),
@@ -589,10 +601,7 @@ async fn progressing_mirror_still_expires_at_its_total_deadline() {
     )
     .await
     .unwrap();
-    let plan = ExecutionPlan {
-        attempts: vec![selected(&upstream.url)],
-        ..Default::default()
-    };
+    let plan = planned();
     spawn_mirrors(
         runtime.clone(),
         admit_mirrors(&runtime, &[plan]),

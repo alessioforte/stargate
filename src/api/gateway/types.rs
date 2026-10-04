@@ -1,5 +1,5 @@
 use crate::etc::{internal_context::InternalContextRuntime, reqctx::PropagationDraft};
-use ::http::{HeaderMap, Method, StatusCode, Version};
+use ::http::{HeaderMap, Method, Version};
 use gate::graph::{HeaderValueNode, InternalContextNode, ResponseBodyNode};
 use hyper::body::Bytes;
 use std::sync::Arc;
@@ -42,6 +42,8 @@ pub(super) struct ResponseHeaderMutations {
 #[derive(Debug, Clone)]
 pub(super) struct RequestState {
     pub(super) execution: super::lifecycle::Execution,
+    pub(super) client_ip: String,
+    pub(super) load_balancer_key: Option<String>,
     pub(super) original_path: String,
     pub(super) path: String,
     pub(super) query: String,
@@ -73,21 +75,25 @@ pub(super) enum SelectedService {
     },
 }
 
-#[derive(Debug, Default, Clone)]
-pub(super) struct ExecutionPlan {
-    pub(super) attempts: Vec<SelectedService>,
-    pub(super) failover_on_status: Vec<u16>,
-    pub(super) mirrors: Vec<ExecutionPlan>,
-}
-
-impl ExecutionPlan {
-    pub(super) fn needs_failover_replay(&self, eligibility: ReplayEligibility) -> bool {
-        eligibility == ReplayEligibility::Idempotent && self.attempts.len() > 1
-    }
-
-    pub(super) fn should_failover_response(&self, status: StatusCode) -> bool {
-        self.failover_on_status.contains(&status.as_u16())
-    }
+#[derive(Debug, Clone)]
+pub(super) enum ExecutionPlan {
+    Upstream {
+        service_name: String,
+        internal_context: Option<InternalContextNode>,
+    },
+    DirectResponse {
+        status: u16,
+        headers: Vec<HeaderValueNode>,
+        body: Option<ResponseBodyNode>,
+    },
+    Failover {
+        services: Vec<ExecutionPlan>,
+        on_status: Vec<u16>,
+    },
+    Mirror {
+        service: Box<ExecutionPlan>,
+        mirrors: Vec<ExecutionPlan>,
+    },
 }
 
 #[derive(Debug)]

@@ -153,29 +153,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn transport_only_failover_requires_replay() {
-        let plan = super::super::types::ExecutionPlan {
-            attempts: vec![
-                super::super::types::SelectedService::DirectResponse {
-                    status: 502,
-                    headers: Vec::new(),
-                    body: None,
-                },
-                super::super::types::SelectedService::DirectResponse {
-                    status: 200,
-                    headers: Vec::new(),
-                    body: None,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert!(plan.needs_failover_replay(super::super::types::ReplayEligibility::Idempotent));
-        assert!(
-            !plan.needs_failover_replay(super::super::types::ReplayEligibility::SingleDispatch)
-        );
-    }
     fn small_runtime() -> std::sync::Arc<crate::etc::gate::RuntimeSnapshot> {
         let mut config = gate::cfg::Config::default();
         config.runtime.replay_body_bytes = 8;

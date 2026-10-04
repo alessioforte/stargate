@@ -1,16 +1,14 @@
-use super::types::{DynLoadBalancer, ExecutionPlan, SelectedService, ServiceSelectionError};
+use super::types::{ExecutionPlan, ServiceSelectionError};
 use crate::err::{ErrorCode, ErrorResponse};
 use gate::graph::{HttpGraph, ServiceNode, WeightedServiceNode};
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
+    collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
 };
 
 pub(super) fn build_execution_plan(
     graph: &HttpGraph,
-    balancers: &HashMap<String, DynLoadBalancer>,
     service_name: &str,
-    ctx: &lb::RequestContext<'_>,
     seed: &str,
 ) -> Result<ExecutionPlan, ServiceSelectionError> {
     let service = graph.services.get(service_name).ok_or_else(|| {
@@ -19,24 +17,12 @@ pub(super) fn build_execution_plan(
 
     match service {
         ServiceNode::LoadBalancer { name, upstream } => {
-            let lb = balancers.get(name).ok_or_else(|| {
-                ServiceSelectionError::Internal(format!("Load balancer '{}' not found", name))
-            })?;
             let upstream_node = graph.upstreams.get(upstream).ok_or_else(|| {
                 ServiceSelectionError::Internal(format!("Upstream '{}' not found", upstream))
             })?;
-
-            let upstream = lb
-                .select(ctx)
-                .ok_or(ServiceSelectionError::NoHealthyUpstream)?;
-
-            Ok(ExecutionPlan {
-                attempts: vec![SelectedService::Upstream {
-                    service_name: name.clone(),
-                    upstream_base_url: upstream.base_url.clone(),
-                    internal_context: upstream_node.internal_context.clone(),
-                }],
-                ..ExecutionPlan::default()
+            Ok(ExecutionPlan::Upstream {
+                service_name: name.clone(),
+                internal_context: upstream_node.internal_context.clone(),
             })
         }
         ServiceNode::Weighted { services, .. } => {
@@ -46,26 +32,18 @@ pub(super) fn build_execution_plan(
                     service_name
                 ))
             })?;
-            build_execution_plan(graph, balancers, child, ctx, seed)
+            build_execution_plan(graph, child, seed)
         }
         ServiceNode::Mirror {
             service, mirrors, ..
         } => {
-            let mut plan = build_execution_plan(graph, balancers, service, ctx, seed)?;
-            for mirror in mirrors {
-                if !mirror_selected(mirror.percent, seed, &mirror.service) {
-                    continue;
-                }
-                match build_execution_plan(graph, balancers, &mirror.service, ctx, seed) {
-                    Ok(mirror_plan) => plan.mirrors.push(mirror_plan),
-                    Err(error) => tracing::warn!(
-                        service = mirror.service.as_str(),
-                        error = %selection_error_message(&error),
-                        "Mirror target skipped"
-                    ),
-                }
-            }
-            Ok(plan)
+            let service = Box::new(build_execution_plan(graph, service, seed)?);
+            let mirrors = mirrors
+                .iter()
+                .filter(|mirror| mirror_selected(mirror.percent, seed, &mirror.service))
+                .map(|mirror| build_execution_plan(graph, &mirror.service, seed))
+                .collect::<Result<_, _>>()?;
+            Ok(ExecutionPlan::Mirror { service, mirrors })
         }
         ServiceNode::Failover {
             service,
@@ -73,52 +51,25 @@ pub(super) fn build_execution_plan(
             on_status,
             ..
         } => {
-            let mut plan = ExecutionPlan::default();
-            append_available_plan(&mut plan, graph, balancers, service, ctx, seed)?;
-            for failover in failovers {
-                append_available_plan(&mut plan, graph, balancers, failover, ctx, seed)?;
-            }
-
-            if plan.attempts.is_empty() {
-                return Err(ServiceSelectionError::NoHealthyUpstream);
-            }
-
-            plan.failover_on_status.extend(on_status.iter().copied());
-            Ok(plan)
+            let services = std::iter::once(service)
+                .chain(failovers)
+                .map(|service| build_execution_plan(graph, service, seed))
+                .collect::<Result<_, _>>()?;
+            Ok(ExecutionPlan::Failover {
+                services,
+                on_status: on_status.clone(),
+            })
         }
         ServiceNode::DirectResponse {
             status,
             headers,
             body,
             ..
-        } => Ok(ExecutionPlan {
-            attempts: vec![SelectedService::DirectResponse {
-                status: *status,
-                headers: headers.clone(),
-                body: body.clone(),
-            }],
-            ..ExecutionPlan::default()
+        } => Ok(ExecutionPlan::DirectResponse {
+            status: *status,
+            headers: headers.clone(),
+            body: body.clone(),
         }),
-    }
-}
-
-fn append_available_plan(
-    target: &mut ExecutionPlan,
-    graph: &HttpGraph,
-    balancers: &HashMap<String, DynLoadBalancer>,
-    service_name: &str,
-    ctx: &lb::RequestContext<'_>,
-    seed: &str,
-) -> Result<(), ServiceSelectionError> {
-    match build_execution_plan(graph, balancers, service_name, ctx, seed) {
-        Ok(plan) => {
-            target.attempts.extend(plan.attempts);
-            target.failover_on_status.extend(plan.failover_on_status);
-            target.mirrors.extend(plan.mirrors);
-            Ok(())
-        }
-        Err(ServiceSelectionError::NoHealthyUpstream) => Ok(()),
-        Err(error) => Err(error),
     }
 }
 
@@ -131,13 +82,6 @@ fn mirror_selected(percent: u8, seed: &str, service: &str) -> bool {
     seed.hash(&mut hasher);
     service.hash(&mut hasher);
     hasher.finish() % 100 < u64::from(percent)
-}
-
-fn selection_error_message(error: &ServiceSelectionError) -> String {
-    match error {
-        ServiceSelectionError::NoHealthyUpstream => "no healthy upstream".to_string(),
-        ServiceSelectionError::Internal(message) => message.clone(),
-    }
 }
 
 fn choose_weighted_service<'a>(services: &'a [WeightedServiceNode], seed: &str) -> Option<&'a str> {
@@ -178,22 +122,6 @@ mod tests {
     use super::*;
     use gate::cfg::RuntimeConfig;
 
-    fn balancer(url: &str) -> DynLoadBalancer {
-        lb::BaseLoadBalancer::new(
-            lb::RoundRobin::new(),
-            vec![lb::Upstream::new(url.to_owned(), None)],
-        )
-    }
-
-    fn request_context() -> lb::RequestContext<'static> {
-        lb::RequestContext {
-            client_ip: "127.0.0.1",
-            path: "/orders",
-            method: "GET",
-            key: None,
-        }
-    }
-
     #[test]
     fn selected_leaf_carries_its_compiled_audience_not_its_target_url() {
         let config = RuntimeConfig::from_yaml_str(
@@ -223,22 +151,15 @@ http:
         )
         .unwrap();
         let graph = &config.compiled().http;
-        let balancer = balancer("http://orders.internal:8080");
-        let balancers = HashMap::from([("orders-leaf".to_owned(), balancer)]);
-        let request = request_context();
-
-        let plan =
-            build_execution_plan(graph, &balancers, "orders-leaf", &request, "request-id").unwrap();
-
-        let SelectedService::Upstream {
-            upstream_base_url,
+        let plan = build_execution_plan(graph, "orders-leaf", "request-id").unwrap();
+        let ExecutionPlan::Upstream {
+            service_name,
             internal_context,
-            ..
-        } = &plan.attempts[0]
+        } = &plan
         else {
             panic!("expected an upstream leaf");
         };
-        assert_eq!(upstream_base_url, "http://orders.internal:8080");
+        assert_eq!(service_name, "orders-leaf");
         assert_eq!(
             internal_context
                 .as_ref()
@@ -310,43 +231,37 @@ http:
         )
         .unwrap();
         let graph = &config.compiled().http;
-        let balancers = HashMap::from([
-            (
-                "primary-leaf".to_owned(),
-                balancer("http://primary.internal"),
-            ),
-            (
-                "fallback-leaf".to_owned(),
-                balancer("http://fallback.internal"),
-            ),
-            ("shadow-leaf".to_owned(), balancer("http://shadow.internal")),
-        ]);
-
-        let plan =
-            build_execution_plan(graph, &balancers, "root", &request_context(), "request-id")
-                .unwrap();
-
-        let audiences = |attempts: &[SelectedService]| {
-            attempts
+        let plan = build_execution_plan(graph, "root", "request-id").unwrap();
+        let ExecutionPlan::Mirror { service, mirrors } = &plan else {
+            panic!("expected mirror boundary")
+        };
+        fn audiences(plan: &ExecutionPlan) -> Vec<&str> {
+            let ExecutionPlan::Failover { services, .. } = plan else {
+                panic!("expected failover boundary")
+            };
+            services
                 .iter()
-                .map(|selected| match selected {
-                    SelectedService::Upstream {
+                .map(|service| {
+                    let ExecutionPlan::Upstream {
                         internal_context, ..
-                    } => internal_context.as_ref().unwrap().audience.clone(),
-                    SelectedService::DirectResponse { .. } => "direct".to_owned(),
+                    } = service
+                    else {
+                        panic!("expected leaf")
+                    };
+                    internal_context.as_ref().unwrap().audience.as_str()
                 })
                 .collect::<Vec<_>>()
-        };
+        }
         assert_eq!(
-            audiences(&plan.attempts),
+            audiences(service),
             vec![
                 "urn:stargate:service:primary",
                 "urn:stargate:service:fallback"
             ]
         );
-        assert_eq!(plan.mirrors.len(), 1);
+        assert_eq!(mirrors.len(), 1);
         assert_eq!(
-            audiences(&plan.mirrors[0].attempts),
+            audiences(&mirrors[0]),
             vec![
                 "urn:stargate:service:shadow",
                 "urn:stargate:service:fallback"
@@ -398,39 +313,28 @@ http:
         )
         .unwrap();
         let graph = &config.compiled().http;
-        let balancers = HashMap::from([
-            ("blue".to_owned(), balancer("http://blue.internal")),
-            ("green".to_owned(), balancer("http://green.internal")),
-        ]);
-        let mut selected_urls = std::collections::HashSet::new();
+        let mut selected_services = std::collections::HashSet::new();
 
         for seed in 0..64 {
-            let plan = build_execution_plan(
-                graph,
-                &balancers,
-                "weighted",
-                &request_context(),
-                &seed.to_string(),
-            )
-            .unwrap();
-            let SelectedService::Upstream {
-                upstream_base_url,
+            let plan = build_execution_plan(graph, "weighted", &seed.to_string()).unwrap();
+            let ExecutionPlan::Upstream {
+                service_name,
                 internal_context,
                 ..
-            } = &plan.attempts[0]
+            } = &plan
             else {
                 panic!("weighted leaf must be an upstream");
             };
-            let expected = if upstream_base_url == "http://blue.internal" {
+            let expected = if service_name == "blue" {
                 "urn:stargate:service:blue"
             } else {
-                assert_eq!(upstream_base_url, "http://green.internal");
+                assert_eq!(service_name, "green");
                 "urn:stargate:service:green"
             };
             assert_eq!(internal_context.as_ref().unwrap().audience, expected);
-            selected_urls.insert(upstream_base_url.clone());
+            selected_services.insert(service_name.clone());
         }
 
-        assert_eq!(selected_urls.len(), 2);
+        assert_eq!(selected_services.len(), 2);
     }
 }

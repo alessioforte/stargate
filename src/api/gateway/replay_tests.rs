@@ -1,7 +1,7 @@
 use super::{
-    executor::execute_plan_from_replay,
+    execution::execute_plan_from_replay,
     lifecycle::Execution,
-    types::{ExecutionPlan, ReplayEligibility, ReplayRequest, RequestState, SelectedService},
+    types::{ExecutionPlan, ReplayEligibility, ReplayRequest, RequestState},
 };
 use crate::{
     err::ErrorCode,
@@ -121,6 +121,8 @@ fn state(runtime: &RuntimeSnapshot) -> RequestState {
             runtime.settings.request_timeout,
             runtime.resources.shutdown.child_token(),
         ),
+        client_ip: "127.0.0.1".into(),
+        load_balancer_key: None,
         original_path: "/orders".into(),
         path: "/orders".into(),
         query: String::new(),
@@ -131,22 +133,17 @@ fn state(runtime: &RuntimeSnapshot) -> RequestState {
     }
 }
 
-fn selected(name: &str, url: &str) -> SelectedService {
-    SelectedService::Upstream {
+fn planned(name: &str) -> ExecutionPlan {
+    ExecutionPlan::Upstream {
         service_name: name.into(),
-        upstream_base_url: url.into(),
         internal_context: None,
     }
 }
 
-fn plan(primary: &Upstream, backup: &Upstream) -> ExecutionPlan {
-    ExecutionPlan {
-        attempts: vec![
-            selected("primary", &primary.url),
-            selected("backup", &backup.url),
-        ],
-        failover_on_status: vec![503],
-        mirrors: Vec::new(),
+fn plan() -> ExecutionPlan {
+    ExecutionPlan::Failover {
+        services: vec![planned("primary"), planned("backup")],
+        on_status: vec![503],
     }
 }
 
@@ -162,18 +159,7 @@ fn replay(method: Method) -> ReplayRequest {
 }
 
 #[test]
-fn replay_eligibility_is_conservative_and_controls_failover_buffering() {
-    let plan = ExecutionPlan {
-        attempts: vec![
-            SelectedService::DirectResponse {
-                status: 503,
-                headers: Vec::new(),
-                body: None
-            };
-            2
-        ],
-        ..Default::default()
-    };
+fn replay_eligibility_is_conservative() {
     for method in [
         Method::GET,
         Method::HEAD,
@@ -184,7 +170,6 @@ fn replay_eligibility_is_conservative_and_controls_failover_buffering() {
     ] {
         let eligibility = ReplayEligibility::for_method(&method);
         assert_eq!(eligibility, ReplayEligibility::Idempotent);
-        assert!(plan.needs_failover_replay(eligibility));
     }
     for method in [
         Method::POST,
@@ -195,7 +180,6 @@ fn replay_eligibility_is_conservative_and_controls_failover_buffering() {
     ] {
         let eligibility = ReplayEligibility::for_method(&method);
         assert_eq!(eligibility, ReplayEligibility::SingleDispatch);
-        assert!(!plan.needs_failover_replay(eligibility));
     }
 }
 
@@ -212,7 +196,7 @@ async fn buffered_mutations_never_repeat_after_committing_and_losing_headers() {
             test_support::runtime(RuntimeConfig::from_raw(config(&primary, &backup)).unwrap());
         let error = execute_plan_from_replay(
             &runtime,
-            &plan(&primary, &backup),
+            &plan(),
             &replay(method),
             &state(&runtime),
             ctx::DispatchKind::Primary,
@@ -234,7 +218,7 @@ async fn buffered_mutations_return_the_primary_status_without_disposal_or_failov
             test_support::runtime(RuntimeConfig::from_raw(config(&primary, &backup)).unwrap());
         let response = execute_plan_from_replay(
             &runtime,
-            &plan(&primary, &backup),
+            &plan(),
             &replay(Method::POST),
             &state(&runtime),
             kind,
@@ -272,7 +256,7 @@ async fn idempotent_operations_fail_over_on_transport_and_configured_status() {
             }
             let response = execute_plan_from_replay(
                 &runtime,
-                &plan(&primary, &backup),
+                &plan(),
                 &replay,
                 &state(&runtime),
                 ctx::DispatchKind::Primary,
@@ -296,25 +280,37 @@ async fn idempotent_operations_fail_over_on_transport_and_configured_status() {
 async fn request_preparation_and_signing_failures_do_not_advance_the_plan() {
     let primary = Upstream::start(Outcome::Status(200)).await;
     let backup = Upstream::start(Outcome::Status(200)).await;
-    let runtime =
-        test_support::runtime(RuntimeConfig::from_raw(config(&primary, &backup)).unwrap());
     for failure in ["uri", "relative_uri", "version", "signing"] {
-        let mut plan = plan(&primary, &backup);
-        plan.attempts[0] = if failure == "signing" {
-            SelectedService::Upstream {
-                service_name: "primary".into(),
-                upstream_base_url: primary.url.clone(),
-                internal_context: Some(gate::graph::InternalContextNode {
-                    audience: "urn:primary".into(),
-                }),
-            }
-        } else if failure == "uri" {
-            selected("primary", "http://[")
-        } else if failure == "relative_uri" {
-            selected("primary", "relative")
-        } else {
-            selected("primary", &primary.url)
-        };
+        let mut runtime =
+            test_support::runtime(RuntimeConfig::from_raw(config(&primary, &backup)).unwrap());
+        let mut plan = plan();
+        if failure == "signing" {
+            let ExecutionPlan::Failover { services, .. } = &mut plan else {
+                unreachable!()
+            };
+            let ExecutionPlan::Upstream {
+                internal_context, ..
+            } = &mut services[0]
+            else {
+                unreachable!()
+            };
+            *internal_context = Some(gate::graph::InternalContextNode {
+                audience: "urn:primary".into(),
+            });
+        } else if failure == "uri" || failure == "relative_uri" {
+            let url = if failure == "uri" {
+                "http://["
+            } else {
+                "relative"
+            };
+            Arc::get_mut(&mut runtime).unwrap().core.balancers.insert(
+                "primary".into(),
+                lb::BaseLoadBalancer::new(
+                    lb::RoundRobin::new(),
+                    vec![lb::Upstream::new(url.into(), None)],
+                ),
+            );
+        }
         let mut replay = replay(Method::PUT);
         if failure == "version" {
             replay.version = http::Version::HTTP_3;
@@ -336,6 +332,12 @@ async fn request_preparation_and_signing_failures_do_not_advance_the_plan() {
 
 #[tokio::test]
 async fn eligible_failover_mints_a_fresh_context_for_each_target_and_attempt() {
+    for kind in [ctx::DispatchKind::Primary, ctx::DispatchKind::Shadow] {
+        verify_nested_failover_contexts(kind).await;
+    }
+}
+
+async fn verify_nested_failover_contexts(kind: ctx::DispatchKind) {
     use crate::etc::{
         guard::VerifiedIdentity,
         internal_context::InternalContextRuntime,
@@ -350,8 +352,12 @@ async fn eligible_failover_mints_a_fresh_context_for_each_target_and_attempt() {
     const REQUEST_ID: &str = "01JZ000000000000000000000R";
     let primary = Upstream::start(Outcome::Status(503)).await;
     let backup = Upstream::start(Outcome::Status(200)).await;
-    let runtime =
+    let mut runtime =
         test_support::runtime(RuntimeConfig::from_raw(config(&primary, &backup)).unwrap());
+    Arc::get_mut(&mut runtime).unwrap().core.balancers.insert(
+        "unavailable".into(),
+        lb::BaseLoadBalancer::new(lb::RoundRobin::new(), Vec::new()),
+    );
     let signer = ContextSigner::from_rsa_pem(
         SignerConfig::new(ISSUER, KEY_ID, 30).unwrap(),
         include_bytes!("../../../crates/ctx/tests/fixtures/private.pem"),
@@ -375,9 +381,12 @@ async fn eligible_failover_mints_a_fresh_context_for_each_target_and_attempt() {
     ));
     state.internal_context_runtime = Some(InternalContextRuntime::from_signer_for_test(signer));
     let audiences = ["urn:primary", "urn:backup"];
-    let mut plan = plan(&primary, &backup);
-    for (selected, audience) in plan.attempts.iter_mut().zip(audiences) {
-        let SelectedService::Upstream {
+    let mut plan = plan();
+    let ExecutionPlan::Failover { services, .. } = &mut plan else {
+        unreachable!()
+    };
+    for (selected, audience) in services.iter_mut().zip(audiences) {
+        let ExecutionPlan::Upstream {
             internal_context, ..
         } = selected
         else {
@@ -387,15 +396,28 @@ async fn eligible_failover_mints_a_fresh_context_for_each_target_and_attempt() {
             audience: audience.into(),
         });
     }
+    let plan = ExecutionPlan::Failover {
+        services: vec![
+            ExecutionPlan::DirectResponse {
+                status: 503,
+                headers: Vec::new(),
+                body: None,
+            },
+            ExecutionPlan::Failover {
+                services: vec![planned("unavailable"), plan],
+                on_status: vec![404],
+            },
+        ],
+        on_status: vec![503],
+    };
     let mut replay = replay(Method::PUT);
     replay.headers.insert(
         INTERNAL_CONTEXT_HEADER.clone(),
         "stale-client-token".parse().unwrap(),
     );
-    let response =
-        execute_plan_from_replay(&runtime, &plan, &replay, &state, ctx::DispatchKind::Primary)
-            .await
-            .unwrap();
+    let response = execute_plan_from_replay(&runtime, &plan, &replay, &state, kind)
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     drop(response);
     let mut dispatch_ids = std::collections::HashSet::new();
@@ -433,7 +455,7 @@ async fn eligible_failover_mints_a_fresh_context_for_each_target_and_attempt() {
                 },
             )
             .unwrap();
-        assert_eq!(trusted.context().dispatch.kind, ctx::DispatchKind::Primary);
+        assert_eq!(trusted.context().dispatch.kind, kind);
         assert_eq!(trusted.context().dispatch.attempt, index as u16 + 1);
         assert!(dispatch_ids.insert(trusted.dispatch_id().to_owned()));
     }
@@ -622,3 +644,6 @@ mod ingress {
         assert_resources_returned(&gate).await;
     }
 }
+
+#[path = "nested_execution_tests.rs"]
+mod nested_execution_tests;
