@@ -10,18 +10,16 @@ mod reload_tests;
 pub use transport::HyperClient;
 
 use crate::etc::{internal_context, store::use_store, telemetry};
+use arc_swap::ArcSwap;
 use gate::{
-    Gate,
+    PolicySnapshot, RuntimeBuilder,
     cfg::{Config, RuntimeConfig},
 };
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use std::{
     env,
     path::Path,
-    sync::{
-        Arc, OnceLock, RwLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex},
     thread,
 };
 use tokio::runtime::Handle;
@@ -37,12 +35,16 @@ pub(crate) enum GatewayPreparationError {
     InternalContext(#[from] internal_context::InternalContextError),
     #[error(transparent)]
     Transport(#[from] TransportPreparationError),
+    #[error(transparent)]
+    Core(#[from] gate::graph::CompileError),
+    #[error("gateway configuration version exhausted")]
+    VersionExhausted,
 }
 
 impl GatewayPreparationError {
     fn reload_outcome(&self) -> &'static str {
         match self {
-            Self::Config(_) => "error",
+            Self::Config(_) | Self::Core(_) | Self::VersionExhausted => "error",
             Self::InternalContext(_) => "internal_context_error",
             Self::Transport(_) => "transport_error",
         }
@@ -52,6 +54,109 @@ impl GatewayPreparationError {
 pub(crate) struct PreparedConfig {
     pub(crate) config: RuntimeConfig,
     transports: PreparedTransports,
+}
+
+pub struct RuntimeSnapshot {
+    pub core: gate::Runtime,
+    pub version: u64,
+    transports: PreparedTransports,
+}
+
+impl RuntimeSnapshot {
+    pub fn client(&self, service: &str) -> Option<HyperClient> {
+        self.transports.get(service)
+    }
+}
+
+pub fn retain_runtime(body: axum::body::Body, runtime: Arc<RuntimeSnapshot>) -> axum::body::Body {
+    axum::body::Body::new(RuntimeBody {
+        body,
+        _runtime: runtime,
+    })
+}
+
+struct RuntimeBody {
+    body: axum::body::Body,
+    _runtime: Arc<RuntimeSnapshot>,
+}
+
+impl hyper::body::Body for RuntimeBody {
+    type Data = hyper::body::Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        std::pin::Pin::new(&mut self.get_mut().body).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.body.size_hint()
+    }
+}
+
+pub struct Gate {
+    builder: RuntimeBuilder,
+    runtime: ArcSwap<RuntimeSnapshot>,
+    activation: Mutex<()>,
+    pub policy_snapshot: ArcSwap<PolicySnapshot>,
+}
+
+impl Gate {
+    pub(crate) fn new(
+        store: Arc<lim::State>,
+        prepared: PreparedConfig,
+        policies: PolicySnapshot,
+    ) -> Result<Self, GatewayPreparationError> {
+        let builder = RuntimeBuilder::new(store);
+        let core = builder.prepare(&prepared.config)?;
+        let runtime = Arc::new(RuntimeSnapshot {
+            core,
+            transports: prepared.transports,
+            version: 0,
+        });
+        runtime.core.start_probes();
+        Ok(Self {
+            builder,
+            runtime: ArcSwap::from(runtime),
+            activation: Mutex::new(()),
+            policy_snapshot: ArcSwap::from_pointee(policies),
+        })
+    }
+
+    pub fn snapshot(&self) -> Arc<RuntimeSnapshot> {
+        self.runtime.load_full()
+    }
+
+    pub(crate) fn activate(
+        &self,
+        prepared: PreparedConfig,
+    ) -> Result<u64, GatewayPreparationError> {
+        let core = self.builder.prepare(&prepared.config)?;
+        // Serialize only activation: file reads, TLS and core construction all
+        // finish before touching the active generation or its probes.
+        let _activation = self.activation.lock().expect("Activation lock poisoned");
+        let version = self
+            .runtime
+            .load()
+            .version
+            .checked_add(1)
+            .ok_or(GatewayPreparationError::VersionExhausted)?;
+        let runtime = Arc::new(RuntimeSnapshot {
+            core,
+            transports: prepared.transports,
+            version,
+        });
+        let previous = self.runtime.swap(runtime.clone());
+        runtime.core.start_probes();
+        previous.core.stop_probes();
+        Ok(version)
+    }
 }
 
 pub(crate) fn prepare_config(raw: Config) -> Result<PreparedConfig, GatewayPreparationError> {
@@ -104,38 +209,10 @@ pub fn init() -> anyhow::Result<Arc<Gate>> {
     let policies = crate::act::access_control_rules::load_policy_snapshot(&policies_path)
         .map_err(|error| anyhow::anyhow!("Unable to load access-control policies: {error}"))?;
 
-    let gate = Gate::new(Arc::new(store.clone())).build(&prepared.config, policies);
-    update_cached_config(config_cache(), prepared);
+    let gate = Arc::new(Gate::new(Arc::new(store.clone()), prepared, policies)?);
     watch_config_file(&config_file_path, &gate);
     watch_policies_file(&policies_path, &gate);
-    Ok(Arc::new(gate))
-}
-
-static CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
-static CONFIG_CACHE: OnceLock<RwLock<Option<CachedConfig>>> = OnceLock::new();
-
-struct CachedConfig {
-    version: u64,
-    prepared: PreparedConfig,
-}
-
-fn config_cache() -> &'static RwLock<Option<CachedConfig>> {
-    CONFIG_CACHE.get_or_init(|| RwLock::new(None))
-}
-
-fn update_cached_config(cache: &RwLock<Option<CachedConfig>>, prepared: PreparedConfig) -> u64 {
-    let mut cache = cache.write().expect("Config cache lock poisoned");
-    let version = cache.as_ref().map_or(0, |active| active.version + 1);
-    *cache = Some(CachedConfig { version, prepared });
-    version
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn set_config_for_test(config: RuntimeConfig) {
-    let prepared = prepare_runtime_config(config).expect("Invalid test gateway configuration");
-    let version = update_cached_config(config_cache(), prepared);
-    CONFIG_VERSION.store(version, Ordering::SeqCst);
+    Ok(gate)
 }
 
 fn file_content(path: &str) -> Option<Vec<u8>> {
@@ -185,9 +262,9 @@ fn create_file_watcher(
     Some(watcher)
 }
 
-fn watch_config_file(file_path: &str, gate: &Gate) {
+fn watch_config_file(file_path: &str, gate: &Arc<Gate>) {
     let file_path = file_path.to_string();
-    let mut gate = gate.clone();
+    let gate = gate.clone();
     let handle = Handle::current();
     thread::spawn(move || {
         handle.block_on(async {
@@ -209,7 +286,7 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
                         if current_content == last_content {
                             continue;
                         }
-                        match reload_gateway_config_from_path(&mut gate, &file_path, config_cache()).await {
+                        match reload_gateway_config_from_path(&gate, &file_path) {
                             Ok(config_version) => {
                                 last_content = current_content;
                                 info!(config_version, "Configuration file changed, reloaded");
@@ -231,19 +308,15 @@ fn watch_config_file(file_path: &str, gate: &Gate) {
     });
 }
 
-async fn reload_gateway_config_from_path(
-    gate: &mut Gate,
+fn reload_gateway_config_from_path(
+    gate: &Gate,
     path: &str,
-    cache: &RwLock<Option<CachedConfig>>,
 ) -> Result<u64, GatewayPreparationError> {
     let prepared = load_config_from_path(path)?;
-    gate.update_config(&prepared.config).await;
-    let version = update_cached_config(cache, prepared);
-    CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
-    Ok(version)
+    gate.activate(prepared)
 }
 
-fn watch_policies_file(file_path: &str, gate: &Gate) {
+fn watch_policies_file(file_path: &str, gate: &Arc<Gate>) {
     let file_path = file_path.to_string();
     let gate = gate.clone();
     let handle = Handle::current();
@@ -285,10 +358,6 @@ fn watch_policies_file(file_path: &str, gate: &Gate) {
     });
 }
 
-pub fn get_config_version() -> u64 {
-    CONFIG_VERSION.load(Ordering::SeqCst)
-}
-
 pub fn reload_policy_engine(gate: &Gate) -> Result<(), crate::err::ErrorResponse> {
     let policies_path = get_policies_path();
     reload_policy_engine_from_path(gate, &policies_path).map(|_| ())
@@ -303,30 +372,19 @@ fn reload_policy_engine_from_path(
         return Ok(false);
     }
 
-    gate.update_policy_snapshot(policies);
-    CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
+    gate.policy_snapshot.store(Arc::new(policies));
     telemetry::record_config_reload("policies", "success");
     Ok(true)
-}
-
-pub fn get_client(service_name: &str) -> Option<HyperClient> {
-    config_cache()
-        .read()
-        .expect("Config cache lock poisoned")
-        .as_ref()?
-        .prepared
-        .transports
-        .get(service_name)
 }
 
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::{
-        load_config_from_path, reload_gateway_config_from_path, reload_policy_engine_from_path,
-        update_cached_config,
+        Gate, load_config_from_path, reload_gateway_config_from_path,
+        reload_policy_engine_from_path,
     };
     use gate::{
-        Gate, PolicySnapshot,
+        PolicySnapshot,
         cfg::{RuntimeConfig, SCHEMA},
     };
     use std::{fs, sync::Arc};
@@ -365,14 +423,14 @@ http:
         .unwrap();
         let prepared = load_config_from_path(path_str).unwrap();
         let config = prepared.config.clone();
-        let cache = std::sync::RwLock::new(None);
-        update_cached_config(&cache, prepared);
-        let mut gate =
-            Gate::new(Arc::new(lim::State::new())).build(&config, PolicySnapshot::default());
-        let graph = gate.http_graph.load_full();
-        let balancers = gate.http_balancers.load_full();
-        let limiter = gate.limiter.load_full();
-        assert_eq!(graph.routers[0].service, "healthy");
+        let gate = Gate::new(
+            Arc::new(lim::State::new()),
+            prepared,
+            PolicySnapshot::default(),
+        )
+        .unwrap();
+        let runtime = gate.snapshot();
+        assert_eq!(runtime.core.graph.routers[0].service, "healthy");
 
         for yaml in [
             "schema: stargate/v2alpha1\nhttp: {}\n",
@@ -381,13 +439,10 @@ http:
         ] {
             fs::write(&path, yaml).unwrap();
             assert!(load_config_from_path(path_str).is_err());
-            let error = reload_gateway_config_from_path(&mut gate, path_str, &cache)
-                .await
-                .unwrap_err();
+            let error = reload_gateway_config_from_path(&gate, path_str).unwrap_err();
             assert!(error.to_string().contains(SCHEMA));
-            assert!(Arc::ptr_eq(&gate.http_graph.load_full(), &graph));
-            assert!(Arc::ptr_eq(&gate.http_balancers.load_full(), &balancers));
-            assert!(Arc::ptr_eq(&gate.limiter.load_full(), &limiter));
+            assert!(Arc::ptr_eq(&gate.snapshot(), &runtime));
+            assert_eq!(gate.snapshot().version, 0);
         }
         assert_eq!(
             RuntimeConfig::from_raw(config.raw).unwrap().compiled.schema,
@@ -400,7 +455,8 @@ http:
     fn invalid_policy_reload_keeps_the_active_snapshot() {
         let path = policy_path();
         let path_str = path.to_str().unwrap();
-        let gate = Gate::new(Arc::new(lim::State::new()));
+        let gate = super::test_support::gate(gate::cfg::Config::default());
+        let runtime = gate.snapshot();
 
         fs::write(&path, "ALLOW user FOR \"reports:READ\";").unwrap();
         assert!(reload_policy_engine_from_path(&gate, path_str).unwrap());
@@ -415,6 +471,52 @@ http:
         assert!(reload_policy_engine_from_path(&gate, path_str).unwrap());
         assert_ne!(gate.policy_snapshot.load().revision, initial_revision);
 
+        assert!(Arc::ptr_eq(&runtime, &gate.snapshot()));
+        assert_eq!(gate.snapshot().version, 0);
         fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn response_body_retains_its_generation_until_consumed_or_dropped() {
+        use axum::body::Body;
+        use http::Request;
+        use http_body_util::BodyExt;
+
+        let config = RuntimeConfig::from_yaml_str(
+            r#"
+schema: stargate/v1
+http:
+  services:
+    local:
+      kind: direct_response
+      status: 200
+      body:
+        text: ready
+  routers:
+    local:
+      match:
+        path:
+          prefix: /
+      service: local
+"#,
+        )
+        .unwrap()
+        .raw;
+        for consume in [true, false] {
+            let gate = Arc::new(super::test_support::gate(config.clone()));
+            let mut req = Request::builder().uri("/").body(Body::empty()).unwrap();
+            req.extensions_mut().insert(gate.clone());
+            let body = crate::api::gateway::service(req).await.unwrap().into_body();
+            let retained = Arc::downgrade(&gate.snapshot());
+            gate.activate(super::prepare_config(gate::cfg::Config::default()).unwrap())
+                .unwrap();
+            assert!(retained.upgrade().is_some());
+            if consume {
+                assert_eq!(body.collect().await.unwrap().to_bytes(), "ready");
+            } else {
+                drop(body);
+            }
+            assert!(retained.upgrade().is_none());
+        }
     }
 }

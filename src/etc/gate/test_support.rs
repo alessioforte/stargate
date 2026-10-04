@@ -1,9 +1,30 @@
 use gate::cfg::{Config, MtlsConfig, SCHEMA};
 use std::{fs, path::PathBuf};
 
+pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super::RuntimeSnapshot> {
+    let prepared = super::prepare_runtime_config(config).unwrap();
+    let core = gate::Runtime::prepare(prepared.config.compiled.http, lim::Limiter::new()).unwrap();
+    std::sync::Arc::new(super::RuntimeSnapshot {
+        core,
+        transports: prepared.transports,
+        version: 0,
+    })
+}
+
+#[cfg(feature = "memory")]
+pub(crate) fn gate(config: Config) -> super::Gate {
+    super::Gate::new(
+        std::sync::Arc::new(lim::State::new()),
+        super::prepare_config(config).unwrap(),
+        gate::PolicySnapshot::default(),
+    )
+    .unwrap()
+}
+
 pub(crate) const CA: &[u8] = include_bytes!("fixtures/ca.pem");
 pub(crate) const CLIENT_CERT: &[u8] = include_bytes!("fixtures/client.pem");
 pub(crate) const CLIENT_KEY: &[u8] = include_bytes!("fixtures/client-key.pem");
+#[cfg(feature = "memory")]
 pub(crate) const SERVER_CERT: &[u8] = include_bytes!("fixtures/server.pem");
 pub(crate) const SERVER_KEY: &[u8] = include_bytes!("fixtures/server-key.pem");
 

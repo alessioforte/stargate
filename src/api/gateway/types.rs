@@ -4,7 +4,7 @@ use gate::graph::{HeaderValueNode, InternalContextNode, ResponseBodyNode};
 use hyper::body::Bytes;
 use std::sync::Arc;
 
-pub(super) type DynLoadBalancer = Arc<dyn lb::LoadBalancer + Send + Sync>;
+pub(super) use gate::DynLoadBalancer;
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct ResponseHeaderMutations {

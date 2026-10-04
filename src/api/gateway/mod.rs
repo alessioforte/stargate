@@ -15,12 +15,12 @@ mod types;
 mod ws;
 
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::gate::Gate;
 use crate::etc::{ext::RequestExt, guard, reqctx, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue, Request};
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use executor::{execute_plan_from_replay, execute_selected_with_request, spawn_mirrors};
-use gate::Gate;
 use headers::{
     apply_gateway_headers, apply_response_header_mutations, strip_internal_context_response,
 };
@@ -33,6 +33,13 @@ use std::{convert::Infallible, sync::Arc, time::Instant};
 use tracing::Instrument;
 use types::{RequestState, ResponseHeaderMutations};
 
+#[cfg(all(test, feature = "memory"))]
+#[derive(Clone)]
+pub(crate) struct IngressPause {
+    pub pinned: Arc<tokio::sync::Barrier>,
+    pub resume: Arc<tokio::sync::Barrier>,
+}
+
 async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
     let started = Instant::now();
     let mut router_name = "unmatched".to_string();
@@ -44,6 +51,15 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             .get::<Arc<Gate>>()
             .cloned()
             .expect("Gate extension must be configured");
+
+        let runtime = gate.snapshot();
+        let policies = gate.policy_snapshot.load_full();
+        #[cfg(all(test, feature = "memory"))]
+        if let Some(pause) = req.extensions().get::<IngressPause>().cloned() {
+            pause.pinned.wait().await;
+            pause.resume.wait().await;
+        }
+        let graph = &runtime.core.graph;
 
         let auth_req = auth_request(&req);
         let identity = async {
@@ -68,8 +84,6 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             },
         );
 
-        let graph = gate.http_graph.load_full();
-
         let router = {
             let _span = tracing::debug_span!("gateway.route_match").entered();
             graph
@@ -82,10 +96,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
         service_name = router.service.clone();
         tracing::Span::current().record("stargate.router", router_name.as_str());
         tracing::Span::current().record("stargate.service", service_name.as_str());
-        tracing::Span::current().record(
-            "stargate.config_version",
-            crate::etc::gate::get_config_version(),
-        );
+        tracing::Span::current().record("stargate.config_version", runtime.version);
 
         let method = req.method().clone();
         let mut state = RequestState {
@@ -117,11 +128,10 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             HeaderValue::from_str(&request_id).unwrap(),
         );
 
-        let policies = gate.policy_snapshot.load_full();
         apply_policies(
             &graph,
             router,
-            &gate,
+            &runtime,
             &policies.engine,
             &policies.revision,
             &mut req,
@@ -168,7 +178,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             key: sub.map(|sub| sub.id.as_str()),
         };
 
-        let balancers = gate.http_balancers.load_full();
+        let balancers = &runtime.core.balancers;
         let plan = {
             let _span = tracing::debug_span!(
                 "gateway.build_execution_plan",
@@ -176,14 +186,8 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 stargate.service = %router.service,
             )
             .entered();
-            build_execution_plan(
-                &graph,
-                balancers.as_ref(),
-                &router.service,
-                &ctx,
-                &request_id,
-            )
-            .map_err(selection_error_response)?
+            build_execution_plan(&graph, balancers, &router.service, &ctx, &request_id)
+                .map_err(selection_error_response)?
         };
 
         let mut response = if req.get_protocol() == "ws" {
@@ -191,7 +195,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .attempts
                 .first()
                 .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
-            execute_selected_with_request(selected, req, &state, balancers.as_ref())
+            execute_selected_with_request(&runtime, selected, req, &state)
                 .instrument(tracing::info_span!(
                     "gateway.execute",
                     stargate.router = %router.name,
@@ -209,7 +213,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                     .attempts
                     .first()
                     .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
-                execute_selected_with_request(selected, req, &state, balancers.as_ref())
+                execute_selected_with_request(&runtime, selected, req, &state)
                     .instrument(tracing::info_span!(
                         "gateway.execute",
                         stargate.router = %router.name,
@@ -219,12 +223,17 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
             } else {
                 let replay = buffer_request(req, limit).await?;
                 telemetry::record_gateway_replay_bytes(replay.body.len());
-                spawn_mirrors(plan.mirrors.clone(), replay.clone(), state.clone());
+                spawn_mirrors(
+                    runtime.clone(),
+                    plan.mirrors.clone(),
+                    replay.clone(),
+                    state.clone(),
+                );
                 execute_plan_from_replay(
+                    &runtime,
                     &plan,
                     &replay,
                     &state,
-                    Some(balancers.as_ref()),
                     ctx::DispatchKind::Primary,
                 )
                 .instrument(tracing::info_span!(
@@ -239,7 +248,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
                 .attempts
                 .first()
                 .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayNoHealthyUpstream))?;
-            execute_selected_with_request(selected, req, &state, balancers.as_ref())
+            execute_selected_with_request(&runtime, selected, req, &state)
                 .instrument(tracing::info_span!(
                     "gateway.execute",
                     stargate.router = %router.name,
@@ -253,7 +262,7 @@ async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse>
         strip_internal_context_response(response.headers_mut());
         apply_response_header_mutations(response.headers_mut(), &state.response_headers);
         apply_gateway_headers(response.headers_mut(), &response_headers);
-        Ok(response)
+        Ok(response.map(|body| crate::etc::gate::retain_runtime(body, runtime)))
     }
     .await;
 
@@ -291,7 +300,6 @@ mod tests {
     #[cfg(feature = "memory")]
     use super::service;
     #[cfg(feature = "memory")]
-    use gate::Gate;
     #[cfg(feature = "memory")]
     use http::{StatusCode, header::CONTENT_TYPE};
     #[cfg(feature = "memory")]
@@ -318,7 +326,9 @@ mod tests {
     #[cfg(feature = "memory")]
     #[tokio::test]
     async fn service_wraps_missing_route_error_as_json_response() {
-        let gate = Arc::new(Gate::new(Arc::new(lim::State::new())));
+        let gate = Arc::new(crate::etc::gate::test_support::gate(
+            gate::cfg::Config::default(),
+        ));
         let mut req = Request::builder()
             .uri("/missing")
             .body(Body::empty())

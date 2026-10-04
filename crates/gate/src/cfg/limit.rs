@@ -30,8 +30,13 @@ impl Limit {
         self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-    ) -> Box<dyn lim::RateLimit> {
-        self.spec.factory(state, clock)
+    ) -> Result<Box<dyn lim::RateLimit>, super::graph::CompileError> {
+        self.spec.validate().map_err(|message| {
+            super::graph::CompileError::new(format!("limits.{}", self.name), message)
+        })?;
+        self.spec.factory(state, clock).map_err(|message| {
+            super::graph::CompileError::new(format!("limits.{}", self.name), message)
+        })
     }
 }
 
@@ -53,11 +58,36 @@ impl Default for LimitSpec {
 }
 
 impl LimitSpec {
+    pub(super) fn validate(&self) -> Result<(), &'static str> {
+        if let Strategy::Gcra {
+            max_burst,
+            replenish_1_per,
+        } = &self.params
+        {
+            if *max_burst == 0 {
+                return Err("GCRA max_burst must be greater than zero");
+            }
+            let duration = tools::parse_duration(replenish_1_per)
+                .ok()
+                .and_then(|duration| duration.to_std().ok())
+                .filter(|duration| !duration.is_zero())
+                .ok_or("GCRA replenish_1_per must be a positive, representable duration")?;
+            let tau = duration.as_micros().max(1);
+            if tau
+                .checked_mul(u128::from(*max_burst))
+                .is_none_or(|burst| burst > i64::MAX as u128)
+            {
+                return Err("GCRA duration and burst exceed the supported timestamp range");
+            }
+        }
+        Ok(())
+    }
+
     fn factory(
         &self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-    ) -> Box<dyn lim::RateLimit> {
+    ) -> Result<Box<dyn lim::RateLimit>, &'static str> {
         self.params.factory(state, clock)
     }
 }
@@ -116,38 +146,41 @@ impl Strategy {
         &self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-    ) -> Box<dyn lim::RateLimit> {
+    ) -> Result<Box<dyn lim::RateLimit>, &'static str> {
         match self {
             Strategy::Gcra {
                 max_burst,
                 replenish_1_per,
             } => {
-                let replenish_1_per = match tools::parse_duration(replenish_1_per) {
-                    Ok(dur) => dur.to_std().unwrap(),
-                    Err(_) => chrono::Duration::seconds(5).to_std().unwrap(),
-                };
+                let replenish_1_per = tools::parse_duration(replenish_1_per)
+                    .map_err(|_| "invalid GCRA replenish_1_per")?
+                    .to_std()
+                    .map_err(|_| "invalid GCRA replenish_1_per")?;
 
                 let quota = lim::gcra::Quota {
-                    max_burst: NonZeroU32::new(*max_burst).unwrap(),
+                    max_burst: NonZeroU32::new(*max_burst)
+                        .ok_or("GCRA max_burst must be greater than zero")?,
                     replenish_1_per,
                 };
-                Box::new(lim::gcra::Gcra::new(state, clock, quota))
+                Ok(Box::new(lim::gcra::Gcra::new(state, clock, quota)))
             }
             Strategy::TokenBucket {
                 capacity,
                 refill_rate,
             } => {
                 let config = lim::token_bucket::TokenBucketConfig::new(*capacity, *refill_rate);
-                Box::new(lim::token_bucket::TokenBucket::new(state, clock, config))
+                Ok(Box::new(lim::token_bucket::TokenBucket::new(
+                    state, clock, config,
+                )))
             }
             Strategy::QuotaTracker { limit, period } => {
                 let time_window = period.to_time_window();
-                Box::new(lim::strategies::quota_tracker::QuotaTracker::new(
+                Ok(Box::new(lim::strategies::quota_tracker::QuotaTracker::new(
                     state,
                     clock,
                     *limit,
                     time_window,
-                ))
+                )))
             }
         }
     }

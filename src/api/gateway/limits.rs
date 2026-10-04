@@ -1,10 +1,9 @@
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::gate::RuntimeSnapshot;
 use crate::etc::{sub::Subject, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue};
-use gate::Gate;
 use gate::cfg::OnMissingOrg;
 use lim::{Limiter, RateLimitDecision};
-use std::sync::Arc;
 
 const DEFAULT_RATE_LIMIT: &str = "default";
 
@@ -53,13 +52,13 @@ enum OrgTarget<'a> {
 }
 
 pub async fn apply_limits(
-    gate: &Arc<Gate>,
+    runtime: &RuntimeSnapshot,
     subject: Option<&Subject>,
     client_ip: &str,
     headers: &mut HeaderMap,
     policies: SelectedLimitPolicies,
 ) -> Result<(), ErrorResponse> {
-    let limiter = gate.limiter.load_full();
+    let limiter = &runtime.core.limiter;
     let org_id = subject.and_then(|subject| subject.org_id.as_deref());
 
     // One cached lookup per request, only when a route actually carries

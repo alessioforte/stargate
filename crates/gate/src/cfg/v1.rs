@@ -370,6 +370,8 @@ fn compile_limits(limits: &IndexMap<String, LimitSpec>) -> Result<Vec<Limit>, Co
         if name.trim().is_empty() {
             return Err(CompileError::new("limits", "limit name cannot be empty"));
         }
+        spec.validate()
+            .map_err(|message| CompileError::new(format!("limits.{name}"), message))?;
         out.push(Limit::new(name.clone(), spec.clone()));
     }
     Ok(out)
@@ -381,6 +383,12 @@ fn compile_upstreams(
     let mut out = IndexMap::new();
 
     for (name, upstream) in upstreams {
+        upstream.load_balancer.probe_interval().map_err(|message| {
+            CompileError::new(
+                format!("http.upstreams.{name}.load_balancer.liveness_probe.interval"),
+                message,
+            )
+        })?;
         if upstream.targets.is_empty() {
             return Err(CompileError::new(
                 format!("http.upstreams.{}.targets", name),

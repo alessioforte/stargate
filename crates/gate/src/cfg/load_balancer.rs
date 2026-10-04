@@ -40,6 +40,21 @@ const DEFAULT_FAIL_THRESHOLD: usize = 3;
 const DEFAULT_COOLDOWN_SECS: u64 = 30;
 
 impl LoadBalancer {
+    pub(crate) fn probe_interval(&self) -> Result<Option<chrono::Duration>, &'static str> {
+        let Some(probe) = &self.liveness_probe else {
+            return Ok(None);
+        };
+        let interval = tools::parse_duration(probe.interval.as_deref().unwrap_or("5s"))
+            .map_err(|_| "liveness interval must be a positive, representable duration")?;
+        let duration = interval
+            .to_std()
+            .map_err(|_| "liveness interval must be a positive, representable duration")?;
+        if duration.is_zero() || std::time::Instant::now().checked_add(duration).is_none() {
+            return Err("liveness interval must be a positive, representable duration");
+        }
+        Ok(Some(interval))
+    }
+
     pub fn builder(
         &self,
         protocol: &str,

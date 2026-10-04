@@ -1,9 +1,9 @@
 use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
+use crate::etc::gate::Gate;
 use axum::Json;
 use axum::extract::Request;
 use chrono::Utc;
-use gate::Gate;
 use serde::Serialize;
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -112,7 +112,12 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
     let session_summary = crate::act::sessions::session_summary()
         .await
         .map_err(ErrorResponse::internal)?;
-    let graph = gate.http_graph.load();
+    let runtime = req
+        .extensions()
+        .get::<Arc<crate::etc::gate::RuntimeSnapshot>>()
+        .cloned()
+        .unwrap_or_else(|| gate.snapshot());
+    let graph = &runtime.core.graph;
     let policies = gate.policy_snapshot.load();
 
     Ok(Json(AdminOverview {
@@ -149,7 +154,7 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
                 .map(|value| value.to_rfc3339()),
         },
         gateway: GatewayOverview {
-            config_version: crate::etc::gate::get_config_version(),
+            config_version: runtime.version,
             policy_revision: Some(policies.revision.clone()),
             routers: graph.routers.len(),
             services: graph.services.len(),

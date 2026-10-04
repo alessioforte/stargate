@@ -19,6 +19,26 @@ This is the first gateway configuration format, not an application release
 version. Signed internal-context and other independently versioned contracts
 retain their own version identifiers.
 
+Gateway configuration activates as one runtime snapshot containing the compiled
+graph, balancers, limiter, prepared HTTP clients, and a configuration version.
+Each request pins it before authentication and uses it for routing, policy
+checks, planning, every primary/failover attempt, and all mirrors. Reloads apply
+to new requests; existing requests, streaming response bodies, and WebSocket
+tasks retain their generation. A successful activation starts the new health
+probes and retires the old probe tasks. Failed preparation changes neither the
+active snapshot/version nor its probes.
+
+IAM/admin rate-limit middleware also pins a snapshot for downstream handlers.
+Admin overview reports its graph counts and `configVersion` together. The
+independent ACE policy engine/revision pair is loaded once per request; policy
+file updates change that revision without changing `configVersion`.
+
+GCRA limits require a nonzero `max_burst` and a positive, representable
+`replenish_1_per`. The combined duration/burst must fit the supported timestamp
+range. Liveness probe intervals default to `5s`; explicitly configured zero,
+malformed, or unrepresentable intervals are rejected before activation. These
+errors also reject admin saves.
+
 ## Model
 
 The gateway config is split into named objects:

@@ -53,6 +53,7 @@ publish = false
 push = false
 
 [dependencies]
+arc-swap = "1.9.2"
 ace = { path = "crates/ace" }
 ctx = { path = "crates/ctx" }
 http = "1"

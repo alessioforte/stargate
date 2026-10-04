@@ -176,11 +176,18 @@ mod tests {
         let mut invalid_duration = serde_json::to_value(&valid).unwrap();
         invalid_duration["http"]["upstreams"]["secure"]["transport"] =
             serde_json::json!({ "connect_timeout": "9223372036854775807s" });
+        let mut invalid_limit = serde_json::to_value(&valid).unwrap();
+        invalid_limit["limits"] = serde_json::json!({"default": {"strategy": "gcra", "params": {"max_burst": 0, "replenish_1_per": "1s"}}});
+        let mut invalid_probe = serde_json::to_value(&valid).unwrap();
+        invalid_probe["http"]["upstreams"]["secure"]["load_balancer"]["liveness_probe"] =
+            serde_json::json!({"path": "/health", "interval": "0s"});
 
         for candidate in [
             missing_key,
             mismatched_key,
             serde_json::from_value(invalid_duration).unwrap(),
+            serde_json::from_value(invalid_limit).unwrap(),
+            serde_json::from_value(invalid_probe).unwrap(),
         ] {
             let error = save_configuration(candidate, &path).unwrap_err();
             assert_eq!(error.status, StatusCode::BAD_REQUEST);

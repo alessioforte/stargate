@@ -66,7 +66,8 @@ stargate/
 ### Gateway Runtime (`src/api/gateway/mod.rs`)
 
 Mounted as Axum `fallback_service`. Current request flow:
-1. Load active `Gate` from request extensions.
+1. Load application `Gate` from request extensions and pin its `RuntimeSnapshot`
+   plus the independent ACE engine/revision pair before authentication.
 2. Pre-check API key/JWT and capture subject/auth kind.
 3. Match the request against compiled v1 routers, sorted by descending priority.
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
@@ -89,8 +90,12 @@ Gateway modules:
 - `http.rs`, `ws.rs`: protocol-specific proxy implementations.
 
 `src/etc/gate/transport.rs` prepares HTTP clients and fallible rustls/mTLS
-configuration before activation. Client lookup only clones a prepared client;
-it never reads TLS files or constructs clients on the request path.
+configuration before activation. `crates/gate` exports core `Runtime` data and
+its `RuntimeBuilder`; the application adds prepared transports and a version,
+then publishes one `ArcSwap<RuntimeSnapshot>`. Routing, policies, limits,
+planning, primary attempts, failovers, mirrors, and health feedback use that
+pinned snapshot. Client lookup only clones a client from it. Response bodies
+and upgraded WebSocket tasks retain the snapshot until they finish or drop.
 
 ### Gateway Config v1
 
@@ -237,11 +242,9 @@ the state-store/SQL boundary.
 - Audit relay (cluster only)
 - JWT config
 - GeoIP database
-- Gateway runtime config and compiled HTTP graph
-- Prepared HTTP client pool (published with the validated runtime config)
-- Gateway load balancers
+- Gateway `RuntimeSnapshot`: compiled graph, balancers, limiter, prepared HTTP
+  clients, version, and generation-owned health probes
 - ACE policy engine
-- Limiter/quota service
 
 Each login session uses the standard JWT `sid` as its stable identifier. Native
 access and refresh tokens retain the same `sid` for the lifetime of the login,
@@ -261,17 +264,24 @@ remain subject to their normal JWT expiry.
 
 ### Config Hot-Reload
 
-`notify` watches `config.yaml` and policy files. Content hash prevents false positives.
+`notify` watches `config.yaml` and policy files. Content comparison prevents false positives.
 
 Hot reload behavior:
 - Parse and compile the new v1 config, preflight internal-context requirements,
-  and prepare all HTTP clients and TLS material before publishing any changes.
-- On success, publish the prepared config/client pool and update the gateway
-  graph, balancers, and limiter. Those updates still use separate publications;
-  a single request-pinned runtime snapshot is planned in remediation Step 3.
+  and prepare transports, graph, balancers, limiter, and unstarted probes before
+  publishing any changes. GCRA settings and probe intervals are checked before
+  construction.
+- On success, assign the next config version and atomically swap the complete
+  snapshot. Start its probes and retire the previous generation's probe tasks.
+  Already-pinned requests and mirrors keep their old data and transports.
 - On failure, record a bounded reload outcome, log the preparation error, and
-  retain the previous routes and prepared transports. Only successful content
-  is remembered, so a failed candidate can be retried after fixing its TLS files.
+  retain the previous runtime identity, version, transports, and active probes.
+  Only successful content is remembered, so failed candidates can be retried.
+
+IAM/admin rate-limit middleware pins the same runtime for its limit check and
+downstream readers. Admin overview reports counts and `configVersion` from that
+snapshot. ACE updates publish their engine/revision pair independently and do
+not increment the gateway configuration version.
 
 Startup completes the same preparation before marking readiness. Admin config
 endpoints use that preparation before saving, on a blocking worker. TLS files

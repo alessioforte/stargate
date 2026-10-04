@@ -7,11 +7,11 @@ use super::{
     ws,
 };
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::{ext::RequestExt, gate::get_client, telemetry};
+use crate::etc::{ext::RequestExt, gate::RuntimeSnapshot, telemetry};
 use ::http::{HeaderMap, Request};
 use axum::{body::Body, response::Response};
 use ctx::DispatchKind;
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::Instrument;
 
 /// Upstream status codes treated as upstream-health failures by the circuit
@@ -70,10 +70,10 @@ fn record_upstream_health(
 }
 
 pub(super) async fn execute_selected_with_request(
+    runtime: &Arc<RuntimeSnapshot>,
     selected: &SelectedService,
     req: Request<Body>,
     state: &RequestState,
-    balancers: &HashMap<String, DynLoadBalancer>,
 ) -> Result<Response, ErrorResponse> {
     match selected {
         SelectedService::DirectResponse {
@@ -133,10 +133,15 @@ pub(super) async fn execute_selected_with_request(
 
             if protocol == "ws" {
                 let uri = websocket_uri(&uri);
-                let result =
-                    ws::handler(req, &uri, state.preserve_host, internal_dispatch.as_ref())
-                        .instrument(span.clone())
-                        .await;
+                let result = ws::handler(
+                    runtime.clone(),
+                    req,
+                    &uri,
+                    state.preserve_host,
+                    internal_dispatch.as_ref(),
+                )
+                .instrument(span.clone())
+                .await;
                 record_attempt_span(&span, &result);
                 record_attempt_metrics(
                     service_name,
@@ -145,11 +150,17 @@ pub(super) async fn execute_selected_with_request(
                     &result,
                     started.elapsed(),
                 );
-                record_upstream_health(balancers, service_name, upstream_base_url, &result);
+                record_upstream_health(
+                    &runtime.core.balancers,
+                    service_name,
+                    upstream_base_url,
+                    &result,
+                );
                 return result;
             }
 
-            let client = get_client(service_name)
+            let client = runtime
+                .client(service_name)
                 .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
             let empty_headers = HeaderMap::new();
             let result = http::handler(
@@ -170,17 +181,22 @@ pub(super) async fn execute_selected_with_request(
                 &result,
                 started.elapsed(),
             );
-            record_upstream_health(balancers, service_name, upstream_base_url, &result);
+            record_upstream_health(
+                &runtime.core.balancers,
+                service_name,
+                upstream_base_url,
+                &result,
+            );
             result
         }
     }
 }
 
 async fn execute_selected_from_replay(
+    runtime: &Arc<RuntimeSnapshot>,
     selected: &SelectedService,
     replay: &ReplayRequest,
     state: &RequestState,
-    balancers: Option<&HashMap<String, DynLoadBalancer>>,
     dispatch_attempt: Option<DispatchAttempt>,
 ) -> Result<Response, ErrorResponse> {
     match selected {
@@ -222,7 +238,8 @@ async fn execute_selected_from_replay(
                     )
                 })
                 .transpose()?;
-            let client = get_client(service_name)
+            let client = runtime
+                .client(service_name)
                 .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
 
             let span = tracing::info_span!(
@@ -258,8 +275,13 @@ async fn execute_selected_from_replay(
             .await;
             record_attempt_span(&span, &result);
             record_attempt_metrics(service_name, "upstream", "http", &result, started.elapsed());
-            if let Some(balancers) = balancers {
-                record_upstream_health(balancers, service_name, upstream_base_url, &result);
+            if dispatch_attempt.kind == DispatchKind::Primary {
+                record_upstream_health(
+                    &runtime.core.balancers,
+                    service_name,
+                    upstream_base_url,
+                    &result,
+                );
             }
             result
         }
@@ -267,10 +289,10 @@ async fn execute_selected_from_replay(
 }
 
 pub(super) async fn execute_plan_from_replay(
+    runtime: &Arc<RuntimeSnapshot>,
     plan: &ExecutionPlan,
     replay: &ReplayRequest,
     state: &RequestState,
-    balancers: Option<&HashMap<String, DynLoadBalancer>>,
     dispatch_kind: DispatchKind,
 ) -> Result<Response, ErrorResponse> {
     let last_idx = plan.attempts.len().saturating_sub(1);
@@ -279,7 +301,7 @@ pub(super) async fn execute_plan_from_replay(
         let dispatch_attempt =
             next_dispatch_attempt(selected, dispatch_kind, &mut network_attempt)?;
         let result =
-            execute_selected_from_replay(selected, replay, state, balancers, dispatch_attempt)
+            execute_selected_from_replay(runtime, selected, replay, state, dispatch_attempt)
                 .instrument(tracing::debug_span!(
                     "gateway.replay_attempt",
                     plan_index = idx + 1,
@@ -321,18 +343,20 @@ pub(super) async fn execute_plan_from_replay(
 }
 
 pub(super) fn spawn_mirrors(
+    runtime: Arc<RuntimeSnapshot>,
     mirrors: Vec<ExecutionPlan>,
     replay: ReplayRequest,
     state: RequestState,
 ) {
     for mirror in mirrors {
         telemetry::record_gateway_mirror("dispatched");
+        let runtime = runtime.clone();
         let replay = replay.clone();
         let state = state.clone();
         let span = tracing::debug_span!("gateway.mirror");
         tokio::spawn(
             async move {
-                let outcome = execute_mirror(&mirror, &replay, &state).await;
+                let outcome = execute_mirror(&runtime, &mirror, &replay, &state).await;
                 telemetry::record_gateway_mirror(outcome);
             }
             .instrument(span),
@@ -341,12 +365,13 @@ pub(super) fn spawn_mirrors(
 }
 
 async fn execute_mirror(
+    runtime: &Arc<RuntimeSnapshot>,
     mirror: &ExecutionPlan,
     replay: &ReplayRequest,
     state: &RequestState,
 ) -> &'static str {
     // Shadow outcomes never feed the circuit breaker, including during failover.
-    match execute_plan_from_replay(mirror, replay, state, None, DispatchKind::Shadow).await {
+    match execute_plan_from_replay(runtime, mirror, replay, state, DispatchKind::Shadow).await {
         Ok(response) => match discard_response(response, "mirror").await {
             DisposalOutcome::Drained => "success",
             DisposalOutcome::ByteLimit => "abandoned",
@@ -497,6 +522,28 @@ mod tests {
         map
     }
 
+    fn runtime() -> Arc<RuntimeSnapshot> {
+        let config = gate::cfg::RuntimeConfig::from_yaml_str(
+            r#"
+schema: stargate/v1
+http:
+  upstreams:
+    test:
+      targets:
+        - url: http://127.0.0.1:1
+  services:
+    unreachable:
+      kind: load_balancer
+      upstream: test
+    orders:
+      kind: load_balancer
+      upstream: test
+"#,
+        )
+        .unwrap();
+        crate::etc::gate::test_support::runtime(config)
+    }
+
     fn ctx() -> lb::RequestContext<'static> {
         lb::RequestContext {
             client_ip: "127.0.0.1",
@@ -579,7 +626,7 @@ mod tests {
         };
         let request = Request::builder().body(Body::empty()).unwrap();
 
-        let response = execute_selected_with_request(&selected, request, &state, &HashMap::new())
+        let response = execute_selected_with_request(&runtime(), &selected, request, &state)
             .await
             .unwrap();
 
@@ -608,10 +655,10 @@ mod tests {
         };
 
         let response = execute_plan_from_replay(
+            &runtime(),
             &plan,
             &replay_request(),
             &replay_state(),
-            None,
             DispatchKind::Primary,
         )
         .await
@@ -639,10 +686,10 @@ mod tests {
         };
 
         let response = execute_plan_from_replay(
+            &runtime(),
             &plan,
             &replay_request(),
             &replay_state(),
-            None,
             DispatchKind::Primary,
         )
         .await
@@ -672,10 +719,10 @@ mod tests {
         };
 
         let error = execute_plan_from_replay(
+            &runtime(),
             &plan,
             &replay_request(),
             &replay_state(),
-            None,
             DispatchKind::Primary,
         )
         .await

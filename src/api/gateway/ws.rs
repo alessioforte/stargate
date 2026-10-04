@@ -15,6 +15,7 @@ use tokio_tungstenite::{
 };
 
 pub async fn handler(
+    runtime: std::sync::Arc<crate::etc::gate::RuntimeSnapshot>,
     mut req: http::Request<Body>,
     uri: &str,
     preserve_host: bool,
@@ -53,6 +54,7 @@ pub async fn handler(
         if let Err(error) = proxy_websocket(websocket, upstream_ws).await {
             tracing::warn!(%error, "WebSocket proxy closed with error");
         }
+        drop(runtime);
     });
 
     Ok(response.map(Body::new))

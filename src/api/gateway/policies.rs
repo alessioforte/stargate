@@ -1,5 +1,6 @@
 use super::limits::{OrgScopedLimit, SelectedLimitPolicies, apply_limits};
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::gate::RuntimeSnapshot;
 use crate::etc::{
     ac::access_control,
     guard::{AuthKind, VerifiedIdentity},
@@ -8,17 +9,15 @@ use crate::etc::{
 use ::http::{HeaderMap, Request};
 use axum::body::Body;
 use gate::{
-    Gate,
     cfg::{AuthStrategy, EnvProfile, LimitScope},
     graph::{HttpGraph, PolicyNode, RouterNode},
 };
-use std::sync::Arc;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_policies(
     graph: &HttpGraph,
     router: &RouterNode,
-    gate: &Arc<Gate>,
+    runtime: &RuntimeSnapshot,
     policy_engine: &ace::PolicyEngine,
     policy_revision: &str,
     req: &mut Request<Body>,
@@ -119,7 +118,14 @@ pub async fn apply_policies(
         }
     }
 
-    apply_limits(gate, subject, client_ip, response_headers, selected_limits).await
+    apply_limits(
+        runtime,
+        subject,
+        client_ip,
+        response_headers,
+        selected_limits,
+    )
+    .await
 }
 
 fn auth_strategy_allowed(strategies: &[AuthStrategy], kind: AuthKind) -> bool {

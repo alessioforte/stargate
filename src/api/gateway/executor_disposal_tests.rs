@@ -1,6 +1,6 @@
 use super::{
     execute_mirror, execute_plan_from_replay,
-    tests::{available, replay_request, replay_state, single_upstream},
+    tests::{available, replay_request, replay_state},
 };
 use crate::api::gateway::types::{ExecutionPlan, SelectedService};
 use axum::{body::Body, response::Response};
@@ -13,7 +13,7 @@ use std::{
     convert::Infallible,
     io,
     sync::{
-        Arc, Once,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -43,6 +43,7 @@ impl Drop for BodyGuard {
 }
 
 struct MockUpstream {
+    runtime: Arc<crate::etc::gate::RuntimeSnapshot>,
     url: String,
     connections: Arc<AtomicUsize>,
     dropped_bodies: Arc<AtomicUsize>,
@@ -55,30 +56,7 @@ impl Drop for MockUpstream {
     }
 }
 
-fn init_client() {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let config = RuntimeConfig::from_yaml_str(
-            r#"
-schema: stargate/v1
-http:
-  upstreams:
-    disposal-test:
-      targets:
-        - url: http://127.0.0.1:1
-  services:
-    disposal-test:
-      kind: load_balancer
-      upstream: disposal-test
-"#,
-        )
-        .unwrap();
-        crate::etc::gate::set_config_for_test(config);
-    });
-}
-
 async fn mock_upstream(mode: BodyMode) -> MockUpstream {
-    init_client();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let connections = Arc::new(AtomicUsize::new(0));
@@ -110,7 +88,19 @@ async fn mock_upstream(mode: BodyMode) -> MockUpstream {
             }
         }
     });
+    let config = RuntimeConfig::from_raw(
+        serde_json::from_value(serde_json::json!({
+            "schema": gate::cfg::SCHEMA,
+            "http": {
+                "upstreams": {SERVICE: {"targets": [{"url": url}], "load_balancer": {"strategy": "round_robin", "circuit_breaker": {"fail_threshold": 1, "cooldown": "3600s"}}}},
+                "services": {SERVICE: {"kind": "load_balancer", "upstream": SERVICE}},
+            },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     MockUpstream {
+        runtime: crate::etc::gate::test_support::runtime(config),
         url,
         connections,
         dropped_bodies,
@@ -187,14 +177,14 @@ async fn failover_advances_after_small_endless_stalled_and_broken_responses() {
         BodyMode::Error,
     ] {
         let upstream = mock_upstream(mode).await;
-        let balancers = single_upstream(SERVICE, &upstream.url, 1);
+        let balancers = &upstream.runtime.core.balancers;
         let response = tokio::time::timeout(
             Duration::from_secs(2),
             execute_plan_from_replay(
+                &upstream.runtime,
                 &plan(&upstream.url, true),
                 &replay_request(),
                 &replay_state(),
-                Some(&balancers),
                 DispatchKind::Primary,
             ),
         )
@@ -219,10 +209,11 @@ async fn mirror_completion_distinguishes_disposal_outcomes_without_changing_heal
         (BodyMode::Error, "body_error"),
     ] {
         let upstream = mock_upstream(mode).await;
-        let balancers = single_upstream(SERVICE, &upstream.url, 1);
+        let balancers = &upstream.runtime.core.balancers;
         let outcome = tokio::time::timeout(
             Duration::from_secs(2),
             execute_mirror(
+                &upstream.runtime,
                 &plan(&upstream.url, false),
                 &replay_request(),
                 &replay_state(),
@@ -245,6 +236,7 @@ async fn small_discarded_responses_allow_http_connection_reuse() {
     for _ in 0..2 {
         assert_eq!(
             execute_mirror(
+                &upstream.runtime,
                 &plan(&upstream.url, false),
                 &replay_request(),
                 &replay_state()
@@ -268,10 +260,10 @@ async fn large_response_disposal_workload() {
     let upstream = mock_upstream(BodyMode::Large(bytes)).await;
     for iteration in 0..32 {
         let response = execute_plan_from_replay(
+            &upstream.runtime,
             &plan(&upstream.url, true),
             &replay_request(),
             &replay_state(),
-            None,
             DispatchKind::Primary,
         )
         .await
@@ -279,6 +271,7 @@ async fn large_response_disposal_workload() {
         assert_eq!(response.status(), 204);
         assert_eq!(
             execute_mirror(
+                &upstream.runtime,
                 &plan(&upstream.url, false),
                 &replay_request(),
                 &replay_state()
