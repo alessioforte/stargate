@@ -139,7 +139,88 @@ fn unexpected_alpn_is_an_error_instead_of_a_connector_panic() {
     let mut tls = default_tls_config().unwrap();
     tls.alpn_protocols = vec![b"h2".to_vec()];
     assert!(matches!(
-        build_hyper_client(Duration::from_secs(1), &tls),
+        build_hyper_client(Duration::from_secs(1), &tls, true, true),
         Err(TransportPreparationError::Alpn)
     ));
+}
+
+#[tokio::test]
+async fn http_clients_enforce_configured_protocols_and_share_the_prepared_connection_settings() {
+    use axum::body::Body;
+    use hyper::{
+        server::conn::{http1, http2},
+        service::service_fn,
+    };
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use std::convert::Infallible;
+    for http2 in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let service = service_fn(
+                move |request: http::Request<hyper::body::Incoming>| async move {
+                    assert_eq!(
+                        request.version(),
+                        if http2 {
+                            http::Version::HTTP_2
+                        } else {
+                            http::Version::HTTP_11
+                        }
+                    );
+                    Ok::<_, Infallible>(http::Response::new(Body::empty()))
+                },
+            );
+            if http2 {
+                http2::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(stream), service)
+                    .await
+                    .unwrap();
+            } else {
+                http1::Builder::new()
+                    .serve_connection(TokioIo::new(stream), service)
+                    .await
+                    .unwrap();
+            }
+        });
+        let files = TlsFiles::new();
+        let mut config = files.config(&url);
+        config.http.upstreams.get_mut("secure").unwrap().transport = Some(
+            serde_json::from_value(serde_json::json!({
+                "connect_timeout": "250ms",
+                "protocols": [if http2 {"http2"} else {"http1"}]
+            }))
+            .unwrap(),
+        );
+        let prepared = prepare(&RuntimeConfig::from_raw(config).unwrap()).unwrap();
+        let transport = prepared.get("secure").unwrap();
+        assert_eq!(transport.http1, !http2);
+        assert_eq!(transport.connect_timeout, Duration::from_millis(250));
+        assert_eq!(
+            transport.websocket_tls.alpn_protocols,
+            vec![b"http/1.1".to_vec()]
+        );
+        let request = http::Request::builder()
+            .uri(&url)
+            .body(Body::empty())
+            .unwrap();
+        let response =
+            tokio::time::timeout(Duration::from_secs(1), transport.http.request(request))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            response.version(),
+            if http2 {
+                http::Version::HTTP_2
+            } else {
+                http::Version::HTTP_11
+            }
+        );
+        drop(response);
+        drop(prepared);
+        // A pooled client may retain an idle connection independently of the
+        // request future; protocol assertions have already run on the server.
+        server.abort();
+    }
 }

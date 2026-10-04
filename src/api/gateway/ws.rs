@@ -1,52 +1,50 @@
-use super::{dispatch::InternalDispatch, lifecycle::Execution};
+use super::{dispatch::InternalDispatch, headers::strip_hop_by_hop_headers, lifecycle::Execution};
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::gate::PreparedTransport;
 use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use http::header::{
-    CONNECTION, CONTENT_LENGTH, HOST, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_EXTENSIONS,
-    SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, TE, TRAILER,
-    TRANSFER_ENCODING, UPGRADE,
+    CONTENT_LENGTH, HOST, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_EXTENSIONS, SEC_WEBSOCKET_KEY,
+    SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION,
 };
 use hyper_tungstenite::HyperWebsocket;
-use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest};
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream, client_async, tungstenite::client::IntoClientRequest,
+};
+
+type UpstreamSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 pub async fn handler(
     runtime: std::sync::Arc<crate::etc::gate::RuntimeSnapshot>,
+    transport: &PreparedTransport,
     mut req: http::Request<Body>,
     uri: &str,
     preserve_host: bool,
     internal_dispatch: Option<&InternalDispatch>,
     execution: &Execution,
 ) -> Result<Response, ErrorResponse> {
-    if !hyper_tungstenite::is_upgrade_request(&req) {
-        return Err(ErrorResponse::new(
-            ErrorCode::GatewayWebsocketUpgradeInvalid,
-        ));
+    validate_upgrade(&req)?;
+    if !transport.http1 {
+        return Err(
+            ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
+                .with_param("reason", "websocket_requires_http1"),
+        );
     }
+
+    let (mut response, websocket) = hyper_tungstenite::upgrade(&mut req, None)
+        .map_err(|_| ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid))?;
 
     let upstream_request =
         build_upstream_request(uri, req.headers(), preserve_host, internal_dispatch)?;
-    let (upstream_ws, upstream_response) = execution
-        .run(
-            "websocket_handshake",
-            runtime
-                .settings
-                .connect_timeout
-                .min(runtime.settings.response_header_timeout),
-            connect_async(upstream_request),
-        )
-        .await?
-        .map_err(|error| {
-            tracing::error!(%uri, %error, "WebSocket upstream connect failed");
-            ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
-        })?;
-
-    let (mut response, websocket) =
-        hyper_tungstenite::upgrade(&mut req, None).map_err(|error| {
-            tracing::error!(%error, "WebSocket upgrade failed");
-            ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid)
-        })?;
+    let (upstream_ws, upstream_response) = connect_upstream(
+        upstream_request,
+        transport,
+        execution,
+        runtime.settings.response_header_timeout,
+    )
+    .await?;
 
     if let Some(protocol) = upstream_response.headers().get(SEC_WEBSOCKET_PROTOCOL) {
         response
@@ -86,6 +84,107 @@ pub async fn handler(
     Ok(response.map(Body::new))
 }
 
+fn validate_upgrade(req: &http::Request<Body>) -> Result<(), ErrorResponse> {
+    let invalid = || ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid);
+    // RFC 6455 section 4.2.1; extended CONNECT is not an HTTP/1 Upgrade.
+    if req.method() != http::Method::GET
+        || req.version() != http::Version::HTTP_11
+        || !hyper_tungstenite::is_upgrade_request(req)
+    {
+        return Err(invalid());
+    }
+    for name in [HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION] {
+        if req.headers().get_all(&name).iter().count() != 1 {
+            return Err(invalid());
+        }
+    }
+    let host = req.headers()[HOST].to_str().map_err(|_| invalid())?;
+    if host.parse::<http::uri::Authority>().is_err() || req.headers()[SEC_WEBSOCKET_VERSION] != "13"
+    {
+        return Err(invalid());
+    }
+    let key = base64::engine::general_purpose::STANDARD
+        .decode(req.headers()[SEC_WEBSOCKET_KEY].as_bytes())
+        .map_err(|_| invalid())?;
+    if key.len() != 16 {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+async fn connect_upstream(
+    request: http::Request<()>,
+    transport: &PreparedTransport,
+    execution: &Execution,
+    handshake_timeout: std::time::Duration,
+) -> Result<(UpstreamSocket, http::Response<Option<Vec<u8>>>), ErrorResponse> {
+    let invalid = || ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed);
+    let host = request
+        .uri()
+        .host()
+        .ok_or_else(invalid)?
+        .trim_matches(['[', ']'])
+        .to_owned();
+    let tls = match request.uri().scheme_str() {
+        Some("wss") => {
+            Some(rustls::pki_types::ServerName::try_from(host.clone()).map_err(|_| invalid())?)
+        }
+        Some("ws") => None,
+        _ => return Err(invalid()),
+    };
+    let port = request
+        .uri()
+        .port_u16()
+        .unwrap_or(if tls.is_some() { 443 } else { 80 });
+    // Connect bounds DNS, TCP, and TLS together. The Upgrade response has its
+    // own header deadline, with both phases capped by the execution deadline.
+    let stream = execution
+        .run("connect", transport.connect_timeout, async {
+            let socket = tokio::net::TcpStream::connect((host.as_str(), port)).await?;
+            match tls {
+                Some(server_name) => {
+                    // RFC 6455 section 4.1: TLS identity comes from the target URI,
+                    // independently of a preserved application Host field.
+                    let connector =
+                        tokio_rustls::TlsConnector::from(transport.websocket_tls.clone());
+                    Ok::<_, std::io::Error>(MaybeTlsStream::Rustls(
+                        connector.connect(server_name, socket).await?,
+                    ))
+                }
+                None => Ok(MaybeTlsStream::Plain(socket)),
+            }
+        })
+        .await?
+        .map_err(|error| {
+            tracing::error!(%error, "WebSocket upstream connection failed");
+            ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
+        })?;
+    let (socket, response) = execution
+        .run(
+            "websocket_handshake",
+            handshake_timeout,
+            client_async(request, stream),
+        )
+        .await?
+        .map_err(|error| {
+            tracing::error!(%error, "WebSocket upstream handshake failed");
+            ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
+        })?;
+    // We never offer extensions: tungstenite does not implement their framing.
+    // RFC 6455 section 4.1 requires rejecting unsolicited extensions.
+    if response.headers().contains_key(SEC_WEBSOCKET_EXTENSIONS)
+        || response
+            .headers()
+            .get_all(SEC_WEBSOCKET_PROTOCOL)
+            .iter()
+            .count()
+            > 1
+    {
+        return Err(ErrorResponse::new(ErrorCode::UpstreamConnectionFailed));
+    }
+    Ok((socket, response))
+}
+
 fn build_upstream_request(
     uri: &str,
     incoming_headers: &http::HeaderMap,
@@ -94,10 +193,10 @@ fn build_upstream_request(
 ) -> Result<http::Request<()>, ErrorResponse> {
     let mut request = uri.into_client_request().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid WebSocket upstream URI");
-        ErrorResponse::new(ErrorCode::UpstreamConnectionFailed)
+        ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
     })?;
 
-    copy_forwarded_headers(request.headers_mut(), incoming_headers, preserve_host);
+    copy_forwarded_headers(request.headers_mut(), incoming_headers, preserve_host)?;
     if let Some(dispatch) = internal_dispatch {
         dispatch.prepare(&mut request)?;
     } else {
@@ -111,33 +210,58 @@ fn copy_forwarded_headers(
     target: &mut http::HeaderMap,
     source: &http::HeaderMap,
     preserve_host: bool,
-) {
-    for (name, value) in source {
-        if should_forward_request_header(name, preserve_host) {
+) -> Result<(), ErrorResponse> {
+    let mut source = source.clone();
+    strip_hop_by_hop_headers(&mut source);
+    if preserve_host {
+        let mut hosts = source.get_all(HOST).iter();
+        let host = hosts
+            .next()
+            .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid))?;
+        if hosts.next().is_some() {
+            return Err(ErrorResponse::new(
+                ErrorCode::GatewayWebsocketUpgradeInvalid,
+            ));
+        }
+        // Replace the generated Host; append would serialize the target's value.
+        target.insert(HOST, host.clone());
+    }
+    let protocols = source
+        .get_all(SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .map(|value| value.to_str())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid))?;
+    if !protocols.is_empty() {
+        target.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            protocols
+                .join(", ")
+                .parse()
+                .map_err(|_| ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid))?,
+        );
+    }
+    for (name, value) in &source {
+        if should_forward_request_header(name) {
             target.append(name, value.clone());
         }
     }
+    Ok(())
 }
 
-fn should_forward_request_header(name: &http::HeaderName, preserve_host: bool) -> bool {
-    name != CONNECTION
-        && name != CONTENT_LENGTH
-        && (preserve_host || name != HOST)
+fn should_forward_request_header(name: &http::HeaderName) -> bool {
+    name != CONTENT_LENGTH
+        && name != HOST
         && name != SEC_WEBSOCKET_ACCEPT
         && name != SEC_WEBSOCKET_EXTENSIONS
         && name != SEC_WEBSOCKET_KEY
         && name != SEC_WEBSOCKET_VERSION
-        && name != TE
-        && name != TRAILER
-        && name != TRANSFER_ENCODING
-        && name != UPGRADE
+        && name != SEC_WEBSOCKET_PROTOCOL
 }
 
 async fn proxy_websocket(
     websocket: HyperWebsocket,
-    mut upstream: tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+    mut upstream: UpstreamSocket,
     execution: &Execution,
     idle: std::time::Duration,
     handshake: std::time::Duration,
@@ -155,6 +279,7 @@ async fn proxy_websocket(
                     let message = message?;
                     let close = message.is_close();
                     upstream.send(message).await?;
+                    if close { downstream.flush().await?; }
                     Ok(close)
                 }
                 outbound = upstream.next() => {
@@ -162,6 +287,7 @@ async fn proxy_websocket(
                     let message = message?;
                     let close = message.is_close();
                     downstream.send(message).await?;
+                    if close { upstream.flush().await?; }
                     Ok(close)
                 }
             }
@@ -173,238 +299,13 @@ async fn proxy_websocket(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::etc::{
-        guard::VerifiedIdentity,
-        internal_context::InternalContextRuntime,
-        reqctx::{INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext},
-    };
-    use chrono::Utc;
-    use ctx::{
-        ContextSigner, ContextVerifier, DispatchKind, ExpectedRequest, SignerConfig,
-        StaticKeyResolver, VerifierConfig,
-    };
-    use http::header::{
-        AUTHORIZATION, CONNECTION, COOKIE, HOST, ORIGIN, SEC_WEBSOCKET_EXTENSIONS,
-        SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, UPGRADE,
-    };
-    use std::sync::Arc;
-    use tokio::sync::oneshot;
-    use tokio_tungstenite::{
-        accept_hdr_async,
-        tungstenite::{
-            Message,
-            handshake::server::{Request as ServerRequest, Response as ServerResponse},
-        },
-    };
+#[path = "ws_tests.rs"]
+mod tests;
 
-    const ISSUER: &str = "https://stargate.test/internal-context";
-    const AUDIENCE: &str = "urn:stargate:service:socket";
-    const KEY_ID: &str = "stargate-internal-test";
-    const REQUEST_ID: &str = "01JZ000000000000000000000R";
-    const PRIVATE_KEY: &[u8] = include_bytes!("../../../crates/ctx/tests/fixtures/private.pem");
-    const PUBLIC_KEY: &[u8] = include_bytes!("../../../crates/ctx/tests/fixtures/public.pem");
+#[cfg(test)]
+#[path = "ws_transport_tests.rs"]
+mod transport_tests;
 
-    fn internal_dispatch() -> InternalDispatch {
-        let signer = ContextSigner::from_rsa_pem(
-            SignerConfig::new(ISSUER, KEY_ID, 30).unwrap(),
-            PRIVATE_KEY,
-        )
-        .unwrap();
-        let runtime = InternalContextRuntime::from_signer_for_test(signer);
-        let request = RequestContext::new(REQUEST_ID.to_owned(), Utc::now(), None, None, None);
-        let draft = Arc::new(
-            PropagationDraft::build(
-                &VerifiedIdentity::anonymous(),
-                &request,
-                "GET",
-                "/socket",
-                "/socket",
-                "socket",
-                "socket",
-                None,
-            )
-            .unwrap(),
-        );
-        InternalDispatch::new(
-            "orders",
-            AUDIENCE,
-            Some(&draft),
-            Some(&runtime),
-            DispatchKind::Primary,
-            1,
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn forwards_request_headers_needed_by_upstream() {
-        let mut source = http::HeaderMap::new();
-        source.insert(CONNECTION, "upgrade".parse().unwrap());
-        source.insert(UPGRADE, "websocket".parse().unwrap());
-        source.insert(HOST, "gateway.local".parse().unwrap());
-        source.insert(SEC_WEBSOCKET_KEY, "abc123".parse().unwrap());
-        source.insert(SEC_WEBSOCKET_VERSION, "13".parse().unwrap());
-        source.insert(
-            SEC_WEBSOCKET_EXTENSIONS,
-            "permessage-deflate".parse().unwrap(),
-        );
-        source.insert(SEC_WEBSOCKET_PROTOCOL, "chat, superchat".parse().unwrap());
-        source.insert(AUTHORIZATION, "Bearer token".parse().unwrap());
-        source.insert(COOKIE, "jwt=abc".parse().unwrap());
-        source.insert(ORIGIN, "https://client.local".parse().unwrap());
-        source.insert("x-request-id", "req_123".parse().unwrap());
-
-        let mut target = http::HeaderMap::new();
-        copy_forwarded_headers(&mut target, &source, false);
-
-        assert!(target.get(CONNECTION).is_none());
-        assert!(target.get(UPGRADE).is_none());
-        assert!(target.get(HOST).is_none());
-        assert!(target.get(SEC_WEBSOCKET_KEY).is_none());
-        assert!(target.get(SEC_WEBSOCKET_VERSION).is_none());
-        assert!(target.get(SEC_WEBSOCKET_EXTENSIONS).is_none());
-        assert_eq!(
-            target.get(SEC_WEBSOCKET_PROTOCOL).unwrap(),
-            "chat, superchat"
-        );
-        assert_eq!(target.get(AUTHORIZATION).unwrap(), "Bearer token");
-        assert_eq!(target.get(COOKIE).unwrap(), "jwt=abc");
-        assert_eq!(target.get(ORIGIN).unwrap(), "https://client.local");
-        assert_eq!(target.get("x-request-id").unwrap(), "req_123");
-    }
-
-    #[test]
-    fn upstream_request_builds_from_ws_uri() {
-        let mut headers = http::HeaderMap::new();
-        headers.insert(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
-        headers.insert("x-trace-id", "trace_1".parse().unwrap());
-
-        let request =
-            build_upstream_request("wss://upstream.example/socket?foo=1", &headers, false, None)
-                .unwrap();
-
-        assert_eq!(request.uri(), "wss://upstream.example/socket?foo=1");
-        assert_eq!(
-            request.headers().get(SEC_WEBSOCKET_PROTOCOL).unwrap(),
-            "chat"
-        );
-        assert_eq!(request.headers().get("x-trace-id").unwrap(), "trace_1");
-    }
-
-    #[test]
-    fn sec_websocket_protocol_is_forwardable() {
-        assert!(should_forward_request_header(
-            &SEC_WEBSOCKET_PROTOCOL,
-            false
-        ));
-        assert!(!should_forward_request_header(&SEC_WEBSOCKET_KEY, false));
-        assert!(!should_forward_request_header(&CONNECTION, false));
-    }
-
-    #[test]
-    fn host_header_is_forwarded_when_preserved() {
-        let mut source = http::HeaderMap::new();
-        source.insert(HOST, "gateway.local".parse().unwrap());
-
-        let mut target = http::HeaderMap::new();
-        copy_forwarded_headers(&mut target, &source, true);
-
-        assert_eq!(target.get(HOST).unwrap(), "gateway.local");
-    }
-
-    // `accept_hdr_async` fixes the callback error type to tungstenite's full HTTP
-    // response; the test callback cannot make that dependency-owned type smaller.
-    #[allow(clippy::result_large_err)]
-    #[tokio::test]
-    async fn internal_websocket_handshake_is_sanitized_verified_and_frame_compatible() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let (sender, captured) = oneshot::channel();
-        let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let callback = move |request: &ServerRequest, mut response: ServerResponse| {
-                if let Some(protocol) = request.headers().get(SEC_WEBSOCKET_PROTOCOL) {
-                    response
-                        .headers_mut()
-                        .insert(SEC_WEBSOCKET_PROTOCOL, protocol.clone());
-                }
-                sender
-                    .send((request.uri().clone(), request.headers().clone()))
-                    .unwrap();
-                Ok(response)
-            };
-            let mut socket = accept_hdr_async(stream, callback).await.unwrap();
-            let message = socket.next().await.unwrap().unwrap();
-            socket.send(message).await.unwrap();
-        });
-
-        let mut incoming = http::HeaderMap::new();
-        incoming.insert(AUTHORIZATION, "Bearer edge-secret".parse().unwrap());
-        incoming.insert("proxy-authorization", "Basic edge-secret".parse().unwrap());
-        incoming.insert("x-api-key", "edge-api-key".parse().unwrap());
-        incoming.insert("baggage", "private=value".parse().unwrap());
-        incoming.insert("x-request-id", "attacker-id".parse().unwrap());
-        incoming.insert("stargate-context", "attacker-context".parse().unwrap());
-        incoming.insert(COOKIE, "theme=dark; jwt=edge-session".parse().unwrap());
-        incoming.insert(ORIGIN, "https://client.test".parse().unwrap());
-        incoming.insert(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
-        let target = format!("ws://{address}/socket?%6awt=secret&safe=%2Fvalue");
-        let request =
-            build_upstream_request(&target, &incoming, false, Some(&internal_dispatch())).unwrap();
-
-        let (mut client, _) = connect_async(request).await.unwrap();
-        client.send(Message::Text("ping".into())).await.unwrap();
-        assert_eq!(
-            client.next().await.unwrap().unwrap(),
-            Message::Text("ping".into())
-        );
-        let (uri, headers) = captured.await.unwrap();
-
-        assert_eq!(uri.path(), "/socket");
-        assert_eq!(uri.query(), Some("safe=%2Fvalue"));
-        for name in [
-            AUTHORIZATION,
-            http::header::PROXY_AUTHORIZATION,
-            http::HeaderName::from_static("x-api-key"),
-            http::HeaderName::from_static("baggage"),
-        ] {
-            assert!(headers.get_all(name).iter().next().is_none());
-        }
-        assert_eq!(headers[COOKIE], "theme=dark");
-        assert_eq!(headers[ORIGIN], "https://client.test");
-        assert_eq!(headers[SEC_WEBSOCKET_PROTOCOL], "chat");
-        assert!(headers.get(SEC_WEBSOCKET_KEY).is_some());
-        assert_eq!(headers[SEC_WEBSOCKET_VERSION], "13");
-        assert_eq!(headers.get_all("x-request-id").iter().count(), 1);
-        assert_eq!(headers["x-request-id"], REQUEST_ID);
-
-        let tokens = headers
-            .get_all(INTERNAL_CONTEXT_HEADER)
-            .iter()
-            .map(|value| value.to_str().unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(tokens.len(), 1);
-        let resolver = StaticKeyResolver::from_rsa_pem(KEY_ID, PUBLIC_KEY).unwrap();
-        let verifier = ContextVerifier::new(
-            VerifierConfig::new(ISSUER, AUDIENCE, 5).unwrap(),
-            Arc::new(resolver),
-        );
-        let trusted = verifier
-            .verify(
-                tokens[0],
-                ExpectedRequest {
-                    method: "GET",
-                    encoded_path: "/socket",
-                    request_id: REQUEST_ID,
-                },
-            )
-            .unwrap();
-        assert_eq!(trusted.context().dispatch.kind, DispatchKind::Primary);
-        assert_eq!(trusted.context().dispatch.attempt, 1);
-
-        client.close(None).await.unwrap();
-        server.await.unwrap();
-    }
-}
+#[cfg(test)]
+#[path = "ws_tls_tests.rs"]
+mod tls_tests;

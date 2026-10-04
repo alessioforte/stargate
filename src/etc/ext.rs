@@ -252,13 +252,27 @@ impl<B> RequestExt for Request<B> {
     }
 
     fn get_protocol(&self) -> String {
+        // RFC 8441 section 5: identify extended CONNECT as WebSocket intent so
+        // the HTTP/1-only proxy rejects it instead of forwarding it as HTTP.
+        let extended_ws = self
+            .extensions()
+            .get::<hyper::ext::Protocol>()
+            .is_some_and(|protocol| protocol.as_str() == "websocket");
         let is_ws = self
             .headers()
-            .get(http::header::UPGRADE)
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.eq_ignore_ascii_case("websocket"))
-            .unwrap_or(false);
-        if is_ws { "ws".into() } else { "http".into() }
+            .get_all(http::header::UPGRADE)
+            .iter()
+            .any(|value| {
+                value
+                    .as_bytes()
+                    .split(|byte| *byte == b',')
+                    .any(|protocol| protocol.trim_ascii().eq_ignore_ascii_case(b"websocket"))
+            });
+        if is_ws || extended_ws {
+            "ws".into()
+        } else {
+            "http".into()
+        }
     }
 
     fn get_client_ip(&self) -> String {
@@ -349,8 +363,27 @@ mod tests {
 
     #[test]
     fn protocol_ws_upgrade() {
-        let r = req_with(&[("upgrade", "websocket")], None);
-        assert_eq!(r.get_protocol(), "ws");
+        for headers in [
+            vec![("upgrade", "websocket")],
+            vec![("upgrade", "h2c, WebSocket")],
+            vec![("upgrade", "h2c"), ("upgrade", "WebSocket")],
+        ] {
+            assert_eq!(req_with(&headers, None).get_protocol(), "ws");
+        }
+    }
+
+    #[test]
+    fn extended_websocket_connect_is_identified_for_explicit_rejection() {
+        let mut req = Request::builder()
+            .method("CONNECT")
+            .version(http::Version::HTTP_2)
+            .uri("https://gateway.test/socket")
+            .body(())
+            .unwrap();
+        assert_eq!(req.get_protocol(), "http");
+        req.extensions_mut()
+            .insert(hyper::ext::Protocol::from_static("websocket"));
+        assert_eq!(req.get_protocol(), "ws");
     }
 
     #[test]

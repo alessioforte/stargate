@@ -189,6 +189,33 @@ fn is_cookie_octet(byte: u8) -> bool {
     matches!(byte, 0x21 | 0x23..=0x2b | 0x2d..=0x3a | 0x3c..=0x5b | 0x5d..=0x7e)
 }
 
+// RFC 9110 section 7.6.1: remove Connection-nominated fields before forwarding.
+pub(super) fn strip_hop_by_hop_headers(headers: &mut http::HeaderMap) {
+    let mut connection_headers = Vec::new();
+    for value in headers.get_all(http::header::CONNECTION) {
+        for header in value.as_bytes().split(|byte| *byte == b',') {
+            if let Ok(name) = http::header::HeaderName::from_bytes(header.trim_ascii()) {
+                connection_headers.push(name);
+            }
+        }
+    }
+
+    for name in connection_headers {
+        headers.remove(name);
+    }
+
+    headers.remove(http::header::CONNECTION);
+    headers.remove("keep-alive");
+    headers.remove(http::header::PROXY_AUTHENTICATE);
+    headers.remove(PROXY_AUTHORIZATION);
+    headers.remove(http::header::TE);
+    headers.remove(http::header::TRAILER);
+    headers.remove(http::header::TRANSFER_ENCODING);
+    headers.remove(http::header::UPGRADE);
+    headers.remove("proxy-connection");
+    headers.remove("trailers");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

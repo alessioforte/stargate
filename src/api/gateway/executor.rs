@@ -135,9 +135,13 @@ pub(super) async fn execute_selected_with_request(
                 .transpose()?;
 
             if protocol == "ws" {
+                let transport = runtime
+                    .transport(service_name)
+                    .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
                 let uri = websocket_uri(&uri);
                 let result = ws::handler(
                     runtime.clone(),
+                    transport,
                     req,
                     &uri,
                     state.preserve_host,

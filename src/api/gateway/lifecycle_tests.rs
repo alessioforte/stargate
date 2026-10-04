@@ -179,6 +179,9 @@ async fn tls_connection_and_websocket_handshake_stalls_expire() {
         if websocket {
             request
                 .headers_mut()
+                .insert("host", "gateway.local".parse().unwrap());
+            request
+                .headers_mut()
                 .insert("connection", "Upgrade".parse().unwrap());
             request
                 .headers_mut()

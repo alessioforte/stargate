@@ -196,6 +196,11 @@ checks. Selected unknown names or rate/quota strategy mismatches return
 `500 gateway.limit_configuration_invalid` before resource buckets are charged.
 Quota absence and explicit organization skip policies remain optional checks.
 
+WebSocket upgrades use the selected upstream's prepared TLS identity/trust and
+connect timeout. `preserve_host` sends the incoming Host once while TLS verifies
+the target name. Upstreams must permit `http1` in `transport.protocols`;
+HTTP/2 extended CONNECT is not supported.
+
 Automatic failover replays only `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, and
 `DELETE`. `POST`/`PATCH` and unrecognized methods receive one dispatch attempt;
 an `Idempotency-Key` header does not enable retries. An unavailable primary may

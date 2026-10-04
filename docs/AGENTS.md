@@ -115,6 +115,16 @@ planning, primary attempts, failovers, mirrors, and health feedback use that
 pinned snapshot. Client lookup only clones a client from it. Response bodies
 and upgraded WebSocket tasks retain the snapshot until they finish or drop.
 
+WebSockets use the selected prepared transport's TLS roots/client identity and
+connect timeout. DNS/TCP/TLS and Upgrade response headers have separate finite
+deadlines, capped by the request budget. The handshake requires HTTP/1.1 GET;
+HTTP/2-only upstreams fail locally, since extended CONNECT is not supported.
+`preserve_host` replaces the generated Host exactly once while DNS/TLS identity
+still uses the target URI. HTTP and WebSockets share hop-by-hop sanitization,
+including Connection-nominated fields; WebSockets regenerate handshake fields,
+forward Origin/subprotocols, then sanitize/sign internal context. Upgraded tasks
+hold the runtime/admission until disconnect, idle expiry, or shutdown.
+
 ### Gateway Config v1
 
 `config.yaml` must contain:
@@ -252,7 +262,9 @@ Implemented:
 
 Partially implemented:
 - Circuit breaker is wired to both active liveness probes and live proxy traffic: transport errors and `502`/`503`/`504` responses trip it, mirror traffic does not. Per-upstream `fail_threshold`/`cooldown` are config-exposed via `load_balancer.circuit_breaker`. Breaker state is per-process (not shared across cluster nodes), and tripping on arbitrary response statuses is not configurable.
-- HTTP/2 client support is enabled in the shared hyper client, but per-upstream protocol policy is not fully enforced.
+- HTTP clients enforce per-upstream `transport.protocols` (empty means both;
+  `http2` only uses prior knowledge on cleartext). WebSockets require `http1`
+  and use HTTP/1.1 ALPN with the pinned prepared TLS settings.
 - Finite requests share a 60s total budget across upload, attempts, disposal,
   and response bodies. Defaults: upload idle 15s, full HTTP connection 5s,
   response headers 30s, body idle 30s, mirror total 5s. Route

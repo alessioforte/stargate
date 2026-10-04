@@ -150,18 +150,31 @@ gateway page exposes the mandatory ingress limit and store timeout. Editing
 named objects preserves this top-level binding; when renaming/removing its
 selected limit, select an existing replacement before saving.
 
-## HTTP transport and client TLS
+## HTTP and WebSocket transport
 
 `http.upstreams.<name>.transport.connect_timeout` defaults to `runtime.connect_timeout` (`5s`). A supplied
 value must be a positive, representable integer duration with one of the units
 `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, or `w`. Zero, malformed, negative, and
 overflowing values are rejected, including on upstreams that no service uses.
-This setting bounds connection establishment; request and response lifecycle
-deadlines are separate concerns.
+This setting bounds DNS, TCP, and TLS establishment for both HTTP and WebSocket
+connections; response headers and lifecycle deadlines are separate concerns.
+
+`transport.protocols` controls the prepared HTTP client's allowed protocols.
+Omitting it or supplying `[]` permits HTTP/1.1 and HTTP/2. `[http1]` uses HTTP/1;
+`[http2]` uses HTTP/2, including prior knowledge for cleartext targets. The
+downstream request version does not override this upstream policy. WebSocket
+proxying uses the HTTP/1.1 Upgrade handshake from
+[RFC 6455 section 4](https://www.rfc-editor.org/rfc/rfc6455.html#section-4), so its
+upstream must permit `http1`. An HTTP/2-only upstream rejects WebSocket dispatch
+with `500 gateway.request_preparation_failed` and reason
+`websocket_requires_http1`, before connecting. HTTP/2 extended CONNECT is not
+supported. Downstream upgrades require a valid HTTP/1.1 `GET`, a single Host,
+version `13`, and a single base64 key decoding to 16 bytes; invalid handshakes
+return `400 gateway.websocket_upgrade_invalid` before upstream dispatch.
 
 HTTPS uses the bundled WebPKI roots by default. The optional top-level `mtls`
-block supplies a custom server trust store and a client identity for HTTPS
-upstreams:
+block supplies the same custom server trust store and client identity to HTTPS
+and secure WebSocket upstreams:
 
 ```yaml
 schema: stargate/v1
@@ -200,6 +213,21 @@ credential files alone does not reload the clients: change the gateway
 configuration content to trigger preparation. If a candidate fails, fix its
 files and save that candidate again; existing prepared clients remain usable
 throughout.
+
+WebSockets use the pinned transport's prepared trust roots and client identity,
+with ALPN restricted to `http/1.1`. The connection's DNS destination, TLS server
+name, and certificate verification always use the upstream URI. The
+`preserve_host` middleware replaces the generated Host with exactly one incoming
+value; it does not change the TLS identity or destination. Without it, the
+handshake uses the target Host. HTTP and WebSocket requests share hop-by-hop
+sanitization, including fields named by every `Connection` value. The WebSocket
+client regenerates its Upgrade, key, and version fields after that cleanup.
+Origin and offered subprotocols are forwarded unless explicitly nominated as
+hop-by-hop fields; multiple subprotocol fields are combined for negotiation.
+The upstream's selected subprotocol is returned to the downstream client.
+Extensions are not offered, and an upstream response that selects an extension
+or repeats the selected subprotocol is rejected. Internal-context sanitization
+and per-attempt signing run after the final handshake URI and headers are set.
 
 ## Routing
 
@@ -664,11 +692,14 @@ http:
 `response_body_idle_timeout` and primary concurrency admission without a fixed
 response lifetime. Nonempty data and trailers count as progress. WebSocket
 sessions always follow the stream policy. HTTP uploads remain finite and
-use the upload idle and request budgets, including on response-stream routes. Their upstream handshake is bounded
-by the smaller global connection/header timeout, the downstream upgrade by the
-remaining header/total budget, and frame receipt/forwarding by the body idle
-policy. WebSockets use the first selected upstream and do not replay or mirror
-frames. Per-upstream WebSocket transport alignment is handled in Step 9.
+use the upload idle and request budgets, including on response-stream routes.
+WebSocket DNS/TCP/TLS uses the selected upstream's connect timeout; the upstream
+Upgrade handshake then uses `response_header_timeout`. Both are capped by the
+remaining total budget, as is the downstream upgrade. Frame receipt and
+forwarding use the body idle policy; a stalled sink also expires. The tracked
+task retains its runtime and primary admission until disconnect, idle expiry,
+or shutdown. WebSockets use the first selected upstream and do not replay or
+mirror frames.
 
 Before headers, deadline expiry returns `504 gateway.timeout` with a bounded
 `phase` parameter, and shutdown cancellation returns `503 gateway.cancelled`.

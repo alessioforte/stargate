@@ -47,7 +47,6 @@ pub(crate) fn gate_with_limiter(config: Config, limiter: lim::Limiter) -> super:
 pub(crate) const CA: &[u8] = include_bytes!("fixtures/ca.pem");
 pub(crate) const CLIENT_CERT: &[u8] = include_bytes!("fixtures/client.pem");
 pub(crate) const CLIENT_KEY: &[u8] = include_bytes!("fixtures/client-key.pem");
-#[cfg(feature = "memory")]
 pub(crate) const SERVER_CERT: &[u8] = include_bytes!("fixtures/server.pem");
 pub(crate) const SERVER_KEY: &[u8] = include_bytes!("fixtures/server-key.pem");
 

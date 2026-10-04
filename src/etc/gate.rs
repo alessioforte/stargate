@@ -10,7 +10,7 @@ mod reload_tests;
 
 #[cfg(test)]
 pub(crate) use transport::DeadlineConnector;
-pub use transport::{HyperClient, connection_timed_out};
+pub use transport::{HyperClient, PreparedTransport, connection_timed_out};
 
 use crate::etc::{internal_context, store::use_store, telemetry};
 use arc_swap::ArcSwap;
@@ -76,6 +76,11 @@ pub struct RuntimeSnapshot {
 
 impl RuntimeSnapshot {
     pub fn client(&self, service: &str) -> Option<HyperClient> {
+        self.transport(service)
+            .map(|transport| transport.http.clone())
+    }
+
+    pub fn transport(&self, service: &str) -> Option<&PreparedTransport> {
         self.transports.get(service)
     }
 }

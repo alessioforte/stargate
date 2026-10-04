@@ -1,15 +1,12 @@
 use super::{
     dispatch::InternalDispatch,
-    headers::strip_internal_context_response,
+    headers::{strip_hop_by_hop_headers, strip_internal_context_response},
     lifecycle::{Execution, guarded_body},
 };
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::telemetry;
 use axum::{body::Body, response::Response};
-use http::header::{
-    CONNECTION, HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING,
-    UPGRADE,
-};
+use http::header::HOST;
 
 pub async fn handler(
     mut req: http::Request<Body>,
@@ -31,6 +28,11 @@ pub async fn handler(
         return Err(ErrorResponse::new(
             ErrorCode::GatewayRequestPreparationFailed,
         ));
+    }
+    // Hyper treats an HTTP/2 request version as a required egress protocol.
+    // Let the prepared client's protocol policy and ALPN choose that hop.
+    if req.version() == http::Version::HTTP_2 {
+        *req.version_mut() = http::Version::HTTP_11;
     }
     *req.uri_mut() = upstream_uri;
     strip_hop_by_hop_headers(req.headers_mut());
@@ -122,38 +124,6 @@ pub(super) fn parse_upstream_uri(uri: &str) -> Result<http::Uri, ErrorResponse> 
     Ok(parsed)
 }
 
-fn strip_hop_by_hop_headers(headers: &mut http::HeaderMap) {
-    let mut connection_headers = Vec::new();
-    for value in headers.get_all(CONNECTION) {
-        if let Ok(value) = value.to_str() {
-            for header in value.split(',') {
-                let header = header.trim();
-                if header.is_empty() {
-                    continue;
-                }
-                if let Ok(name) = http::header::HeaderName::from_bytes(header.as_bytes()) {
-                    connection_headers.push(name);
-                }
-            }
-        }
-    }
-
-    for name in connection_headers {
-        headers.remove(name);
-    }
-
-    headers.remove(CONNECTION);
-    headers.remove("keep-alive");
-    headers.remove(PROXY_AUTHENTICATE);
-    headers.remove(PROXY_AUTHORIZATION);
-    headers.remove(TE);
-    headers.remove(TRAILER);
-    headers.remove(TRANSFER_ENCODING);
-    headers.remove(UPGRADE);
-    headers.remove("proxy-connection");
-    headers.remove("trailers");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +163,7 @@ mod tests {
     #[derive(Debug)]
     struct CapturedRequest {
         method: http::Method,
+        version: http::Version,
         uri: http::Uri,
         headers: http::HeaderMap,
     }
@@ -208,6 +179,7 @@ mod tests {
     ) -> Response {
         let captured = CapturedRequest {
             method: req.method().clone(),
+            version: req.version(),
             uri: req.uri().clone(),
             headers: req.headers().clone(),
         };
@@ -327,6 +299,38 @@ mod tests {
         assert!(headers.get("x-remove").is_none());
         assert!(headers.get(TE).is_none());
         assert_eq!(headers.get("x-keep").unwrap(), "ok");
+    }
+
+    #[tokio::test]
+    async fn downstream_http2_does_not_override_an_http1_upstream_policy() {
+        let (url, captured, server) = mock_upstream().await;
+        let mut value = serde_json::to_value(gate::cfg::Config::default()).unwrap();
+        value["http"] = serde_json::json!({
+            "upstreams":{"orders":{"targets":[{"url":url}],"transport":{"protocols":["http1"]}}},
+            "services":{"orders":{"kind":"load_balancer","upstream":"orders"}}
+        });
+        let runtime = crate::etc::gate::test_support::runtime(
+            gate::cfg::RuntimeConfig::from_raw(serde_json::from_value(value).unwrap()).unwrap(),
+        );
+        let req = http::Request::builder()
+            .version(http::Version::HTTP_2)
+            .uri("/orders")
+            .body(Body::empty())
+            .unwrap();
+        let response = handler(
+            req,
+            &url,
+            &runtime.client("orders").unwrap(),
+            false,
+            None,
+            &runtime.settings,
+            &Execution::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(captured.await.unwrap().version, http::Version::HTTP_11);
+        server.abort();
     }
 
     #[tokio::test(flavor = "current_thread")]

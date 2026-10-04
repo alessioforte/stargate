@@ -1,4 +1,7 @@
-use gate::{cfg::RuntimeConfig, graph::ServiceNode};
+use gate::{
+    cfg::{RuntimeConfig, UpstreamProtocol},
+    graph::ServiceNode,
+};
 use hyper_rustls::{ConfigBuilderExt, HttpsConnectorBuilder};
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
@@ -104,12 +107,20 @@ pub enum TransportPreparationError {
 }
 
 pub(super) struct PreparedTransports {
-    clients: HashMap<String, HyperClient>,
+    services: HashMap<String, PreparedTransport>,
+}
+
+#[derive(Clone)]
+pub struct PreparedTransport {
+    pub http: HyperClient,
+    pub websocket_tls: Arc<ClientConfig>,
+    pub connect_timeout: Duration,
+    pub http1: bool,
 }
 
 impl PreparedTransports {
-    pub(super) fn get(&self, service: &str) -> Option<HyperClient> {
-        self.clients.get(service).cloned()
+    pub(super) fn get(&self, service: &str) -> Option<&PreparedTransport> {
+        self.services.get(service)
     }
 }
 
@@ -128,18 +139,35 @@ pub(super) fn prepare(
                 .and_then(|transport| transport.connect_timeout.as_deref()),
             config.compiled.runtime.connect_timeout,
         )?;
-        let tls = if upstream
-            .targets
-            .iter()
-            .any(|target| target.url.starts_with("https://"))
-        {
-            mtls.as_ref().unwrap_or(&default_tls)
-        } else {
-            &default_tls
-        };
-        upstream_clients.insert(name.clone(), build_hyper_client(timeout, tls)?);
+        let tls =
+            if upstream.targets.iter().any(|target| {
+                target.url.starts_with("https://") || target.url.starts_with("wss://")
+            }) {
+                mtls.as_ref().unwrap_or(&default_tls)
+            } else {
+                &default_tls
+            };
+        let protocols = upstream
+            .transport
+            .as_ref()
+            .map_or(&[][..], |value| &value.protocols);
+        let http1 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http1);
+        let http2 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http2);
+        let http = build_hyper_client(timeout, tls, http1, http2)?;
+        let mut websocket_tls = tls.clone();
+        // RFC 6455 section 4: this proxy uses HTTP/1.1 Upgrade, never h2 CONNECT.
+        websocket_tls.alpn_protocols = vec![b"http/1.1".to_vec()];
+        upstream_clients.insert(
+            name.clone(),
+            PreparedTransport {
+                http,
+                websocket_tls: Arc::new(websocket_tls),
+                connect_timeout: timeout,
+                http1,
+            },
+        );
     }
-    let mut clients = HashMap::new();
+    let mut services = HashMap::new();
     for (name, service) in &config.compiled.http.services {
         let ServiceNode::LoadBalancer { upstream, .. } = service else {
             continue;
@@ -149,9 +177,9 @@ pub(super) fn prepare(
                 service: name.clone(),
             }
         })?;
-        clients.insert(name.clone(), client.clone());
+        services.insert(name.clone(), client.clone());
     }
-    Ok(PreparedTransports { clients })
+    Ok(PreparedTransports { services })
 }
 
 fn connect_timeout(
@@ -190,20 +218,28 @@ fn default_tls_config() -> Result<ClientConfig, TransportPreparationError> {
 fn build_hyper_client(
     timeout: Duration,
     tls: &ClientConfig,
+    http1: bool,
+    http2: bool,
 ) -> Result<HyperClient, TransportPreparationError> {
     if !tls.alpn_protocols.is_empty() {
         return Err(TransportPreparationError::Alpn);
     }
     let mut connector = HttpConnector::new();
     connector.enforce_http(false);
-    let https = HttpsConnectorBuilder::new()
+    let builder = HttpsConnectorBuilder::new()
         .with_tls_config(tls.clone())
-        .https_or_http()
-        .enable_http1()
-        .enable_http2()
-        .wrap_connector(connector);
+        .https_or_http();
+    let https = match (http1, http2) {
+        (true, true) => builder
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(connector),
+        (true, false) => builder.enable_http1().wrap_connector(connector),
+        (false, _) => builder.enable_http2().wrap_connector(connector),
+    };
     // The gateway executor owns replay eligibility and per-attempt signing.
     Ok(Client::builder(TokioExecutor::new())
+        .http2_only(!http1)
         .retry_canceled_requests(false)
         .build(DeadlineConnector::new(https, timeout)))
 }
