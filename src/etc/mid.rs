@@ -1,5 +1,6 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::ext::RequestExt;
+use crate::etc::headers::retry_after_header_value;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -50,14 +51,10 @@ pub async fn rate_limit_middleware(mut req: Request, next: Next) -> Response {
         );
         response.map(|body| crate::etc::gate::retain_runtime(body, runtime))
     } else {
-        let retry_after = decision
-            .retry_after
-            .unwrap_or(std::time::Duration::from_secs(60));
-        let retry_after = chrono::Duration::from_std(retry_after).unwrap();
-        let retry_after_str = tools::duration_to_string(&retry_after);
+        let retry_after = retry_after_header_value(decision.retry_after);
 
         let mut err = ErrorResponse::new(ErrorCode::GatewayRateLimitExceeded);
-        err.insert_header("Retry-After", &retry_after_str)
+        err.insert_header("Retry-After", &retry_after)
             .insert_header("X-RateLimit-Limit", &limit)
             .insert_header("X-RateLimit-Remaining", &remaining);
         err.into_response()

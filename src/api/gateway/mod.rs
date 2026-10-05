@@ -20,6 +20,8 @@ mod replay;
 #[cfg(test)]
 mod replay_tests;
 mod responses;
+#[cfg(all(test, feature = "memory"))]
+mod retry_after_tests;
 mod routing;
 mod types;
 mod ws;

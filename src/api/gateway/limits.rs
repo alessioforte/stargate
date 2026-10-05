@@ -1,6 +1,7 @@
 use crate::act::orgs::OrgLimitOverrides;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::gate::RuntimeSnapshot;
+use crate::etc::headers::retry_after_header_value;
 use crate::etc::limits::{attribute_name, configuration_error, validate_limit};
 use crate::etc::{sub::Subject, telemetry};
 use ::http::{HeaderMap, HeaderName, HeaderValue};
@@ -59,17 +60,10 @@ pub(super) async fn apply_ingress_limit(
     }
     telemetry::record_gateway_policy("ingress", "denied");
     telemetry::record_gateway_rejection("ingress");
-    let retry = decision
-        .retry_after
-        .unwrap_or(std::time::Duration::from_secs(60));
-    // RFC 9110 section 10.2.3: delay-seconds is a nonnegative decimal integer.
-    let retry_seconds = retry
-        .as_secs()
-        .saturating_add(u64::from(retry.subsec_nanos() > 0))
-        .max(1);
+    let retry_after = retry_after_header_value(decision.retry_after);
     let mut error = ErrorResponse::new(ErrorCode::GatewayIngressRateLimitExceeded);
     error
-        .insert_header("Retry-After", &retry_seconds.to_string())
+        .insert_header("Retry-After", &retry_after)
         .insert_header("X-RateLimit-Limit", &decision.limit.to_string())
         .insert_header("X-RateLimit-Remaining", &decision.remaining.to_string())
         .insert_header("X-RateLimit-Scope", "ingress");
@@ -350,10 +344,7 @@ fn limited_response(
     code: ErrorCode,
     header_prefix: &str,
 ) -> ErrorResponse {
-    let retry_after = decision
-        .retry_after
-        .unwrap_or(std::time::Duration::from_secs(60));
-    let retry_after = retry_after_header_value(retry_after);
+    let retry_after = retry_after_header_value(decision.retry_after);
     let mut response = ErrorResponse::new(code);
     response
         .insert_header("retry-after", &retry_after)
@@ -438,21 +429,6 @@ fn select_limits(
         rate_limit_name,
         quota_name,
     })
-}
-
-fn retry_after_header_value(retry_after: std::time::Duration) -> String {
-    let retry_after = match chrono::Duration::from_std(retry_after) {
-        Ok(retry_after) => retry_after,
-        Err(error) => {
-            tracing::warn!(
-                error = ?error,
-                "Retry-After duration overflowed chrono::Duration; defaulting to zero"
-            );
-            chrono::Duration::default()
-        }
-    };
-
-    tools::duration_to_string(&retry_after)
 }
 
 #[cfg(test)]

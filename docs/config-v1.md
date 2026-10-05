@@ -816,6 +816,15 @@ Quota is selected independently from rate limiting. A router `quota` policy or
 subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
 limit and quota are selected, both checks run.
 
+Ingress, resource rate/quota, and IAM/admin `429` responses emit `Retry-After`
+as nonnegative decimal seconds, following
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3).
+Any fractional second rounds upward: `0s` → `0`, `500ms` → `1`, `1.001s` → `2`,
+and `60s` → `60`. If the limiter supplies no retry duration, the delay is `60`
+seconds. The response keeps its applicable `X-RateLimit-*` or `X-Quota-*` headers.
+`503` responses, including gateway overload, retain a `10`-second `Retry-After`.
+Configuration durations continue to use their normal unit-bearing format.
+
 Selected subject and organization override names are validated against the
 request's pinned runtime before any resource rate or quota bucket is charged.
 Unknown names, incompatible strategies, and malformed selected attributes return

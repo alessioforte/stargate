@@ -248,7 +248,12 @@ impl axum::response::IntoResponse for ErrorResponse {
             .header(CONTENT_TYPE, "application/json");
 
         if self.status == StatusCode::SERVICE_UNAVAILABLE {
-            builder = builder.header(RETRY_AFTER, "10");
+            builder = builder.header(
+                RETRY_AFTER,
+                crate::etc::headers::retry_after_header_value(Some(
+                    std::time::Duration::from_secs(10),
+                )),
+            );
         }
 
         for (key, value) in &self.headers {

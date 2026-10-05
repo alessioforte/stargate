@@ -101,6 +101,12 @@ Ingress throttling includes integer-second `Retry-After`, `X-RateLimit-Limit`,
 leaves response limit headers to the selected resource policies. Probes bypass
 both ingress admission and IAM rate-limit middleware.
 
+All ingress, resource rate/quota, and IAM/admin `429` responses use decimal
+seconds in `Retry-After`, rounding fractional seconds upward; a missing limiter
+duration defaults to `60` seconds. Rate/quota metadata is retained. All `503`
+errors, including gateway overload, retain their `10`-second delay. See
+[rate and quota policies](config-v1.md#policies) for the header contract.
+
 Request-body failures and `gateway.request_preparation_failed` (500), including
 invalid upstream URIs and internal-context failures, stop dispatch without
 failover or upstream-health penalties. Eligible operations may fail over on

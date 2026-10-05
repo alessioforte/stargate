@@ -700,6 +700,13 @@ HTTP codes currently used include: 400, 401, 403, 404, 409, 413, 429, 500, 502, 
 
 `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-quota-limit`, `x-quota-remaining`, `retry-after`
 
+Ingress, resource rate/quota, and IAM/admin `429` responses use decimal seconds
+in `retry-after`, rounded upward for any fractional second (`500ms` → `1`,
+`1.001s` → `2`, `60s` → `60`; zero stays `0`). A missing limiter retry duration
+defaults to `60` seconds. HTTP formatting preserves the full `std::time::Duration`
+range without a Chrono conversion; configuration durations still use units.
+`503` responses, including gateway overload, retain their `10`-second delay.
+
 ## Graceful Shutdown
 
 SIGTERM/SIGINT -> disable readiness -> wait `SERVER_DRAIN_DELAY_SECS` (5s) ->
