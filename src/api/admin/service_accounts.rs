@@ -4,7 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::msg::{MessageCode, MessageResponse};
+use crate::etc::http::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -250,7 +250,7 @@ pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorR
     let revoked_key_hashes = crate::db::delete_service_account(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
-    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
 
     Ok(Json(MessageResponse::new(MessageCode::ServiceAccountDeleted)).into_response())
 }

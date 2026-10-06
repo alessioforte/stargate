@@ -64,8 +64,8 @@ pub(super) fn extract_basic_client_credentials(
         return Err(oauth_invalid_client("invalid basic client authentication"));
     };
 
-    let client_id = crate::etc::ext::percent_decode(client_id);
-    let client_secret = crate::etc::ext::percent_decode(client_secret);
+    let client_id = crate::etc::http::request::percent_decode(client_id);
+    let client_secret = crate::etc::http::request::percent_decode(client_secret);
     if client_id.trim().is_empty() || client_secret.is_empty() {
         return Err(oauth_invalid_client("invalid basic client authentication"));
     }

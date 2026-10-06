@@ -63,7 +63,7 @@ fn scope_set(scope: Option<&str>) -> Result<HashSet<String>, ErrorResponse> {
 }
 
 async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>), ErrorResponse> {
-    let claims = crate::etc::jwt::jwt_config()
+    let claims = crate::etc::auth::jwt::jwt_config()
         .validate_oauth_access_token(token, None)
         .map_err(|_| bearer_unauthorized("invalid token"))?;
 

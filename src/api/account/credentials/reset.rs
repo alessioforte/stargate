@@ -2,8 +2,8 @@ use super::ChangePasswordRequestBody;
 use crate::act;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
-use crate::etc::msg::{MessageCode, MessageResponse};
-use crate::etc::reqctx::audit_request_from;
+use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::etc::request_context::audit_request_from;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
@@ -35,7 +35,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         })?;
 
     let token = body.token.clone();
-    let claims = etc::jwt::jwt_config()
+    let claims = etc::auth::jwt::jwt_config()
         .validate_token(&token)
         .map_err(|_| ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid))?;
 
@@ -64,7 +64,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
             ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
         })?;
 
-    let password = crate::etc::pw::hash_password(body.password.clone())
+    let password = crate::etc::auth::password::hash_password(body.password.clone())
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 

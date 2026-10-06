@@ -19,7 +19,7 @@ use axum::extract::Query;
 pub async fn get_signup(
     Query(query): Query<SignupVerificationParams>,
 ) -> Result<Json<EmailVerificationResponse>, ErrorResponse> {
-    let jwt_cfg = crate::etc::jwt::jwt_config();
+    let jwt_cfg = crate::etc::auth::jwt::jwt_config();
     let claim = jwt_cfg.validate_token(&query.token).map_err(|error| {
         ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
     })?;

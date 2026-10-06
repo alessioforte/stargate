@@ -30,6 +30,9 @@ signer is available.
 | `INTERNAL_CONTEXT_TTL_SECS` | Normally 30; maximum 60 |
 | `INTERNAL_CONTEXT_CLOCK_SKEW_SECS` | Normally 5; maximum 30 |
 | `INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS` | Published JWKS cache age; normally 60 |
+| `INTERNAL_CONTEXT_SIGNING_WORKERS` | Fixed CPU workers; default 2, range 1–64 |
+| `INTERNAL_CONTEXT_SIGNING_QUEUE_CAPACITY` | Maximum waiting jobs; default 32, range 1–4,096 |
+| `INTERNAL_CONTEXT_SIGNING_QUEUE_TIMEOUT_MS` | Deadline to start signing; default 50 ms, range 1–60,000 |
 
 ## Initial key generation
 
@@ -75,7 +78,8 @@ path, audience, key id, and all decoded claims.
 | Instrument | Type | Purpose |
 | --- | --- | --- |
 | `stargate.gateway.internal_context.issues` | Counter | Issuance/preparation outcomes |
-| `stargate.gateway.internal_context.signing.duration` | Histogram in milliseconds | RS256 signing time when signing was attempted |
+| `stargate.gateway.internal_context.signing.duration` | Histogram in milliseconds | RS256 worker execution time, excluding queue wait |
+| `stargate.gateway.internal_context.queue.duration` | Histogram in milliseconds | Queue wait for jobs that started, labeled by service and dispatch kind |
 | `stargate.gateway.internal_context.token.size` | Histogram in bytes | Compact token size when a token was produced |
 | `stargate.config.reloads` | Counter | Gateway configuration reload outcome, including preflight rejection |
 
@@ -86,10 +90,11 @@ Internal-context instruments use only these bounded dimensions:
   failure before a dispatch kind is available;
 - `stargate.outcome`: `success` or `failure`; and
 - `stargate.reason`: `none`, `draft`, `runtime`, `sanitization`, `trace`,
-  `binding`, `claims`, `time`, `signing`, `size`, `header`, or `attempt`.
+  `binding`, `claims`, `time`, `signing`, `size`, `header`, `attempt`,
+  `signing_queue_full`, `signing_queue_timeout`, or `signing_workers_unavailable`.
 
 Successful issuance emits a debug event with logical service, dispatch kind,
-signing duration, and token byte size. Failure emits a warning with the same
+signing duration, queue wait, and token byte size. Failure emits a warning with the same
 safe fields that exist at the point of failure. Neither event contains the
 compact token, payload, actor, organization, request path, audience, or key id.
 
@@ -188,6 +193,8 @@ configuration reload:
 cargo test --features edge reload_candidate_failure_occurs_before_activation
 cargo test --features edge issuance_failure_contacts_no_upstream
 cargo test --features edge internal_context_failure_never_fails_over
+python3 benches/scripts/benchmark_gateway.py --verify --seconds 3 --runs 3 --output /tmp/gateway-verification.json
+python3 benches/scripts/benchmark_gateway_backends.py --verify --output /tmp/backend-verification.json
 ```
 
 The drill proves:
@@ -195,6 +202,22 @@ The drill proves:
 - an invalid candidate fails preflight before graph activation;
 - signing/preparation failure sends no request to the selected upstream; and
 - an internal-context failure does not advance to an unsigned failover.
+
+The opt-in script checks add simultaneous reload, TLS file rejection/recovery,
+failover, mirror pressure, live HTTP/WebSocket traffic, disconnect, and shutdown.
+They verify separate header/body lifetime metrics and zero retained gateway
+resources. The backend script uses only its disposable localhost Docker stores
+and checks actual Redis admission, rate/quota charging, and failure recovery.
+See [gateway-performance.md](gateway-performance.md) for scope and recorded results.
+
+The release tests live in `src/api/gateway/performance/`; Redis gateway
+correctness lives in `src/api/gateway/tests/cluster.rs`, and backend workloads
+live in `src/etc/performance.rs`. The runner selectors above are unchanged.
+Signed dispatch and its tracing target belong to
+`stargate::api::gateway::upstream::internal_context`; attempt spans belong to
+`stargate::api::gateway::upstream::attempt`. Use the current namespaces for
+module-specific log filters. The span names and metric instruments remain
+stable through the gateway/shared-support refactor.
 
 In an environment drill, point a test route at a capture service, then stage a
 mismatched `kid`, private key, or JWKS in a replacement deployment. Confirm the
@@ -233,6 +256,32 @@ Treat compromise as affecting every audience signed by that key.
 
 Deleting only the private-key file does not remove a key already loaded into a
 running process.
+
+## Signing admission
+
+Internal-context dispatch uses a fixed worker pool, initialized on the first
+signed attempt. Worker and queue settings take effect at process startup. RSA
+operations run outside Tokio. The queue has a finite capacity and a deadline to
+start work; full or expired queues return `503 gateway.overloaded`
+with `phase=signing` and a bounded reason, before any network attempt. This local
+failure does not trigger failover or change upstream health. Failed worker startup
+returns the existing preparation error. Monitor the issuance failure reasons and
+`stargate.gateway.rejections{kind=signing}` alongside queue wait.
+
+Cancellation drops the reply receivers, so waiting work is skipped. An RSA
+operation that has already started finishes on its worker; at most the configured
+worker count can be running, and its result is discarded if the request ended.
+Queued jobs retain owned issuance facts, rather than request bodies or admission
+permits. Workers stop when the runtime's sender is dropped; the process runtime
+normally lives until exit. Every accepted attempt still mints its own token,
+including fresh `jti`, after final request sanitization and binding. No tokens are
+cached or shared between attempts.
+
+These defaults protect unrelated I/O but do not establish production capacity.
+Increase workers only with spare CPU and measured tail-latency headroom; increasing
+queue capacity cannot increase signing throughput. See the release gateway
+[performance measurements](gateway-performance.md) for the mixed-traffic evidence,
+resource budgets, and repeatable commands.
 
 ## Signing benchmark baseline
 

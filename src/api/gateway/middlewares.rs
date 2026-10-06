@@ -1,7 +1,7 @@
-use super::{
-    headers::apply_request_headers,
-    path::{add_prefix, normalize_path, path_prefix_matches, strip_prefix},
-    types::RequestState,
+use crate::api::gateway::{
+    request::RequestState,
+    routing::path::{add_prefix, normalize_path, path_prefix_matches, strip_prefix},
+    upstream::headers::apply_request_headers,
 };
 use crate::err::{ErrorCode, ErrorResponse};
 use ::http::Request;

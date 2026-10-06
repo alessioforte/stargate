@@ -56,7 +56,7 @@ pub async fn bootstrap_instance(
             if password.trim().is_empty() {
                 bail!("password must not be empty");
             }
-            let hash = crate::etc::pw::hash_password(password)
+            let hash = crate::etc::auth::password::hash_password(password)
                 .await
                 .context("failed to hash bootstrap password")?;
             let nickname = nickname.unwrap_or_else(|| email.clone());

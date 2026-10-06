@@ -414,6 +414,13 @@ enablement evidence with the responsible deployment or release record.
 removed by request/response header middleware, and cannot be returned by a
 `direct_response` service. Matching is case-insensitive.
 
+Signed HTTP attempts and WebSocket handshakes await a fixed CPU worker pool.
+Its queue capacity/deadline are configured with `INTERNAL_CONTEXT_SIGNING_*`
+environment variables, independently from the gateway YAML. Full/expired queues
+return local `503 gateway.overloaded` (`phase=signing`) without failover or
+upstream health changes. See [signing admission](internal-context-operations.md#signing-admission)
+and the [performance report](gateway-performance.md) for defaults and measurements.
+
 The signer is configured independently from OAuth/OIDC keys:
 
 ```bash
@@ -718,11 +725,31 @@ connections are cancelled, and tracked gateway tasks are drained before hooks.
 
 `stargate.gateway.resources.active` is an up/down counter with only `kind`:
 `primary` (requests/sessions), `mirror` (reserved slots/tasks), and `replay_memory`
-(reserved bytes). `stargate.gateway.rejections` uses the same bounded capacity
-labels; `stargate.gateway.timeouts` uses bounded phase labels (`total`, `upload`,
+(reserved bytes). All three return to zero after gateway work drains.
+`stargate.gateway.rejections` uses bounded `kind` labels: `primary`,
+`replay_memory`, `ingress`, and `signing`.
+`stargate.gateway.timeouts` uses bounded phase labels (`total`, `upload`, `ingress`,
 `connect`, `response_headers`, `response_body`, `disposal`,
 `websocket_handshake`, `websocket_idle`). None contain URLs, credentials, or
 request IDs.
+
+`stargate.gateway.duration` and `stargate.gateway.upstream.duration` end at
+response headers. The upstream instrument includes dispatch preparation and
+signing. `stargate.gateway.transfer.duration` records milliseconds until each
+upload, downstream body, or accepted WebSocket completes or terminates. Its only
+labels are `phase` (`upload`, `response_body`, `websocket`) and
+`stargate.outcome` (`complete`, `error`, `timeout`, `cancelled`, `dropped`). Each
+guarded downstream body is recorded once, including empty bodies; a dropped client body
+and process cancellation are separate outcomes. Body lifetime starts when the
+response wrapper is created, so it is a separate phase, not the end-to-end
+duration. WebSocket lifetime starts after the upstream handshake.
+Local errors returned before a response wrapper is created have header latency only.
+
+`stargate.config.reloads` uses `stargate.config_kind` (`gateway_config`,
+`policies`) and bounded `stargate.outcome` (`success`, `error`,
+`transport_error`, `internal_context_error`). Preparation failures retain the
+current snapshot; repaired TLS files can activate on a later reload. No metric
+label contains a file path, target URL, token, or request ID.
 
 `stargate.gateway.response.disposals` counts completed disposal outcomes;
 `stargate.gateway.response.disposal.bytes` and

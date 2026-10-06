@@ -8,7 +8,14 @@ mod etc;
 mod fun;
 
 use crate::etc::{
-    cors, gate, geoip, headers, internal_context, jwt, log, logo, profile, run, store, tls,
+    auth::jwt,
+    gate,
+    http::{cors, headers},
+    internal_context,
+    observability::logging,
+    request_context::geoip,
+    server::{self, banner, profile, tls},
+    store,
 };
 
 use axum::Extension;
@@ -29,7 +36,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 pub async fn run() -> std::io::Result<()> {
-    println!("{}", logo::LOGO);
+    println!("{}", banner::LOGO);
 
     dotenv().ok();
     tls::install_crypto_provider();
@@ -39,15 +46,15 @@ pub async fn run() -> std::io::Result<()> {
         if command.is_standalone() {
             return cli::run_cli_command(command).await;
         }
-        let guard = log::init();
-        etc::pw::init();
+        let guard = logging::init();
+        etc::auth::password::init();
         let result = cli::run_cli_command(command).await;
         guard.shutdown();
         return result;
     }
 
-    let guard = log::init();
-    etc::pw::init();
+    let guard = logging::init();
+    etc::auth::password::init();
 
     let version = env!("CARGO_PKG_VERSION");
     let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
@@ -81,12 +88,12 @@ pub async fn run() -> std::io::Result<()> {
     aud::spawn()?;
 
     let gate = gate::init().map_err(std::io::Error::other)?;
-    let lifecycle = etc::health::Lifecycle::default();
+    let lifecycle = etc::server::health::Lifecycle::default();
 
     let app = api::server_router(lifecycle.clone())
         .layer(Extension(Arc::clone(&gate)))
         .layer(from_fn(headers::security_headers_middleware))
-        .layer(from_fn(log::trace_middleware))
+        .layer(from_fn(logging::trace_middleware))
         .layer(cors::hyper_configure())
         .layer(CompressionLayer::new())
         .layer(NormalizePathLayer::trim_trailing_slash());
@@ -108,9 +115,9 @@ pub async fn run() -> std::io::Result<()> {
     info!("Server listening on {}", addr);
 
     let result = if tls_enabled {
-        run::tls(app, addr, shutdown, shutdown_timeout_secs).await
+        server::tls(app, addr, shutdown, shutdown_timeout_secs).await
     } else {
-        run::plain(app, addr, shutdown, shutdown_timeout_secs).await
+        server::plain(app, addr, shutdown, shutdown_timeout_secs).await
     };
 
     info!("Server stopped, running shutdown hooks...");

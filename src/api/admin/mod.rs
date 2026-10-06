@@ -15,10 +15,10 @@ pub mod sessions;
 pub mod users;
 
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::ext::RequestExt;
-use crate::etc::jwt::jwt_config;
-use crate::etc::reqctx::{audit_request_from, take_trusted_audit_context_from};
-use crate::etc::sub::Subject;
+use crate::etc::auth::jwt::jwt_config;
+use crate::etc::auth::subject::Subject;
+use crate::etc::http::request::RequestExt;
+use crate::etc::request_context::{audit_request_from, take_trusted_audit_context_from};
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
@@ -147,7 +147,7 @@ async fn resolve_authorization(
                     let store = crate::etc::store::use_store();
                     let session = store.get::<Subject>(&sid).await.unwrap_or(None);
                     if let Some(subject) = session.as_ref()
-                        && subject.sub_type == crate::etc::sub::SubjectType::User
+                        && subject.sub_type == crate::etc::auth::subject::SubjectType::User
                         && claims.sub_id.as_deref() == Some(subject.id.as_str())
                     {
                         match crate::act::sessions::ensure_session_registered(
@@ -543,7 +543,7 @@ mod tests {
         TrustedAuditRequest,
     };
 
-    use crate::etc::reqctx::RequestContext;
+    use crate::etc::request_context::RequestContext;
 
     use super::{AuditRouteBoundary, install_audit_context};
 

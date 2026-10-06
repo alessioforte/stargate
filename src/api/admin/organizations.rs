@@ -4,7 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::msg::{MessageCode, MessageResponse};
+use crate::etc::http::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -274,7 +274,7 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
     let revoked_key_hashes = crate::db::delete_organization(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
-    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
     crate::act::orgs::invalidate(&id).await;
 
     for member in &members {

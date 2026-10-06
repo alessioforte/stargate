@@ -12,7 +12,7 @@ pub fn server_drain_delay_secs() -> u64 {
 
 pub async fn drain_on_shutdown(
     signal: impl std::future::Future<Output = ()>,
-    lifecycle: crate::etc::health::Lifecycle,
+    lifecycle: crate::etc::server::health::Lifecycle,
     delay: std::time::Duration,
 ) {
     signal.await;
@@ -64,7 +64,7 @@ pub fn shutdown_signal() -> std::io::Result<impl std::future::Future<Output = ()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::etc::health::Lifecycle;
+    use crate::etc::server::health::Lifecycle;
     use std::time::Duration;
     use tokio::time::Instant;
 

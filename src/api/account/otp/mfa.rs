@@ -4,7 +4,7 @@ use crate::act::otp::types::{
     MfaVerificationResponse, OtpChallengeResponse,
 };
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::ext::RequestExt;
+use crate::etc::http::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Path, Request};
 

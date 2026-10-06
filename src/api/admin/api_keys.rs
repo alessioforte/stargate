@@ -4,7 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::msg::{MessageCode, MessageResponse};
+use crate::etc::http::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};

@@ -5,7 +5,7 @@ use super::shared::{
     resolve_audience, resolve_scopes, scope_contains,
 };
 use crate::err::OAuthErrorResponse;
-use crate::etc::ext::RequestExt;
+use crate::etc::http::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Query, Request};
 use axum::http::StatusCode;
@@ -244,7 +244,7 @@ async fn current_authorized_user(token: Option<String>) -> OAuthResult<Option<Au
         return Ok(None);
     };
 
-    let claims = match crate::etc::jwt::jwt_config().validate_session_access_token(&token) {
+    let claims = match crate::etc::auth::jwt::jwt_config().validate_session_access_token(&token) {
         Ok(claims) => claims,
         _ => return Ok(None),
     };
@@ -260,14 +260,14 @@ async fn current_authorized_user(token: Option<String>) -> OAuthResult<Option<Au
         return Ok(None);
     };
     let Some(subject) = crate::etc::store::use_store()
-        .get::<crate::etc::sub::Subject>(sid)
+        .get::<crate::etc::auth::subject::Subject>(sid)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(None);
     };
 
-    if subject.sub_type != crate::etc::sub::SubjectType::User {
+    if subject.sub_type != crate::etc::auth::subject::SubjectType::User {
         return Ok(None);
     }
 

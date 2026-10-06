@@ -5,7 +5,7 @@ use super::shared::{
     resolve_client_credentials_parts,
 };
 use crate::err::OAuthErrorResponse;
-use crate::etc::reqctx::{audit_request_from, take_trusted_audit_context_from};
+use crate::etc::request_context::{audit_request_from, take_trusted_audit_context_from};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
@@ -314,7 +314,7 @@ async fn introspect_token(token: &str) -> OAuthResult<IntrospectionResponse> {
 }
 
 fn validate_introspectable_jwt(token: &str) -> Result<jwt::Claims, jwt::JwtValidationError> {
-    let jwt = crate::etc::jwt::jwt_config();
+    let jwt = crate::etc::auth::jwt::jwt_config();
     jwt.validate_oauth_access_token(token, None)
         .or_else(|_| jwt.validate_session_access_token(token))
         .or_else(|_| jwt.validate_session_refresh_token(token))

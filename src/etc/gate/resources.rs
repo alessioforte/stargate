@@ -1,6 +1,6 @@
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::telemetry,
+    etc::observability::telemetry,
 };
 use gate::cfg::ProcessBudgets;
 use std::sync::{Arc, Mutex};
@@ -91,6 +91,11 @@ impl ProcessResources {
 
     pub async fn wait(&self) {
         self.tasks.wait().await;
+    }
+
+    #[cfg(all(test, feature = "memory"))]
+    pub fn tracked_tasks(&self) -> usize {
+        self.tasks.len()
     }
 
     #[cfg(test)]

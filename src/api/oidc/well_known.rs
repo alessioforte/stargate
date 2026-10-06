@@ -1,5 +1,5 @@
 use crate::err::ErrorResponse;
-use crate::etc::jwt::jwt_config;
+use crate::etc::auth::jwt::jwt_config;
 use axum::Json;
 use axum::response::IntoResponse;
 use http::HeaderMap;

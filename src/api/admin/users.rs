@@ -5,7 +5,7 @@ use super::{
 use crate::act::PendingSignupProfile;
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::msg::{MessageCode, MessageResponse};
+use crate::etc::http::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -392,7 +392,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
     })?;
 
-    let hashed = crate::etc::pw::hash_password(payload.password.clone())
+    let hashed = crate::etc::auth::password::hash_password(payload.password.clone())
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
     let profile = Profile::new(payload.email.clone(), nickname)
@@ -699,7 +699,7 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
 
     // Kill everything that could still authenticate as this user: cached
     // subjects of the just-revoked keys, and every live session.
-    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
     if let Err(error) = crate::act::sessions::revoke_all_sessions(&id).await {
         tracing::error!(user_id = %id, "failed to revoke sessions after user delete: {error}");
     }
@@ -903,7 +903,7 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
     // The membership is gone: org-bound keys were revoked in the same
     // transaction (purge their cached subjects), and sessions acting in
     // this org die now. Org-less and other-org sessions survive.
-    crate::etc::guard::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
     if let Err(error) = crate::act::sessions::revoke_org_sessions(&user_id, &org_id).await {
         tracing::error!(
             user_id = %user_id,

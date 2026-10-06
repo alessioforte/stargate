@@ -124,7 +124,7 @@ fn issue_client_credentials_token(
     scopes: &[String],
     audience: Option<String>,
 ) -> OAuthResult<TokenResponse> {
-    let jwt = crate::etc::jwt::jwt_config();
+    let jwt = crate::etc::auth::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let claims =
         oidc::claims::client_credentials_access_claims(&client.client_id, scope.clone(), audience);
@@ -259,7 +259,7 @@ fn issue_user_token_response(
     nonce: Option<String>,
     refresh_token: Option<String>,
 ) -> OAuthResult<TokenResponse> {
-    let jwt = crate::etc::jwt::jwt_config();
+    let jwt = crate::etc::auth::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let profile = user_claims_profile(user);
     let access_claims = oidc::claims::user_access_claims(
@@ -346,7 +346,7 @@ async fn issue_authorization_code_token(
 }
 
 fn refresh_token_ttl_secs() -> u64 {
-    crate::etc::jwt::jwt_config()
+    crate::etc::auth::jwt::jwt_config()
         .refresh_exp
         .as_seconds_f64()
         .max(1.0) as u64

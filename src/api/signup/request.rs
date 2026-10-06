@@ -1,9 +1,8 @@
 use super::SignupRequestBody;
 use crate::{
-    act,
-    act::PendingSignupProfile,
+    act::{self, PendingSignupProfile},
     err::{ErrorCode, ErrorResponse},
-    etc::msg::{MessageCode, MessageResponse},
+    etc::http::messages::{MessageCode, MessageResponse},
     fun::signup_url,
 };
 use axum::Json;
@@ -55,7 +54,7 @@ pub(crate) async fn send_signup_request(
         .sid(sid.clone())
         .email(profile.email.clone());
 
-    let token = crate::etc::jwt::jwt_config()
+    let token = crate::etc::auth::jwt::jwt_config()
         .generate_token(&claim)
         .map_err(ErrorResponse::internal)?;
 

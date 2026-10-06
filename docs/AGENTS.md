@@ -22,7 +22,7 @@ stargate/
 │   ├── cli/           # Admin CLI (bootstrap super-admin)
 │   ├── db/            # DB pool init (feature-gated postgres/sqlite)
 │   ├── err/           # HTTP error types -> JSON responses (axum IntoResponse)
-│   ├── etc/           # Config, CORS, GeoIP, JWT, TLS, guards, middleware, reqctx, proxy utils
+│   ├── etc/           # Shared auth, HTTP, request context, observability, server, gateway/runtime support
 │   └── fun/           # Business logic (token gen, name format, super-admin)
 ├── crates/
 │   ├── ace/           # Access Control Engine (ABAC policy evaluation)
@@ -47,6 +47,7 @@ stargate/
 ├── docs/              # Config docs, including config-v1.md
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks
+    └── scripts/       # Isolated gateway and backend benchmark/verification runners
 ```
 
 ## Key Architecture
@@ -63,12 +64,44 @@ stargate/
 - **OpenAPI**: utoipa + utoipa-axum + utoipa-swagger-ui
 - **Observability**: tracing + tracing-subscriber + tracing-appender
 
+### Shared Support (`src/etc/`)
+
+- `auth/`: access control, subjects, session JWT configuration, and password
+  helpers. `identity.rs` owns verified facts and auth-scoped validated
+  constructors; `verification.rs` owns credential and backing-state checks.
+- `http/`: request extraction, trusted proxies, origins/CORS, security and retry
+  headers, IAM/admin rate limiting, and successful message envelopes.
+- `request_context/`: the root captures metadata, owns ingress headers, and
+  caches GeoIP lazily. `propagation.rs` owns immutable signed-context drafts
+  and dispatch binding; `adapters.rs` projects audit/authorization facts.
+- `observability/`: logging/subscriber setup and one telemetry provider
+  lifecycle. `telemetry/propagation.rs` handles trace headers/span linkage;
+  `telemetry/metrics.rs` owns instruments and recording. Initialize
+  logging/telemetry before request use.
+- `server/`: incoming connections, listener TLS, health lifecycle/probes,
+  profile validation, and the startup banner. Outgoing TLS remains in `gate`.
+- `gate/`: initialization/exports, `config.rs` preparation/files, `runtime.rs`
+  atomic snapshot activation, `reload.rs` file watchers, `body.rs` snapshot
+  retention, and prepared outgoing `transport/`. Shared watcher mechanics
+  remain singular, with distinct gateway/policy failure deduplication.
+- `internal_context/`: signer runtime/issuance at the root, typed environment
+  loading in `settings.rs`, key/JWKS validation in `material.rs`, and the
+  existing bounded workers in `signing.rs`. Session JWT stays separate.
+- `store/`: the root exports the selected profile interface; `memory.rs` owns
+  restoration/persistence and `redis.rs` owns initialization/readiness.
+- `env.rs`, `input.rs`, `limits.rs`, and `time.rs`: focused shared helpers at
+  the root. `performance.rs` is a Redis-gated test-only backend workload.
+
+Callers use these domains directly; the former abbreviated flat module paths
+have no compatibility aliases. Private-helper tests stay under their owning
+module; shared fixtures remain test-only.
+
 ### Gateway Runtime (`src/api/gateway/mod.rs`)
 
 Mounted as Axum `fallback_service`. Current request flow:
 1. Load application `Gate` from request extensions and pin its `RuntimeSnapshot`
-   plus the independent ACE engine/revision pair, then acquire shared process
-   admission before authentication.
+   plus the independent `PolicySnapshot` (ACE engine/revision), then acquire
+   shared process admission before authentication.
 2. Resolve the client IP with the trusted-proxy rules and check the required
    `ingress.limit` in its dedicated IP bucket, bounded by `ingress.timeout`
    (default `250ms`). Return `429` on denial or `503` on store failure/timeout
@@ -77,6 +110,8 @@ Mounted as Axum `fallback_service`. Current request flow:
 3. Match the request against compiled v1 routers, sorted by descending priority.
 4. Apply route middlewares: path rewrite, preserve host, request/response header transforms.
 5. Apply selected policies in fixed runtime order: auth, access control, rate limit, quota.
+   Policy execution reads graph/engine/revision from the pinned snapshots. After
+   success, capture trusted propagation facts with the existing `ctx::RouteContext`.
 6. Build an execution tree retaining each service's failover rules and mirrors.
    Weighted choices and mirror sampling are deterministic for the request seed;
    upstream selection waits until execution enters a leaf.
@@ -92,23 +127,60 @@ Mounted as Axum `fallback_service`. Current request flow:
 8. Execute HTTP, WebSocket, or direct response and apply gateway/response headers.
 
 Gateway modules:
-- `routing.rs`: router and matcher evaluation.
-- `middlewares.rs`: path and header transform application.
-- `policies.rs`: auth, ACE, rate limit, quota policy execution.
-- `planner.rs`: service graph expansion into an execution plan.
-- `executor.rs`: upstream/direct-response execution, mirror dispatch, failover execution.
-- `disposal.rs`: frame-by-frame disposal of discarded responses, bounded by
-  configurable data and absolute time budgets (defaults 64 KiB / 250 ms),
-  capped by the remaining request/mirror budget, with completion metrics.
-- `dispatch.rs`: shared internal-context sanitization, trace injection, and per-attempt signing boundary.
-- `replay.rs`: upload-idle enforcement and shared replay storage reservations.
-- `lifecycle.rs`: absolute execution budgets and guarded streaming bodies.
+- `mod.rs`: public `service` signature and error-to-response boundary.
+- `request.rs`: pinned request orchestration and `RequestState`; middleware,
+  policy, planning, and response order remain explicit.
+- `authentication.rs`: body-free credential adapter.
+- `middlewares.rs`: configured path and header transforms.
+- `routing/mod.rs` and `routing/path.rs`: ordered matcher evaluation and path
+  handling. Header/path values borrow where possible, host comparison avoids
+  temporary lowercase copies, and compiled source-IP networks are reused.
+- `policies/mod.rs`: auth/ACE and selected policy execution;
+  `policies/ingress.rs` owns pre-authentication IP admission, and
+  `policies/limits.rs` owns subject/org rate and quota checks.
+- `execution/mod.rs`: recursive plan traversal and nested failover/mirror
+  boundaries. `execution/plan.rs` owns planning and plan/error types;
+  `execution/replay.rs` owns eligibility, unsigned replay data, upload-idle
+  enforcement, and shared storage reservations. `execution/mirrors.rs` owns
+  shadow admission/dispatch, and `execution/disposal.rs` bounds discarded
+  response disposal by data/time budgets and the remaining execution budget.
+- `upstream/mod.rs`: one selected upstream/direct-response dispatch and
+  `SelectedService`. `upstream/attempt.rs` owns network attempt numbering,
+  explicit result observations, and live upstream health feedback. Live attempt
+  timing includes dispatch preparation; HTTP replay timing begins afterward.
+  Local preparation errors skip attempt observations, and shadow results cannot
+  change primary health. Protocol labels borrow static strings.
+- `upstream/internal_context.rs`: final sanitization, trace injection, and
+  fresh per-attempt signing. Bounded workers stay in
+  `src/etc/internal_context/signing.rs`; full/expired queues return local 503
+  without failover. `upstream/headers.rs` keeps shared request/protocol header
+  operations singular, and `upstream/http.rs` owns HTTP forwarding.
+- `upstream/websocket/mod.rs`: upgrade orchestration and resource lifetime;
+  `handshake.rs` owns validation, outgoing headers, and DNS/TCP/TLS/Upgrade;
+  `relay.rs` owns frame progress and idle/cancellation handling.
+- `response.rs`: direct responses, final response mutations, gateway header
+  insertion, context-response hygiene, and `ResponseHeaderMutations`.
+- `lifecycle/mod.rs`: absolute execution deadlines/cancellation;
+  `lifecycle/body.rs` owns guarded body progress, permit release, and transfer
+  timers. Header latency stays separate from upload/body/WebSocket lifetime.
 - `src/etc/gate/resources.rs`: process admission, memory permits, and tracked tasks.
-- `headers.rs`, `path.rs`, `responses.rs`, `limits.rs`, `types.rs`: focused helpers and shared types.
-- `http.rs`, `ws.rs`: protocol-specific proxy implementations.
+- `tests/`: gateway-wide ingress, replay/nested execution, lifecycle, and
+  rate-header scenarios. Tests using private helpers stay under their owner,
+  including `upstream/attempt/tests.rs`, WebSocket handshake children, and
+  `lifecycle/body/tests.rs`. Shared fixtures stay test-only; TLS material is
+  exposed through `etc::gate::test_support`, and signing material through
+  `etc::internal_context::test_support`. The root's `IngressPause` export is a
+  memory-profile test fixture for cross-domain pinned-request regressions.
+- `performance/`: opt-in release workloads and combined lifecycle/telemetry
+  verification; `tests/cluster.rs` exercises admission/rate/quota against
+  disposable Redis. Backend workloads live in `src/etc/performance.rs`.
+  Runners are in `benches/scripts/`; measured scope is in
+  `docs/gateway-performance.md`. Their substring selectors remain unchanged.
 
-`src/etc/gate/transport.rs` prepares HTTP clients and fallible rustls/mTLS
-configuration before activation. `crates/gate` exports core `Runtime` data and
+`src/etc/gate/transport/mod.rs` prepares the service/client map;
+`transport/connector.rs` owns HTTP connection deadlines and protocol selection,
+and `transport/tls.rs` validates outgoing rustls/mTLS material before activation.
+`crates/gate` exports core `Runtime` data and
 its `RuntimeBuilder`; the application adds prepared transports and a version,
 then publishes one `ArcSwap<RuntimeSnapshot>`. Routing, policies, limits,
 planning, primary attempts, failovers, mirrors, and health feedback use that
@@ -538,6 +610,9 @@ the same logical outbox columns.
 | `INTERNAL_CONTEXT_JWKS_PATH` | - | Dedicated public internal-context JWKS |
 | `INTERNAL_CONTEXT_TTL_SECS` | 30 | Internal-context token lifetime |
 | `INTERNAL_CONTEXT_CLOCK_SKEW_SECS` | 5 | Consumer clock-skew allowance |
+| `INTERNAL_CONTEXT_SIGNING_WORKERS` | 2 | Fixed CPU signing workers (1–64) |
+| `INTERNAL_CONTEXT_SIGNING_QUEUE_CAPACITY` | 32 | Waiting signing jobs (1–4,096) |
+| `INTERNAL_CONTEXT_SIGNING_QUEUE_TIMEOUT_MS` | 50 | Deadline to start signing (1–60,000 ms) |
 | `INTERNAL_CONTEXT_JWKS_CACHE_MAX_AGE_SECS` | 60 | Published internal JWKS cache max-age |
 | `POSTGRES_ENDPOINT` | - | Postgres host (cluster) |
 | `POSTGRES_USERNAME` | - | Postgres user |
@@ -716,7 +791,7 @@ plain HTTP uses the same tracked Hyper connection loop and drain deadline.
 
 Probe routes are mounted outside authentication and rate limiting. `/livez`
 stays successful while the listener responds, including the shutdown delay.
-Readiness and `/admin/health` share dependency checks in `src/etc/health.rs`,
+Readiness and `/admin/health` share dependency checks in `src/etc/server/health.rs`,
 with concurrent one-second timeouts. Invalid config reloads keep the active
 graph and do not disable readiness; upstreams, SMTP, identity providers,
 telemetry, and audit delivery lag are not readiness dependencies.
@@ -819,6 +894,12 @@ Following the arrows keeps each concern in exactly one place.
 
 ## Current Notes
 
+- Gateway/shared-support organization is complete; see
+  [the refactor plan](gateway-etc-refactor-plan.md) and
+  [final verification](refactoring/gateway-etc/step6.md). Final workspace suites
+  pass 722 edge / 617 cluster tests, with ignore reasons preserved. Real Redis
+  gateway and disposable backend checks pass separately. Local performance
+  comparisons and their host-variability limits are recorded with the results.
 - Request ID: ULID per request, in response header `x-request-id`, in audit logs.
 - Thread-local LRU caches for ACE decisions are version-aware and invalidated on policy change.
 - WebSocket proxying is supported in the gateway via `hyper-tungstenite`.
@@ -833,6 +914,9 @@ Following the arrows keeps each concern in exactly one place.
 - OAuth/OIDC non-redirect errors still use Stargate's generic error envelope rather than full RFC-shaped error bodies.
 - OTP/MFA API modules are intentionally thin Axum/OpenAPI bindings; workflow changes should usually go in `src/act/otp`.
 - Email OTP is currently the only wired account MFA method. TOTP/HOTP and SMS primitives exist in `crates/otp` for future account integrations.
-- Internal-context issuance exports bounded outcome, signing-duration, and
+- Internal-context issuance exports bounded outcome, signing-duration, queue-wait, and
   token-size telemetry. Operations, rotation, recovery, alerts, and the local
   signing benchmark are documented in `docs/internal-context-operations.md`.
+- Final gateway verification uses one deployment profile at a time. The opt-in
+  scripts support `--verify` for combined lifecycle/metrics and disposable Redis
+  correctness checks; raw results are under `docs/performance/step12/`.

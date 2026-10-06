@@ -1,4 +1,4 @@
-use crate::etc::jwt::jwt_config;
+use crate::etc::auth::jwt::jwt_config;
 
 pub struct SessionTokens {
     pub access_token: String,
@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn generated_refresh_token_preserves_session_context() {
-        crate::etc::tls::install_crypto_provider();
+        crate::etc::server::tls::install_crypto_provider();
         let mut claims = jwt::Claims::default()
             .subject("alice@example.com".to_string())
             .sub_id("user-1".to_string())

@@ -62,7 +62,7 @@ pub(crate) async fn maybe_password_expired_response(
         .sub_id(user.id.clone())
         .email(user.email.clone())
         .sid(sid);
-    let reset_token = etc::jwt::jwt_config()
+    let reset_token = etc::auth::jwt::jwt_config()
         .generate_token(&claim)
         .map_err(ErrorResponse::internal)?;
 

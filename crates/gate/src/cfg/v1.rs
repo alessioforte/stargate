@@ -1034,7 +1034,11 @@ fn compile_match_expr(expr: &MatchExpr, path: String) -> Result<MatchExprNode, C
                 ));
             }
             Ok(MatchExprNode::SourceIp(SourceIpPredicate {
-                cidrs: value.cidrs.clone(),
+                networks: value
+                    .cidrs
+                    .iter()
+                    .filter_map(|raw| crate::graph::IpNetwork::parse(raw))
+                    .collect(),
             }))
         }
     }

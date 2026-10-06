@@ -1,8 +1,8 @@
 use crate::act::oauth_state;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
-use crate::etc::jwt::jwt_config;
-use crate::etc::reqctx::audit_request_from;
+use crate::etc::auth::jwt::jwt_config;
+use crate::etc::request_context::audit_request_from;
 use crate::fun::build_jwt_cookie;
 use crate::fun::format_name;
 use axum::Json;
@@ -155,7 +155,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
     })?;
 
     let store = etc::store::use_store();
-    let mut subject = etc::sub::Subject::from(user.clone());
+    let mut subject = etc::auth::subject::Subject::from(user.clone());
     subject.org_id = org.as_ref().map(|org| org.org_id.clone());
     subject.org_role = org.as_ref().map(|org| org.role.clone());
     let refresh_exp = jwt_config().refresh_exp;

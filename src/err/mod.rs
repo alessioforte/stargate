@@ -250,7 +250,7 @@ impl axum::response::IntoResponse for ErrorResponse {
         if self.status == StatusCode::SERVICE_UNAVAILABLE {
             builder = builder.header(
                 RETRY_AFTER,
-                crate::etc::headers::retry_after_header_value(Some(
+                crate::etc::http::headers::retry_after_header_value(Some(
                     std::time::Duration::from_secs(10),
                 )),
             );

@@ -1,6 +1,6 @@
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::telemetry,
+    etc::observability::telemetry,
 };
 use lim::{LimitKind, Limiter, RateLimitError};
 

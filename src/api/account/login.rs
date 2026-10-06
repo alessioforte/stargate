@@ -4,7 +4,7 @@ use crate::api::account::credentials::expired::maybe_password_expired_response;
 use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
 use crate::api::account::session::issue_user_session;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::ext::RequestExt;
+use crate::etc::http::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use axum::response::Response;
@@ -60,9 +60,9 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         // Verify against a dummy hash so the unknown-user path takes about as
         // long as the valid-user path, preventing username enumeration via
         // response timing.
-        let _ = crate::etc::pw::verify_password(
+        let _ = crate::etc::auth::password::verify_password(
             credentials.password.clone(),
-            crate::etc::pw::dummy_hash(),
+            crate::etc::auth::password::dummy_hash(),
         )
         .await;
         login_guard::record_failed_attempt(&throttle)
@@ -76,9 +76,9 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         .map_err(ErrorResponse::internal)?;
 
     let Some(user_credential) = user_credential else {
-        let _ = crate::etc::pw::verify_password(
+        let _ = crate::etc::auth::password::verify_password(
             credentials.password.clone(),
-            crate::etc::pw::dummy_hash(),
+            crate::etc::auth::password::dummy_hash(),
         )
         .await;
         login_guard::record_failed_attempt(&throttle)
@@ -87,9 +87,11 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
     };
 
-    let password_check =
-        crate::etc::pw::check_password(credentials.password.clone(), user_credential.value.clone())
-            .await;
+    let password_check = crate::etc::auth::password::check_password(
+        credentials.password.clone(),
+        user_credential.value.clone(),
+    )
+    .await;
     if !password_check.valid {
         login_guard::record_failed_attempt(&throttle)
             .await
@@ -135,7 +137,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
 /// concurrent logins race-safe.
 fn spawn_credential_rehash(user_id: String, password: String, old_hash: String) {
     tokio::spawn(async move {
-        let Some(new_hash) = crate::etc::pw::hash_password(password).await else {
+        let Some(new_hash) = crate::etc::auth::password::hash_password(password).await else {
             tracing::warn!("credential rehash skipped: hashing failed");
             return;
         };

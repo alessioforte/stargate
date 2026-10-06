@@ -10,7 +10,7 @@ pub fn router() -> axum::Router {
 
     let state = axum::Router::new()
         .route("/oauth/state", post(post_state))
-        .layer(from_fn(crate::etc::origin::trusted_origin_middleware));
+        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware));
 
     axum::Router::new()
         .merge(state)

@@ -34,9 +34,7 @@ fn missing_empty_malformed_and_invalid_der_files_return_typed_errors() {
                 "client" => mtls.client_cert_path = path.clone(),
                 _ => mtls.client_key_path = path.clone(),
             }
-            let error = build_mtls(&mtls)
-                .err()
-                .expect("invalid TLS material was accepted");
+            let error = build_mtls(&mtls).expect_err("invalid TLS material was accepted");
             assert!(matches!(
                 error,
                 TransportPreparationError::ReadFile { .. }

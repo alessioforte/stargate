@@ -72,7 +72,7 @@ pub fn router() -> axum::Router {
             "/account/credentials",
             post(credentials::forgot::post_credentials).put(credentials::reset::put_credentials),
         )
-        .layer(from_fn(crate::etc::origin::trusted_origin_middleware));
+        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware));
 
     axum::Router::new()
         .merge(sensitive)

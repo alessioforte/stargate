@@ -47,5 +47,5 @@ pub fn router() -> axum::Router {
                 .post(request::post_signup)
                 .put(complete::put_signup),
         )
-        .layer(from_fn(crate::etc::origin::trusted_origin_middleware))
+        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware))
 }

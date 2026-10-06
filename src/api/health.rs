@@ -1,4 +1,4 @@
-use crate::etc::health::{Lifecycle, check_dependencies};
+use crate::etc::server::health::{Lifecycle, check_dependencies};
 use axum::{
     Json, Router,
     extract::State,

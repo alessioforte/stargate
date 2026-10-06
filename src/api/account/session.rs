@@ -2,7 +2,7 @@ use super::AuthResponse;
 use crate::act::sessions;
 use crate::err::ErrorResponse;
 use crate::etc;
-use crate::etc::jwt::jwt_config;
+use crate::etc::auth::jwt::jwt_config;
 use crate::fun::{build_jwt_cookie, format_name};
 use axum::Json;
 use axum::response::{IntoResponse, Response};
@@ -16,7 +16,7 @@ pub(crate) async fn issue_user_session(
 ) -> Result<Response, ErrorResponse> {
     let org = sessions::resolve_org_context(&user, requested_org_id).await?;
 
-    let mut subject = etc::sub::Subject::from(user.clone());
+    let mut subject = etc::auth::subject::Subject::from(user.clone());
     subject.org_id = org.as_ref().map(|org| org.org_id.clone());
     subject.org_role = org.as_ref().map(|org| org.role.clone());
 

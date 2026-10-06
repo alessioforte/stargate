@@ -1,3 +1,4 @@
+pub use super::network::IpNetwork;
 use crate::cfg::{
     CompiledIngress, CompiledRuntimeSettings, Limit, LoadBalancer, MtlsConfig, ResponseMode,
     {AuthStrategy, EnvProfile, LimitScope, OnMissingOrg, UpstreamProtocol},
@@ -208,7 +209,7 @@ pub struct NamedValuePredicate {
 
 #[derive(Debug, Clone)]
 pub struct SourceIpPredicate {
-    pub cidrs: Vec<String>,
+    pub networks: Vec<IpNetwork>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

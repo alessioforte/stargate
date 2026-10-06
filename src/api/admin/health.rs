@@ -1,6 +1,6 @@
 use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
-use crate::etc::health::{ComponentHealth, check_dependencies};
+use crate::etc::server::health::{ComponentHealth, check_dependencies};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -94,9 +94,9 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
         version,
         status: overall,
         checked_at: chrono::Utc::now().to_rfc3339(),
-        runtime_profile: crate::etc::profile::COMPILED_PROFILE,
-        database_backend: crate::etc::profile::COMPILED_DB_BACKEND,
-        state_backend: crate::etc::profile::COMPILED_STATE_BACKEND,
+        runtime_profile: crate::etc::server::profile::COMPILED_PROFILE,
+        database_backend: crate::etc::server::profile::COMPILED_DB_BACKEND,
+        state_backend: crate::etc::server::profile::COMPILED_STATE_BACKEND,
         database: dependencies.database.into(),
         #[cfg(feature = "redis")]
         redis: dependencies.redis.into(),

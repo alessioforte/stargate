@@ -1,5 +1,5 @@
 pub fn get_base_url() -> String {
-    let protocol = if crate::etc::tls::enabled().unwrap_or(false) {
+    let protocol = if crate::etc::server::tls::enabled().unwrap_or(false) {
         "https"
     } else {
         "http"

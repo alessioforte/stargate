@@ -1,6 +1,9 @@
 use super::{AuthResponse, RefreshTokenRequestBody};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::{self, jwt::jwt_config, sub::Subject};
+use crate::etc::{
+    self,
+    auth::{jwt::jwt_config, subject::Subject},
+};
 use crate::fun::build_jwt_cookie;
 use axum::Json;
 use axum::response::{IntoResponse, Response};

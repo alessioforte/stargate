@@ -1,8 +1,8 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
-use crate::etc::ext::RequestExt;
-use crate::etc::jwt::jwt_config;
-use crate::etc::sub::Subject;
+use crate::etc::auth::jwt::jwt_config;
+use crate::etc::auth::subject::Subject;
+use crate::etc::http::request::RequestExt;
 use axum::Json;
 use axum::extract::Request;
 use serde::Serialize;

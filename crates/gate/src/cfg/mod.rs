@@ -4,6 +4,7 @@ mod ingress;
 mod limit;
 mod load_balancer;
 mod mtls;
+mod network;
 mod runtime;
 mod v1;
 

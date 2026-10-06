@@ -1,7 +1,7 @@
 use crate::act;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
-use crate::etc::msg::{MessageCode, MessageResponse};
+use crate::etc::http::messages::{MessageCode, MessageResponse};
 use crate::fun::format_name;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ pub async fn post_credentials(
         .email(user.email.clone())
         .sid(sid);
 
-    let token = etc::jwt::jwt_config()
+    let token = etc::auth::jwt::jwt_config()
         .generate_token(&claim)
         .map_err(ErrorResponse::internal)?;
 

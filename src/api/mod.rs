@@ -123,10 +123,10 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
-pub fn server_router(lifecycle: crate::etc::health::Lifecycle) -> axum::Router {
+pub fn server_router(lifecycle: crate::etc::server::health::Lifecycle) -> axum::Router {
     router()
         .layer(axum::middleware::from_fn(
-            crate::etc::mid::rate_limit_middleware,
+            crate::etc::http::rate_limit::rate_limit_middleware,
         ))
         .fallback_service(tower::service_fn(gateway::service))
         .merge(health::router(lifecycle))

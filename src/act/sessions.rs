@@ -12,9 +12,9 @@
 //! valid JWT with no session behind it is rejected everywhere.
 
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::jwt::jwt_config;
+use crate::etc::auth::jwt::jwt_config;
+use crate::etc::auth::subject::{Subject, SubjectType};
 use crate::etc::store::use_store;
-use crate::etc::sub::{Subject, SubjectType};
 use db::ent::OrgMembership;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

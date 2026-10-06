@@ -67,7 +67,7 @@ documentation UI: code, HTTP status, type, English fallback, and link.
 ## Adding or changing a code
 
 1. Add the semantic variant and metadata to `src/err/types.rs`, or add a
-   successful message to `src/etc/msg.rs`.
+   successful message to `src/etc/http/messages.rs`.
 2. Use the typed variant at the call site. Do not construct string codes.
 3. Add only the locale overrides that have been translated.
 4. Add safe interpolation values with `with_param`; never include secrets or
@@ -82,7 +82,7 @@ different condition once clients depend on it.
 
 | Code | HTTP status | Condition |
 | --- | --- | --- |
-| `gateway.overloaded` | 503 | No primary concurrency permit is available |
+| `gateway.overloaded` | 503 | Primary admission or internal-context signing capacity is exhausted |
 | `gateway.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its gateway ingress allowance, before authentication or routing |
 | `gateway.ingress_unavailable` | 503 | The ingress limiter is missing, fails, or exceeds its store deadline |
 | `gateway.replay_memory_exhausted` | 503 | Required failover replay cannot reserve storage |
@@ -91,8 +91,10 @@ different condition once clients depend on it.
 | `gateway.timeout` | 504 | Connection, headers, or absolute finite budget expires |
 | `gateway.cancelled` | 503 | Gateway work is cancelled during shutdown |
 
-Timeout/cancellation responses may contain a safe `phase` parameter. Once headers
-have been sent, a body/session timeout closes the stream instead of sending a
+Signing overload responses contain `phase=signing` and reason
+`signing_queue_full` or `signing_queue_timeout`; they contact no upstream and do
+not trigger failover. Timeout/cancellation responses may contain a safe `phase`
+parameter. Once headers have been sent, a body/session timeout closes the stream instead of sending a
 second JSON response or retrying. Mirror capacity/memory saturation skips optional
 mirror traffic. See [runtime budgets](config-v1.md#runtime-deadlines-and-resource-budgets).
 

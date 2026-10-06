@@ -1,48 +1,9 @@
 use gate::cfg::{Config, MtlsConfig, SCHEMA};
 use std::{fs, path::PathBuf};
 
-pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super::RuntimeSnapshot> {
-    let prepared = super::prepare_runtime_config(config).unwrap();
-    let core = gate::Runtime::prepare(prepared.config.compiled.http, lim::Limiter::new()).unwrap();
-    std::sync::Arc::new(super::RuntimeSnapshot {
-        core,
-        ingress: prepared.config.compiled.ingress,
-        resources: super::resources::ProcessResources::new(
-            prepared.config.compiled.runtime.budgets,
-        ),
-        settings: prepared.config.compiled.runtime,
-        transports: prepared.transports,
-        version: 0,
-    })
-}
-
+pub(crate) use super::runtime::test_support::runtime;
 #[cfg(feature = "memory")]
-pub(crate) fn gate(config: Config) -> super::Gate {
-    super::Gate::new(
-        std::sync::Arc::new(lim::State::new()),
-        super::prepare_config(config).unwrap(),
-        gate::PolicySnapshot::default(),
-    )
-    .unwrap()
-}
-
-#[cfg(feature = "memory")]
-pub(crate) fn gate_with_limiter(config: Config, limiter: lim::Limiter) -> super::Gate {
-    let gate = gate(config.clone());
-    let prepared = super::prepare_config(config).unwrap();
-    let core = gate::Runtime::prepare(prepared.config.compiled.http, limiter).unwrap();
-    let runtime = std::sync::Arc::new(super::RuntimeSnapshot {
-        core,
-        ingress: prepared.config.compiled.ingress,
-        settings: prepared.config.compiled.runtime,
-        resources: gate.resources.clone(),
-        transports: prepared.transports,
-        version: 0,
-    });
-    gate.runtime.store(runtime.clone());
-    runtime.core.start_probes();
-    gate
-}
+pub(crate) use super::runtime::test_support::{gate, gate_with_limiter};
 
 pub(crate) const CA: &[u8] = include_bytes!("fixtures/ca.pem");
 pub(crate) const CLIENT_CERT: &[u8] = include_bytes!("fixtures/client.pem");

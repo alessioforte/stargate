@@ -7,7 +7,7 @@
 //! `published_at` commit re-ships the byte-identical payload, so consumers must
 //! deduplicate on the `event_id` inside it.
 
-use crate::etc::telemetry;
+use crate::etc::observability::telemetry;
 use db::ent::OutboxEventRow;
 use db::service::Service;
 use once_cell::sync::OnceCell;

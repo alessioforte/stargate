@@ -1,8 +1,8 @@
 use super::SignupCompleteRequestBody;
 use crate::act;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::msg::{MessageCode, MessageResponse};
-use crate::etc::reqctx::audit_request_from;
+use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::etc::request_context::audit_request_from;
 use crate::fun::format_name;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
@@ -32,7 +32,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
             ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
         })?;
 
-    let jwt_cfg = crate::etc::jwt::jwt_config();
+    let jwt_cfg = crate::etc::auth::jwt::jwt_config();
     let claim = jwt_cfg.validate_token(&body.token).map_err(|error| {
         ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
     })?;
@@ -115,7 +115,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         .picture(signup.picture)
         .attrs(signup.attrs);
 
-    let password = crate::etc::pw::hash_password(body.password.clone())
+    let password = crate::etc::auth::password::hash_password(body.password.clone())
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 

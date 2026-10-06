@@ -1,6 +1,6 @@
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::jwt::jwt_config;
-use crate::etc::sub::{Subject, SubjectType};
+use crate::etc::auth::jwt::jwt_config;
+use crate::etc::auth::subject::{Subject, SubjectType};
 use store::Store;
 
 use super::types::AuthenticatedUser;

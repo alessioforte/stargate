@@ -40,9 +40,15 @@ configuration, and the compiled gateway configuration. The listener opens
 after initialization, so `/livez` also works as a startup probe. Fatal startup
 errors still prevent the server from listening.
 
+Missing, unreadable, or invalid configured TLS roots/client identity reject
+startup before listening. A failed TLS hot reload keeps the last valid prepared
+clients and routes; restoring valid files permits the next reload to activate.
+
 Individual gateway upstreams, SMTP, external identity providers, telemetry,
 and audit relay delivery lag do not gate pod readiness. Invalid hot reloads
 retain the last valid configuration and keep the current readiness behavior.
+Process admission exhaustion and a full/expired internal-context signing queue
+return request-level `503` responses; they do not change probe readiness.
 
 ## Shutdown
 
@@ -59,6 +65,8 @@ connections share the `SERVER_SHUTDOWN_TIMEOUT_SECS` deadline (default `25`);
 remaining connection tasks are cancelled when it expires. Tracked gateway tasks
 are drained before the audit relay stops and the edge memory store is persisted.
 The deployment termination grace period remains the final process deadline.
+Queued signing jobs whose callers cancel are skipped. Already-started RSA work
+cannot be preempted; the fixed worker count bounds that work until it completes.
 
 Allow room in the pod's `terminationGracePeriodSeconds` for the delay,
 connection draining, and persistence hooks. The Helm chart defaults to 40
