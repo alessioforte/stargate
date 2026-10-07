@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY apps/mail ./
 RUN npm run export
 
-FROM rust:${RUST_VERSION}-slim-bullseye AS chef
+FROM rust:${RUST_VERSION}-slim-bookworm AS chef
 ARG CARGO_CHEF_VERSION
 WORKDIR /app
 RUN apt-get update && \
@@ -85,7 +85,7 @@ RUN cargo build --release \
         --features "${STARGATE_PROFILE}" && \
     cp "./target/release/${APP_NAME}" /bin/server
 
-FROM debian:bullseye-slim AS final
+FROM debian:bookworm-slim AS final
 ARG STARGATE_PROFILE
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \

@@ -17,7 +17,7 @@ deployment:
 replicaCount: 1
 
 image:
-  repository: stargate
+  repository: ghcr.io/alessioforte/stargate
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent

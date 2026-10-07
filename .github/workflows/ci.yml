@@ -1,14 +1,15 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
 
-# Cancel superseded runs on the same ref.
+# Keep reusable release checks separate from branch CI and never cancel them.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.ref_type != 'tag' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,16 +18,21 @@ jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
         with:
+          toolchain: stable
           components: rustfmt
       - run: cargo fmt --all --check
 
   build-test:
     name: build & test (${{ matrix.profile }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -35,11 +41,12 @@ jobs:
         # in isolation with --no-default-features.
         profile: [edge, cluster]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ matrix.profile }}
       # Build and test deny rustc warnings (dead_code, unused, etc.); clippy
