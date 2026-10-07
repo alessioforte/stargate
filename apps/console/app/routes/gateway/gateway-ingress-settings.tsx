@@ -22,7 +22,7 @@ const GatewayIngressSettings: React.FC<Props> = ({ config, onChange }) => {
     .sort();
 
   return (
-    <Group align="start" grow>
+    <Group p="xs" align="start" grow>
       <Select
         label={t("ingressLimit")}
         description={t("ingressLimitDescription")}

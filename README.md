@@ -44,14 +44,14 @@ docker build \
 
 The main build arguments are:
 
-| Argument | Default | Purpose |
-| --- | --- | --- |
-| `STARGATE_PROFILE` | `edge` | Compiles the `edge` or `cluster` backend |
-| `CONSOLE_APP_BASE_PATH` | `/stargate` | Build and runtime path for the Console |
-| `AUTH_APP_BASE_PATH` | `/auth` | Build and runtime path for the auth UI |
-| `VITE_API_URL` | same browser origin | Public API URL embedded in both web apps |
-| `VITE_AUTH_URL` | `<origin>/auth` | Public auth-app URL embedded in the Console |
-| `VITE_OAUTH_CLIENT_ID` | `stargate_console` | OAuth client used by the Console and instance bootstrap |
+| Argument                  | Default                                         | Purpose                                                      |
+| ------------------------- | ----------------------------------------------- | ------------------------------------------------------------ |
+| `STARGATE_PROFILE`        | `edge`                                          | Compiles the `edge` or `cluster` backend                     |
+| `CONSOLE_APP_BASE_PATH`   | `/stargate`                                     | Build and runtime path for the Console                       |
+| `AUTH_APP_BASE_PATH`      | `/auth`                                         | Build and runtime path for the auth UI                       |
+| `VITE_API_URL`            | same browser origin                             | Public API URL embedded in both web apps                     |
+| `VITE_AUTH_URL`           | `<origin>/auth`                                 | Public auth-app URL embedded in the Console                  |
+| `VITE_OAUTH_CLIENT_ID`    | `stargate_console`                              | OAuth client used by the Console and instance bootstrap      |
 | `VITE_OAUTH_REDIRECT_URI` | `<origin><CONSOLE_APP_BASE_PATH>/auth/callback` | Console OAuth callback used by the UI and instance bootstrap |
 
 For a deployment with explicit public URLs:
