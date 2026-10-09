@@ -24,4 +24,6 @@ Open [localhost:3000](http://localhost:3000) with your browser to see the result
 
 ## License
 
-MIT License
+Stargate's email templates are licensed under the
+[Elastic License 2.0 (ELv2)](../../LICENSE). React Email and other third-party
+dependencies retain their original licenses.

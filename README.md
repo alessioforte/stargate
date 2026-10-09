@@ -1,5 +1,22 @@
 # Stargate User Management System and API Gateway
 
+## License
+
+Copyright (c) 2024-2026 Alessio Forte.
+
+Stargate is source-available under the [Elastic License 2.0 (ELv2)](LICENSE).
+You may use, modify, and redistribute it subject to the license terms.
+
+ELv2 does not permit providing Stargate to third parties as a hosted or managed
+service where users have access to a substantial set of its features or
+functionality. For such offerings, contact
+[Alessio Forte](mailto:fortealessio@gmail.com) to discuss a separate commercial
+license.
+
+Third-party dependencies and incorporated components retain their original
+licenses and notices. This summary is informational; the [license text](LICENSE)
+governs use of Stargate.
+
 ## Deployment Profiles
 
 Stargate supports different deployment profiles with different operational limits:

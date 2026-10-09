@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "A powerful API gateway and IAM server built in Rust."
 authors = ["Alessio Forte <fortealessio@gmail.com>"]
 edition = "2024"
-license = "MIT"
+license = "Elastic-2.0"
 readme = "README.md"
 
 [workspace.package]
 version = "0.1.0"
 authors = ["Alessio Forte <fortealessio@gmail.com>"]
 edition = "2024"
-license = "MIT"
+license = "Elastic-2.0"
 readme = "README.md"
 
 [workspace]

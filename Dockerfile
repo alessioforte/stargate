@@ -96,6 +96,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 RUN mkdir -p .stargate && chown stargate:stargate .stargate
+COPY LICENSE ./LICENSE
 COPY --from=server-build /bin/server /bin/server
 COPY --from=console-build --chown=stargate:stargate \
     /app/.stargate/apps/console ./.stargate/apps/console

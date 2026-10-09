@@ -1,6 +1,7 @@
 {
   "name": "auth",
   "private": true,
+  "license": "Elastic-2.0",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
