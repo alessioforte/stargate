@@ -1,21 +1,13 @@
 # Stargate User Management System and API Gateway
 
-## License
+Stargate is an identity and access management (IAM) server and API gateway built
+in Rust. It manages users, organizations, authentication, and access policies,
+while routing requests to backend services with rate limiting, load balancing,
+and failover.
 
-Copyright (c) 2024-2026 Alessio Forte.
-
-Stargate is source-available under the [Elastic License 2.0 (ELv2)](LICENSE).
-You may use, modify, and redistribute it subject to the license terms.
-
-ELv2 does not permit providing Stargate to third parties as a hosted or managed
-service where users have access to a substantial set of its features or
-functionality. For such offerings, contact
-[Alessio Forte](mailto:fortealessio@gmail.com) to discuss a separate commercial
-license.
-
-Third-party dependencies and incorporated components retain their original
-licenses and notices. This summary is informational; the [license text](LICENSE)
-governs use of Stargate.
+It includes OAuth 2.0 and OpenID Connect support, a hosted login UI, and a web
+administration console, with deployment profiles for single-node edge
+installations and scalable clusters.
 
 ## Deployment Profiles
 
@@ -328,3 +320,20 @@ The CLI initializes the database before executing the command, so it uses the sa
 - In `edge` mode, ensure the process can create or access `.stargate/sqlite.db`.
 - In `cluster` mode, set the required Postgres environment variables before running the command.
 - If `STARGATE_RUNTIME_PROFILE` is set, it must match the compiled profile.
+
+## License
+
+Copyright (c) 2024-2026 Alessio Forte.
+
+Stargate is source-available under the [Elastic License 2.0 (ELv2)](LICENSE).
+You may use, modify, and redistribute it subject to the license terms.
+
+ELv2 does not permit providing Stargate to third parties as a hosted or managed
+service where users have access to a substantial set of its features or
+functionality. For such offerings, contact
+[Alessio Forte](mailto:fortealessio@gmail.com) to discuss a separate commercial
+license.
+
+Third-party dependencies and incorporated components retain their original
+licenses and notices. This summary is informational; the [license text](LICENSE)
+governs use of Stargate.
