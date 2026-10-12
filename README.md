@@ -9,6 +9,15 @@ It includes OAuth 2.0 and OpenID Connect support, a hosted login UI, and a web
 administration console, with deployment profiles for single-node edge
 installations and scalable clusters.
 
+## Why Stargate
+
+Stargate grew out of the time spent integrating identity providers, API gateways,
+and custom authorization for multi-tenant applications. It brings user and
+organization management, configurable access policies, and API routing into one
+system, reducing the integration work needed to get started. The goal is to help
+teams spend less time assembling infrastructure and more time building their
+product.
+
 ## Deployment Profiles
 
 Stargate supports different deployment profiles with different operational limits:
