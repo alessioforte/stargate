@@ -18,6 +18,22 @@ system, reducing the integration work needed to get started. The goal is to help
 teams spend less time assembling infrastructure and more time building their
 product.
 
+Route policies use the same verified identity and organization context as the
+IAM layer, so access decisions can be enforced before requests reach backend
+services. You configure which policies protect each route within Stargate,
+reducing the work of connecting separate identity and gateway systems and the
+duplication of common access checks across microservices.
+
+Stargate evaluates access policies directly within the gateway process, using
+in-memory rules and a local decision cache. This avoids network calls to a
+separate authorization service for policy evaluation and can reduce
+authorization overhead compared with architectures that delegate these
+decisions remotely.
+
+Microservices remain responsible for domain-specific authorization and data
+ownership checks, such as verifying that an order belongs to the active
+organization.
+
 ## Deployment Profiles
 
 Stargate supports different deployment profiles with different operational limits:
