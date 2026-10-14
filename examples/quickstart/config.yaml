@@ -1,0 +1,61 @@
+# Gateway configuration used by the repository's docker-compose.yml.
+#
+# Compose copies this file into the `stargate-config` volume on first start, so
+# changes made from the Console's gateway page persist across restarts. To start
+# over from this file, run `docker compose down -v`.
+#
+# Reference: docs/config-v1.md
+schema: stargate/v1
+
+# Pre-authentication admission: every client IP is checked against this limit
+# before credentials are verified or routes are matched.
+ingress:
+  limit: ingress
+  timeout: 250ms
+
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
+  # Required: applied to every route without its own rate_limit policy.
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
+
+http:
+  upstreams:
+    whoami:
+      targets:
+        - url: http://whoami:80
+
+  services:
+    whoami:
+      kind: load_balancer
+      upstream: whoami
+
+  middlewares:
+    strip-demo:
+      kind: strip_prefix
+      prefixes: [/demo]
+
+  policies:
+    # Accepts Stargate session tokens and API keys. The check runs inside the
+    # gateway process: no call to a separate authorization service.
+    authenticated:
+      kind: auth
+      strategies: [jwt, api_key]
+
+  routers:
+    # http://localhost:5050/demo -> whoami, only for authenticated callers.
+    demo:
+      priority: 100
+      match:
+        path:
+          prefix: /demo
+      service: whoami
+      middlewares: [strip-demo]
+      policies: [authenticated]

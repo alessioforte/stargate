@@ -9,7 +9,10 @@ this workflow never deploys or writes to other repositories.
 1. Set `[workspace.package].version` in `Cargo.toml` to the new version and keep
    the root `[package].version` equal to it. Member crates inherit the workspace
    version. Refresh `Cargo.lock` with `cargo check --workspace --features cluster`,
-   commit the version changes, and merge to `main` after CI passes.
+   update the default image tag in `docker-compose.yml`
+   (`${STARGATE_VERSION:-<version>}`), commit the version changes, and merge to
+   `main` after CI passes. The release workflow refuses a mismatched quickstart
+   tag.
 2. Run a dry run on `main`:
    `gh workflow run release.yml --ref main -f dry_run=true`. It uses the workspace
    version, runs the existing edge/cluster CI, builds the image, and lints,

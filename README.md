@@ -1,364 +1,212 @@
-# Stargate User Management System and API Gateway
+# Stargate
 
-Stargate is an identity and access management (IAM) server and API gateway built
-in Rust. It manages users, organizations, authentication, and access policies,
-while routing requests to backend services with rate limiting, load balancing,
-and failover.
+**Identity provider and API gateway in one Rust binary.** Access policies are
+evaluated inside the gateway process, so authorizing a request needs no extra
+network hop to an auth service.
 
-It includes OAuth 2.0 and OpenID Connect support, a hosted login UI, and a web
-administration console, with deployment profiles for single-node edge
-installations and scalable clusters.
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#project-status)
+[![CI](https://github.com/alessioforte/stargate/actions/workflows/ci.yml/badge.svg)](https://github.com/alessioforte/stargate/actions/workflows/ci.yml)
+[![OIDC conformance](https://github.com/alessioforte/stargate/actions/workflows/oidc-conformance.yml/badge.svg)](docs/oidc-conformance.md)
+[![License: ELv2](https://img.shields.io/badge/license-ELv2%20(free%20to%20self--host)-blue)](#license)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshots/console.png" alt="Stargate Console dashboard"></td>
+    <td width="50%"><img src="docs/assets/screenshots/login.png" alt="Stargate hosted login"></td>
+  </tr>
+  <tr>
+    <td align="center">Console</td>
+    <td align="center">Hosted login</td>
+  </tr>
+</table>
+
+Stargate manages users, organizations, sessions, and API keys; acts as an
+OAuth 2.0 and OpenID Connect provider; and routes traffic to your services with
+rate limiting, load balancing, and failover. It ships with a web Console and a
+hosted login UI, and runs as a single node on SQLite or as a horizontally
+scaled cluster on PostgreSQL and Redis.
+
+> **Free to self-host.** Stargate is source-available under the
+> [Elastic License 2.0](#license): you can run, modify, and use it in production
+> for your own products at no cost. You may not offer Stargate itself as a
+> hosted or managed service. ELv2 is not an OSI-approved open-source license.
+
+## Quickstart
+
+With Docker and a clone of this repository, two commands start Stargate with
+PostgreSQL, Redis, a mail catcher, and a demo upstream:
+
+```bash
+git clone https://github.com/alessioforte/stargate.git && cd stargate
+
+docker compose up -d --wait
+docker compose exec stargate /bin/server admin bootstrap \
+  --email admin@example.com --generate-password
+```
+
+Open <http://localhost:5050/stargate> and sign in as `admin@example.com` with
+the printed password.
+
+The example gateway config routes `/demo` to a
+[whoami](https://github.com/traefik/whoami) container, for authenticated
+callers only:
+
+```bash
+curl -i http://localhost:5050/demo
+# 401: anonymous requests stop at the gateway
+
+TOKEN=$(curl -s http://localhost:5050/account/login \
+  -H 'content-type: application/json' \
+  -d '{"username":"admin@example.com","password":"<printed password>"}' | jq -r .accessToken)
+curl http://localhost:5050/demo -H "Authorization: Bearer $TOKEN"
+# 200: proxied to whoami
+```
+
+Signup, password-reset, and OTP emails land in Mailpit at
+<http://localhost:8025>. Edit routes from the Console's gateway page, or start
+from [`examples/quickstart/config.yaml`](examples/quickstart/config.yaml).
+`docker compose down` stops everything; add `-v` to delete the data.
+
+The quickstart uses placeholder secrets and listens on `127.0.0.1` only. For
+real deployments, see [Deploy](#deploy).
 
 ## Why Stargate
 
-Stargate grew out of the time spent integrating identity providers, API gateways,
-and custom authorization for multi-tenant applications. It brings user and
-organization management, configurable access policies, and API routing into one
-system, reducing the integration work needed to get started. The goal is to help
-teams spend less time assembling infrastructure and more time building their
-product.
+Most stacks run an identity provider and a separate API gateway, then connect
+them with token validation in every service, forward-auth hops, or calls to a
+policy service. Stargate puts both in one process. The gateway sees the same
+verified identity and organization context as the IAM layer and evaluates
+access policies against in-memory rules with a local decision cache, before a
+request reaches your services.
 
-Route policies use the same verified identity and organization context as the
-IAM layer, so access decisions can be enforced before requests reach backend
-services. You configure which policies protect each route within Stargate,
-reducing the work of connecting separate identity and gateway systems and the
-duplication of common access checks across microservices.
+Your services keep domain checks, such as whether an order belongs to the
+active organization. They no longer need to reimplement authentication, coarse
+authorization, and rate limiting.
 
-Stargate evaluates access policies directly within the gateway process, using
-in-memory rules and a local decision cache. This avoids network calls to a
-separate authorization service for policy evaluation and can reduce
-authorization overhead compared with architectures that delegate these
-decisions remotely.
+## How it compares
 
-Microservices remain responsible for domain-specific authorization and data
-ownership checks, such as verifying that an order belongs to the active
-organization.
+|                                     | Stargate                                                     | Keycloak                                                        | authentik                                  | Zitadel                                    |
+| ----------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| Language                            | Rust                                                         | Java (Quarkus)                                                  | Python, Go                                 | Go, TypeScript (login UI)                  |
+| License                             | ELv2 (source-available)                                      | Apache 2.0                                                      | MIT, plus enterprise license               | AGPL-3.0 (v3+)                             |
+| OAuth 2.0 / OpenID Connect provider | ✅                                                           | ✅                                                              | ✅                                         | ✅                                         |
+| SAML 2.0                            | ❌                                                           | ✅                                                              | ✅                                         | ✅                                         |
+| Built-in API gateway                | ✅ Routing, load balancing, rate limits, failover, mirroring | ❌                                                              | Auth proxy outposts, no traffic management | ❌                                         |
+| Where route authorization runs      | In the gateway process                                       | A separate gateway or adapter, or Keycloak's Authorization Services | An authentik outpost in front of each app  | Your gateway or service, from token claims |
+| Smallest deployment                 | One binary + SQLite                                          | JVM server + external database                                  | Server + worker + PostgreSQL               | Server + login UI + PostgreSQL             |
+| Maturity                            | Alpha                                                        | Production-proven                                               | Production-proven                          | Production-proven                          |
 
-## Deployment Profiles
+Choose Keycloak, authentik, or Zitadel if you need SAML, LDAP, a consent UI for
+third-party apps, or a mature and audited identity provider today. Comparison as
+of October 2026, from each project's public documentation; corrections are
+welcome.
 
-Stargate supports different deployment profiles with different operational limits:
+## Features
 
-- `edge`: single-node deployments where local `sqlite + memory` state is acceptable. This fits Raspberry Pi, appliance, and other edge installs. Use `replicaCount=1` and keep autoscaling disabled.
-- `cluster`: multi-replica deployments that require shared backends such as Redis and Postgres. Do not use local-only state assumptions in this mode.
+**Identity and access**
 
-The Helm chart defaults to `deployment.mode=edge` and validates incompatible combinations at template time.
+- Users, organizations with roles, service accounts, API keys, and admin keys.
+- Password login with Argon2id, configurable password policies (global and
+  per organization), passwordless email OTP, and email MFA with admin step-up.
+- Social login with Google and GitHub.
+- Attribute-based access-control rules, editable from the Console.
+- Audit events written in the same transaction as each change; cluster
+  deployments relay them to Redis Streams.
 
-For Helm values, security defaults, production examples, and 0.1.x migration
-notes, see the [Stargate Helm chart guide](k8s/stargate/README.md).
+**OAuth 2.0 and OpenID Connect provider**
 
-For a Terraform-managed Kubernetes deployment that connects to existing
-PostgreSQL and Redis services, see
-[Deploy Stargate on Kubernetes with Terraform](docs/terraform-kubernetes-deployment.md).
+- Authorization Code with PKCE, client credentials, and rotating refresh tokens.
+- Discovery, JWKS, userinfo, introspection, and revocation endpoints.
+- Admin-managed clients. See the [provider guide](docs/oauth-oidc-provider-guide.md)
+  and [conformance status](docs/oidc-conformance.md).
 
-## Docker
+**Gateway**
 
-The Dockerfile builds the Rust server, the `console` and `auth` web apps, and the
-transactional mail templates. The final image serves:
+- Matching on method, host, path (exact, prefix, template, regex), headers,
+  query, cookies, and source IP, with `all`/`any`/`not` combinators.
+- Path rewriting, header transforms, and host preservation.
+- Per-route auth, access-control, rate-limit, and quota policies, scoped to the
+  subject or the organization.
+- Weighted splits, traffic mirroring, failover, direct responses, health checks
+  with circuit breaking, and WebSocket proxying.
+- Signed identity context forwarded to upstreams, and config hot reload that
+  keeps the previous version if the new one is invalid.
 
-- Console: `/stargate`
-- Auth UI: `/auth`
-- API routes: `/account/*`, `/admin/*`
-- Probes: `/livez` (liveness), `/readyz` (readiness), `/health` (readiness compatibility)
+**Operations**
 
-### Build an image
+- `edge` profile (SQLite + in-memory store) and `cluster` profile (PostgreSQL +
+  Redis), selected at build time.
+- Liveness and readiness probes, OpenTelemetry traces, metrics, and logs, and
+  graceful shutdown.
+- Container images for `linux/amd64` and `linux/arm64`, and a Helm chart.
 
-Choose exactly one backend profile:
+## Deploy
 
-```bash
-# SQLite + in-memory store
-docker build \
-  --build-arg STARGATE_PROFILE=edge \
-  -t stargate:edge .
+| Profile   | Backends                 | Use it for                                                          |
+| --------- | ------------------------ | ------------------------------------------------------------------- |
+| `edge`    | SQLite + in-memory store | One node: appliances, Raspberry Pi, small installs. Keep 1 replica. |
+| `cluster` | PostgreSQL + Redis       | Multiple replicas behind a load balancer.                           |
 
-# PostgreSQL + Redis
-docker build \
-  --build-arg STARGATE_PROFILE=cluster \
-  -t stargate:cluster .
-```
+- [Docker](docs/docker.md): build images and run them without Compose.
+- [Helm chart](k8s/stargate/README.md): values, security defaults, and
+  production examples.
+- [Kubernetes with Terraform](docs/terraform-kubernetes-deployment.md), using
+  existing PostgreSQL and Redis.
+- [CLI](docs/cli.md): bootstrap the first administrator and generate key
+  material.
 
-The main build arguments are:
-
-| Argument                  | Default                                         | Purpose                                                      |
-| ------------------------- | ----------------------------------------------- | ------------------------------------------------------------ |
-| `STARGATE_PROFILE`        | `edge`                                          | Compiles the `edge` or `cluster` backend                     |
-| `CONSOLE_APP_BASE_PATH`   | `/stargate`                                     | Build and runtime path for the Console                       |
-| `AUTH_APP_BASE_PATH`      | `/auth`                                         | Build and runtime path for the auth UI                       |
-| `VITE_API_URL`            | same browser origin                             | Public API URL embedded in both web apps                     |
-| `VITE_AUTH_URL`           | `<origin>/auth`                                 | Public auth-app URL embedded in the Console                  |
-| `VITE_OAUTH_CLIENT_ID`    | `stargate_console`                              | OAuth client used by the Console and instance bootstrap      |
-| `VITE_OAUTH_REDIRECT_URI` | `<origin><CONSOLE_APP_BASE_PATH>/auth/callback` | Console OAuth callback used by the UI and instance bootstrap |
-
-For a deployment with explicit public URLs:
-
-```bash
-docker build \
-  --build-arg STARGATE_PROFILE=cluster \
-  --build-arg VITE_API_URL=https://identity.example.com \
-  --build-arg VITE_AUTH_URL=https://identity.example.com/auth \
-  --build-arg VITE_OAUTH_CLIENT_ID=stargate_console \
-  --build-arg VITE_OAUTH_REDIRECT_URI=https://identity.example.com/stargate/auth/callback \
-  -t stargate:cluster .
-```
-
-`CONSOLE_APP_BASE_PATH` and `AUTH_APP_BASE_PATH` are also written into the image's
-runtime environment, keeping the Vite asset paths and Rust routes synchronized.
-The `VITE_*` values are compiled into the web apps; rebuild the image to change
-them.
-
-### Run the edge image
-
-Create a valid v1 gateway configuration first; see
-[docs/config-v1.md](docs/config-v1.md). The bind-mounted file must
-exist before starting the container. Copy `.env.example` to `.env.docker` and
-adjust its public URLs, signing configuration, SMTP settings, and secrets.
+Build from source with exactly one profile:
 
 ```bash
-docker volume create stargate-data
-
-docker run --rm \
-  --name stargate \
-  -p 5050:5050 \
-  --env-file .env.docker \
-  --mount source=stargate-data,target=/app/.stargate \
-  --mount type=bind,source="$(pwd)/config.yaml",target=/app/.stargate/config.yaml,readonly \
-  stargate:edge
+cargo run --features edge
+cargo build --release --features cluster
 ```
 
-The named volume persists SQLite, the in-memory store snapshot, generated key
-material, policies, and logs. On its first use, Docker initializes the empty
-volume with the Console, auth UI, and mail templates bundled in the image.
+## Documentation
 
-If the admin configuration API must update `config.yaml`, remove `readonly` and
-make the host file writable by container UID/GID `999`. The final image runs as
-the non-root `stargate` user.
+| Guide                                                                   | Covers                                                          |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [Gateway config](docs/config-v1.md)                                     | Routers, services, middlewares, policies, limits, replay rules  |
+| [OAuth/OIDC provider](docs/oauth-oidc-provider-guide.md)                | Clients, flows, scopes, and claims                              |
+| [OIDC conformance](docs/oidc-conformance.md)                            | What the conformance suite checks in CI, and known gaps         |
+| [Multi-organization](docs/multi-org-guide.md)                           | Organizations, memberships, and org-scoped sessions and limits  |
+| [Password policies](docs/password-policies-guide.md)                    | Policy rules, per-org overrides, and hashing parameters         |
+| [Internal context](docs/internal-context-consumer-guide.md)             | Verifying the identity context forwarded to upstreams           |
+| [Health probes](docs/health-probes.md)                                  | Liveness, readiness, and shutdown timing                        |
+| [API errors](docs/api-errors-and-messages.md)                           | Error codes and response format                                 |
+| [Releasing](docs/RELEASING.md)                                          | Publishing images and the Helm chart                            |
+| [`.env.example`](.env.example)                                          | Every environment variable                                      |
 
-Open:
+The OpenAPI document is served at `/docs` on a running instance.
 
-- `http://localhost:5050/stargate` for the Console
-- `http://localhost:5050/auth` for the auth UI
-- `http://localhost:5050/livez` for process liveness
-- `http://localhost:5050/readyz` for traffic readiness
+## Project status
 
-Probe behavior, dependency checks, and shutdown timing are documented in
-[Health and readiness probes](docs/health-probes.md).
+Stargate is **alpha**. It has not had an independent security audit, and the
+configuration format and APIs may change between minor versions. Try it,
+evaluate it, and report what breaks. Please be careful before putting it in
+front of production traffic.
 
-Bootstrap the first administrator and the Console OAuth client while the
-container is running:
+## Security
 
-```bash
-docker exec stargate /bin/server admin bootstrap \
-  --email admin@example.com \
-  --generate-password \
-  --name "Admin User" \
-  --nickname admin \
-  --oauth-redirect-uri http://localhost:5050/stargate/auth/callback
-```
-
-The command runs as a second process, uses the server's database configuration,
-and exits without stopping the server.
-
-### Run the cluster image
-
-Configure PostgreSQL and Redis in the environment file, then run the image with
-the same gateway configuration mount:
-
-```bash
-docker run --rm \
-  --name stargate \
-  -p 5050:5050 \
-  --env-file .env.cluster \
-  --mount type=bind,source="$(pwd)/config.yaml",target=/app/.stargate/config.yaml,readonly \
-  stargate:cluster
-```
-
-At minimum, the cluster environment must provide `POSTGRES_ENDPOINT`,
-`POSTGRES_DATABASE`, `POSTGRES_USERNAME`, `POSTGRES_PASSWORD`, and `REDIS_URL`.
-Use service/container DNS names rather than `localhost` when the databases run
-in other containers. Also provide stable JWT signing material: configure an
-HMAC `JWT_SECRET`, or mount the asymmetric key directory at
-`/app/.stargate/jwks`. Otherwise, tokens issued before a container replacement
-will no longer verify.
-
-### Persistent-volume upgrades
-
-Do not bind-mount an empty host directory over `/app/.stargate`: it hides the
-web apps and mail templates included in the image. An existing named volume also
-retains the artifacts copied from the image when that volume was first created.
-When upgrading the image, migrate persistent state to a newly initialized
-volume or explicitly refresh these directories:
-
-```text
-/app/.stargate/apps/console
-/app/.stargate/apps/auth
-/app/.stargate/transactional
-```
-
-At runtime, Stargate validates `STARGATE_RUNTIME_PROFILE` against the compiled
-backend set and fails fast if they do not match.
-
-## Gateway Config
-
-`config.yaml` uses the v1 schema:
-
-```yaml
-schema: stargate/v1
-ingress:
-  limit: ingress
-  timeout: 250ms
-limits:
-  default:
-    strategy: gcra
-    params:
-      max_burst: 100
-      replenish_1_per: 1s
-  ingress:
-    strategy: gcra
-    params:
-      max_burst: 100
-      replenish_1_per: 100ms
-```
-
-The v1 format models `upstreams`, `services`, `middlewares`, `policies`, and `routers` separately. It supports header/query/cookie/source-IP routing, regex and template paths, explicit route priority, fallback direct responses, path rewriting, weighted services, mirror traffic, and failover on selected response status codes.
-
-The required `ingress.limit` checks each client IP before authentication and
-routing, including invalid credentials and unmatched routes. Its store deadline
-defaults to `250ms`; probes remain exempt. Named ingress limits use separate
-buckets from resource policies.
-
-Supplied configs also require `limits.default` for resource and IAM/admin rate
-checks. Selected unknown names or rate/quota strategy mismatches return
-`500 gateway.limit_configuration_invalid` before resource buckets are charged.
-Quota absence and explicit organization skip policies remain optional checks.
-
-WebSocket upgrades use the selected upstream's prepared TLS identity/trust and
-connect timeout. `preserve_host` sends the incoming Host once while TLS verifies
-the target name. Upstreams must permit `http1` in `transport.protocols`;
-HTTP/2 extended CONNECT is not supported.
-
-Automatic failover replays only `GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`, and
-`DELETE`. `POST`/`PATCH` and unrecognized methods receive one dispatch attempt;
-an `Idempotency-Key` header does not enable retries. An unavailable primary may
-still be skipped before dispatch. Mutations stream without a failover buffer
-unless selected mirror traffic requires one. Nested services keep their own
-failover rules; mirrors run only for branches that execution enters, and unused fallback
-upstreams remain unselected.
-
-See [docs/config-v1.md](docs/config-v1.md) for examples and runtime notes.
-
-## CLI
-
-Stargate includes a built-in CLI for administrative tasks. The server checks CLI arguments first, and when a command is provided it runs the CLI flow instead of starting the HTTP server.
-
-Current command tree:
-
-```text
-stargate admin bootstrap
-```
-
-## Bootstrap The Instance
-
-Use the CLI to create the initial super-admin account and the public OAuth
-client required by the Console. Stargate does not auto-create privileged
-resources during normal startup.
-
-A profile must be selected on every build/run (`edge` and `cluster` are
-mutually exclusive, and there is no default). The examples below use
-`--features edge`; swap in `--features cluster` for cluster deployments.
-
-Pass the password directly:
-
-```bash
-cargo run --features edge -- admin bootstrap \
-  --email admin@example.com \
-  --password 'replace-with-a-strong-password' \
-  --name 'Admin User' \
-  --nickname admin \
-  --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
-```
-
-Or read the password from stdin so it does not appear in shell history:
-
-```bash
-printf '%s' 'replace-with-a-strong-password' | cargo run --features edge -- admin bootstrap \
-  --email admin@example.com \
-  --password-stdin \
-  --name 'Admin User' \
-  --nickname admin \
-  --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
-```
-
-Or let Stargate generate a one-time bootstrap password and print it after successful creation:
-
-```bash
-cargo run --features edge -- admin bootstrap \
-  --email admin@example.com \
-  --generate-password \
-  --name 'Admin User' \
-  --nickname admin \
-  --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
-```
-
-If you are running a built binary instead of `cargo run`, use the same arguments:
-
-```bash
-./stargate admin bootstrap \
-  --email admin@example.com \
-  --password-stdin \
-  --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
-```
-
-## CLI Behavior
-
-- `admin bootstrap` creates the first super-admin and the Console OAuth client
-  in one database transaction.
-- The OAuth client is a public Authorization Code + PKCE client with refresh
-  tokens and the `openid`, `email`, `profile`, and `offline_access` scopes.
-- `--oauth-client-id` defaults to `CONSOLE_OAUTH_CLIENT_ID`, then
-  `stargate_console`.
-- `--oauth-redirect-uri` defaults to `CONSOLE_OAUTH_REDIRECT_URI`. When it is
-  unset, Stargate derives the callback from `CONSOLE_PUBLIC_URL`,
-  `OAUTH_BASE_URL`, or `JWT_ISSUER`, plus `CONSOLE_APP_BASE_PATH`.
-- Production redirect URIs must use HTTPS. HTTP is accepted only for loopback
-  hosts such as `localhost`.
-- Re-running the command leaves matching resources unchanged.
-- When a super-admin already exists but the Console OAuth client is missing, run
-  the command with only the OAuth options to repair it:
-
-  ```bash
-  ./stargate admin bootstrap \
-    --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
-  ```
-
-- If the configured client ID already exists with incompatible settings, the
-  command fails without changing the administrator.
-- `admin bootstrap` fails if the target email already exists as a user.
-- `--password`, `--password-stdin`, and `--generate-password` are mutually exclusive.
-- An email and one password option are required only when no super-admin exists.
-- `--generate-password` prints the generated password only after a successful bootstrap.
-- `--nickname` is optional and defaults to the email address.
-- `--name` is optional and sets the initial given name.
-
-## Runtime Requirements
-
-The CLI initializes the database before executing the command, so it uses the same compiled backend profile and runtime database configuration as the server.
-
-- In `edge` mode, ensure the process can create or access `.stargate/sqlite.db`.
-- In `cluster` mode, set the required Postgres environment variables before running the command.
-- If `STARGATE_RUNTIME_PROFILE` is set, it must match the compiled profile.
+Please report vulnerabilities privately, as described in
+[SECURITY.md](SECURITY.md). Do not open public issues for security problems.
 
 ## License
 
 Copyright (c) 2024-2026 Alessio Forte.
 
 Stargate is source-available under the [Elastic License 2.0 (ELv2)](LICENSE).
-You may use, modify, and redistribute it subject to the license terms.
 
-ELv2 does not permit providing Stargate to third parties as a hosted or managed
-service where users have access to a substantial set of its features or
-functionality. For such offerings, contact
-[Alessio Forte](mailto:fortealessio@gmail.com) to discuss a separate commercial
-license.
+- **You can** self-host Stargate, use it commercially in your own products and
+  infrastructure, modify it, and redistribute it.
+- **You cannot** provide Stargate to third parties as a hosted or managed
+  service that gives them access to a substantial set of its features, or
+  remove its licensing notices.
 
-Third-party dependencies and incorporated components retain their original
-licenses and notices. This summary is informational; the [license text](LICENSE)
+ELv2 is not an [OSI-approved](https://opensource.org/licenses) open-source
+license. For a managed-service offering, contact
+[Alessio Forte](mailto:fortealessio@gmail.com) about a commercial license.
+
+Third-party dependencies and incorporated components keep their own licenses
+and notices. This summary is informational; the [license text](LICENSE)
 governs use of Stargate.

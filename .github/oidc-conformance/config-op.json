@@ -1,0 +1,7 @@
+{
+  "alias": "stargate",
+  "description": "Stargate OpenID Provider (CI)",
+  "server": {
+    "discoveryUrl": "https://stargate.local:5443/.well-known/openid-configuration"
+  }
+}

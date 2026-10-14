@@ -1,0 +1,118 @@
+name: OIDC conformance
+
+# Runs the OpenID Foundation conformance suite against a local Stargate. These
+# results cannot be used for certification (that requires the hosted suite);
+# they catch regressions in the OpenID Provider. See docs/oidc-conformance.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/jwt/**"
+      - "crates/oidc/**"
+      - "src/api/oidc/**"
+      - "src/etc/auth/**"
+      - "Cargo.lock"
+      - ".github/oidc-conformance/**"
+      - ".github/workflows/oidc-conformance.yml"
+  pull_request:
+    paths:
+      - "crates/jwt/**"
+      - "crates/oidc/**"
+      - "src/api/oidc/**"
+      - "src/etc/auth/**"
+      - "Cargo.lock"
+      - ".github/oidc-conformance/**"
+      - ".github/workflows/oidc-conformance.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: oidc-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Prebuilt suite images are kept for recent releases only; bump when the
+  # pinned tag disappears from registry.gitlab.com/openid/conformance-suite.
+  SUITE_VERSION: release-v5.3.2
+  # Local suite: dev mode needs no API token. The hostname resolves to 127.0.0.1.
+  CONFORMANCE_SERVER: https://localhost.emobix.co.uk:8443/
+  CONFORMANCE_DEV_MODE: "1"
+
+jobs:
+  config-op:
+    name: Config OP plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: oidc-conformance
+
+      - name: Start conformance suite
+        run: |
+          git clone --quiet --depth 1 --branch "$SUITE_VERSION" \
+            https://gitlab.com/openid/conformance-suite.git "$RUNNER_TEMP/conformance-suite"
+          # The override maps stargate.local to the runner, where Stargate listens.
+          IMAGE_TAG="$SUITE_VERSION" docker compose --project-name oidc-conformance \
+            -f "$RUNNER_TEMP/conformance-suite/docker-compose-prebuilt.yml" \
+            -f .github/oidc-conformance/compose.override.yml \
+            up -d --quiet-pull
+
+      - name: Build Stargate (edge)
+        run: cargo build --no-default-features --features edge
+
+      - name: Start Stargate with TLS
+        # The suite requires every discovered endpoint to use HTTPS; it accepts
+        # self-signed certificates. Runs from a scratch directory so the edge
+        # profile's .stargate state stays out of the checkout.
+        run: |
+          mkdir -p "$RUNNER_TEMP/stargate" "$RUNNER_TEMP/results"
+          cd "$RUNNER_TEMP/stargate"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=stargate.local" \
+            -addext "subjectAltName=DNS:stargate.local" -keyout key.pem -out cert.pem
+          TLS_ENABLED=true TLS_CERT="$PWD/cert.pem" TLS_KEY="$PWD/key.pem" PORT=5443 \
+            JWT_ISSUER=https://stargate.local:5443 \
+            LOG_FILE_ENABLED=false LOG_CONSOLE_ENABLED=true \
+            nohup "$GITHUB_WORKSPACE/target/debug/stargate" > "$RUNNER_TEMP/results/stargate.log" 2>&1 &
+          timeout 60 bash -c 'until curl -skf https://127.0.0.1:5443/readyz >/dev/null; do sleep 1; done'
+
+      - name: Wait for conformance suite
+        run: |
+          for _ in $(seq 100); do
+            curl -skf "${CONFORMANCE_SERVER}api/runner/available" >/dev/null && exit 0
+            sleep 3
+          done
+          echo "Conformance suite did not become available" >&2
+          exit 1
+
+      - name: Install suite runner dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet -r "$RUNNER_TEMP/conformance-suite/scripts/requirements.txt"
+
+      # Discovery metadata and JWKS. Fails on any unexpected failure or warning.
+      - name: Run Config OP plan
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
+            --verbose --export-dir "$RUNNER_TEMP/results" \
+            oidcc-config-certification-test-plan .github/oidc-conformance/config-op.json
+
+      - name: Collect suite logs
+        if: always()
+        run: docker logs oidc-conformance-server-1 > "$RUNNER_TEMP/results/suite-server.log" 2>&1 || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: oidc-conformance-results
+          path: ${{ runner.temp }}/results
+          if-no-files-found: warn

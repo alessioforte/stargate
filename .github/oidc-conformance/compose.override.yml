@@ -1,0 +1,6 @@
+# Layered over the conformance suite's docker-compose-prebuilt.yml so the suite
+# server can reach the Stargate process running on the CI host.
+services:
+  server:
+    extra_hosts:
+      - "stargate.local:host-gateway"

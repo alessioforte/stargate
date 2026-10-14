@@ -73,6 +73,15 @@ jobs:
           echo "CHART_REGISTRY=oci://ghcr.io/$OWNER/charts" >> "$GITHUB_ENV"
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
+      # The README quickstart pulls the image tag pinned in docker-compose.yml.
+      - name: Check quickstart image tag
+        run: |
+          expected="$IMAGE:\${STARGATE_VERSION:-$VERSION}"
+          if ! grep -Fq "$expected" docker-compose.yml; then
+            echo "docker-compose.yml must default to $expected" >&2
+            exit 1
+          fi
+
       - name: Refuse existing image or chart versions
         if: env.DRY_RUN != 'true'
         env:

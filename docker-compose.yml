@@ -1,0 +1,130 @@
+# Stargate quickstart: the published cluster image with PostgreSQL, Redis,
+# Mailpit (catches outgoing email), and a demo upstream behind the gateway.
+#
+#   docker compose up -d --wait
+#   docker compose exec stargate /bin/server admin bootstrap \
+#     --email admin@example.com --generate-password
+#
+# Console: http://localhost:5050/stargate  Mailpit: http://localhost:8025
+#
+# For local evaluation only: the credentials below are placeholders and the
+# ports are bound to 127.0.0.1. See docs/docker.md and k8s/stargate/README.md
+# for real deployments.
+
+name: stargate
+
+x-stargate-image: &stargate-image ghcr.io/alessioforte/stargate:${STARGATE_VERSION:-0.1.0}
+
+services:
+  stargate:
+    image: *stargate-image
+    ports:
+      - "127.0.0.1:5050:5050"
+    environment:
+      JWT_ISSUER: http://localhost:5050
+      # Docker sets HOSTNAME to the container ID; Stargate uses it in links.
+      HOSTNAME: localhost
+      AUTH_PUBLIC_BASE_URL: http://localhost:5050/auth
+      CONFIG_PATH: /app/.stargate/config
+      POSTGRES_ENDPOINT: postgres:5432
+      POSTGRES_DATABASE: stargate
+      POSTGRES_USERNAME: stargate
+      POSTGRES_PASSWORD: stargate
+      REDIS_URL: redis://redis:6379
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: Stargate <no-reply@stargate.localhost>
+      EMAIL_OTP_PEPPER: quickstart-only-change-me
+      LOG_FILE_ENABLED: "false"
+      LOG_CONSOLE_ENABLED: "true"
+    volumes:
+      # Gateway config and access-control rules (editable from the Console).
+      - stargate-config:/app/.stargate/config
+      # Generated RS256 signing keys: tokens stay valid across container restarts.
+      - stargate-keys:/app/.stargate/jwks
+    healthcheck:
+      # The image has no curl; ask /readyz (PostgreSQL + Redis checks) over bash.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/5050 &&
+          printf 'GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          head -n1 <&3 | grep -q ' 200 '
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      stargate-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+      whoami:
+        condition: service_started
+    restart: unless-stopped
+
+  # One-shot: seeds the config volume from examples/quickstart on first start
+  # and hands both state volumes to the image's non-root user (UID 10001).
+  stargate-init:
+    image: *stargate-image
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        [ -e /app/.stargate/config/config.yaml ] || cp /seed/config.yaml /app/.stargate/config/config.yaml
+        chown -R 10001:10001 /app/.stargate/config /app/.stargate/jwks
+    volumes:
+      - ./examples/quickstart:/seed:ro
+      - stargate-config:/app/.stargate/config
+      - stargate-keys:/app/.stargate/jwks
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: stargate
+      POSTGRES_USER: stargate
+      POSTGRES_PASSWORD: stargate
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "stargate", "-d", "stargate"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Signup verification, password reset, and OTP emails land here.
+  mailpit:
+    image: axllent/mailpit:v1.31
+    ports:
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+
+  # Demo upstream routed at /demo by examples/quickstart/config.yaml.
+  whoami:
+    image: traefik/whoami:v1.12
+    restart: unless-stopped
+
+volumes:
+  stargate-config:
+  stargate-keys:
+  postgres-data:
+  redis-data:
