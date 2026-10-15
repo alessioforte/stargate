@@ -1,6 +1,6 @@
 use super::shared::OAuthResult;
 
-pub(super) use oidc::codes::AuthorizationCodeRecord;
+pub(super) use oidc::codes::{AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
 
 pub(super) async fn store(
     code_hash: &str,
@@ -12,7 +12,7 @@ pub(super) async fn store(
         .map_err(Into::into)
 }
 
-pub(super) async fn get(code_hash: &str) -> OAuthResult<Option<AuthorizationCodeRecord>> {
+pub(super) async fn get(code_hash: &str) -> OAuthResult<CodeLookup> {
     oidc::codes::get(crate::etc::store::use_store(), code_hash)
         .await
         .map_err(Into::into)
@@ -23,6 +23,12 @@ pub(super) async fn consume(
     record: &AuthorizationCodeRecord,
 ) -> OAuthResult<bool> {
     oidc::codes::consume(crate::etc::store::use_store(), code_hash, record)
+        .await
+        .map_err(Into::into)
+}
+
+pub(super) async fn record_redemption(code_hash: &str, grant: RedeemedGrant) -> OAuthResult<()> {
+    oidc::codes::record_redemption(crate::etc::store::use_store(), code_hash, grant)
         .await
         .map_err(Into::into)
 }
@@ -52,12 +58,13 @@ mod tests {
 
         store(&code_hash, record(), 60).await.unwrap();
 
-        let first = get(&code_hash).await.unwrap();
-        let first_consumed = consume(&code_hash, first.as_ref().unwrap()).await.unwrap();
+        let CodeLookup::Pending(first) = get(&code_hash).await.unwrap() else {
+            panic!("expected a pending code");
+        };
+        let first_consumed = consume(&code_hash, &first).await.unwrap();
         let second = get(&code_hash).await.unwrap();
 
-        assert!(first.is_some());
         assert!(first_consumed);
-        assert!(second.is_none());
+        assert_eq!(second, CodeLookup::Redeemed(None));
     }
 }

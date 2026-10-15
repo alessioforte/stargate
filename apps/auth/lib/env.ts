@@ -17,6 +17,15 @@ function browserOrigin() {
   return window.location.origin;
 }
 
+/**
+ * Native form target of the provider login, used when the login form is
+ * submitted without JavaScript. Relative unless VITE_API_URL is set, so it
+ * also resolves in the build-time prerender where there is no window.
+ */
+export function oauthLoginAction() {
+  return `${cleanUrl(import.meta.env.VITE_API_URL) ?? ""}/oauth/login`;
+}
+
 export function getAuthAppConfig(): AuthAppConfig {
   return {
     apiUrl: cleanUrl(import.meta.env.VITE_API_URL) ?? browserOrigin(),

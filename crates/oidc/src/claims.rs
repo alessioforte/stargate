@@ -62,9 +62,9 @@ pub fn id_token_claims(
     auth_time: chrono::DateTime<chrono::Utc>,
     nonce: Option<String>,
 ) -> jwt::Claims {
+    // Only registered ID token claims: no Stargate-internal `sub_id`.
     let mut claims = jwt::Claims::default()
         .subject(user.id.clone())
-        .sub_id(user.id.clone())
         .aud(client_id.to_string());
     claims.azp = Some(client_id.to_string());
     claims.sid = sid.map(str::to_string);
@@ -116,6 +116,7 @@ mod tests {
         );
 
         assert_eq!(claims.sid.as_deref(), Some("session-1"));
+        assert!(claims.sub_id.is_none());
         assert!(claims.email.is_none());
         assert!(claims.name.is_none());
     }

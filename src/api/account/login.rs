@@ -35,15 +35,44 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
             ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
         })?;
 
-    let login_identifier = credentials.username.trim();
+    let (user, user_credential) =
+        verify_login_password(&client_ip, &credentials.username, &credentials.password).await?;
+
+    let auth_time = chrono::Utc::now().timestamp() as usize;
+
+    if let Some(response) =
+        maybe_start_login_mfa(&user, &client_ip, auth_time, credentials.org_id.as_deref()).await?
+    {
+        return Ok(response);
+    }
+
+    // For MFA users the expiry check runs after MFA verification instead, so
+    // an expired password alone never yields a reset token.
+    if let Some(response) = maybe_password_expired_response(&user, Some(&user_credential)).await? {
+        return Ok(response);
+    }
+
+    issue_user_session(user, auth_time, credentials.org_id.as_deref()).await
+}
+
+/// Check a username/password pair under the login guard: throttling,
+/// constant-time unknown-user handling, failed-attempt accounting, and a
+/// background rehash when the stored hash is outdated. Shared by the JSON
+/// login API and the OpenID Provider login page.
+pub(crate) async fn verify_login_password(
+    client_ip: &str,
+    username: &str,
+    password: &str,
+) -> Result<(db::ent::User, db::ent::Credential), ErrorResponse> {
+    let login_identifier = username.trim();
 
     let user = crate::db::get_user_by_username(login_identifier)
         .await
         .map_err(ErrorResponse::internal)?;
 
     let throttle = match user.as_ref() {
-        Some(u) => login_guard::LoginThrottle::for_user(&client_ip, &u.id),
-        None => login_guard::LoginThrottle::for_identifier(&client_ip, login_identifier),
+        Some(u) => login_guard::LoginThrottle::for_user(client_ip, &u.id),
+        None => login_guard::LoginThrottle::for_identifier(client_ip, login_identifier),
     };
 
     let allowed = login_guard::check_login_allowed(&throttle)
@@ -61,7 +90,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         // long as the valid-user path, preventing username enumeration via
         // response timing.
         let _ = crate::etc::auth::password::verify_password(
-            credentials.password.clone(),
+            password.to_string(),
             crate::etc::auth::password::dummy_hash(),
         )
         .await;
@@ -77,7 +106,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
 
     let Some(user_credential) = user_credential else {
         let _ = crate::etc::auth::password::verify_password(
-            credentials.password.clone(),
+            password.to_string(),
             crate::etc::auth::password::dummy_hash(),
         )
         .await;
@@ -88,7 +117,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
     };
 
     let password_check = crate::etc::auth::password::check_password(
-        credentials.password.clone(),
+        password.to_string(),
         user_credential.value.clone(),
     )
     .await;
@@ -109,26 +138,12 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
     if password_check.needs_rehash {
         spawn_credential_rehash(
             user.id.clone(),
-            credentials.password.clone(),
+            password.to_string(),
             user_credential.value.clone(),
         );
     }
 
-    let auth_time = chrono::Utc::now().timestamp() as usize;
-
-    if let Some(response) =
-        maybe_start_login_mfa(&user, &client_ip, auth_time, credentials.org_id.as_deref()).await?
-    {
-        return Ok(response);
-    }
-
-    // For MFA users the expiry check runs after MFA verification instead, so
-    // an expired password alone never yields a reset token.
-    if let Some(response) = maybe_password_expired_response(&user, Some(&user_credential)).await? {
-        return Ok(response);
-    }
-
-    issue_user_session(user, auth_time, credentials.org_id.as_deref()).await
+    Ok((user, user_credential))
 }
 
 /// Re-encode a verified password in the background when its stored hash

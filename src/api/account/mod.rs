@@ -6,7 +6,7 @@ pub mod otp;
 pub mod password_policy;
 pub mod profile;
 pub mod refresh_token;
-mod session;
+pub(crate) mod session;
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;

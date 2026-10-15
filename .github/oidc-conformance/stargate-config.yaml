@@ -1,0 +1,37 @@
+# Stargate config for the conformance job: the default rate limit (burst 100,
+# 1 req/s per IP) throttles the suite, which sends every request from one IP.
+schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+runtime:
+  primary_concurrency: 1024
+  mirror_concurrency: 64
+  replay_body_bytes: 2097152
+  replay_memory_bytes: 67108864
+  upload_idle_timeout: 15s
+  connect_timeout: 5s
+  response_header_timeout: 30s
+  response_body_idle_timeout: 30s
+  discarded_body_timeout: 250ms
+  discarded_body_bytes: 65536
+  mirror_timeout: 5s
+  request_timeout: 60s
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100000
+      replenish_1_per: 100ms
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100000
+      replenish_1_per: 1ms
+mtls: null
+http:
+  upstreams: {}
+  services: {}
+  middlewares: {}
+  policies: {}
+  routers: {}

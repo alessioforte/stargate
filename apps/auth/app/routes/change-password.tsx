@@ -8,7 +8,6 @@ import {
   Center,
   PasswordInput,
   Stack,
-  Text,
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";

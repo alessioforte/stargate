@@ -13,6 +13,11 @@ fn endpoint_base_url(issuer: &str) -> String {
     oidc::metadata::endpoint_base_url(issuer, configured_base_url.as_deref(), &port)
 }
 
+/// Public base URL of the provider endpoints, as advertised in discovery.
+pub(super) fn public_endpoint_base_url() -> String {
+    endpoint_base_url(&jwt::issuer_from_env())
+}
+
 fn jwks_cache_control() -> String {
     let max_age = env::var("JWKS_CACHE_MAX_AGE_SECS")
         .ok()

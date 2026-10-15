@@ -116,7 +116,11 @@ welcome.
 **OAuth 2.0 and OpenID Connect provider**
 
 - Authorization Code with PKCE, client credentials, and rotating refresh tokens.
+- The authorization endpoint signs users in on the hosted login page, with
+  email MFA; the page is prerendered and also works without JavaScript.
 - Discovery, JWKS, userinfo, introspection, and revocation endpoints.
+- The OpenID Foundation Basic OP and Config OP conformance plans run in CI
+  (local suite, not certified).
 - Admin-managed clients. See the [provider guide](docs/oauth-oidc-provider-guide.md)
   and [conformance status](docs/oidc-conformance.md).
 

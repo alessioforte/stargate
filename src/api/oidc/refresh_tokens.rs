@@ -38,6 +38,17 @@ pub(super) async fn rotate(
         .map_err(Into::into)
 }
 
+/// Drop a refresh-token family so none of its tokens rotate again.
+pub(super) async fn revoke_family(family_id: &str) -> OAuthResult<()> {
+    use store::Store;
+
+    crate::etc::store::use_store()
+        .delete(&oidc::refresh::family_key(family_id))
+        .await
+        .map_err(crate::err::OAuthErrorResponse::internal)?;
+    Ok(())
+}
+
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::*;

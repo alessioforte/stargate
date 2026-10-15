@@ -1,19 +1,21 @@
-import { StrictMode } from "react";
-import { createTheme, MantineProvider } from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import App from "./app";
+import { AppProviders } from "./providers";
 
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 
-const theme = createTheme({});
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <MantineProvider theme={theme} defaultColorScheme="auto">
-      <Notifications position="bottom-right" />
-      <App />
-    </MantineProvider>
-  </StrictMode>,
+const container = document.getElementById("root")!;
+const app = (
+  <AppProviders>
+    <App />
+  </AppProviders>
 );
+
+// Pages prerendered at build time (see scripts/prerender.mjs) arrive with
+// markup in #root: hydrate it instead of replacing it.
+if (container.firstElementChild) {
+  hydrateRoot(container, app);
+} else {
+  createRoot(container).render(app);
+}

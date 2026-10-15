@@ -14,9 +14,19 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
+import { oauthLoginAction } from "@/lib/env";
+import { useHydrated } from "@/lib/hydration";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
-import { useRouterLike } from "../../lib/navigation";
+
+/** Codes `/oauth/login` sends back in `?error=` after a no-JS form post. */
+const OAUTH_LOGIN_ERRORS = new Set([
+  "invalid_credentials",
+  "too_many_attempts",
+  "interaction_expired",
+  "javascript_required",
+  "server_error",
+]);
 
 interface LoginValues {
   username: string;
@@ -26,15 +36,20 @@ interface LoginValues {
 
 export default function Login() {
   const t = useTranslations();
-  const router = useRouterLike();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const loading = useStore((state) => state.loading);
   const login = useStore((state) => state.login);
   const message = useStore((state) => state.message);
-  const returnToParam = searchParams.get("return_to");
-  const returnTo = getReturnTo(searchParams);
-  const passwordlessHref = hrefWithReturnTo("/login/passwordless", returnTo);
+  // This page is prerendered without a query string: read the URL only
+  // once hydrated so the first render matches the static markup.
+  const hydrated = useHydrated();
+  const returnToParam = hydrated ? searchParams.get("return_to") : null;
+  const returnTo = hydrated ? getReturnTo(searchParams) : null;
+  const errorParam = hydrated ? searchParams.get("error") : null;
+  const oauthError =
+    errorParam && OAUTH_LOGIN_ERRORS.has(errorParam) ? errorParam : null;
+  // const passwordlessHref = hrefWithReturnTo("/login/passwordless", returnTo);
   const resetPasswordHref = hrefWithReturnTo("/reset-password", returnTo);
 
   useEffect(() => {
@@ -54,6 +69,15 @@ export default function Login() {
         value.length > 5 ? null : "Password must be at least 6 characters",
     },
   });
+
+  // OpenID Connect `login_hint`, forwarded by /oauth/authorize.
+  const loginHint = hydrated ? searchParams.get("login_hint") : null;
+  useEffect(() => {
+    if (loginHint && !form.values.username) {
+      form.setFieldValue("username", loginHint);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loginHint]);
 
   const handleSubmit = async ({ username, password }: LoginValues) => {
     const result = await login({
@@ -80,8 +104,20 @@ export default function Login() {
           {t("loginTitle")}
         </Title>
       </Center>
-      <form onSubmit={form.onSubmit(handleSubmit)}>
+      {/* With JavaScript the submit is handled in-page. Without it (or before
+          the bundle loads) the browser posts the form to the provider login
+          endpoint, which resumes a parked OpenID Connect authorization. */}
+      <form
+        method="post"
+        action={oauthLoginAction()}
+        onSubmit={form.onSubmit(handleSubmit)}
+      >
         <Stack gap="md">
+          {oauthError && !message && (
+            <Alert color="red" title={t("error")}>
+              {t(`oauthLoginErrors.${oauthError}`)}
+            </Alert>
+          )}
           {message && (
             <Alert
               color={message.type === "error" ? "red" : "yellow"}
@@ -98,6 +134,7 @@ export default function Login() {
             label={t("username")}
             placeholder={t("username")}
             autoComplete="username"
+            name="username"
             {...form.getInputProps("username")}
           />
           <PasswordInput
@@ -107,6 +144,7 @@ export default function Login() {
             label={t("password")}
             placeholder={t("password")}
             autoComplete="current-password"
+            name="password"
             {...form.getInputProps("password")}
           />
           <Group mb="md" justify="space-between" align="center">

@@ -2,14 +2,24 @@ use crate::fun::get_base_url;
 
 const DEFAULT_AUTH_APP_BASE_PATH: &str = "/auth";
 
+fn auth_app_base_path() -> String {
+    let path = std::env::var("AUTH_APP_BASE_PATH")
+        .unwrap_or_else(|_| DEFAULT_AUTH_APP_BASE_PATH.to_string());
+    normalize_base_path(&path)
+}
+
+/// Base of the hosted auth app for redirects answered by this server:
+/// `AUTH_PUBLIC_BASE_URL` when set, otherwise the app's base path here.
+pub fn auth_app_href() -> String {
+    std::env::var("AUTH_PUBLIC_BASE_URL").unwrap_or_else(|_| auth_app_base_path())
+}
+
 pub fn signup_url(token: &str) -> String {
     let base_url = std::env::var("AUTH_PUBLIC_BASE_URL").unwrap_or_else(|_| {
-        let auth_app_base_path = std::env::var("AUTH_APP_BASE_PATH")
-            .unwrap_or_else(|_| DEFAULT_AUTH_APP_BASE_PATH.to_string());
         format!(
             "{}{}",
             get_base_url().trim_end_matches('/'),
-            normalize_base_path(&auth_app_base_path)
+            auth_app_base_path()
         )
     });
 

@@ -204,7 +204,11 @@ impl JwtConfig {
         &self,
         claims: Claims,
     ) -> Result<String, jsonwebtoken::errors::Error> {
-        let claims = self.timed_claims(claims, TOKEN_TYPE_ID_TOKEN, self.access_exp);
+        // ID tokens go to third-party relying parties, so they carry no
+        // private `typ` claim. Typed validators still reject them because they
+        // require `bearer` or `refresh`.
+        let mut claims = self.timed_claims(claims, TOKEN_TYPE_ID_TOKEN, self.access_exp);
+        claims.typ = None;
         self.generate_token(&claims)
     }
 
@@ -300,7 +304,12 @@ impl JwtConfig {
         nonce: Option<&str>,
     ) -> Result<Claims, JwtValidationError> {
         let claims = self.decode_without_audience(token)?;
-        Self::require_type(&claims, TOKEN_TYPE_ID_TOKEN)?;
+        if claims.typ.is_some() {
+            return Err(JwtValidationError::InvalidType {
+                expected: TOKEN_TYPE_ID_TOKEN,
+                actual: claims.typ.clone(),
+            });
+        }
         match claims.aud.as_deref() {
             Some(actual) if actual == client_id => {}
             actual => {
@@ -483,6 +492,24 @@ mod tests {
             config.validate_oauth_access_token(&token, Some("admin")),
             Err(JwtValidationError::AudienceMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn oidc_id_token_has_no_typ_and_is_not_an_access_token() {
+        let config = JwtConfig::new(
+            Algorithm::HS256,
+            KeySource::Secret("secret".to_string()),
+            Duration::minutes(5),
+            Duration::minutes(5),
+        );
+        let claims = Claims::default()
+            .subject("user-1".to_string())
+            .aud("client-1".to_string());
+        let token = config.generate_oidc_id_token(claims).unwrap();
+
+        assert!(config.validate_token(&token).unwrap().typ.is_none());
+        assert!(config.validate_oauth_access_token(&token, None).is_err());
+        assert!(config.validate_session_access_token(&token).is_err());
     }
 
     #[test]

@@ -1,5 +1,7 @@
 mod authorization_codes;
 pub(crate) mod authorize;
+mod interactions;
+pub(crate) mod login;
 mod pkce;
 mod refresh_tokens;
 mod shared;
@@ -8,7 +10,8 @@ pub(crate) mod token_ops;
 pub(crate) mod userinfo;
 pub(crate) mod well_known;
 
-pub use authorize::get_authorize;
+pub use authorize::{get_authorize, post_authorize};
+pub use login::post_login;
 pub use token::post_token;
 pub use token_ops::{post_introspect, post_revoke};
 pub use userinfo::{get_userinfo, post_userinfo};
@@ -34,7 +37,11 @@ pub fn router() -> axum::Router {
             "/.well-known/openid-configuration",
             get(get_openid_configuration),
         )
-        .route("/oauth/authorize", get(get_authorize))
+        .route("/oauth/authorize", get(get_authorize).post(post_authorize))
+        .route(
+            "/oauth/login",
+            post(post_login).layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
+        )
         .route("/oauth/token", post(post_token))
         .route("/oauth/userinfo", get(get_userinfo).post(post_userinfo))
         .merge(protected)

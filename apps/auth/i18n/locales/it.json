@@ -62,5 +62,12 @@
   },
   "chooseOrganization": "Scegli un'organizzazione",
   "chooseOrganizationHint": "Seleziona in quale organizzazione accedere. Potrai cambiarla in seguito.",
-  "currentOrganization": "Attuale"
+  "currentOrganization": "Attuale",
+  "oauthLoginErrors": {
+    "invalid_credentials": "Nome utente o password non validi.",
+    "too_many_attempts": "Troppi tentativi di accesso. Riprova più tardi.",
+    "interaction_expired": "Questa richiesta di accesso è scaduta. Torna all'applicazione e riprova.",
+    "javascript_required": "L'accesso a questo account richiede un passaggio aggiuntivo (codice di verifica o cambio password) che necessita di JavaScript. Abilita JavaScript e riprova.",
+    "server_error": "Si è verificato un errore. Riprova più tardi."
+  }
 }

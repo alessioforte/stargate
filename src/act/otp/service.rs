@@ -105,6 +105,11 @@ pub(crate) async fn complete_passwordless_email_otp(
     Ok((user, auth_time))
 }
 
+/// Whether signing in this user needs an MFA step, without starting one.
+pub(crate) async fn login_mfa_required(user: &db::ent::User) -> Result<bool, ErrorResponse> {
+    Ok(mfa_policy_for_user(user).await?.required)
+}
+
 pub(crate) async fn maybe_start_login_mfa(
     user: &db::ent::User,
     client_ip: &str,

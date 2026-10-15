@@ -1,4 +1,5 @@
 import type { LoginMFAResponse, OtpChallengeResponse } from "@/services/types";
+import { getAuthAppConfig } from "@/lib/env";
 
 const RETURN_TO_KEY = "stargate.auth.return_to";
 const PENDING_MFA_KEY = "stargate.auth.pending_mfa";
@@ -39,21 +40,48 @@ function writeJson(key: string, value: unknown) {
   window.sessionStorage.setItem(key, JSON.stringify(value));
 }
 
+/**
+ * Accept only in-app paths and absolute URLs on this page's origin or the
+ * API's origin, so `return_to` cannot send users to another site after
+ * sign-in (open redirect).
+ */
+export function safeReturnTo(value: string | null | undefined) {
+  if (!value) return null;
+
+  if (value.startsWith("/")) {
+    return value.startsWith("//") || value.startsWith("/\\") ? null : value;
+  }
+
+  if (typeof window === "undefined") return null;
+
+  try {
+    const url = new URL(value);
+    const allowedOrigins = [
+      window.location.origin,
+      new URL(getAuthAppConfig().apiUrl).origin,
+    ];
+    return allowedOrigins.includes(url.origin) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getReturnTo(searchParams?: SearchParamsLike | null) {
-  return searchParams?.get("return_to") ?? getStoredReturnTo();
+  return safeReturnTo(searchParams?.get("return_to")) ?? getStoredReturnTo();
 }
 
 export function storeReturnTo(returnTo: string | null) {
   if (!canUseSessionStorage()) return;
 
-  if (returnTo) {
-    window.sessionStorage.setItem(RETURN_TO_KEY, returnTo);
+  const safe = safeReturnTo(returnTo);
+  if (safe) {
+    window.sessionStorage.setItem(RETURN_TO_KEY, safe);
   }
 }
 
 export function getStoredReturnTo() {
   if (!canUseSessionStorage()) return null;
-  return window.sessionStorage.getItem(RETURN_TO_KEY);
+  return safeReturnTo(window.sessionStorage.getItem(RETURN_TO_KEY));
 }
 
 export function clearReturnTo() {
@@ -70,7 +98,7 @@ export function redirectToReturnTo(
   router: RouterLike,
   returnTo: string | null,
 ) {
-  const target = returnTo ?? "/";
+  const target = safeReturnTo(returnTo) ?? "/";
 
   if (/^https?:\/\//.test(target)) {
     window.location.assign(target);

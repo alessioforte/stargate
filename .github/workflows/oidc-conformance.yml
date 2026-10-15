@@ -12,6 +12,11 @@ on:
       - "crates/oidc/**"
       - "src/api/oidc/**"
       - "src/etc/auth/**"
+      - "src/api/account/login.rs"
+      - "src/api/account/session.rs"
+      - "src/fun/build_jwt_cookie.rs"
+      - "src/api/auth_app.rs"
+      - "apps/auth/**"
       - "Cargo.lock"
       - ".github/oidc-conformance/**"
       - ".github/workflows/oidc-conformance.yml"
@@ -21,6 +26,11 @@ on:
       - "crates/oidc/**"
       - "src/api/oidc/**"
       - "src/etc/auth/**"
+      - "src/api/account/login.rs"
+      - "src/api/account/session.rs"
+      - "src/fun/build_jwt_cookie.rs"
+      - "src/api/auth_app.rs"
+      - "apps/auth/**"
       - "Cargo.lock"
       - ".github/oidc-conformance/**"
       - ".github/workflows/oidc-conformance.yml"
@@ -38,10 +48,13 @@ env:
   # Local suite: dev mode needs no API token. The hostname resolves to 127.0.0.1.
   CONFORMANCE_SERVER: https://localhost.emobix.co.uk:8443/
   CONFORMANCE_DEV_MODE: "1"
+  # Test user the suite's browser signs in as (Basic OP plan).
+  OIDC_TEST_USERNAME: oidc-tester@example.com
+  OIDC_TEST_PASSWORD: Blue-Harbor-7319!
 
 jobs:
-  config-op:
-    name: Config OP plan
+  conformance:
+    name: Config OP and Basic OP plans
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -70,19 +83,41 @@ jobs:
       - name: Build Stargate (edge)
         run: cargo build --no-default-features --features edge
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.18.0
+          cache: npm
+          cache-dependency-path: apps/auth/package-lock.json
+
+      # The suite's browser signs in on the hosted login page. Its build
+      # prerenders the page so the form works without JavaScript (HtmlUnit
+      # cannot run the app's ES module bundle). Same-origin API: no VITE_API_URL.
+      - name: Build auth app
+        working-directory: apps/auth
+        run: |
+          npm ci
+          VITE_API_URL= npm run build
+
       - name: Start Stargate with TLS
         # The suite requires every discovered endpoint to use HTTPS; it accepts
         # self-signed certificates. Runs from a scratch directory so the edge
-        # profile's .stargate state stays out of the checkout.
+        # profile's .stargate state stays out of the checkout. The seeded config
+        # relaxes the per-IP rate limit, and MFA is off so the suite's browser
+        # signs in with a password only.
         run: |
-          mkdir -p "$RUNNER_TEMP/stargate" "$RUNNER_TEMP/results"
+          mkdir -p "$RUNNER_TEMP/stargate/.stargate" "$RUNNER_TEMP/results"
           cd "$RUNNER_TEMP/stargate"
+          cp "$GITHUB_WORKSPACE/.github/oidc-conformance/stargate-config.yaml" .stargate/config.yaml
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=stargate.local" \
             -addext "subjectAltName=DNS:stargate.local" -keyout key.pem -out cert.pem
-          TLS_ENABLED=true TLS_CERT="$PWD/cert.pem" TLS_KEY="$PWD/key.pem" PORT=5443 \
-            JWT_ISSUER=https://stargate.local:5443 \
-            LOG_FILE_ENABLED=false LOG_CONSOLE_ENABLED=true \
-            nohup "$GITHUB_WORKSPACE/target/debug/stargate" > "$RUNNER_TEMP/results/stargate.log" 2>&1 &
+          export TLS_ENABLED=true TLS_CERT="$PWD/cert.pem" TLS_KEY="$PWD/key.pem" PORT=5443 \
+            JWT_ISSUER=https://stargate.local:5443 MFA_MODE=off \
+            AUTH_APP_DIR="$GITHUB_WORKSPACE/.stargate/apps/auth" \
+            LOG_FILE_ENABLED=false LOG_CONSOLE_ENABLED=true
+          "$GITHUB_WORKSPACE/target/debug/stargate" admin bootstrap \
+            --email "$OIDC_TEST_USERNAME" --password "$OIDC_TEST_PASSWORD" \
+            --name "Oidc Tester" --nickname tester
+          nohup "$GITHUB_WORKSPACE/target/debug/stargate" > "$RUNNER_TEMP/results/stargate.log" 2>&1 &
           timeout 60 bash -c 'until curl -skf https://127.0.0.1:5443/readyz >/dev/null; do sleep 1; done'
 
       - name: Wait for conformance suite
@@ -105,6 +140,20 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
             --verbose --export-dir "$RUNNER_TEMP/results" \
             oidcc-config-certification-test-plan .github/oidc-conformance/config-op.json
+
+      # Full Authorization Code logins through the suite's headless browser.
+      # REVIEW results (screenshots for certification) are not failures here.
+      - name: Run Basic OP plan
+        run: |
+          API_URL=https://127.0.0.1:5443 .github/oidc-conformance/basic-op-setup.sh \
+            https://stargate.local:5443 "$OIDC_TEST_USERNAME" "$OIDC_TEST_PASSWORD" \
+            "$RUNNER_TEMP/basic-op.json"
+          "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
+            --verbose --export-dir "$RUNNER_TEMP/results" \
+            --expected-failures-file .github/oidc-conformance/basic-op-expected-failures.json \
+            --expected-skips-file .github/oidc-conformance/basic-op-expected-skips.json \
+            "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]" \
+            "$RUNNER_TEMP/basic-op.json"
 
       - name: Collect suite logs
         if: always()

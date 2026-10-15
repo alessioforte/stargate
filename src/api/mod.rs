@@ -31,6 +31,8 @@ use utoipa::OpenApi;
         crate::api::signup::complete::put_signup,
         crate::api::social::state::post_state,
         crate::api::oidc::authorize::get_authorize,
+        crate::api::oidc::authorize::post_authorize,
+        crate::api::oidc::login::post_login,
         crate::api::oidc::token::post_token,
         crate::api::oidc::userinfo::get_userinfo,
         crate::api::oidc::userinfo::post_userinfo,

@@ -67,6 +67,11 @@ pub struct OpenIdConfiguration {
     claims_supported: Vec<String>,
     code_challenge_methods_supported: Vec<String>,
     token_endpoint_auth_methods_supported: Vec<String>,
+    response_modes_supported: Vec<String>,
+    claims_parameter_supported: bool,
+    request_parameter_supported: bool,
+    /// Discovery defaults this to `true`, so it is stated explicitly.
+    request_uri_parameter_supported: bool,
 }
 
 pub fn endpoint_base_url(issuer: &str, configured_base_url: Option<&str>, port: &str) -> String {
@@ -235,8 +240,12 @@ pub fn openid_configuration(
             "email".to_string(),
             "email_verified".to_string(),
             "name".to_string(),
+            "given_name".to_string(),
+            "family_name".to_string(),
+            "nickname".to_string(),
             "preferred_username".to_string(),
             "picture".to_string(),
+            "updated_at".to_string(),
         ],
         code_challenge_methods_supported: vec![PKCE_METHOD_S256.to_string()],
         token_endpoint_auth_methods_supported: vec![
@@ -244,6 +253,10 @@ pub fn openid_configuration(
             AUTH_METHOD_CLIENT_SECRET_POST.to_string(),
             AUTH_METHOD_NONE.to_string(),
         ],
+        response_modes_supported: vec!["query".to_string()],
+        claims_parameter_supported: false,
+        request_parameter_supported: false,
+        request_uri_parameter_supported: false,
     }
 }
 

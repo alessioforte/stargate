@@ -27,5 +27,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "components", "i18n", "lib", "services", "store"]
+  "include": ["app", "components", "i18n", "lib", "services", "store"]
 }

@@ -1,10 +1,13 @@
+/// `SameSite=Lax` (not `Strict`) so the session reaches `/oauth/authorize`
+/// when a relying party on another site redirects the browser there; the
+/// cookie still stays off cross-site subrequests and non-GET navigations.
 pub fn build_jwt_cookie(access_token: &str, max_age_secs: i64) -> String {
     let secure = crate::etc::server::tls::enabled().unwrap_or(false);
     let mut parts = vec![
         format!("jwt={}", access_token),
         "Path=/".to_string(),
         "HttpOnly".to_string(),
-        "SameSite=Strict".to_string(),
+        "SameSite=Lax".to_string(),
         format!("Max-Age={}", max_age_secs),
     ];
     if secure {

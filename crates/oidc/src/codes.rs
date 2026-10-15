@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use store::Store;
 
 const CODE_KEY_PREFIX: &str = "oauth:authorization-code:";
-const CONSUMED_MARKER_TTL_SECS: u64 = 60;
+/// How long a redeemed code is remembered, so a replay can still be detected
+/// and the tokens it issued revoked (RFC 6749 §4.1.2). Matches the code TTL.
+const REDEEMED_MARKER_TTL_SECS: u64 = crate::scopes::AUTHORIZATION_CODE_TTL_SECS as u64;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AuthorizationCodeRecord {
@@ -21,10 +23,28 @@ pub struct AuthorizationCodeRecord {
     pub sid: Option<String>,
 }
 
+/// Tokens issued for a redeemed code, revoked if the code is replayed.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct RedeemedGrant {
+    pub access_jti: Option<String>,
+    pub access_exp: Option<usize>,
+    pub refresh_family_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 enum StoredAuthorizationCode {
     Pending(Box<AuthorizationCodeRecord>),
     Consumed,
+    Redeemed(RedeemedGrant),
+}
+
+/// What a presented authorization code refers to.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CodeLookup {
+    Missing,
+    Pending(AuthorizationCodeRecord),
+    /// Already exchanged. Carries the issued tokens once they are recorded.
+    Redeemed(Option<RedeemedGrant>),
 }
 
 pub fn code_key(code_hash: &str) -> String {
@@ -51,20 +71,14 @@ pub async fn store<S: Store>(
     Ok(())
 }
 
-pub async fn get<S: Store>(
-    store: &S,
-    code_hash: &str,
-) -> Result<Option<AuthorizationCodeRecord>, OAuthError> {
+pub async fn get<S: Store>(store: &S, code_hash: &str) -> Result<CodeLookup, OAuthError> {
     let key = code_key(code_hash);
-    let Some(current) = store.get::<StoredAuthorizationCode>(&key).await? else {
-        return Ok(None);
-    };
-
-    let StoredAuthorizationCode::Pending(record) = current else {
-        return Ok(None);
-    };
-
-    Ok(Some(*record))
+    Ok(match store.get::<StoredAuthorizationCode>(&key).await? {
+        None => CodeLookup::Missing,
+        Some(StoredAuthorizationCode::Pending(record)) => CodeLookup::Pending(*record),
+        Some(StoredAuthorizationCode::Consumed) => CodeLookup::Redeemed(None),
+        Some(StoredAuthorizationCode::Redeemed(grant)) => CodeLookup::Redeemed(Some(grant)),
+    })
 }
 
 pub async fn consume<S: Store>(
@@ -76,17 +90,46 @@ pub async fn consume<S: Store>(
     let expected = StoredAuthorizationCode::Pending(Box::new(record.clone()));
     let consumed = StoredAuthorizationCode::Consumed;
     let swapped = store
-        .compare_and_swap(&key, &expected, &consumed, Some(CONSUMED_MARKER_TTL_SECS))
+        .compare_and_swap(&key, &expected, &consumed, Some(REDEEMED_MARKER_TTL_SECS))
         .await?;
-    if !swapped {
-        return Ok(false);
-    }
+    Ok(swapped)
+}
 
-    if let Err(error) = store.delete(&key).await {
-        tracing::warn!(key, %error, "failed to delete consumed OAuth authorization code");
-    }
+/// Remember the tokens issued for a consumed code so a later replay can
+/// revoke them.
+pub async fn record_redemption<S: Store>(
+    store: &S,
+    code_hash: &str,
+    grant: RedeemedGrant,
+) -> Result<(), OAuthError> {
+    store
+        .set(
+            &code_key(code_hash),
+            &StoredAuthorizationCode::Redeemed(grant),
+            Some(REDEEMED_MARKER_TTL_SECS),
+        )
+        .await?;
+    Ok(())
+}
 
-    Ok(true)
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::AuthorizationCodeRecord;
+
+    pub(crate) fn record() -> AuthorizationCodeRecord {
+        AuthorizationCodeRecord {
+            client_id: "client-1".to_string(),
+            user_id: "user-1".to_string(),
+            sid: Some("session-1".to_string()),
+            redirect_uri: "https://app.example.com/callback".to_string(),
+            scope: "openid email".to_string(),
+            audience: Some("gateway".to_string()),
+            nonce: Some("nonce-1".to_string()),
+            code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
+            code_challenge_method: "S256".to_string(),
+            auth_time: chrono::Utc::now(),
+        }
+    }
 }
 
 #[cfg(all(test, feature = "memory"))]
@@ -118,14 +161,38 @@ mod tests {
             .await
             .unwrap();
 
-        let first = get(&store, &code_hash).await.unwrap();
-        let first_consumed = consume(&store, &code_hash, first.as_ref().unwrap())
-            .await
-            .unwrap();
+        let CodeLookup::Pending(first) = get(&store, &code_hash).await.unwrap() else {
+            panic!("expected a pending code");
+        };
+        let first_consumed = consume(&store, &code_hash, &first).await.unwrap();
+        let second_consumed = consume(&store, &code_hash, &first).await.unwrap();
         let second = get(&store, &code_hash).await.unwrap();
 
-        assert!(first.is_some());
         assert!(first_consumed);
-        assert!(second.is_none());
+        assert!(!second_consumed);
+        assert_eq!(second, CodeLookup::Redeemed(None));
+    }
+
+    #[tokio::test]
+    async fn redeemed_code_keeps_issued_grant() {
+        let store = MemoryStore::new();
+        let code_hash = format!("test-{}", ulid::Ulid::generate());
+        let grant = RedeemedGrant {
+            access_jti: Some("jti-1".to_string()),
+            access_exp: Some(1),
+            refresh_family_id: None,
+        };
+
+        super::store(&store, &code_hash, record(), 60)
+            .await
+            .unwrap();
+        record_redemption(&store, &code_hash, grant.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            get(&store, &code_hash).await.unwrap(),
+            CodeLookup::Redeemed(Some(grant))
+        );
     }
 }

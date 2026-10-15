@@ -1,6 +1,10 @@
 import React from "react";
-import { ActionIcon, useMantineColorScheme } from "@mantine/core";
-import { useColorScheme } from "@mantine/hooks";
+import {
+  ActionIcon,
+  Box,
+  useComputedColorScheme,
+  useMantineColorScheme,
+} from "@mantine/core";
 import { CiLight, CiDark } from "react-icons/ci";
 
 interface Props {
@@ -9,14 +13,18 @@ interface Props {
   size?: string;
 }
 
+// Both icons are rendered and CSS shows the one for the active scheme, so
+// the markup does not depend on browser state (the login page is
+// prerendered and hydrated).
 const ColorSchemeToggle: React.FC<Props> = ({
   color = "gray",
   className,
   size = "xl",
 }) => {
-  const defaultColorScheme = useColorScheme();
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const theme = colorScheme === "auto" ? defaultColorScheme : colorScheme;
+  const { setColorScheme } = useMantineColorScheme();
+  const computedColorScheme = useComputedColorScheme("light", {
+    getInitialValueInEffect: true,
+  });
   return (
     <ActionIcon
       size={size}
@@ -25,11 +33,15 @@ const ColorSchemeToggle: React.FC<Props> = ({
       variant="transparent"
       color={color}
       onClick={() => {
-        const cs = theme === "light" ? "dark" : "light";
-        setColorScheme(cs);
+        setColorScheme(computedColorScheme === "light" ? "dark" : "light");
       }}
     >
-      {theme === "dark" ? <CiDark /> : <CiLight />}
+      <Box component="span" darkHidden>
+        <CiLight />
+      </Box>
+      <Box component="span" lightHidden>
+        <CiDark />
+      </Box>
     </ActionIcon>
   );
 };

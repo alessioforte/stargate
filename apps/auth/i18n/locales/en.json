@@ -62,5 +62,12 @@
   },
   "chooseOrganization": "Choose an organization",
   "chooseOrganizationHint": "Select which organization to sign in to. You can switch later.",
-  "currentOrganization": "Current"
+  "currentOrganization": "Current",
+  "oauthLoginErrors": {
+    "invalid_credentials": "Invalid username or password.",
+    "too_many_attempts": "Too many sign-in attempts. Please try again later.",
+    "interaction_expired": "This sign-in request has expired. Return to the application and try again.",
+    "javascript_required": "Signing in to this account needs an extra step (verification code or password change) that requires JavaScript. Enable JavaScript and try again.",
+    "server_error": "Something went wrong. Please try again later."
+  }
 }

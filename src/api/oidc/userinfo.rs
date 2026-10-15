@@ -1,9 +1,9 @@
 use super::shared::{SCOPE_EMAIL, SCOPE_OPENID, SCOPE_PROFILE, parse_space_delimited};
 use crate::err::{ErrorCode, ErrorResponse};
 use axum::Json;
-use axum::extract::Request;
+use axum::extract::{Form, FromRequest, Request};
 use http::header::AUTHORIZATION;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Debug, Serialize, utoipa::ToSchema, PartialEq)]
@@ -16,9 +16,17 @@ pub struct UserInfoResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    given_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    family_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nickname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     preferred_username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     picture: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<i64>,
 }
 
 fn bearer_unauthorized(message: impl Into<String>) -> ErrorResponse {
@@ -126,13 +134,36 @@ fn userinfo_from_user(user: &db::ent::User, scopes: &HashSet<String>) -> UserInf
         email: include_email.then(|| user.email.clone()),
         email_verified: include_email.then_some(true),
         name,
+        given_name: include_profile.then(|| user.given_name.clone()).flatten(),
+        family_name: include_profile.then(|| user.family_name.clone()).flatten(),
+        nickname: include_profile.then(|| user.nickname.clone()),
         preferred_username: include_profile.then(|| user.nickname.clone()),
         picture: include_profile.then(|| user.picture.clone()).flatten(),
+        updated_at: include_profile.then(|| user.updated_at.timestamp()),
     }
 }
 
-async fn handle_userinfo(req: Request) -> Result<Json<UserInfoResponse>, ErrorResponse> {
-    let token = bearer_token(&req)?;
+#[derive(Debug, Deserialize)]
+struct UserInfoForm {
+    access_token: Option<String>,
+}
+
+/// Bearer token from the `Authorization` header or, for POST, the
+/// form-encoded `access_token` body parameter (RFC 6750 §2.2).
+async fn post_bearer_token(req: Request) -> Result<String, ErrorResponse> {
+    if req.headers().contains_key(AUTHORIZATION) {
+        return bearer_token(&req);
+    }
+    let Form(form) = Form::<UserInfoForm>::from_request(req, &())
+        .await
+        .map_err(|_| bearer_unauthorized("bearer token is required"))?;
+    form.access_token
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| bearer_unauthorized("bearer token is required"))
+}
+
+async fn handle_userinfo(token: String) -> Result<Json<UserInfoResponse>, ErrorResponse> {
     let (claims, scopes) = active_user_claims(&token).await?;
     let Some(user_id) = claims
         .sub_id
@@ -167,7 +198,7 @@ async fn handle_userinfo(req: Request) -> Result<Json<UserInfoResponse>, ErrorRe
     )
 )]
 pub async fn get_userinfo(req: Request) -> Result<Json<UserInfoResponse>, ErrorResponse> {
-    handle_userinfo(req).await
+    handle_userinfo(bearer_token(&req)?).await
 }
 
 #[utoipa::path(
@@ -182,7 +213,7 @@ pub async fn get_userinfo(req: Request) -> Result<Json<UserInfoResponse>, ErrorR
     )
 )]
 pub async fn post_userinfo(req: Request) -> Result<Json<UserInfoResponse>, ErrorResponse> {
-    handle_userinfo(req).await
+    handle_userinfo(post_bearer_token(req).await?).await
 }
 
 #[cfg(test)]
@@ -205,6 +236,7 @@ mod tests {
         assert_eq!(body.sub, user.id);
         assert!(body.email.is_none());
         assert!(body.name.is_none());
+        assert!(body.updated_at.is_none());
     }
 
     #[test]
@@ -221,10 +253,14 @@ mod tests {
         assert_eq!(body.email.as_deref(), Some("alice@example.com"));
         assert_eq!(body.email_verified, Some(true));
         assert_eq!(body.name.as_deref(), Some("Alice Example"));
+        assert_eq!(body.given_name.as_deref(), Some("Alice"));
+        assert_eq!(body.family_name.as_deref(), Some("Example"));
+        assert_eq!(body.nickname.as_deref(), Some("alice"));
         assert_eq!(body.preferred_username.as_deref(), Some("alice"));
         assert_eq!(
             body.picture.as_deref(),
             Some("https://app.example.com/alice.png")
         );
+        assert_eq!(body.updated_at, Some(user.updated_at.timestamp()));
     }
 }

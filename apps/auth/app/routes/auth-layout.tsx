@@ -6,9 +6,7 @@ import { TranslationProvider } from "@/i18n";
 import useStore from "@/store";
 
 export default function AuthLayout() {
-  const theme = useStore((state) => state.theme);
   const language = useStore((state) => state.language);
-  const setTheme = useStore((state) => state.setTheme);
   const setLanguage = useStore((state) => state.setLanguage);
   const loadApiMessages = useStore((state) => state.loadApiMessages);
 
@@ -33,7 +31,7 @@ export default function AuthLayout() {
               }
             }}
           />
-          <ColorSchemeToggle theme={theme} onClick={setTheme} />
+          <ColorSchemeToggle />
         </Group>
         <main className="auth-main">
           <Box className="auth-panel">

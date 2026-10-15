@@ -1,4 +1,4 @@
-use super::authorization_codes::{self, AuthorizationCodeRecord};
+use super::authorization_codes::{self, AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
 use super::pkce;
 use super::refresh_tokens;
 use super::shared::{
@@ -11,7 +11,10 @@ use super::shared::{
 use crate::err::OAuthErrorResponse;
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
+use axum::response::{IntoResponse, Response};
 use chrono::Utc;
+use http::HeaderValue;
+use http::header::{CACHE_CONTROL, PRAGMA};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -52,7 +55,19 @@ pub struct TokenResponse {
         (status = 500, description = "Internal Server Error", body = OAuthErrorResponse),
     )
 )]
-pub async fn post_token(req: Request) -> OAuthResult<Json<TokenResponse>> {
+pub async fn post_token(req: Request) -> Response {
+    let mut response = match token_response(req).await {
+        Ok(body) => Json(body).into_response(),
+        Err(error) => error.into_response(),
+    };
+    // Token responses carry credentials and must not be cached (RFC 6749 §5.1).
+    let headers = response.headers_mut();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
+    response
+}
+
+async fn token_response(req: Request) -> OAuthResult<TokenResponse> {
     let basic = extract_basic_client_credentials(&req)?;
     let form = extract_token_endpoint_form(req).await?;
 
@@ -75,7 +90,7 @@ pub async fn post_token(req: Request) -> OAuthResult<Json<TokenResponse>> {
         _ => return Err(oauth_unsupported_grant_type("unsupported grant_type")),
     };
 
-    Ok(Json(body))
+    Ok(body)
 }
 
 async fn extract_token_endpoint_form(req: Request) -> OAuthResult<TokenEndpointForm> {
@@ -258,11 +273,11 @@ fn issue_user_token_response(
     auth_time: chrono::DateTime<Utc>,
     nonce: Option<String>,
     refresh_token: Option<String>,
-) -> OAuthResult<TokenResponse> {
+) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
     let jwt = crate::etc::auth::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let profile = user_claims_profile(user);
-    let access_claims = oidc::claims::user_access_claims(
+    let mut access_claims = oidc::claims::user_access_claims(
         &profile,
         &client.client_id,
         sid,
@@ -272,6 +287,11 @@ fn issue_user_token_response(
     );
     let id_claims =
         oidc::claims::id_token_claims(&profile, &client.client_id, sid, scopes, auth_time, nonce);
+    // Fix the jti up front so a replayed authorization code can revoke it.
+    let access_jti = ulid::Ulid::generate().to_string();
+    access_claims.jti = Some(access_jti.clone());
+    // Upper bound for the token's exp (timed_claims stamps it a moment later).
+    let access_exp = Utc::now().timestamp() as usize + jwt.access_exp.as_seconds_f64() as usize + 1;
 
     let access_token = jwt
         .generate_oauth_access_token(access_claims)
@@ -286,14 +306,23 @@ fn issue_user_token_response(
         None
     };
 
-    Ok(TokenResponse {
+    let grant = RedeemedGrant {
+        access_jti: Some(access_jti),
+        access_exp: Some(access_exp),
+        refresh_family_id: refresh_token
+            .as_deref()
+            .and_then(oidc::refresh::parse_refresh_token)
+            .map(|(family_id, _)| family_id.to_string()),
+    };
+    let response = TokenResponse {
         access_token,
         id_token,
         refresh_token,
         token_type: "Bearer".to_string(),
         expires_in: jwt.access_exp.as_seconds_f64() as u64,
         scope,
-    })
+    };
+    Ok((response, grant))
 }
 
 async fn issue_authorization_code_token(
@@ -301,7 +330,7 @@ async fn issue_authorization_code_token(
     code: &AuthorizationCodeRecord,
     user: &db::ent::User,
     scopes: &[String],
-) -> OAuthResult<TokenResponse> {
+) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
     if let Some(sid) = code.sid.as_deref()
         && !crate::act::sessions::register_session_client(sid, &user.id, &client.client_id)
             .await
@@ -374,13 +403,17 @@ async fn issue_authorization_code_grant(
         .code_verifier
         .as_deref()
         .map(str::trim)
-        .filter(|verifier| !verifier.is_empty())
-        .ok_or_else(|| oauth_bad_request("code_verifier is required"))?;
+        .filter(|verifier| !verifier.is_empty());
 
     let code_hash = pw::hash_api_key(code);
 
-    let Some(record) = authorization_codes::get(&code_hash).await? else {
-        return Err(oauth_invalid_grant("invalid authorization code"));
+    let record = match authorization_codes::get(&code_hash).await? {
+        CodeLookup::Pending(record) => record,
+        CodeLookup::Missing => return Err(oauth_invalid_grant("invalid authorization code")),
+        CodeLookup::Redeemed(grant) => {
+            revoke_replayed_code_grant(grant).await;
+            return Err(oauth_invalid_grant("invalid authorization code"));
+        }
     };
 
     if record.client_id != client.client_id {
@@ -406,7 +439,36 @@ async fn issue_authorization_code_grant(
         return Err(oauth_invalid_grant("invalid authorization code"));
     }
 
-    issue_authorization_code_token(client, &record, &user, &scopes).await
+    let (response, grant) = issue_authorization_code_token(client, &record, &user, &scopes).await?;
+    if let Err(error) = authorization_codes::record_redemption(&code_hash, grant).await {
+        tracing::warn!(error = %error, "failed to record authorization code redemption");
+    }
+    Ok(response)
+}
+
+/// A redeemed code presented again may have been intercepted, so revoke the
+/// tokens issued for it (RFC 6749 §4.1.2). Best-effort: failures only log.
+async fn revoke_replayed_code_grant(grant: Option<RedeemedGrant>) {
+    let Some(grant) = grant else {
+        return;
+    };
+
+    if let (Some(jti), Some(exp)) = (grant.access_jti, grant.access_exp) {
+        let claims = jwt::Claims {
+            jti: Some(jti),
+            exp,
+            ..Default::default()
+        };
+        if let Err(error) = crate::act::token_revocation::revoke_claims(&claims).await {
+            tracing::warn!(error = %error, "failed to revoke access token of replayed code");
+        }
+    }
+
+    if let Some(family_id) = grant.refresh_family_id.as_deref()
+        && let Err(error) = refresh_tokens::revoke_family(family_id).await
+    {
+        tracing::warn!(error = %error, "failed to revoke refresh tokens of replayed code");
+    }
 }
 
 async fn issue_refresh_token_grant(
@@ -451,4 +513,5 @@ async fn issue_refresh_token_grant(
         family.nonce.clone(),
         Some(new_refresh_token),
     )
+    .map(|(response, _)| response)
 }

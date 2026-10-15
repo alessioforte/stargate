@@ -1,35 +1,46 @@
 use super::authorization_codes::{self, AuthorizationCodeRecord};
+use super::interactions;
 use super::shared::{
-    AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN, OAuthResult,
-    PKCE_METHOD_S256, RESPONSE_CODE, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, oauth_bad_request,
-    resolve_audience, resolve_scopes, scope_contains,
+    AUTH_METHOD_NONE, AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN,
+    OAuthResult, PKCE_METHOD_S256, RESPONSE_CODE, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID,
+    oauth_bad_request, parse_space_delimited, resolve_audience, scope_contains,
 };
 use crate::err::OAuthErrorResponse;
 use crate::etc::http::request::RequestExt;
 use axum::body::Body;
-use axum::extract::{Query, Request};
+use axum::extract::{Form, FromRequest, Query, Request};
 use axum::http::StatusCode;
 use axum::response::Response;
-use chrono::{Duration, TimeZone, Utc};
-use http::header::LOCATION;
-use serde::Deserialize;
+use chrono::{TimeZone, Utc};
+use http::header::{LOCATION, SET_COOKIE};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use store::Store;
 use url::Url;
 
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+/// Authorization request parameters. Everything is optional so that a
+/// missing or malformed value can be reported to the client's redirect_uri
+/// (OIDC Core 3.1.2.6) instead of failing before the client is known.
+/// Unrecognized parameters (`display`, `ui_locales`, `acr_values`, ...) are
+/// ignored as OIDC Core requires.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::IntoParams)]
 pub struct AuthorizeQuery {
-    response_type: String,
-    client_id: String,
-    redirect_uri: String,
-    scope: String,
+    response_type: Option<String>,
+    client_id: Option<String>,
+    redirect_uri: Option<String>,
+    scope: Option<String>,
     state: Option<String>,
     nonce: Option<String>,
-    code_challenge: String,
-    code_challenge_method: String,
+    code_challenge: Option<String>,
+    code_challenge_method: Option<String>,
     audience: Option<String>,
     prompt: Option<String>,
-    max_age: Option<u64>,
+    max_age: Option<String>,
+    pub(crate) login_hint: Option<String>,
+    request: Option<String>,
+    request_uri: Option<String>,
+    /// Resumes a request parked while the user signed in.
+    interaction: Option<String>,
 }
 
 struct AuthorizedUser {
@@ -45,81 +56,142 @@ struct AuthorizePrompt {
     consent: bool,
 }
 
+struct ValidatedAuthorizeRequest {
+    scopes: Vec<String>,
+    audience: Option<String>,
+    code_challenge: Option<String>,
+    max_age: Option<i64>,
+}
+
 #[utoipa::path(
     get,
     path = "/oauth/authorize",
     tags = ["OAuth"],
+    params(AuthorizeQuery),
     responses(
-        (status = 302, description = "Redirects to the registered redirect_uri with an authorization code or OAuth error"),
+        (status = 302, description = "Redirects to the registered redirect_uri with an authorization code or OAuth error, or to the provider login page"),
         (status = 400, description = "Bad Request", body = OAuthErrorResponse),
         (status = 500, description = "Internal Server Error", body = OAuthErrorResponse),
     )
 )]
 pub async fn get_authorize(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
-    let uri = req.uri().clone();
-    drop(req);
+    let Query(query) = Query::<AuthorizeQuery>::try_from_uri(req.uri())
+        .map_err(|e| oauth_bad_request(e.body_text()))?;
+    authorize(token, query).await
+}
 
-    let Query(query): Query<AuthorizeQuery> =
-        Query::try_from_uri(&uri).map_err(|e| oauth_bad_request(e.body_text()))?;
+#[utoipa::path(
+    post,
+    path = "/oauth/authorize",
+    tags = ["OAuth"],
+    request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "Authorization request parameters (OIDC Core 3.1.2.1)"),
+    responses(
+        (status = 302, description = "Redirects to the registered redirect_uri with an authorization code or OAuth error, or to the provider login page"),
+        (status = 400, description = "Bad Request", body = OAuthErrorResponse),
+        (status = 500, description = "Internal Server Error", body = OAuthErrorResponse),
+    )
+)]
+pub async fn post_authorize(req: Request) -> OAuthResult<Response> {
+    let token = req.get_token();
+    let Form(query) = Form::<AuthorizeQuery>::from_request(req, &())
+        .await
+        .map_err(|e| oauth_bad_request(e.body_text()))?;
+    authorize(token, query).await
+}
+
+async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<Response> {
+    // A resumed request replays the parked parameters; the rest of this
+    // request's query is ignored.
+    let (query, parked_at) = match query.interaction.as_deref() {
+        Some(id) => {
+            let Some(pending) = interactions::take(id).await? else {
+                return Err(oauth_bad_request(
+                    "authorization request expired or was already completed",
+                ));
+            };
+            (pending.query, Some(pending.created_at))
+        }
+        None => (query, None),
+    };
 
     let client = authorization_client(&query).await?;
-    let redirect_uri = query.redirect_uri.as_str();
+    let redirect_uri = query.redirect_uri.as_deref().unwrap_or_default();
     let state = query.state.as_deref();
+    let error_redirect = |error: &str, description: &str| {
+        oauth_error_redirect(redirect_uri, error, description, state)
+    };
+
+    if query.request.is_some() {
+        return error_redirect("request_not_supported", "request objects are not supported");
+    }
+    if query.request_uri.is_some() {
+        return error_redirect("request_uri_not_supported", "request_uri is not supported");
+    }
 
     let prompt = match validate_authorize_prompt(query.prompt.as_deref()) {
         Ok(prompt) => prompt,
-        Err(err) => {
-            return oauth_error_redirect(redirect_uri, "invalid_request", err.description(), state);
-        }
+        Err(err) => return error_redirect(&err.error, err.description()),
     };
 
-    let (scopes, audience) = match validate_authorize_request(&client, &query) {
-        Ok(value) => value,
-        Err(err) => {
-            return oauth_error_redirect(redirect_uri, "invalid_request", err.description(), state);
-        }
+    let request = match validate_authorize_request(&client, &query) {
+        Ok(request) => request,
+        Err(err) => return error_redirect(&err.error, err.description()),
     };
 
-    let Some(user) = current_authorized_user(token).await? else {
-        return oauth_error_redirect(redirect_uri, "login_required", "login required", state);
+    let user = current_authorized_user(token).await?;
+    let user = match user {
+        // Signed in on the login page for this very request.
+        Some(user) if parked_at.is_some_and(|at| user.auth_time.timestamp() >= at) => user,
+        Some(user) if !prompt.login && !max_age_exceeded(&user, request.max_age) => user,
+        _ if prompt.none => return error_redirect("login_required", "login required"),
+        _ => return login_redirect(query).await,
     };
 
-    if prompt.login {
-        return oauth_error_redirect(
-            redirect_uri,
-            "login_required",
-            "fresh login required",
-            state,
-        );
-    }
-
-    if let Some(max_age) = query.max_age {
-        let auth_age = Utc::now().signed_duration_since(user.auth_time);
-        if auth_age > Duration::seconds(max_age as i64) {
-            return oauth_error_redirect(
-                redirect_uri,
-                "login_required",
-                "fresh login required",
-                state,
-            );
-        }
-    }
-
-    if !consent_satisfied(&client, &user.user, &scopes, audience.as_deref(), &prompt).await? {
+    if !consent_satisfied(
+        &client,
+        &user.user,
+        &request.scopes,
+        request.audience.as_deref(),
+        &prompt,
+    )
+    .await?
+    {
         if prompt.none {
-            return oauth_error_redirect(
-                redirect_uri,
-                "interaction_required",
-                "interaction required",
-                state,
-            );
+            return error_redirect("interaction_required", "interaction required");
         }
-        return oauth_error_redirect(redirect_uri, "consent_required", "consent required", state);
+        return error_redirect("consent_required", "consent required");
     }
 
-    let code = store_authorization_code(&client, &query, &user, &scopes, audience).await?;
+    let code = store_authorization_code(&client, &query, &user, &request).await?;
     oauth_code_redirect(redirect_uri, &code, state)
+}
+
+fn max_age_exceeded(user: &AuthorizedUser, max_age: Option<i64>) -> bool {
+    let Some(max_age) = max_age else {
+        return false;
+    };
+    // max_age=0 is equivalent to prompt=login (OIDC Core 3.1.2.1).
+    max_age == 0 || Utc::now().timestamp() - user.auth_time.timestamp() > max_age
+}
+
+/// Park the request and send the browser to the hosted auth app's login
+/// page, which resumes it after a successful sign-in.
+async fn login_redirect(mut query: AuthorizeQuery) -> OAuthResult<Response> {
+    query.interaction = None;
+    let login_hint = query.login_hint.clone();
+    let id = interactions::park(query).await?;
+    let mut response = found_redirect(interactions::login_page_url(interactions::LoginPage {
+        interaction: Some(&id),
+        login_hint: login_hint.as_deref(),
+        ..Default::default()
+    }))?;
+    let cookie = interactions::interaction_cookie(&id, interactions::INTERACTION_TTL_SECS);
+    response.headers_mut().append(
+        SET_COOKIE,
+        cookie.parse().map_err(OAuthErrorResponse::internal)?,
+    );
+    Ok(response)
 }
 
 fn redirect_location(redirect_uri: &str, params: &[(&str, &str)]) -> OAuthResult<String> {
@@ -181,15 +253,27 @@ fn exact_redirect_uri_allowed(client: &db::ent::OAuthClient, redirect_uri: &str)
     client.redirect_uris.iter().any(|uri| uri == redirect_uri)
 }
 
+fn oauth_error(error: &str, description: impl Into<String>) -> OAuthErrorResponse {
+    let mut err = oauth_bad_request(description);
+    err.error = error.to_string();
+    err
+}
+
 async fn authorization_client(query: &AuthorizeQuery) -> OAuthResult<db::ent::OAuthClient> {
-    if query.client_id.trim().is_empty() {
+    let client_id = query
+        .client_id
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    if client_id.is_empty() {
         return Err(oauth_bad_request("client_id is required"));
     }
-    if query.redirect_uri.trim().is_empty() {
+    let redirect_uri = query.redirect_uri.as_deref().unwrap_or_default();
+    if redirect_uri.trim().is_empty() {
         return Err(oauth_bad_request("redirect_uri is required"));
     }
 
-    let Some(client) = crate::db::get_oauth_client_by_client_id(query.client_id.trim())
+    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -200,7 +284,7 @@ async fn authorization_client(query: &AuthorizeQuery) -> OAuthResult<db::ent::OA
         return Err(oauth_bad_request("client is disabled"));
     }
 
-    if !exact_redirect_uri_allowed(&client, &query.redirect_uri) {
+    if !exact_redirect_uri_allowed(&client, redirect_uri) {
         return Err(oauth_bad_request(
             "redirect_uri is not registered for this client",
         ));
@@ -221,7 +305,9 @@ fn validate_authorize_prompt(prompt: Option<&str>) -> OAuthResult<AuthorizePromp
                 values.insert(value.to_string());
             }
             _ => {
-                return Err(oauth_bad_request("unsupported prompt value"));
+                return Err(oauth_bad_request(format!(
+                    "unsupported prompt value '{value}'"
+                )));
             }
         }
     }
@@ -305,42 +391,57 @@ async fn current_authorized_user(token: Option<String>) -> OAuthResult<Option<Au
 fn validate_authorize_request(
     client: &db::ent::OAuthClient,
     query: &AuthorizeQuery,
-) -> OAuthResult<(Vec<String>, Option<String>)> {
-    if query.response_type.trim() != RESPONSE_CODE {
-        return Err(oauth_bad_request("unsupported response_type"));
+) -> OAuthResult<ValidatedAuthorizeRequest> {
+    let response_type = query
+        .response_type
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    if response_type.is_empty() {
+        return Err(oauth_bad_request("response_type is required"));
+    }
+    if response_type != RESPONSE_CODE {
+        return Err(oauth_error(
+            "unsupported_response_type",
+            "only the code response type is supported",
+        ));
     }
 
     if !client
         .grant_types
         .iter()
         .any(|grant_type| grant_type == GRANT_AUTHORIZATION_CODE)
+        || !client
+            .response_types
+            .iter()
+            .any(|response_type| response_type == RESPONSE_CODE)
     {
-        return Err(oauth_bad_request(
+        return Err(oauth_error(
+            "unauthorized_client",
             "authorization_code grant is not allowed for this client",
         ));
     }
 
-    if !client
-        .response_types
-        .iter()
-        .any(|response_type| response_type == RESPONSE_CODE)
-    {
-        return Err(oauth_bad_request(
-            "code response type is not allowed for this client",
-        ));
-    }
+    let code_challenge = validate_code_challenge(client, query)?;
 
-    if query.code_challenge.trim().is_empty() {
-        return Err(oauth_bad_request("code_challenge is required"));
+    // Scopes the client is not registered for are dropped rather than
+    // rejected, as OIDC Core 3.1.2.1 asks servers to ignore unknown scopes.
+    let requested = parse_space_delimited(query.scope.as_deref(), "scope")?;
+    if requested.is_empty() {
+        return Err(oauth_bad_request("scope is required"));
     }
-
-    if query.code_challenge_method.trim() != PKCE_METHOD_S256 {
-        return Err(oauth_bad_request("code_challenge_method must be S256"));
+    if !scope_contains(&requested, SCOPE_OPENID) {
+        return Err(oauth_error("invalid_scope", "openid scope is required"));
     }
-
-    let scopes = resolve_scopes(Some(query.scope.as_str()), &client.scopes)?;
+    let scopes = requested
+        .into_iter()
+        .filter(|scope| client.scopes.iter().any(|allowed| allowed == scope))
+        .collect::<Vec<_>>();
     if !scope_contains(&scopes, SCOPE_OPENID) {
-        return Err(oauth_bad_request("openid scope is required"));
+        return Err(oauth_error(
+            "invalid_scope",
+            "openid scope is not allowed for this client",
+        ));
     }
 
     if scope_contains(&scopes, SCOPE_OFFLINE_ACCESS)
@@ -349,13 +450,53 @@ fn validate_authorize_request(
             .iter()
             .any(|grant_type| grant_type == GRANT_REFRESH_TOKEN)
     {
-        return Err(oauth_bad_request(
+        return Err(oauth_error(
+            "invalid_scope",
             "offline_access requires refresh_token grant",
         ));
     }
 
+    let max_age = match query.max_age.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(value) => Some(
+            value
+                .parse::<u32>()
+                .map_err(|_| oauth_bad_request("max_age must be a non-negative integer"))?
+                as i64,
+        ),
+    };
+
     let audience = resolve_audience(query.audience.as_deref(), &client.audiences)?;
-    Ok((scopes, audience))
+    Ok(ValidatedAuthorizeRequest {
+        scopes,
+        audience,
+        code_challenge,
+        max_age,
+    })
+}
+
+fn validate_code_challenge(
+    client: &db::ent::OAuthClient,
+    query: &AuthorizeQuery,
+) -> OAuthResult<Option<String>> {
+    let challenge = query
+        .code_challenge
+        .as_deref()
+        .map(str::trim)
+        .filter(|challenge| !challenge.is_empty());
+    let Some(challenge) = challenge else {
+        let public_client = client.token_endpoint_auth_method == AUTH_METHOD_NONE;
+        if oidc::pkce::client_requires_pkce(public_client, &client.attrs) {
+            return Err(oauth_bad_request("code_challenge is required"));
+        }
+        return Ok(None);
+    };
+
+    if query.code_challenge_method.as_deref().map(str::trim) != Some(PKCE_METHOD_S256) {
+        return Err(oauth_bad_request("code_challenge_method must be S256"));
+    }
+
+    Ok(Some(challenge.to_string()))
 }
 
 async fn consent_satisfied(
@@ -398,8 +539,7 @@ async fn store_authorization_code(
     client: &db::ent::OAuthClient,
     query: &AuthorizeQuery,
     user: &AuthorizedUser,
-    scopes: &[String],
-    audience: Option<String>,
+    request: &ValidatedAuthorizeRequest,
 ) -> OAuthResult<String> {
     let code = oidc::codes::authorization_code();
     let code_hash = pw::hash_api_key(&code);
@@ -407,12 +547,17 @@ async fn store_authorization_code(
         client_id: client.client_id.clone(),
         user_id: user.user.id.clone(),
         sid: Some(user.sid.clone()),
-        redirect_uri: query.redirect_uri.clone(),
-        scope: scopes.join(" "),
-        audience,
+        redirect_uri: query.redirect_uri.clone().unwrap_or_default(),
+        scope: request.scopes.join(" "),
+        audience: request.audience.clone(),
         nonce: query.nonce.clone(),
-        code_challenge: query.code_challenge.trim().to_string(),
-        code_challenge_method: PKCE_METHOD_S256.to_string(),
+        // Empty when the client is allowed to skip PKCE.
+        code_challenge: request.code_challenge.clone().unwrap_or_default(),
+        code_challenge_method: request
+            .code_challenge
+            .as_ref()
+            .map(|_| PKCE_METHOD_S256.to_string())
+            .unwrap_or_default(),
         auth_time: user.auth_time,
     };
 
@@ -423,9 +568,10 @@ async fn store_authorization_code(
 
 #[cfg(test)]
 mod tests {
-    use super::super::shared::AUTH_METHOD_NONE;
-    use super::super::shared::{SCOPE_EMAIL, SCOPE_PROFILE};
+    use super::super::shared::{AUTH_METHOD_CLIENT_SECRET_BASIC, SCOPE_EMAIL, SCOPE_PROFILE};
     use super::*;
+
+    const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
     fn authorization_code_client(client_id: &str) -> db::ent::OAuthClient {
         db::ent::OAuthClient::new(
@@ -447,71 +593,139 @@ mod tests {
         )
     }
 
+    fn query(scope: &str) -> AuthorizeQuery {
+        AuthorizeQuery {
+            response_type: Some(RESPONSE_CODE.to_string()),
+            client_id: Some("client-1".to_string()),
+            redirect_uri: Some("https://app.example.com/callback".to_string()),
+            scope: Some(scope.to_string()),
+            code_challenge: Some(CHALLENGE.to_string()),
+            code_challenge_method: Some(PKCE_METHOD_S256.to_string()),
+            ..AuthorizeQuery::default()
+        }
+    }
+
+    fn error_code(result: OAuthResult<ValidatedAuthorizeRequest>) -> String {
+        match result {
+            Ok(_) => panic!("expected an error"),
+            Err(err) => err.error,
+        }
+    }
+
     #[test]
     fn authorize_request_requires_openid_scope() {
         let client = authorization_code_client("client-1");
-        let query = AuthorizeQuery {
-            response_type: RESPONSE_CODE.to_string(),
-            client_id: "client-1".to_string(),
-            redirect_uri: "https://app.example.com/callback".to_string(),
-            scope: SCOPE_EMAIL.to_string(),
-            state: None,
-            nonce: None,
-            code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
-            code_challenge_method: PKCE_METHOD_S256.to_string(),
-            audience: None,
-            prompt: None,
-            max_age: None,
-        };
 
-        assert!(validate_authorize_request(&client, &query).is_err());
+        assert_eq!(
+            error_code(validate_authorize_request(&client, &query(SCOPE_EMAIL))),
+            "invalid_scope"
+        );
     }
 
     #[test]
     fn authorize_request_accepts_code_pkce_and_registered_scope() {
         let client = authorization_code_client("client-1");
-        let query = AuthorizeQuery {
-            response_type: RESPONSE_CODE.to_string(),
-            client_id: "client-1".to_string(),
-            redirect_uri: "https://app.example.com/callback".to_string(),
-            scope: format!("{SCOPE_OPENID} {SCOPE_EMAIL}"),
-            state: None,
-            nonce: None,
-            code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
-            code_challenge_method: PKCE_METHOD_S256.to_string(),
-            audience: None,
-            prompt: None,
-            max_age: None,
-        };
-
-        let (scopes, audience) = validate_authorize_request(&client, &query).unwrap();
+        let request =
+            validate_authorize_request(&client, &query(&format!("{SCOPE_OPENID} {SCOPE_EMAIL}")))
+                .unwrap();
 
         assert_eq!(
-            scopes,
+            request.scopes,
             vec![SCOPE_OPENID.to_string(), SCOPE_EMAIL.to_string()]
         );
-        assert_eq!(audience.as_deref(), Some("gateway"));
+        assert_eq!(request.audience.as_deref(), Some("gateway"));
+        assert_eq!(request.code_challenge.as_deref(), Some(CHALLENGE));
+    }
+
+    #[test]
+    fn authorize_request_ignores_unregistered_scopes() {
+        let client = authorization_code_client("client-1");
+        let request = validate_authorize_request(&client, &query("openid address phone")).unwrap();
+
+        assert_eq!(request.scopes, vec![SCOPE_OPENID.to_string()]);
+    }
+
+    #[test]
+    fn authorize_request_reports_response_type_errors() {
+        let client = authorization_code_client("client-1");
+        let mut missing = query(SCOPE_OPENID);
+        missing.response_type = None;
+        let mut token = query(SCOPE_OPENID);
+        token.response_type = Some("token".to_string());
+
+        assert_eq!(
+            error_code(validate_authorize_request(&client, &missing)),
+            "invalid_request"
+        );
+        assert_eq!(
+            error_code(validate_authorize_request(&client, &token)),
+            "unsupported_response_type"
+        );
+    }
+
+    #[test]
+    fn pkce_is_required_unless_confidential_client_opts_out() {
+        let mut client = authorization_code_client("client-1");
+        let mut without_pkce = query(SCOPE_OPENID);
+        without_pkce.code_challenge = None;
+        without_pkce.code_challenge_method = None;
+
+        assert!(validate_authorize_request(&client, &without_pkce).is_err());
+
+        client.token_endpoint_auth_method = AUTH_METHOD_CLIENT_SECRET_BASIC.to_string();
+        assert!(validate_authorize_request(&client, &without_pkce).is_err());
+
+        client.attrs = serde_json::json!({ "require_pkce": false });
+        let request = validate_authorize_request(&client, &without_pkce).unwrap();
+        assert!(request.code_challenge.is_none());
+
+        // A public client cannot opt out.
+        client.token_endpoint_auth_method = AUTH_METHOD_NONE.to_string();
+        assert!(validate_authorize_request(&client, &without_pkce).is_err());
+    }
+
+    #[test]
+    fn authorize_request_rejects_invalid_max_age() {
+        let client = authorization_code_client("client-1");
+        let mut request = query(SCOPE_OPENID);
+        request.max_age = Some("-1".to_string());
+
+        assert!(validate_authorize_request(&client, &request).is_err());
+
+        request.max_age = Some("10000".to_string());
+        assert_eq!(
+            validate_authorize_request(&client, &request)
+                .unwrap()
+                .max_age,
+            Some(10000)
+        );
     }
 
     #[test]
     fn authorize_request_rejects_offline_access_without_refresh_grant() {
         let mut client = authorization_code_client("client-1");
         client.scopes.0.push(SCOPE_OFFLINE_ACCESS.to_string());
-        let query = AuthorizeQuery {
-            response_type: RESPONSE_CODE.to_string(),
-            client_id: "client-1".to_string(),
-            redirect_uri: "https://app.example.com/callback".to_string(),
-            scope: format!("{SCOPE_OPENID} {SCOPE_OFFLINE_ACCESS}"),
-            state: None,
-            nonce: None,
-            code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
-            code_challenge_method: PKCE_METHOD_S256.to_string(),
-            audience: None,
-            prompt: None,
-            max_age: None,
+
+        assert!(
+            validate_authorize_request(
+                &client,
+                &query(&format!("{SCOPE_OPENID} {SCOPE_OFFLINE_ACCESS}"))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn max_age_zero_always_requires_login() {
+        let user = AuthorizedUser {
+            user: db::ent::User::new("alice@example.com".to_string(), "alice".to_string()),
+            sid: "sid-1".to_string(),
+            auth_time: Utc::now(),
         };
 
-        assert!(validate_authorize_request(&client, &query).is_err());
+        assert!(max_age_exceeded(&user, Some(0)));
+        assert!(!max_age_exceeded(&user, Some(60)));
+        assert!(!max_age_exceeded(&user, None));
     }
 
     #[tokio::test]

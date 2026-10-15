@@ -13,6 +13,8 @@ Discovery and keys:
 OAuth/OIDC:
 
 - `GET /oauth/authorize`
+- `POST /oauth/authorize` (form-encoded, same parameters)
+- `POST /oauth/login` (no-JavaScript form post of the hosted login page; answers with redirects)
 - `POST /oauth/token`
 - `GET /oauth/userinfo`
 - `POST /oauth/userinfo`
@@ -76,6 +78,18 @@ First-party clients can skip consent when one of these attrs is true:
 ```
 
 Also accepted: `firstParty` and `trusted`.
+
+Confidential clients must send PKCE by default. OpenID Connect Core does not
+require it, so a confidential client can opt out (public clients cannot):
+
+```json
+{
+  "require_pkce": false
+}
+```
+
+Also accepted: `requirePkce`. A code issued without a challenge is rejected at
+the token endpoint if the request carries a `code_verifier`.
 
 Privileged token operation clients can use:
 
@@ -188,11 +202,52 @@ GET /oauth/authorize?
   code_challenge_method=S256
 ```
 
-If the user is not logged in, Stargate redirects back with:
+If the user has no session, or `prompt=login` or an exceeded `max_age`
+requires a fresh login, Stargate parks the request for 10 minutes and sends the
+browser to the hosted auth app's login page:
+
+```text
+/auth/login?return_to=<issuer>/oauth/authorize?interaction=<id>&login_hint=...
+```
+
+The page offers the hosted app's full sign-in (password, email MFA, password
+reset and change, organization choice) and prefills `login_hint`. After
+sign-in it follows `return_to`, and `/oauth/authorize` resumes the parked
+request. A session issued after the request was parked satisfies `prompt=login`
+and `max_age`, so the user is not asked again.
+
+The login page is prerendered at build time (`apps/auth/scripts/prerender.mjs`)
+and hydrated in the browser, so it also works without JavaScript: its form then
+posts natively to `POST /oauth/login`, which checks the password like
+`POST /account/login` (login throttling, constant-time unknown users) and
+redirects back to `/oauth/authorize`, or to the login page with `error=...`.
+That path supports password-only sign-in: users who need MFA or a password
+change get `error=javascript_required`. The parked request id reaches
+`/oauth/login` in the `oauth_interaction` cookie (`HttpOnly`,
+`SameSite=Strict`, `Path=/oauth/login`), which also blocks cross-site form
+posts (login CSRF). The no-JavaScript path therefore needs the auth app on the
+same site as Stargate, which is the default (`/auth`, served from
+`AUTH_APP_DIR`).
+
+`return_to` is only followed to in-app paths and to the auth app's own origin
+or its API origin.
+
+With `prompt=none` Stargate never shows the login page and redirects back with:
 
 ```text
 error=login_required
 ```
+
+The session cookie is `SameSite=Lax`, so a user already signed in to Stargate
+is recognized when a relying party on another site redirects to
+`/oauth/authorize`.
+
+Errors that can be reported to a verified `redirect_uri` use the OAuth/OIDC
+codes: `invalid_request`, `unsupported_response_type`, `invalid_scope`,
+`unauthorized_client`, `login_required`, `interaction_required`,
+`consent_required`, `request_not_supported`, and `request_uri_not_supported`.
+Scopes the client is not registered for are ignored. Unknown parameters
+(`display`, `ui_locales`, `acr_values`, ...) are ignored.
 
 If a third-party client needs consent and no active consent exists:
 
@@ -229,6 +284,10 @@ Response:
 
 `refresh_token` appears only when `offline_access` was requested and the client allows `refresh_token`.
 
+Token responses carry `Cache-Control: no-store`. An authorization code works
+once; presenting it again fails with `invalid_grant` and revokes the access
+token and refresh-token family issued for it.
+
 ## Refresh Token Grant
 
 Refresh tokens are opaque. Stargate stores refresh-token family state in the `store` backend:
@@ -255,11 +314,14 @@ curl "$STARGATE/oauth/userinfo" \
   -H "authorization: Bearer $ACCESS_TOKEN"
 ```
 
+`POST /oauth/userinfo` also accepts the token as a form-encoded
+`access_token` body parameter (RFC 6750 §2.2).
+
 Claims depend on granted scopes:
 
 - `openid`: `sub`
 - `email`: `email`, `email_verified`
-- `profile`: `name`, `preferred_username`, `picture`
+- `profile`: `name`, `given_name`, `family_name`, `nickname`, `preferred_username`, `picture`, `updated_at`
 
 Client credentials tokens are rejected by UserInfo.
 
@@ -364,7 +426,8 @@ JWT revocation stores revoked `jti` state until token expiry. Invisible or inact
 - Dynamic client registration is not supported.
 - `oauth_client_secrets` history/overlap is not implemented; rotation replaces the active hash.
 - Browser consent UI is not implemented.
-- Authorization Code login UX is not implemented; unauthenticated requests redirect with `login_required`.
+- Without JavaScript, the hosted login page signs in with a password only; MFA and password changes need JavaScript.
+- Request objects (`request`, `request_uri`) and the `claims` parameter are not supported.
 - Admin/user-facing consent management endpoints are not implemented.
 - OAuth/OIDC error responses still use Stargate's generic error envelope for most non-redirect errors.
 - OAuth AS metadata does not advertise `scopes_supported`; there is no global OAuth scope registry.
