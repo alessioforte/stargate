@@ -34,6 +34,9 @@ const initialState: State = {
   error: null,
   organizationError: null,
   organizationSwitchingId: null,
+  consentPrompt: null,
+  consentError: null,
+  consentSubmitting: false,
   language: "en",
 };
 
@@ -515,6 +518,42 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       status: "success",
       message: response.message ?? "Organization selected",
     };
+  },
+  loadConsentPrompt: async (interactionId) => {
+    set({ consentPrompt: null, consentError: null });
+
+    const response = await services.auth.getConsentPrompt(interactionId);
+    if (response.error || !response.data) {
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "This authorization request has expired",
+      );
+      set({ consentError: message });
+      return { status: "error", message };
+    }
+
+    set({ consentPrompt: response.data });
+    return { status: "success", prompt: response.data };
+  },
+  decideConsent: async (interactionId, approve) => {
+    set({ consentError: null, consentSubmitting: true });
+
+    const response = await services.auth.decideConsent(interactionId, approve);
+    if (response.error || !response.data) {
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Failed to save your decision",
+      );
+      set({ consentError: message, consentSubmitting: false });
+      return { status: "error", message };
+    }
+
+    // Stays submitting: the page navigates away to redirectTo.
+    return { status: "success", redirectTo: response.data.redirectTo };
   },
 });
 

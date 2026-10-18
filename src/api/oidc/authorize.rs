@@ -43,6 +43,20 @@ pub struct AuthorizeQuery {
     interaction: Option<String>,
 }
 
+impl AuthorizeQuery {
+    pub(crate) fn client_id(&self) -> Option<&str> {
+        self.client_id.as_deref()
+    }
+
+    pub(crate) fn redirect_uri(&self) -> Option<&str> {
+        self.redirect_uri.as_deref()
+    }
+
+    pub(crate) fn state(&self) -> Option<&str> {
+        self.state.as_deref()
+    }
+}
+
 struct AuthorizedUser {
     user: db::ent::User,
     sid: String,
@@ -103,16 +117,16 @@ pub async fn post_authorize(req: Request) -> OAuthResult<Response> {
 async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<Response> {
     // A resumed request replays the parked parameters; the rest of this
     // request's query is ignored.
-    let (query, parked_at) = match query.interaction.as_deref() {
+    let (query, parked_at, consent_stage) = match query.interaction.as_deref() {
         Some(id) => {
             let Some(pending) = interactions::take(id).await? else {
                 return Err(oauth_bad_request(
                     "authorization request expired or was already completed",
                 ));
             };
-            (pending.query, Some(pending.created_at))
+            (pending.query, Some(pending.created_at), pending.consent)
         }
-        None => (query, None),
+        None => (query, None, None),
     };
 
     let client = authorization_client(&query).await?;
@@ -140,7 +154,15 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
     };
 
     let user = current_authorized_user(token).await?;
+    // A parked consent stage only counts for the user it was created for.
+    let stage_for_user = |user: &AuthorizedUser| {
+        consent_stage
+            .as_ref()
+            .filter(|stage| stage.user_id == user.user.id)
+    };
     let user = match user {
+        // Parked for consent after this user passed the login checks.
+        Some(user) if stage_for_user(&user).is_some() => user,
         // Signed in on the login page for this very request.
         Some(user) if parked_at.is_some_and(|at| user.auth_time.timestamp() >= at) => user,
         Some(user) if !prompt.login && !max_age_exceeded(&user, request.max_age) => user,
@@ -148,19 +170,30 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
         _ => return login_redirect(query).await,
     };
 
-    if !consent_satisfied(
-        &client,
-        &user.user,
-        &request.scopes,
-        request.audience.as_deref(),
-        &prompt,
-    )
-    .await?
+    let approved = stage_for_user(&user).is_some_and(|stage| stage.approved);
+    if !approved
+        && !consent_satisfied(
+            &client,
+            &user.user,
+            &request.scopes,
+            request.audience.as_deref(),
+            &prompt,
+        )
+        .await?
     {
         if prompt.none {
-            return error_redirect("interaction_required", "interaction required");
+            return error_redirect("consent_required", "consent required");
         }
-        return error_redirect("consent_required", "consent required");
+        return consent_redirect(
+            query,
+            interactions::ConsentStage {
+                user_id: user.user.id.clone(),
+                scopes: request.scopes.clone(),
+                audience: request.audience.clone(),
+                approved: false,
+            },
+        )
+        .await;
     }
 
     let code = store_authorization_code(&client, &query, &user, &request).await?;
@@ -192,6 +225,17 @@ async fn login_redirect(mut query: AuthorizeQuery) -> OAuthResult<Response> {
         cookie.parse().map_err(OAuthErrorResponse::internal)?,
     );
     Ok(response)
+}
+
+/// Park the request for the signed-in user's consent and send the browser to
+/// the hosted auth app's consent page, which resumes it after the decision.
+async fn consent_redirect(
+    mut query: AuthorizeQuery,
+    stage: interactions::ConsentStage,
+) -> OAuthResult<Response> {
+    query.interaction = None;
+    let id = interactions::park_for_consent(query, stage).await?;
+    found_redirect(interactions::consent_page_url(&id))
 }
 
 fn redirect_location(redirect_uri: &str, params: &[(&str, &str)]) -> OAuthResult<String> {
@@ -232,7 +276,22 @@ fn oauth_error_redirect(
     description: &str,
     state: Option<&str>,
 ) -> OAuthResult<Response> {
-    let location = match state {
+    found_redirect(error_redirect_location(
+        redirect_uri,
+        error,
+        description,
+        state,
+    )?)
+}
+
+/// `redirect_uri` with an OAuth error response (RFC 6749 §4.1.2.1).
+pub(super) fn error_redirect_location(
+    redirect_uri: &str,
+    error: &str,
+    description: &str,
+    state: Option<&str>,
+) -> OAuthResult<String> {
+    match state {
         Some(state) => redirect_location(
             redirect_uri,
             &[
@@ -240,13 +299,12 @@ fn oauth_error_redirect(
                 ("error_description", description),
                 ("state", state),
             ],
-        )?,
+        ),
         None => redirect_location(
             redirect_uri,
             &[("error", error), ("error_description", description)],
-        )?,
-    };
-    found_redirect(location)
+        ),
+    }
 }
 
 fn exact_redirect_uri_allowed(client: &db::ent::OAuthClient, redirect_uri: &str) -> bool {

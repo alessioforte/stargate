@@ -69,7 +69,8 @@ Important fields:
 - `audiences`: allowed resource audiences
 - `attrs`: optional client flags
 
-First-party clients can skip consent when one of these attrs is true:
+First-party clients skip consent (see "Consent" below) when one of these
+attrs is true:
 
 ```json
 {
@@ -249,13 +250,44 @@ codes: `invalid_request`, `unsupported_response_type`, `invalid_scope`,
 Scopes the client is not registered for are ignored. Unknown parameters
 (`display`, `ui_locales`, `acr_values`, ...) are ignored.
 
-If a third-party client needs consent and no active consent exists:
+### Consent
+
+First-party clients (see client attrs) never ask for consent. For other
+clients, Stargate checks the user's stored consent: it must cover the
+requested scopes and audience. If it does not, or the request has
+`prompt=consent`, the request is parked again, bound to the signed-in user,
+and the browser goes to the hosted consent page:
 
 ```text
-error=consent_required
+/auth/consent?interaction=<id>
 ```
 
-Current first milestone has no browser consent UI. First-party clients can skip consent via client attrs.
+The page shows the application (name, description, the host it returns to,
+and the `logo_uri`, `client_uri`, `policy_uri`, `tos_uri` client attrs when
+they are HTTP(S) URLs), the signed-in account, and the requested scopes.
+It uses two endpoints, both authenticated by the user's session cookie:
+
+- `GET /oauth/interactions/{id}`: request details. Requests of other users
+  answer `404 oauth_interaction.not_found`.
+- `POST /oauth/interactions/{id}/consent` with `{ "approve": true|false }`:
+  returns `{ "redirectTo": "..." }`. Approval stores the consent (merged with
+  scopes granted before) and resumes the authorization request; denial ends
+  it and redirects the client with `error=access_denied` and its `state`.
+
+With `prompt=none` and no covering consent the client receives
+`error=consent_required`. The consent page needs JavaScript.
+
+Users manage their consents with:
+
+- `GET /account/consents`: applications they allowed, with scopes.
+- `DELETE /account/consents/{client_id}`: revoke (`204`, or `404
+  oauth_consent.not_found`). The next authorization asks again, and the
+  client's refresh tokens stop working (`invalid_grant`, the refresh family is
+  dropped). Access tokens already issued stay valid until they expire.
+
+Granting and revoking are audited in `outbox_events` as
+`oauth_consent.granted`, `oauth_consent.updated` (a grant on top of an active
+consent), and `oauth_consent.revoked`, with the user as actor.
 
 Exchange code:
 
@@ -425,10 +457,9 @@ JWT revocation stores revoked `jti` state until token expiry. Invisible or inact
 
 - Dynamic client registration is not supported.
 - `oauth_client_secrets` history/overlap is not implemented; rotation replaces the active hash.
-- Browser consent UI is not implemented.
-- Without JavaScript, the hosted login page signs in with a password only; MFA and password changes need JavaScript.
+- Without JavaScript, the hosted login page signs in with a password only; MFA and password changes need JavaScript. The consent page always needs JavaScript.
 - Request objects (`request`, `request_uri`) and the `claims` parameter are not supported.
-- Admin/user-facing consent management endpoints are not implemented.
+- There is no UI yet for users to review/revoke consents (the `/account/consents` API exists) and no admin consent endpoints.
 - OAuth/OIDC error responses still use Stargate's generic error envelope for most non-redirect errors.
 - OAuth AS metadata does not advertise `scopes_supported`; there is no global OAuth scope registry.
 - OAuth clients cannot broadly introspect/revoke API keys; admin grants still handle API-key revocation.

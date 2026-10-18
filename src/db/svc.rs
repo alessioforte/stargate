@@ -249,6 +249,31 @@ pub async fn get_active_oauth_consent(
     svc.get_active_oauth_consent(user_id, client_id).await
 }
 
+pub async fn list_active_oauth_consents(user_id: &str) -> Result<Vec<OAuthConsent>> {
+    service().list_active_oauth_consents(user_id).await
+}
+
+pub async fn upsert_oauth_consent(
+    consent: OAuthConsent,
+    ctx: TrustedAuditContext,
+) -> Result<OAuthConsent> {
+    service()
+        .upsert_oauth_consent(consent, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error saving OAuth consent: {:?}", e))
+}
+
+pub async fn revoke_oauth_consent(
+    user_id: &str,
+    client_id: &str,
+    ctx: TrustedAuditContext,
+) -> Result<Option<OAuthConsent>> {
+    service()
+        .revoke_oauth_consent(user_id, client_id, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error revoking OAuth consent: {:?}", e))
+}
+
 // ── Api Keys ────────────────────────────────────────────────────────────────
 
 pub async fn create_user_api_key(

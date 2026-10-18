@@ -63,6 +63,23 @@
   "chooseOrganization": "Choose an organization",
   "chooseOrganizationHint": "Select which organization to sign in to. You can switch later.",
   "currentOrganization": "Current",
+  "consentTitle": "{{client}} wants to access your account",
+  "consentSignedInAs": "Signed in as {{email}}",
+  "consentRequests": "This will allow the application to:",
+  "consentAudience": "Call {{audience}} on your behalf",
+  "consentRedirectHost": "After your choice you will return to {{host}}.",
+  "consentAllow": "Allow",
+  "consentDeny": "Deny",
+  "consentWebsite": "Website",
+  "consentPolicy": "Privacy policy",
+  "consentTerms": "Terms of service",
+  "consentMissing": "This authorization request is invalid. Return to the application and try again.",
+  "consentScopes": {
+    "openid": "Sign you in with your account",
+    "email": "See your email address",
+    "profile": "See your name, nickname, and profile picture",
+    "offline_access": "Stay signed in and access your data when you are not using it"
+  },
   "oauthLoginErrors": {
     "invalid_credentials": "Invalid username or password.",
     "too_many_attempts": "Too many sign-in attempts. Please try again later.",

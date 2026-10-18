@@ -1,3 +1,4 @@
+pub mod consents;
 pub mod credentials;
 pub mod login;
 pub mod logout;
@@ -72,11 +73,16 @@ pub fn router() -> axum::Router {
             "/account/credentials",
             post(credentials::forgot::post_credentials).put(credentials::reset::put_credentials),
         )
+        .route(
+            "/account/consents/{client_id}",
+            delete(consents::delete_consent),
+        )
         .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware));
 
     axum::Router::new()
         .merge(sensitive)
         .route("/account/profile", get(profile::get_profile))
+        .route("/account/consents", get(consents::get_consents))
         .route(
             "/account/organizations",
             get(organizations::get_account_organizations),

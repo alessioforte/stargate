@@ -99,6 +99,32 @@ export interface AccountOrganizationsResponse {
   organizations: AccountOrganization[];
 }
 
+/** Application asking for consent (GET /oauth/interactions/{id}). */
+export interface ConsentClient {
+  clientId: string;
+  name: string;
+  description?: string | null;
+  logoUri?: string | null;
+  clientUri?: string | null;
+  policyUri?: string | null;
+  tosUri?: string | null;
+  redirectHost?: string | null;
+}
+
+export interface ConsentPromptResponse {
+  client: ConsentClient;
+  scopes: string[];
+  /** Requested scopes the user already granted to this client. */
+  grantedScopes: string[];
+  audience?: string | null;
+  userEmail: string;
+}
+
+/** Where to send the browser after the consent decision. */
+export interface ConsentDecisionResponse {
+  redirectTo: string;
+}
+
 /** Fresh token pair issued by PUT /account/session/organization. */
 export interface SwitchOrganizationResponse {
   accessToken: string;

@@ -1,6 +1,7 @@
 import { Navigate, type RouteObject } from "react-router";
 import AuthLayout from "./routes/auth-layout";
 import ChangePasswordPage from "./routes/change-password";
+import ConsentPage from "./routes/consent";
 import HomeRedirect from "./routes/home-redirect";
 import LoginPage from "./routes/login";
 import LoginMFAPage from "./routes/login-mfa";
@@ -32,6 +33,10 @@ export const routeObjects: RouteObject[] = [
       {
         path: "login/passwordless",
         element: <PasswordlessLoginPage />,
+      },
+      {
+        path: "consent",
+        element: <ConsentPage />,
       },
       {
         path: "select-organization",

@@ -1,5 +1,6 @@
 import type {
   AccountOrganization,
+  ConsentPromptResponse,
   LoginMFAResponse,
   LoginRequest,
   LoginResponse,
@@ -75,6 +76,26 @@ export type OrganizationsLoadResult =
       message: string;
     };
 
+export type ConsentLoadResult =
+  | {
+      status: "success";
+      prompt: ConsentPromptResponse;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
+export type ConsentDecisionResult =
+  | {
+      status: "success";
+      redirectTo: string;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
 export interface State {
   accountOrganizations: AccountOrganization[] | null;
   message: AppMessage | null;
@@ -87,6 +108,9 @@ export interface State {
   error: string | null;
   organizationError: string | null;
   organizationSwitchingId: string | null;
+  consentPrompt: ConsentPromptResponse | null;
+  consentError: string | null;
+  consentSubmitting: boolean;
   language: string;
 }
 
@@ -114,5 +138,10 @@ export interface Actions {
   ) => Promise<MessageActionResult>;
   loadAccountOrganizations: () => Promise<OrganizationsLoadResult>;
   switchOrganization: (orgId: string) => Promise<MessageActionResult>;
+  loadConsentPrompt: (interactionId: string) => Promise<ConsentLoadResult>;
+  decideConsent: (
+    interactionId: string,
+    approve: boolean,
+  ) => Promise<ConsentDecisionResult>;
   clearAuthError: () => void;
 }

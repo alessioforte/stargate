@@ -278,6 +278,7 @@ Endpoints:
   `/.well-known/jwks.json`
 - `GET`/`POST /oauth/authorize`
 - `POST /oauth/login` (no-JS fallback of the hosted login; see below)
+- `GET /oauth/interactions/{id}`, `POST /oauth/interactions/{id}/consent` (consent page API)
 - `/oauth/token` (`Cache-Control: no-store`)
 - `GET`/`POST /oauth/userinfo` (POST also accepts form `access_token`)
 - `/oauth/introspect`, `/oauth/revoke`
@@ -298,6 +299,23 @@ Provider login (one login UI, the hosted auth app):
   password-only, redirects only; MFA / expired password -> `error=javascript_required`.
   The OIDC conformance suite's HtmlUnit browser uses this path.
 - SPA `return_to` is restricted to in-app paths and the page/API origins (`safeReturnTo`).
+
+Consent (`src/api/oidc/consent.rs`, SPA `app/routes/consent.tsx`, JS only):
+- Non-first-party clients need an active `oauth_consents` row covering the requested
+  scopes/audience. Otherwise (or with `prompt=consent`) the request is re-parked with a
+  `ConsentStage` bound to the signed-in user and the browser goes to
+  `/auth/consent?interaction={id}`; `prompt=none` gets `consent_required`.
+- The page reads `GET /oauth/interactions/{id}` and posts `{ approve }` to
+  `/oauth/interactions/{id}/consent` (session cookie; other users' ids are `404`).
+  Approval upserts the consent (scopes merged), marks the stage approved, and returns
+  the resume URL; denial ends the request with `access_denied` to the client.
+- A resumed stage skips the login checks for the same user only (they passed before
+  parking) and satisfies `prompt=consent` once approved.
+- `GET /account/consents` / `DELETE /account/consents/{client_id}` let users list and
+  revoke. The refresh grant re-checks consent for non-first-party clients and drops the
+  family when it is gone; issued access tokens live until expiry.
+- Writes take the user's `TrustedAuditContext` (actor `user`, application scope; the
+  service rejects other users) and emit `oauth_consent.granted` / `.updated` / `.revoked`.
 
 Authorization request handling:
 - Errors after the client and `redirect_uri` are verified are redirected with
@@ -330,7 +348,8 @@ Client notes:
 - Confidential clients require PKCE unless `attrs.require_pkce = false`; a code
   issued without a challenge rejects a `code_verifier` (downgrade protection).
 - First-party clients skip consent with `attrs.first_party`, `attrs.firstParty`, or
-  `attrs.trusted`. There is no consent UI: others get `consent_required`.
+  `attrs.trusted`. The consent page shows `logo_uri` / `client_uri` / `policy_uri` /
+  `tos_uri` attrs when they are HTTP(S) URLs.
 - Privileged token operations: `oauth:introspect` / `oauth:revoke` scopes or
   `attrs.can_introspect` / `attrs.can_revoke`.
 - The session cookie is `SameSite=Lax` so `/oauth/authorize` sees sessions on
@@ -490,7 +509,7 @@ Bootstrap flags: `--password`, `--password-stdin`, `--generate-password`,
   cluster Redis up), `GET /health` (readiness compatibility). See `docs/health-probes.md`.
 - `GET /docs` (Swagger UI), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
 - `/.well-known/*`: OAuth/OIDC metadata, JWKS, `stargate-context-jwks.json`
-- `/account/*`: login, logout, profile, refresh, credentials, organizations, OTP/MFA
+- `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA
 - `/oauth/*`: provider endpoints; `/oauth/state`, `/oauth/github`, `/oauth/google`: social login
 - `/signup/*`: registration + email verification
 - `/admin/*`: users (+ invitations), orgs, API/admin keys, OAuth clients, service accounts,

@@ -96,8 +96,8 @@ authorization, and rate limiting.
 | Smallest deployment                 | One binary + SQLite                                          | JVM server + external database                                  | Server + worker + PostgreSQL               | Server + login UI + PostgreSQL             |
 | Maturity                            | Alpha                                                        | Production-proven                                               | Production-proven                          | Production-proven                          |
 
-Choose Keycloak, authentik, or Zitadel if you need SAML, LDAP, a consent UI for
-third-party apps, or a mature and audited identity provider today. Comparison as
+Choose Keycloak, authentik, or Zitadel if you need SAML, LDAP, OIDC logout, or
+a mature and audited identity provider today. Comparison as
 of October 2026, from each project's public documentation; corrections are
 welcome.
 
@@ -118,6 +118,7 @@ welcome.
 - Authorization Code with PKCE, client credentials, and rotating refresh tokens.
 - The authorization endpoint signs users in on the hosted login page, with
   email MFA; the page is prerendered and also works without JavaScript.
+- A consent page for third-party apps; users can list and revoke consents.
 - Discovery, JWKS, userinfo, introspection, and revocation endpoints.
 - The OpenID Foundation Basic OP and Config OP conformance plans run in CI
   (local suite, not certified).

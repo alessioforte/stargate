@@ -119,13 +119,27 @@ pub trait DbStore {
     async fn delete_oauth_client(&self, client_id: &str, ctx: TrustedAuditContext) -> Result<()>;
 
     // ── OAuth Consents ─────────────────────────────────────────────────────
-    async fn upsert_oauth_consent(&self, consent: OAuthConsent) -> Result<OAuthConsent>;
+    /// Record the user's own consent decision. The context must be the
+    /// consenting user in the application scope.
+    async fn upsert_oauth_consent(
+        &self,
+        consent: OAuthConsent,
+        ctx: TrustedAuditContext,
+    ) -> Result<OAuthConsent>;
     async fn get_active_oauth_consent(
         &self,
         user_id: &str,
         client_id: &str,
     ) -> Result<Option<OAuthConsent>>;
-    async fn revoke_oauth_consent(&self, user_id: &str, client_id: &str) -> Result<()>;
+    async fn list_active_oauth_consents(&self, user_id: &str) -> Result<Vec<OAuthConsent>>;
+    /// Revoke the user's active consent for a client. Returns the revoked
+    /// consent, or `None` when there was none. Same context rule as upsert.
+    async fn revoke_oauth_consent(
+        &self,
+        user_id: &str,
+        client_id: &str,
+        ctx: TrustedAuditContext,
+    ) -> Result<Option<OAuthConsent>>;
 
     // ── API Keys ────────────────────────────────────────────────────────────
     async fn create_api_key(

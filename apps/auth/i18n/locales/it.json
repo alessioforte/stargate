@@ -63,6 +63,23 @@
   "chooseOrganization": "Scegli un'organizzazione",
   "chooseOrganizationHint": "Seleziona in quale organizzazione accedere. Potrai cambiarla in seguito.",
   "currentOrganization": "Attuale",
+  "consentTitle": "{{client}} vuole accedere al tuo account",
+  "consentSignedInAs": "Accesso effettuato come {{email}}",
+  "consentRequests": "L'applicazione potrà:",
+  "consentAudience": "Chiamare {{audience}} per tuo conto",
+  "consentRedirectHost": "Dopo la tua scelta tornerai su {{host}}.",
+  "consentAllow": "Consenti",
+  "consentDeny": "Rifiuta",
+  "consentWebsite": "Sito web",
+  "consentPolicy": "Informativa sulla privacy",
+  "consentTerms": "Termini di servizio",
+  "consentMissing": "Questa richiesta di autorizzazione non è valida. Torna all'applicazione e riprova.",
+  "consentScopes": {
+    "openid": "Farti accedere con il tuo account",
+    "email": "Vedere il tuo indirizzo email",
+    "profile": "Vedere il tuo nome, nickname e immagine del profilo",
+    "offline_access": "Mantenere l'accesso e usare i tuoi dati anche quando non stai usando l'applicazione"
+  },
   "oauthLoginErrors": {
     "invalid_credentials": "Nome utente o password non validi.",
     "too_many_attempts": "Troppi tentativi di accesso. Riprova più tardi.",

@@ -2,6 +2,8 @@ import { Http } from "./http";
 import type {
   AccountOrganizationsResponse,
   ApiMessageCatalog,
+  ConsentDecisionResponse,
+  ConsentPromptResponse,
   LoginRequest,
   LoginMFAResponse,
   LoginResponse,
@@ -122,6 +124,24 @@ export default class AuthService {
     const response = await this.http.request<AccountOrganizationsResponse>({
       method: "GET",
       url: `${this.baseURL}/account/organizations`,
+    });
+    return response;
+  }
+
+  /** Authorization request waiting for the signed-in user's consent. */
+  async getConsentPrompt(interactionId: string) {
+    const response = await this.http.request<ConsentPromptResponse>({
+      method: "GET",
+      url: `${this.baseURL}/oauth/interactions/${encodeURIComponent(interactionId)}`,
+    });
+    return response;
+  }
+
+  async decideConsent(interactionId: string, approve: boolean) {
+    const response = await this.http.request<ConsentDecisionResponse>({
+      method: "POST",
+      url: `${this.baseURL}/oauth/interactions/${encodeURIComponent(interactionId)}/consent`,
+      data: { approve },
     });
     return response;
   }

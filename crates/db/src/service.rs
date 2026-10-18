@@ -148,6 +148,27 @@ impl<'a> From<&'a OAuthClient> for OAuthClientAuditSnapshot<'a> {
 }
 
 #[derive(Serialize)]
+struct OAuthConsentAuditSnapshot<'a> {
+    client_id: &'a str,
+    user_id: &'a str,
+    scopes: &'a [String],
+    audiences: &'a [String],
+    revoked: bool,
+}
+
+impl<'a> From<&'a OAuthConsent> for OAuthConsentAuditSnapshot<'a> {
+    fn from(consent: &'a OAuthConsent) -> Self {
+        Self {
+            client_id: &consent.client_id,
+            user_id: &consent.user_id,
+            scopes: consent.scopes.as_slice(),
+            audiences: consent.audiences.as_slice(),
+            revoked: consent.revoked_at.is_some(),
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct ApiKeyAuditSnapshot<'a> {
     label: &'a str,
     revoked: bool,
@@ -333,6 +354,17 @@ fn ensure_password_change_context(context: &TrustedAuditContext) -> Result<()> {
         context.actor().actor_type() == "user"
             && matches!(context.boundary().scope(), AuditScopeSelector::Application),
         "password change requires an authenticated user application context"
+    );
+    Ok(())
+}
+
+/// Consent is granted and revoked only by the user it belongs to.
+fn ensure_consent_owner_context(context: &TrustedAuditContext, user_id: &str) -> Result<()> {
+    ensure!(
+        context.actor().actor_type() == "user"
+            && context.actor().id() == Some(user_id)
+            && matches!(context.boundary().scope(), AuditScopeSelector::Application),
+        "OAuth consent changes require the consenting user's application context"
     );
     Ok(())
 }
@@ -1249,9 +1281,38 @@ impl DbStore for Service {
 
     // ── OAuth Consents ─────────────────────────────────────────────────────
 
-    async fn upsert_oauth_consent(&self, consent: OAuthConsent) -> Result<OAuthConsent> {
+    async fn upsert_oauth_consent(
+        &self,
+        consent: OAuthConsent,
+        context: TrustedAuditContext,
+    ) -> Result<OAuthConsent> {
+        ensure_consent_owner_context(&context, &consent.user_id)?;
         let mut tx = self.pool.begin().await?;
+        let before = self
+            .oauth_consent
+            .get_active_for_user_client(&mut *tx, &consent.user_id, &consent.client_id, Utc::now())
+            .await?;
         let consent = self.oauth_consent.upsert(&mut tx, consent).await?;
+        // A grant on top of an active consent (e.g. more scopes) is an update.
+        let (action, operation) = if before.is_some() {
+            ("oauth_consent.updated", AuditOperation::Update)
+        } else {
+            ("oauth_consent.granted", AuditOperation::Create)
+        };
+        let event = build_outbox_event(
+            &context,
+            Utc::now(),
+            AuditResource::new("oauth_consent", &consent.id),
+            action,
+            operation,
+            before
+                .as_ref()
+                .map(|before| snapshot(OAuthConsentAuditSnapshot::from(before)))
+                .transpose()?,
+            Some(snapshot(OAuthConsentAuditSnapshot::from(&consent))?),
+            serde_json::json!({ "source": "consent_prompt" }),
+        )?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
         Ok(consent)
     }
@@ -1266,13 +1327,45 @@ impl DbStore for Service {
             .await
     }
 
-    async fn revoke_oauth_consent(&self, user_id: &str, client_id: &str) -> Result<()> {
+    async fn list_active_oauth_consents(&self, user_id: &str) -> Result<Vec<OAuthConsent>> {
+        self.oauth_consent
+            .list_active_for_user(&self.pool, user_id, chrono::Utc::now())
+            .await
+    }
+
+    async fn revoke_oauth_consent(
+        &self,
+        user_id: &str,
+        client_id: &str,
+        context: TrustedAuditContext,
+    ) -> Result<Option<OAuthConsent>> {
+        ensure_consent_owner_context(&context, user_id)?;
         let mut tx = self.pool.begin().await?;
+        let Some(before) = self
+            .oauth_consent
+            .get_active_for_user_client(&mut *tx, user_id, client_id, Utc::now())
+            .await?
+        else {
+            return Ok(None);
+        };
         self.oauth_consent
             .revoke_for_user_client(&mut tx, user_id, client_id)
             .await?;
+        let mut after = before.clone();
+        after.revoked_at = Some(Utc::now());
+        let event = build_outbox_event(
+            &context,
+            Utc::now(),
+            AuditResource::new("oauth_consent", &before.id),
+            "oauth_consent.revoked",
+            AuditOperation::Update,
+            Some(snapshot(OAuthConsentAuditSnapshot::from(&before))?),
+            Some(snapshot(OAuthConsentAuditSnapshot::from(&after))?),
+            serde_json::json!({ "source": "account_api" }),
+        )?;
+        self.outbox.insert(&mut tx, &event).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(Some(after))
     }
 
     // ── API Keys ────────────────────────────────────────────────────────────
@@ -3026,6 +3119,107 @@ mod sqlite_tests {
             vec!["gateway".to_string()],
             serde_json::json!({ "secret": "OAUTH_ATTRS_SECRET" }),
         )
+    }
+
+    #[tokio::test]
+    async fn oauth_consent_grant_and_revoke_are_audited_for_the_owner_only() {
+        let svc = test_service().await;
+        let client = svc
+            .create_oauth_client(
+                console_bootstrap_client("https://app.example.com/callback"),
+                trusted_ctx(),
+            )
+            .await
+            .expect("create client");
+        let user = svc
+            .create_user(
+                Profile::new("consent@example.com".to_string(), "consent".to_string()),
+                CredentialType::Password,
+                "CONSENT_PASSWORD_HASH",
+                None,
+                anonymous_application_context(),
+            )
+            .await
+            .expect("create user");
+        let consent = || {
+            OAuthConsent::new(
+                client.client_id.clone(),
+                user.id.clone(),
+                vec!["openid".to_string(), "email".to_string()],
+                vec![],
+                None,
+                serde_json::json!({}),
+            )
+        };
+
+        let foreign = svc
+            .upsert_oauth_consent(consent(), user_application_context("someone-else"))
+            .await;
+        assert!(foreign.is_err(), "another user cannot grant consent");
+
+        let granted = svc
+            .upsert_oauth_consent(consent(), user_application_context(&user.id))
+            .await
+            .expect("grant consent");
+        svc.upsert_oauth_consent(consent(), user_application_context(&user.id))
+            .await
+            .expect("grant again");
+        assert_eq!(
+            svc.list_active_oauth_consents(&user.id)
+                .await
+                .expect("list consents")
+                .len(),
+            1
+        );
+
+        let revoked = svc
+            .revoke_oauth_consent(
+                &user.id,
+                &client.client_id,
+                user_application_context(&user.id),
+            )
+            .await
+            .expect("revoke consent");
+        assert!(revoked.is_some_and(|consent| consent.revoked_at.is_some()));
+        assert!(
+            svc.revoke_oauth_consent(
+                &user.id,
+                &client.client_id,
+                user_application_context(&user.id)
+            )
+            .await
+            .expect("revoke again")
+            .is_none()
+        );
+        assert!(
+            svc.get_active_oauth_consent(&user.id, &client.client_id)
+                .await
+                .expect("get consent")
+                .is_none()
+        );
+
+        let events = audit_payloads(&svc).await;
+        let consent_events = events_for_resource(&events, "oauth_consent", &granted.id);
+        let actions: Vec<_> = consent_events
+            .iter()
+            .map(|event| event["action"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            actions,
+            [
+                "oauth_consent.granted",
+                "oauth_consent.updated",
+                "oauth_consent.revoked"
+            ]
+        );
+        for event in &consent_events {
+            assert_eq!(event["actor"]["type"], "user");
+            assert_eq!(event["actor"]["id"], user.id);
+            assert_eq!(event["scope"]["kind"], "application");
+        }
+        assert_eq!(consent_events[0]["operation"], "create");
+        assert_eq!(consent_events[1]["operation"], "update");
+        assert_eq!(consent_events[2]["after"]["revoked"], true);
     }
 
     fn events_for_resource<'a>(

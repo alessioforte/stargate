@@ -100,6 +100,8 @@ pub enum ErrorCode {
     OAuthClientNotFound,
     OAuthClientAlreadyExists,
     OAuthClientSecretUnsupported,
+    OAuthInteractionNotFound,
+    OAuthConsentNotFound,
     OutboxEventNotFound,
     ConfigurationNotFound,
     ConfigurationInvalid,
@@ -229,6 +231,8 @@ impl ErrorCode {
         Self::OAuthClientNotFound,
         Self::OAuthClientAlreadyExists,
         Self::OAuthClientSecretUnsupported,
+        Self::OAuthInteractionNotFound,
+        Self::OAuthConsentNotFound,
         Self::OutboxEventNotFound,
         Self::ConfigurationNotFound,
         Self::ConfigurationInvalid,
@@ -364,6 +368,8 @@ impl ErrorCode {
             Self::OAuthClientNotFound => "oauth_client.not_found",
             Self::OAuthClientAlreadyExists => "oauth_client.already_exists",
             Self::OAuthClientSecretUnsupported => "oauth_client.secret_unsupported",
+            Self::OAuthInteractionNotFound => "oauth_interaction.not_found",
+            Self::OAuthConsentNotFound => "oauth_consent.not_found",
             Self::OutboxEventNotFound => "outbox_event.not_found",
             Self::ConfigurationNotFound => "configuration.not_found",
             Self::ConfigurationInvalid => "configuration.invalid",
@@ -693,6 +699,14 @@ impl ErrorCode {
                 Validation,
                 "Public OAuth clients do not use client secrets",
             ),
+            Self::OAuthInteractionNotFound => definition(
+                Status::NOT_FOUND,
+                NotFound,
+                "Authorization request expired or not found",
+            ),
+            Self::OAuthConsentNotFound => {
+                definition(Status::NOT_FOUND, NotFound, "OAuth consent not found")
+            }
             Self::OutboxEventNotFound => {
                 definition(Status::NOT_FOUND, NotFound, "Outbox event not found")
             }

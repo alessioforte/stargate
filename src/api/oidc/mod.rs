@@ -1,5 +1,6 @@
 mod authorization_codes;
 pub(crate) mod authorize;
+pub(crate) mod consent;
 mod interactions;
 pub(crate) mod login;
 mod pkce;
@@ -11,6 +12,7 @@ pub(crate) mod userinfo;
 pub(crate) mod well_known;
 
 pub use authorize::{get_authorize, post_authorize};
+pub use consent::{get_interaction, post_consent};
 pub use login::post_login;
 pub use token::post_token;
 pub use token_ops::{post_introspect, post_revoke};
@@ -41,6 +43,11 @@ pub fn router() -> axum::Router {
         .route(
             "/oauth/login",
             post(post_login).layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
+        )
+        .route("/oauth/interactions/{interaction_id}", get(get_interaction))
+        .route(
+            "/oauth/interactions/{interaction_id}/consent",
+            post(post_consent).layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
         )
         .route("/oauth/token", post(post_token))
         .route("/oauth/userinfo", get(get_userinfo).post(post_userinfo))

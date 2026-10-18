@@ -91,6 +91,34 @@ impl OAuthConsentRepository {
         Ok(row)
     }
 
+    /// Active (unrevoked, unexpired) consents of a user, newest grant first.
+    pub async fn list_active_for_user<'c, E>(
+        &self,
+        ex: E,
+        user_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<OAuthConsent>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let rows = sqlx::query_as::<_, OAuthConsent>(sqlx::AssertSqlSafe(format!(
+            "
+            SELECT * FROM {tbl}
+            WHERE user_id = $1
+              AND revoked_at IS NULL
+              AND (expires_at IS NULL OR expires_at > $2)
+            ORDER BY granted_at DESC
+        ",
+            tbl = OAUTH_CONSENT
+        )))
+        .bind(user_id)
+        .bind(now)
+        .fetch_all(ex)
+        .await?;
+
+        Ok(rows)
+    }
+
     pub async fn revoke_for_user_client(
         &self,
         tx: &mut crate::backend::Tx<'_>,

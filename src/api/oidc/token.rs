@@ -471,6 +471,20 @@ async fn revoke_replayed_code_grant(grant: Option<RedeemedGrant>) {
     }
 }
 
+async fn consent_still_covers(
+    client: &db::ent::OAuthClient,
+    user_id: &str,
+    scopes: &[String],
+    audience: Option<&str>,
+) -> OAuthResult<bool> {
+    let consent = crate::db::get_active_oauth_consent(user_id, &client.client_id)
+        .await
+        .map_err(OAuthErrorResponse::internal)?;
+    Ok(consent.is_some_and(|consent| {
+        oidc::consent::consent_covers(&consent.scopes, &consent.audiences, scopes, audience)
+    }))
+}
+
 async fn issue_refresh_token_grant(
     client: &db::ent::OAuthClient,
     form: &TokenEndpointForm,
@@ -496,6 +510,18 @@ async fn issue_refresh_token_grant(
     };
 
     let scopes = parse_space_delimited(Some(family.scope.as_str()), "scope")?;
+    // Revoking consent also ends a third-party client's offline access.
+    if !oidc::consent::client_is_first_party(&client.attrs)
+        && !consent_still_covers(client, &family.user_id, &scopes, family.audience.as_deref())
+            .await?
+    {
+        if let Some((family_id, _)) = oidc::refresh::parse_refresh_token(token)
+            && let Err(error) = refresh_tokens::revoke_family(family_id).await
+        {
+            tracing::warn!(error = %error, "failed to revoke refresh tokens after consent revocation");
+        }
+        return Err(oauth_invalid_grant("consent was revoked"));
+    }
     if let Some(sid) = family.sid.as_deref()
         && !crate::act::sessions::touch_session(sid, &family.user_id)
             .await

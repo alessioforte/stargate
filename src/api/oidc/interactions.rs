@@ -1,4 +1,4 @@
-//! Authorization requests parked while the user signs in.
+//! Authorization requests parked while the user signs in or consents.
 //!
 //! When `/oauth/authorize` needs an interactive login, the request is stored
 //! under an unguessable id and the browser is sent to the hosted auth app's
@@ -6,6 +6,10 @@
 //! resumes the original request after sign-in. The id also travels in the
 //! [`INTERACTION_COOKIE`] for the page's no-JavaScript form post to
 //! `/oauth/login` (see `login.rs`).
+//!
+//! When the signed-in user has not consented to the client, the request is
+//! parked again with a [`ConsentStage`] bound to that user, and the browser
+//! goes to the app's consent page (see `consent.rs`).
 
 use super::authorize::AuthorizeQuery;
 use super::shared::OAuthResult;
@@ -86,12 +90,39 @@ fn login_page_url_from(auth_app: &str, endpoint_base: &str, page: LoginPage) -> 
     }
 }
 
+/// The hosted auth app's consent page for a parked request.
+pub(crate) fn consent_page_url(id: &str) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("interaction", id)
+        .finish();
+    format!(
+        "{}/consent?{query}",
+        crate::fun::auth_app_href().trim_end_matches('/')
+    )
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct PendingAuthorization {
     pub(crate) query: AuthorizeQuery,
     /// Unix seconds when the request was parked. A session whose `auth_time`
     /// is not older than this was authenticated for this request.
     pub(crate) created_at: i64,
+    /// Present when the request waits for the user's consent.
+    #[serde(default)]
+    pub(crate) consent: Option<ConsentStage>,
+}
+
+/// A request parked for consent. The login checks already passed for
+/// `user_id`, so resuming only needs that same user's session.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub(crate) struct ConsentStage {
+    pub(crate) user_id: String,
+    /// Scopes and audience the client asked for, after validation.
+    pub(crate) scopes: Vec<String>,
+    pub(crate) audience: Option<String>,
+    /// Set once the user approves on the consent page.
+    #[serde(default)]
+    pub(crate) approved: bool,
 }
 
 fn key(id: &str) -> String {
@@ -107,16 +138,51 @@ fn valid_id(id: &str) -> bool {
 }
 
 pub(crate) async fn park(query: AuthorizeQuery) -> OAuthResult<String> {
+    park_with(query, None).await
+}
+
+pub(crate) async fn park_for_consent(
+    query: AuthorizeQuery,
+    stage: ConsentStage,
+) -> OAuthResult<String> {
+    park_with(query, Some(stage)).await
+}
+
+async fn park_with(query: AuthorizeQuery, consent: Option<ConsentStage>) -> OAuthResult<String> {
     let id = format!("{}_{}", ulid::Ulid::generate(), pw::generate_api_key());
     let pending = PendingAuthorization {
         query,
         created_at: chrono::Utc::now().timestamp(),
+        consent,
     };
-    crate::etc::store::use_store()
-        .set(&key(&id), &pending, Some(INTERACTION_TTL_SECS))
-        .await
-        .map_err(OAuthErrorResponse::internal)?;
+    save(&id, &pending).await?;
     Ok(id)
+}
+
+async fn save(id: &str, pending: &PendingAuthorization) -> OAuthResult<()> {
+    crate::etc::store::use_store()
+        .set(&key(id), pending, Some(INTERACTION_TTL_SECS))
+        .await
+        .map_err(OAuthErrorResponse::internal)
+}
+
+/// Mark a request parked for consent as approved, so resuming it issues a
+/// code even with `prompt=consent`. Returns false when there is no such
+/// request for `user_id`.
+pub(crate) async fn approve_consent(id: &str, user_id: &str) -> OAuthResult<bool> {
+    let Some(mut pending) = get(id).await? else {
+        return Ok(false);
+    };
+    let Some(stage) = pending
+        .consent
+        .as_mut()
+        .filter(|stage| stage.user_id == user_id)
+    else {
+        return Ok(false);
+    };
+    stage.approved = true;
+    save(id, &pending).await?;
+    Ok(true)
 }
 
 pub(crate) async fn get(id: &str) -> OAuthResult<Option<PendingAuthorization>> {
@@ -185,6 +251,27 @@ mod tests {
             ),
             "/auth/login?error=interaction_expired"
         );
+    }
+
+    #[cfg(feature = "memory")]
+    #[tokio::test]
+    async fn consent_approval_is_bound_to_the_parked_user() {
+        let stage = ConsentStage {
+            user_id: "user-1".to_string(),
+            scopes: vec!["openid".to_string()],
+            audience: None,
+            approved: false,
+        };
+        let id = park_for_consent(AuthorizeQuery::default(), stage)
+            .await
+            .unwrap();
+
+        assert!(!approve_consent(&id, "user-2").await.unwrap());
+        assert!(!get(&id).await.unwrap().unwrap().consent.unwrap().approved);
+
+        assert!(approve_consent(&id, "user-1").await.unwrap());
+        assert!(get(&id).await.unwrap().unwrap().consent.unwrap().approved);
+        assert!(!approve_consent("missing", "user-1").await.unwrap());
     }
 
     #[test]
