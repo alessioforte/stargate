@@ -1,9 +1,10 @@
 use crate::claims::Claims;
+use crate::keyring::{KeyError, KeyMaterial};
 use chrono::Duration;
 use jsonwebtoken::Algorithm;
 
-use jsonwebtoken::jwk::{Jwk, JwkSet, PublicKeyUse};
-use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::{Header, Validation, decode, decode_header, encode};
 use std::fs;
 use std::{error::Error, fmt};
 
@@ -29,10 +30,9 @@ pub enum KeySource {
 
 /// JWT Configuration struct to hold preloaded keys and algorithm
 pub struct JwtConfig {
-    algorithm: Algorithm,
-    key_id: Option<String>,
-    encoding_key: EncodingKey,
-    decoding_key: DecodingKey,
+    /// The active signing key first, then verification-only keys. Tokens
+    /// are verified with the key named by their `kid` header.
+    keys: Vec<KeyMaterial>,
     /// Expected `iss` claim, enforced on every validation. Captured once at
     /// construction from the same source (`issuer_from_env`) that token
     /// generation uses, so self-issued tokens validate and tokens minted for
@@ -110,59 +110,114 @@ impl JwtConfig {
         refresh_exp: Duration,
         key_id: Option<String>,
     ) -> Self {
-        let (encoding_key, decoding_key) = match key_source {
+        let key = match key_source {
             KeySource::Secret(secret) => {
-                let bytes = secret.as_bytes();
-                (
-                    EncodingKey::from_secret(bytes),
-                    DecodingKey::from_secret(bytes),
-                )
+                KeyMaterial::from_secret(key_id, algorithm, secret.as_bytes())
+                    .expect("Invalid JWT secret configuration")
             }
             KeySource::Rsa {
                 private_key_path,
                 public_key_path,
-            } => {
-                let priv_pem =
-                    fs::read_to_string(&private_key_path).expect("Failed to read RSA private key");
-                let pub_pem =
-                    fs::read_to_string(&public_key_path).expect("Failed to read RSA public key");
-                (
-                    EncodingKey::from_rsa_pem(priv_pem.as_bytes())
-                        .expect("Invalid RSA private key"),
-                    DecodingKey::from_rsa_pem(pub_pem.as_bytes()).expect("Invalid RSA public key"),
-                )
             }
-            KeySource::Ec {
+            | KeySource::Ec {
                 private_key_path,
                 public_key_path,
             } => {
-                let priv_pem =
-                    fs::read_to_string(&private_key_path).expect("Failed to read EC private key");
-                let pub_pem =
-                    fs::read_to_string(&public_key_path).expect("Failed to read EC public key");
-                (
-                    EncodingKey::from_ec_pem(priv_pem.as_bytes()).expect("Invalid EC private key"),
-                    DecodingKey::from_ec_pem(pub_pem.as_bytes()).expect("Invalid EC public key"),
+                let private_pem =
+                    fs::read(&private_key_path).expect("Failed to read JWT private key");
+                let public_pem = fs::read(&public_key_path).expect("Failed to read JWT public key");
+                KeyMaterial::from_pem_parts(
+                    key_id.as_deref(),
+                    algorithm,
+                    Some(&private_pem),
+                    &public_pem,
                 )
+                .expect("Invalid JWT signing key")
             }
         };
 
-        Self {
-            algorithm,
-            key_id,
-            encoding_key,
-            decoding_key,
+        Self::from_keyring(key, Vec::new(), access_exp, refresh_exp)
+            .expect("Invalid JWT signing key")
+    }
+
+    /// A configuration that signs with `active` and also accepts tokens
+    /// signed by `additional` keys (published in the JWKS). Key ids must be
+    /// unique; additional keys must have one.
+    pub fn from_keyring(
+        active: KeyMaterial,
+        additional: Vec<KeyMaterial>,
+        access_exp: Duration,
+        refresh_exp: Duration,
+    ) -> Result<Self, KeyError> {
+        if !active.can_sign() {
+            return Err(KeyError::new("the active JWT key needs its private key"));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for key in std::iter::once(&active).chain(&additional) {
+            match key.key_id() {
+                Some(key_id) if !seen.insert(key_id.to_string()) => {
+                    return Err(KeyError::new(format!("duplicate JWT key id '{key_id}'")));
+                }
+                None if !additional.is_empty() => {
+                    return Err(KeyError::new(
+                        "every JWT key needs a key id when several keys are configured",
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        let mut keys = Vec::with_capacity(1 + additional.len());
+        keys.push(active);
+        keys.extend(additional);
+        Ok(Self {
+            keys,
             issuer: crate::claims::issuer_from_env(),
             access_exp,
             refresh_exp,
-        }
+        })
+    }
+
+    fn active(&self) -> &KeyMaterial {
+        &self.keys[0]
     }
 
     /// Generate a JWT token
     pub fn generate_token(&self, claims: &Claims) -> Result<String, jsonwebtoken::errors::Error> {
-        let mut header = Header::new(self.algorithm);
-        header.kid = self.key_id.clone();
-        encode(&header, claims, &self.encoding_key)
+        let active = self.active();
+        let mut header = Header::new(active.algorithm);
+        header.kid = active.key_id.clone();
+        let encoding = active
+            .encoding
+            .as_ref()
+            .expect("the active JWT key can sign");
+        encode(&header, claims, encoding)
+    }
+
+    /// The key a token claims to be signed with. A token without `kid` is
+    /// checked against the active key; an unknown `kid` is rejected.
+    fn verification_key(&self, token: &str) -> Result<&KeyMaterial, jsonwebtoken::errors::Error> {
+        let header = decode_header(token)?;
+        let Some(key_id) = header.kid.as_deref() else {
+            return Ok(self.active());
+        };
+        self.keys
+            .iter()
+            .find(|key| key.key_id() == Some(key_id))
+            .or_else(|| {
+                // A single unnamed key accepts any kid (legacy configurations).
+                (self.keys.len() == 1 && self.active().key_id.is_none()).then(|| self.active())
+            })
+            .ok_or_else(|| jsonwebtoken::errors::ErrorKind::InvalidSignature.into())
+    }
+
+    fn decode_claims(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+        let key = self.verification_key(token)?;
+        // The algorithm comes from the key, never from the token header.
+        let mut validation = Validation::new(key.algorithm);
+        validation.validate_aud = false;
+        validation.set_issuer(&[self.issuer.as_str()]);
+        Ok(decode::<Claims>(token, &key.decoding, &validation)?.claims)
     }
 
     fn timed_claims(&self, mut claims: Claims, token_type: &str, ttl: Duration) -> Claims {
@@ -213,22 +268,14 @@ impl JwtConfig {
     }
 
     fn decode_without_audience(&self, token: &str) -> Result<Claims, JwtValidationError> {
-        let mut validation = Validation::new(self.algorithm);
-        validation.validate_aud = false;
-        validation.set_issuer(&[self.issuer.as_str()]);
-        let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
-        Ok(token_data.claims)
+        Ok(self.decode_claims(token)?)
     }
 
     /// Validate a JWT token without enforcing caller intent.
     ///
     /// Prefer the intent-specific helpers for application handlers.
     pub fn validate_token(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-        let mut validation = Validation::new(self.algorithm);
-        validation.validate_aud = false;
-        validation.set_issuer(&[self.issuer.as_str()]);
-        let token_data = decode::<Claims>(token, &self.decoding_key, &validation)?;
-        Ok(token_data.claims)
+        self.decode_claims(token)
     }
 
     fn require_type(claims: &Claims, expected: &'static str) -> Result<(), JwtValidationError> {
@@ -333,27 +380,27 @@ impl JwtConfig {
         Ok(claims)
     }
 
+    /// Algorithm of the active signing key.
     pub fn algorithm(&self) -> Algorithm {
-        self.algorithm
+        self.active().algorithm
     }
 
+    /// Key id of the active signing key.
     pub fn key_id(&self) -> Option<&str> {
-        self.key_id.as_deref()
+        self.active().key_id()
     }
 
+    /// Ids of all keys tokens are accepted from, active first.
+    pub fn key_ids(&self) -> Vec<&str> {
+        self.keys.iter().filter_map(KeyMaterial::key_id).collect()
+    }
+
+    /// Public JWKs of every asymmetric key, active first. HMAC secrets are
+    /// never published.
     pub fn public_jwks(&self) -> Result<JwkSet, jsonwebtoken::errors::Error> {
-        if matches!(
-            self.algorithm,
-            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
-        ) {
-            return Ok(JwkSet { keys: Vec::new() });
-        }
-
-        let mut jwk = Jwk::from_encoding_key(&self.encoding_key, self.algorithm)?;
-        jwk.common.key_id = self.key_id.clone();
-        jwk.common.public_key_use = Some(PublicKeyUse::Signature);
-
-        Ok(JwkSet { keys: vec![jwk] })
+        Ok(JwkSet {
+            keys: self.keys.iter().filter_map(|key| key.jwk.clone()).collect(),
+        })
     }
 }
 

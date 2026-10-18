@@ -136,7 +136,9 @@ Use service/container DNS names rather than `localhost` when the databases run
 in other containers. Also provide stable JWT signing material: configure an
 HMAC `JWT_SECRET`, or mount the asymmetric key directory at
 `/app/.stargate/jwks`. Otherwise, tokens issued before a container replacement
-will no longer verify.
+will no longer verify. Every node must see the same key directory; key rotation
+(`stargate jwt generate-key`) is described in the
+[provider guide](oauth-oidc-provider-guide.md#signing-keys-and-rotation).
 
 ## Persistent-volume upgrades
 

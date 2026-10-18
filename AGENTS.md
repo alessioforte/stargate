@@ -26,7 +26,7 @@ stargate/
 │   │                  #   email verify, change password, password policy, token revocation, ACE rules
 │   ├── api/           # Axum routers + handlers; gateway fallback service; auth/console app hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
-│   ├── cli/           # CLI: admin bootstrap, internal-context generate-key
+│   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
 │   ├── db/            # DB pool init (feature-gated postgres/sqlite)
 │   ├── err/           # Error catalog (ErrorCode) -> JSON responses; OAuth error envelope
 │   ├── etc/           # Shared support: auth, http, request_context, observability, server, gate,
@@ -38,7 +38,7 @@ stargate/
 │   ├── db/            # DB repo traits + sqlx implementations, TrustedAuditContext, outbox
 │   ├── gate/          # Gateway config schema (cfg/v1.rs), compiler, runtime graph
 │   ├── idp/           # External identity provider clients (Google, GitHub)
-│   ├── jwt/           # JWT encode/decode/validation (typed access/refresh/ID tokens)
+│   ├── jwt/           # JWT encode/decode/validation (typed tokens), keyring (`kid`-selected keys)
 │   ├── lb/            # Load balancing, health checks, circuit breaker core
 │   ├── lim/           # Rate limiting + quota
 │   ├── oidc/          # Pure OAuth/OIDC provider helpers (PKCE, codes, refresh, claims, metadata)
@@ -325,6 +325,20 @@ Authorization request handling:
 - Unregistered scopes are dropped; `openid` is required. `max_age=0` = `prompt=login`.
 - A replayed authorization code revokes the access token and refresh family it issued.
 
+Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
+- `.stargate/jwks/keys/<kid>/{private.pem,public.pem,alg}`; `JWT_KID` is the active
+  key (signs). Every other dir is verification-only: published in the JWKS (active
+  first) and accepted for tokens with its `kid`. Verification picks the key by `kid`
+  and uses that key's algorithm; unknown `kid` is rejected. Private/public pairs are
+  probe-checked at load; inactive keys need only `public.pem`.
+- First start generates `keys/<JWT_KID>/`. The legacy `private.pem`/`public.pem`
+  (`es256/`, `es384/`) stays active until `stargate jwt generate-key` moves it into
+  `keys/<current kid>/`. `JWT_ALGORITHM` mismatch with the active key fails startup.
+- Rotation: generate next key + restart (published), wait JWKS cache, set `JWT_KID`
+  + restart, remove the old dir after `JWT_REFRESH_EXP`. HMAC (`HS*`) is single-key.
+- OIDC Discovery requires RS256: a non-RS256 active key logs a warning and fails the
+  Config OP discovery check.
+
 Grants: `client_credentials`, Authorization Code + PKCE (`S256`), `refresh_token`
 with opaque rotating families.
 
@@ -423,10 +437,10 @@ the same logical columns on PostgreSQL and SQLite.
 |-----|---------|---------|
 | `PORT` | 5050 | HTTP listen port |
 | `STARGATE_RUNTIME_PROFILE` | - | `edge` or `cluster` (validated against the build) |
-| `JWT_ALGORITHM` | `RS256` | JWT signing algorithm |
+| `JWT_ALGORITHM` | active key / `RS256` | Must match the active key when set; picks the first generated key |
 | `JWT_SECRET` | - | HMAC key for HS* algorithms |
 | `JWT_ISSUER` | `http://localhost:$PORT` | JWT and OAuth/OIDC issuer |
-| `JWT_KID` | `stargate-current` | JWT key id |
+| `JWT_KID` | `stargate-current` | Active signing key (`.stargate/jwks/keys/<kid>/`) |
 | `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
 | `OAUTH_BASE_URL` | issuer | Public base URL for provider endpoint links |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
@@ -495,13 +509,17 @@ cargo run --features edge -- admin bootstrap \
   --name "Admin User" --nickname admin \
   --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 
+# Next JWT signing key in .stargate/jwks/keys/<kid>/ (adopts the legacy pair first)
+cargo run --features edge -- jwt generate-key --kid stargate-2026-11
+
 # Internal-context signing key + public JWKS (refuses to overwrite)
 cargo run --features edge -- internal-context generate-key \
   --output-dir .stargate/internal-context --kid stargate-internal-current
 ```
 
 Bootstrap flags: `--password`, `--password-stdin`, `--generate-password`,
-`--oauth-client-id`, `--oauth-redirect-uri`. Docs: `docs/cli.md`.
+`--oauth-client-id`, `--oauth-redirect-uri`. `jwt` and `internal-context` commands
+need no database. Docs: `docs/cli.md`.
 
 ## API Overview
 

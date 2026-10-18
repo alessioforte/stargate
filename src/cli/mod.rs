@@ -1,8 +1,10 @@
 mod internal_context;
+mod jwt;
 
 use crate::db;
 use clap::{Args, Parser, Subcommand};
 use internal_context::InternalContextArgs;
+use jwt::JwtArgs;
 use std::io::{self, Read};
 
 #[derive(Debug, Parser)]
@@ -17,11 +19,13 @@ pub struct Cli {
 pub enum Command {
     Admin(AdminArgs),
     InternalContext(InternalContextArgs),
+    /// Manage JWT signing keys.
+    Jwt(JwtArgs),
 }
 
 impl Command {
     pub const fn is_standalone(&self) -> bool {
-        matches!(self, Self::InternalContext(_))
+        matches!(self, Self::InternalContext(_) | Self::Jwt(_))
     }
 }
 
@@ -97,6 +101,7 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
             AdminCommand::Bootstrap(args) => run_bootstrap(args).await,
         },
         Command::InternalContext(args) => internal_context::run(args),
+        Command::Jwt(args) => jwt::run(args),
     }
 }
 
