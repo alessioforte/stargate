@@ -1,5 +1,5 @@
 use super::jwt_keyring::{self, JWKS_DIR};
-use jwt::{Algorithm, JwtConfig, KeySource};
+use jwt::{Algorithm, JwtConfig, KeyMaterial};
 use once_cell::sync::Lazy;
 use std::{env, fs, path::Path};
 use tools::parse_duration;
@@ -34,47 +34,72 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
         .ok()
         .filter(|kid| !kid.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_KEY_ID.to_owned());
+    // Optional RS256 key for ID tokens while JWT_KID is an EC key or an HMAC
+    // secret (OpenID Connect requires RS256 support).
+    let id_token_key_id = env::var("JWT_ID_TOKEN_KID")
+        .ok()
+        .map(|kid| kid.trim().to_owned())
+        .filter(|kid| !kid.is_empty());
 
-    match configured {
+    let invalid = |error: String| -> ! { panic!("Invalid JWT signing keys: {error}") };
+    let root = Path::new(JWKS_DIR);
+    let (active, additional) = match configured {
         Some(algorithm @ (Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512)) => {
-            info!("JWT Algorithm: {:?}", algorithm);
             let secret = env::var("JWT_SECRET").unwrap_or_else(|_| load_or_generate_secret());
-            JwtConfig::new_with_key_id(
-                algorithm,
-                KeySource::Secret(secret),
-                access_exp,
-                refresh_exp,
-                Some(key_id),
-            )
+            let active =
+                KeyMaterial::from_secret(Some(key_id.clone()), algorithm, secret.as_bytes())
+                    .unwrap_or_else(|error| invalid(error.to_string()));
+            let additional = match id_token_key_id.as_deref() {
+                Some(id_key) => jwt_keyring::load_for_id_tokens(root, id_key)
+                    .unwrap_or_else(|error| invalid(error)),
+                None => Vec::new(),
+            };
+            (active, additional)
         }
         Some(algorithm) if !jwt_keyring::is_asymmetric(algorithm) => {
             panic!("Unsupported JWT algorithm: {algorithm:?}")
         }
         _ => {
-            let keyring = jwt_keyring::load(Path::new(JWKS_DIR), &key_id, configured)
-                .unwrap_or_else(|error| panic!("Invalid JWT signing keys: {error}"));
-            info!(
-                "JWT signing key: {} ({:?})",
-                key_id,
-                keyring.active.algorithm()
-            );
-            if keyring.active.algorithm() != Algorithm::RS256 {
-                tracing::warn!(
-                    "ID tokens are signed with {:?}; OpenID Connect Discovery requires RS256 support, so certified relying parties may reject this provider",
-                    keyring.active.algorithm()
-                );
-            }
-            for key in &keyring.additional {
-                info!(
-                    "JWT verification key: {} ({:?})",
-                    key.key_id().unwrap_or_default(),
-                    key.algorithm()
-                );
-            }
-            JwtConfig::from_keyring(keyring.active, keyring.additional, access_exp, refresh_exp)
-                .unwrap_or_else(|error| panic!("Invalid JWT signing keys: {error}"))
+            let keyring = jwt_keyring::load(root, &key_id, id_token_key_id.as_deref(), configured)
+                .unwrap_or_else(|error| invalid(error));
+            (keyring.active, keyring.additional)
+        }
+    };
+
+    info!("JWT signing key: {} ({:?})", key_id, active.algorithm());
+    for key in &additional {
+        let kid = key.key_id().unwrap_or_default();
+        if Some(kid) != id_token_key_id.as_deref() {
+            info!("JWT verification key: {} ({:?})", kid, key.algorithm());
         }
     }
+
+    let mut config = JwtConfig::from_keyring(active, additional, access_exp, refresh_exp)
+        .unwrap_or_else(|error| invalid(error.to_string()));
+    if let Some(id_key) = id_token_key_id.as_deref() {
+        config = config
+            .with_id_token_key(id_key)
+            .unwrap_or_else(|error| invalid(error.to_string()));
+        if config.id_token_algorithm() != jwt_keyring::ID_TOKEN_ALGORITHM {
+            invalid(format!(
+                "JWT_ID_TOKEN_KID '{id_key}' is {:?}; ID token keys must be {:?}",
+                config.id_token_algorithm(),
+                jwt_keyring::ID_TOKEN_ALGORITHM
+            ));
+        }
+        info!(
+            "JWT ID token key: {} ({:?})",
+            id_key,
+            config.id_token_algorithm()
+        );
+    }
+    if config.id_token_algorithm() != Algorithm::RS256 {
+        tracing::warn!(
+            "ID tokens are signed with {:?}; OpenID Connect requires RS256 support, so certified relying parties may reject this provider. Set JWT_ID_TOKEN_KID to an RS256 key.",
+            config.id_token_algorithm()
+        );
+    }
+    config
 });
 
 fn load_or_generate_secret() -> String {

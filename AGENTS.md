@@ -331,13 +331,18 @@ Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
   first) and accepted for tokens with its `kid`. Verification picks the key by `kid`
   and uses that key's algorithm; unknown `kid` is rejected. Private/public pairs are
   probe-checked at load; inactive keys need only `public.pem`.
-- First start generates `keys/<JWT_KID>/`. The legacy `private.pem`/`public.pem`
-  (`es256/`, `es384/`) stays active until `stargate jwt generate-key` moves it into
-  `keys/<current kid>/`. `JWT_ALGORITHM` mismatch with the active key fails startup.
+- First start generates `keys/<JWT_KID>/` (and `keys/<JWT_ID_TOKEN_KID>/`, RS256) only on
+  a fresh keyring; afterwards a missing named key fails startup (no silent new keys).
+  The legacy `private.pem`/`public.pem` (`es256/`, `es384/`) stays active until
+  `stargate jwt generate-key` moves it into `keys/<current kid>/`. `JWT_ALGORITHM`
+  mismatch with the active key fails startup.
 - Rotation: generate next key + restart (published), wait JWKS cache, set `JWT_KID`
   + restart, remove the old dir after `JWT_REFRESH_EXP`. HMAC (`HS*`) is single-key.
-- OIDC Discovery requires RS256: a non-RS256 active key logs a warning and fails the
-  Config OP discovery check.
+- ID tokens: `JWT_ID_TOKEN_KID` names an RS256 key (loaded with its private key,
+  `JwtConfig::with_id_token_key`) that signs only ID tokens; discovery advertises
+  `id_token_algorithm()`. Works with an EC or HMAC active key. Without it a non-RS256
+  active key logs a warning and fails the Config OP discovery check (OIDC requires
+  RS256). Rotate it with `jwt generate-key --id-token`, same steps.
 
 Grants: `client_credentials`, Authorization Code + PKCE (`S256`), `refresh_token`
 with opaque rotating families.
@@ -441,6 +446,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `JWT_SECRET` | - | HMAC key for HS* algorithms |
 | `JWT_ISSUER` | `http://localhost:$PORT` | JWT and OAuth/OIDC issuer |
 | `JWT_KID` | `stargate-current` | Active signing key (`.stargate/jwks/keys/<kid>/`) |
+| `JWT_ID_TOKEN_KID` | - | Optional RS256 key that signs ID tokens (EC or HMAC active key) |
 | `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
 | `OAUTH_BASE_URL` | issuer | Public base URL for provider endpoint links |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
@@ -509,7 +515,8 @@ cargo run --features edge -- admin bootstrap \
   --name "Admin User" --nickname admin \
   --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 
-# Next JWT signing key in .stargate/jwks/keys/<kid>/ (adopts the legacy pair first)
+# Next JWT signing key in .stargate/jwks/keys/<kid>/ (adopts the legacy pair first);
+# --id-token creates the RS256 key for JWT_ID_TOKEN_KID
 cargo run --features edge -- jwt generate-key --kid stargate-2026-11
 
 # Internal-context signing key + public JWKS (refuses to overwrite)

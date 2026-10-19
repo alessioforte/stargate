@@ -56,10 +56,22 @@ JWT_KID=stargate-current
 `JWT_SECRET` is used only with HMAC algorithms such as `HS256`. HMAC secrets
 are never published and cannot be rotated without invalidating every token.
 
-OpenID Connect Discovery requires providers to support RS256 ID tokens, so keep
-an RSA key active when third-party relying parties use Stargate. ES256/ES384
-keys work, but the OpenID conformance suite flags a provider that only offers
-them (Stargate logs a warning at startup).
+OpenID Connect requires providers to support RS256 ID tokens (Discovery §3,
+Core §15.1). ID tokens are signed with the active key unless
+`JWT_ID_TOKEN_KID` names a separate RS256 key. Set it when `JWT_KID` is an EC
+key or when sessions use an HMAC secret:
+
+```env
+JWT_ALGORITHM=ES256
+JWT_KID=ec-2026-10
+JWT_ID_TOKEN_KID=rsa-2026-10
+```
+
+Access, session, and refresh tokens then use the active key, and ID tokens use
+the RS256 key; discovery advertises RS256 and both keys are in the JWKS. With an
+HMAC secret only the RS256 key is published. Without `JWT_ID_TOKEN_KID`, a
+non-RS256 active key makes Stargate log a warning and fails the OpenID Config
+OP discovery check.
 
 ### Signing keys and rotation
 
@@ -67,7 +79,7 @@ Asymmetric keys live under `.stargate/jwks/` (share this directory across
 cluster nodes):
 
 ```text
-.stargate/jwks/keys/<kid>/private.pem   signing key (needed only by the active key)
+.stargate/jwks/keys/<kid>/private.pem   signing key (needed by the active and ID token keys)
 .stargate/jwks/keys/<kid>/public.pem    verification key
 .stargate/jwks/keys/<kid>/alg           RS256, RS384, RS512, ES256, or ES384
 ```
@@ -77,8 +89,12 @@ under `keys/` is a verification-only key: it is published in
 `/.well-known/jwks.json` (active key first) and tokens carrying its `kid` keep
 validating. Tokens are always verified with the key their `kid` names and that
 key's algorithm; an unknown `kid` is rejected. On first start Stargate creates
-`keys/<JWT_KID>/` with an `JWT_ALGORITHM` key (default RS256). `JWT_ALGORITHM`
-may be left unset; when set it must match the active key, or startup fails.
+`keys/<JWT_KID>/` with an `JWT_ALGORITHM` key (default RS256), and
+`keys/<JWT_ID_TOKEN_KID>/` (RS256) when set. Keys are generated only on a fresh
+keyring: once other keys exist, a `JWT_KID` or `JWT_ID_TOKEN_KID` naming a
+missing key fails startup instead of silently minting an unpublished key.
+`JWT_ALGORITHM` may be left unset; when set it must match the active key, or
+startup fails.
 
 Installations from before the keyring keep `.stargate/jwks/private.pem` and
 `public.pem` (`es256/`, `es384/` for EC keys) as the active key until the first
@@ -97,6 +113,11 @@ Rotate without logging anyone out:
    tokens; OAuth refresh tokens are opaque and unaffected), delete
    `keys/<old kid>/` and restart. A retired key may drop its `private.pem`
    earlier: verification only needs `public.pem`.
+
+The ID token key rotates the same way, independently: `stargate jwt
+generate-key --kid rsa-2026-11 --id-token`, restart, wait, set
+`JWT_ID_TOKEN_KID`, restart, and delete the old directory after the ID token
+lifetime (`JWT_ACCESS_EXP`).
 
 For a compromised key, skip the waits: activate a new key and delete the
 compromised directory at once. Every token it signed stops validating, so users

@@ -13,6 +13,10 @@
 //! carry its `kid`. That covers both the next key (published before it is
 //! activated) and retired keys (kept until their tokens expire).
 //!
+//! `JWT_ID_TOKEN_KID` optionally names an RS256 key that signs OIDC ID tokens
+//! while the active key (e.g. ES256, or an HMAC secret) signs everything else.
+//! OpenID Connect requires RS256 ID tokens to be supported.
+//!
 //! Installations created before the keyring keep their legacy files as the
 //! active key until `stargate jwt generate-key` moves them into
 //! `keys/<current kid>/`.
@@ -65,12 +69,24 @@ fn both_exist((private, public): &(PathBuf, PathBuf)) -> bool {
     private.is_file() && public.is_file()
 }
 
-/// Load the keyring under `root`. `configured` is `JWT_ALGORITHM` when set:
-/// it must match the active key's algorithm, and picks the algorithm of a
-/// key generated on first start (default RS256).
+/// Algorithm of keys that sign OIDC ID tokens (`JWT_ID_TOKEN_KID`):
+/// OpenID Connect requires providers to support RS256.
+pub(crate) const ID_TOKEN_ALGORITHM: Algorithm = Algorithm::RS256;
+
+/// Load the keyring under `root` for an asymmetric active key.
+///
+/// `configured` is `JWT_ALGORITHM` when set: it must match the active key's
+/// algorithm, and picks the algorithm of a generated active key (default
+/// RS256). `id_token_key_id` (`JWT_ID_TOKEN_KID`) names a key loaded with its
+/// private key so it can sign ID tokens.
+///
+/// Missing keys are generated only on a fresh keyring (no legacy files and
+/// no key directories besides the two named ones). Otherwise a missing key is
+/// an error: silently creating it would sign with a key nobody has seen.
 pub(crate) fn load(
     root: &Path,
     active_key_id: &str,
+    id_token_key_id: Option<&str>,
     configured: Option<Algorithm>,
 ) -> Result<LoadedKeyring, String> {
     jwt::validate_key_id(active_key_id).map_err(|error| format!("JWT_KID: {error}"))?;
@@ -78,6 +94,7 @@ pub(crate) fn load(
 
     let active_dir = key_dir(root, active_key_id);
     let legacy = legacy_pair(root, default_algorithm);
+    let fresh = is_fresh(root, &[Some(active_key_id), id_token_key_id])?;
     let active = if active_dir.is_dir() {
         if both_exist(&legacy) {
             tracing::warn!(
@@ -88,10 +105,17 @@ pub(crate) fn load(
         load_dir(&active_dir, active_key_id, true, configured)?
     } else if both_exist(&legacy) {
         load_pair(active_key_id, default_algorithm, Some(&legacy.0), &legacy.1)?
-    } else {
+    } else if fresh {
         // First start: create the active key in the keyring layout.
         generate(root, active_key_id, default_algorithm).map_err(|error| error.to_string())?;
         load_dir(&active_dir, active_key_id, true, configured)?
+    } else {
+        return Err(missing_key(
+            "JWT_KID",
+            active_key_id,
+            default_algorithm,
+            root,
+        ));
     };
 
     if let Some(configured) = configured
@@ -103,40 +127,116 @@ pub(crate) fn load(
         ));
     }
 
-    let mut additional = Vec::new();
-    let keys_dir = root.join(KEYS_DIR);
-    if keys_dir.is_dir() {
-        let mut entries = fs::read_dir(&keys_dir)
-            .map_err(|error| format!("{}: {error}", keys_dir.display()))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("{}: {error}", keys_dir.display()))?;
-        entries.sort_by_key(|entry| entry.file_name());
-        for entry in entries {
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let Some(key_id) = entry.file_name().to_str().map(str::to_string) else {
-                return Err(format!(
-                    "{}: key directory names must be UTF-8",
-                    keys_dir.display()
-                ));
-            };
-            if key_id == active_key_id {
-                continue;
-            }
-            additional.push(load_dir(&entry.path(), &key_id, false, None)?);
-        }
-    }
-
+    let additional = load_others(root, Some(active_key_id), id_token_key_id, fresh)?;
     Ok(LoadedKeyring { active, additional })
 }
 
-/// Load `keys/<kid>/`. Only the active key reads its private key; other keys
-/// only verify, so their private keys may be deleted.
+/// Keys for an HMAC configuration that signs ID tokens with
+/// `id_token_key_id`: that key (with its private key) plus the other keyring
+/// keys, verification-only, for rotation overlap.
+pub(crate) fn load_for_id_tokens(
+    root: &Path,
+    id_token_key_id: &str,
+) -> Result<Vec<KeyMaterial>, String> {
+    let fresh = is_fresh(root, &[Some(id_token_key_id)])?;
+    load_others(root, None, Some(id_token_key_id), fresh)
+}
+
+/// Every key directory except `skip`. The ID token key is loaded with its
+/// private key, and generated (RS256) on a fresh keyring.
+fn load_others(
+    root: &Path,
+    skip: Option<&str>,
+    id_token_key_id: Option<&str>,
+    fresh: bool,
+) -> Result<Vec<KeyMaterial>, String> {
+    if let Some(key_id) = id_token_key_id {
+        jwt::validate_key_id(key_id).map_err(|error| format!("JWT_ID_TOKEN_KID: {error}"))?;
+        if Some(key_id) != skip && !key_dir(root, key_id).is_dir() {
+            if !fresh {
+                return Err(missing_key(
+                    "JWT_ID_TOKEN_KID",
+                    key_id,
+                    ID_TOKEN_ALGORITHM,
+                    root,
+                ));
+            }
+            generate(root, key_id, ID_TOKEN_ALGORITHM).map_err(|error| error.to_string())?;
+        }
+    }
+
+    let mut keys = Vec::new();
+    for (key_id, path) in key_dirs(root)? {
+        if Some(key_id.as_str()) == skip {
+            continue;
+        }
+        let signs_id_tokens = Some(key_id.as_str()) == id_token_key_id;
+        keys.push(load_dir(&path, &key_id, signs_id_tokens, None)?);
+    }
+    Ok(keys)
+}
+
+/// `(kid, path)` of every directory under `keys/`, sorted by kid.
+fn key_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    let keys_dir = root.join(KEYS_DIR);
+    if !keys_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut entries = fs::read_dir(&keys_dir)
+        .map_err(|error| format!("{}: {error}", keys_dir.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("{}: {error}", keys_dir.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+    let mut dirs = Vec::new();
+    for entry in entries {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let Some(key_id) = entry.file_name().to_str().map(str::to_string) else {
+            return Err(format!(
+                "{}: key directory names must be UTF-8",
+                keys_dir.display()
+            ));
+        };
+        dirs.push((key_id, entry.path()));
+    }
+    Ok(dirs)
+}
+
+/// No legacy key files and no key directories other than `named` ones.
+fn is_fresh(root: &Path, named: &[Option<&str>]) -> Result<bool, String> {
+    let legacy = [Algorithm::RS256, Algorithm::ES256, Algorithm::ES384]
+        .into_iter()
+        .any(|algorithm| both_exist(&legacy_pair(root, algorithm)));
+    if legacy {
+        return Ok(false);
+    }
+    Ok(key_dirs(root)?
+        .iter()
+        .all(|(key_id, _)| named.contains(&Some(key_id.as_str()))))
+}
+
+fn missing_key(variable: &str, key_id: &str, algorithm: Algorithm, root: &Path) -> String {
+    let id_token_flag = if variable == "JWT_ID_TOKEN_KID" {
+        " --id-token"
+    } else {
+        ""
+    };
+    format!(
+        "{variable} names '{key_id}', which is not in {}; create it first with \
+         `stargate jwt generate-key --kid {key_id}{id_token_flag} --algorithm {algorithm:?}` \
+         (a legacy ES key also needs JWT_ALGORITHM set to its algorithm)",
+        root.join(KEYS_DIR).display()
+    )
+}
+
+/// Load `keys/<kid>/`. Only signing keys (`signs`: the active key and the ID
+/// token key) read their private key; other keys only verify, so their
+/// private keys may be deleted.
 fn load_dir(
     dir: &Path,
     key_id: &str,
-    active: bool,
+    signs: bool,
     configured: Option<Algorithm>,
 ) -> Result<KeyMaterial, String> {
     jwt::validate_key_id(key_id).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -155,7 +255,7 @@ fn load_dir(
     load_pair(
         key_id,
         algorithm,
-        active.then_some(private.as_path()),
+        signs.then_some(private.as_path()),
         &public,
     )
 }
@@ -313,7 +413,7 @@ mod tests {
     #[test]
     fn first_start_generates_the_active_key_in_the_keyring() {
         let root = temp_root("jwt-keyring-first");
-        let keyring = load(&root, "k1", None).unwrap();
+        let keyring = load(&root, "k1", None, None).unwrap();
 
         assert_eq!(keyring.active.key_id(), Some("k1"));
         assert_eq!(keyring.active.algorithm(), Algorithm::RS256);
@@ -325,7 +425,7 @@ mod tests {
         );
 
         // The same key is loaded again on the next start.
-        let again = load(&root, "k1", None).unwrap();
+        let again = load(&root, "k1", None, None).unwrap();
         assert!(again.active.can_sign());
         fs::remove_dir_all(root).unwrap();
     }
@@ -335,7 +435,7 @@ mod tests {
         let root = temp_root("jwt-keyring-legacy");
         write_legacy(&root);
 
-        let keyring = load(&root, "stargate-current", None).unwrap();
+        let keyring = load(&root, "stargate-current", None, None).unwrap();
         assert_eq!(keyring.active.key_id(), Some("stargate-current"));
         assert!(!root.join(KEYS_DIR).exists(), "no files created");
 
@@ -353,26 +453,26 @@ mod tests {
     #[test]
     fn rotation_publishes_next_key_then_keeps_the_retired_one() {
         let root = temp_root("jwt-keyring-rotation");
-        load(&root, "k1", None).unwrap();
+        load(&root, "k1", None, None).unwrap();
         generate(&root, "k2", Algorithm::ES256).unwrap();
         assert!(
             generate(&root, "k2", Algorithm::ES256).is_err(),
             "no overwrite"
         );
 
-        let prepublished = load(&root, "k1", None).unwrap();
+        let prepublished = load(&root, "k1", None, None).unwrap();
         assert_eq!(prepublished.active.key_id(), Some("k1"));
         assert_eq!(prepublished.additional.len(), 1);
         assert_eq!(prepublished.additional[0].key_id(), Some("k2"));
         assert!(!prepublished.additional[0].can_sign());
 
-        let rotated = load(&root, "k2", None).unwrap();
+        let rotated = load(&root, "k2", None, None).unwrap();
         assert_eq!(rotated.active.algorithm(), Algorithm::ES256);
         assert_eq!(rotated.additional[0].key_id(), Some("k1"));
 
         // A retired key may drop its private key and still verify.
         fs::remove_file(root.join("keys/k1/private.pem")).unwrap();
-        assert_eq!(load(&root, "k2", None).unwrap().additional.len(), 1);
+        assert_eq!(load(&root, "k2", None, None).unwrap().additional.len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -381,9 +481,84 @@ mod tests {
         let root = temp_root("jwt-keyring-algorithm");
         generate(&root, "k1", Algorithm::ES256).unwrap();
 
-        assert!(load(&root, "k1", Some(Algorithm::RS256)).is_err());
-        assert!(load(&root, "k1", Some(Algorithm::ES256)).is_ok());
-        assert!(load(&root, "../k1", None).is_err());
+        assert!(load(&root, "k1", None, Some(Algorithm::RS256)).is_err());
+        assert!(load(&root, "k1", None, Some(Algorithm::ES256)).is_ok());
+        assert!(load(&root, "../k1", None, None).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fresh_keyring_generates_the_active_and_id_token_keys() {
+        let root = temp_root("jwt-keyring-id-fresh");
+        let keyring = load(&root, "ec-1", Some("rsa-1"), Some(Algorithm::ES256)).unwrap();
+
+        assert_eq!(keyring.active.algorithm(), Algorithm::ES256);
+        assert_eq!(keyring.additional.len(), 1);
+        let id_key = &keyring.additional[0];
+        assert_eq!(id_key.key_id(), Some("rsa-1"));
+        assert_eq!(id_key.algorithm(), ID_TOKEN_ALGORITHM);
+        assert!(id_key.can_sign(), "ID token key loads its private key");
+
+        // Other verification-only keys still skip their private key.
+        generate(&root, "next", Algorithm::ES256).unwrap();
+        let keyring = load(&root, "ec-1", Some("rsa-1"), Some(Algorithm::ES256)).unwrap();
+        let next = keyring
+            .additional
+            .iter()
+            .find(|key| key.key_id() == Some("next"))
+            .unwrap();
+        assert!(!next.can_sign());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_keys_are_errors_once_the_keyring_is_in_use() {
+        let root = temp_root("jwt-keyring-missing");
+        load(&root, "k1", None, None).unwrap();
+
+        // A typo in JWT_KID must not mint a key nobody has published.
+        let error = load(&root, "k2", None, None).err().unwrap();
+        assert!(
+            error.contains("stargate jwt generate-key --kid k2"),
+            "{error}"
+        );
+        assert!(!root.join("keys/k2").exists());
+
+        // Enabling an ID token key on a keyring with only the active key
+        // creates it; once other keys exist, a missing one is an error.
+        load(&root, "k1", Some("rsa-1"), None).unwrap();
+        assert!(root.join("keys/rsa-1/private.pem").is_file());
+        let error = load(&root, "k1", Some("rsa-2"), None).err().unwrap();
+        assert!(error.contains("--id-token"), "{error}");
+
+        // The active key may also sign ID tokens.
+        assert!(load(&root, "k1", Some("k1"), None).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_files_of_another_algorithm_are_not_replaced() {
+        let root = temp_root("jwt-keyring-legacy-ec");
+        let (private, public) = jwt::generate_p256_keys().unwrap();
+        fs::create_dir_all(root.join("es256")).unwrap();
+        fs::write(root.join("es256").join(PRIVATE_KEY), private).unwrap();
+        fs::write(root.join("es256").join(PUBLIC_KEY), public).unwrap();
+
+        // JWT_ALGORITHM unset (RS256) does not see the ES256 legacy pair.
+        assert!(load(&root, "stargate-current", None, None).is_err());
+        assert!(!root.join(KEYS_DIR).exists(), "no RSA key generated");
+        assert!(load(&root, "stargate-current", None, Some(Algorithm::ES256)).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hmac_configurations_load_the_id_token_key() {
+        let root = temp_root("jwt-keyring-hmac");
+        let keys = load_for_id_tokens(&root, "rsa-1").unwrap();
+
+        assert_eq!(keys.len(), 1);
+        assert!(keys[0].can_sign());
+        assert_eq!(keys[0].algorithm(), Algorithm::RS256);
         fs::remove_dir_all(root).unwrap();
     }
 }

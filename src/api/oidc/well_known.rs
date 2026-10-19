@@ -83,6 +83,6 @@ pub async fn get_openid_configuration() -> Result<Json<OpenIdConfiguration>, Err
     Ok(Json(oidc::metadata::openid_configuration(
         issuer,
         &base_url,
-        jwt_config().algorithm(),
+        jwt_config().id_token_algorithm(),
     )))
 }

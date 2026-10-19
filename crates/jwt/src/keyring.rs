@@ -481,4 +481,91 @@ mod tests {
         );
         assert!(infer_algorithm(b"not a key").is_err());
     }
+
+    fn id_token(config: &JwtConfig) -> String {
+        config
+            .generate_oidc_id_token(
+                Claims::default()
+                    .subject("user-1".to_string())
+                    .aud("client-1".to_string()),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn id_tokens_can_use_a_dedicated_rs256_key() {
+        let ec = crate::generate_p256_keys().unwrap();
+        let rsa = rsa_pair();
+        let config = config(
+            signing("ec-1", Algorithm::ES256, &ec),
+            vec![signing("rsa-1", Algorithm::RS256, &rsa)],
+        )
+        .with_id_token_key("rsa-1")
+        .unwrap();
+
+        let id_header = jsonwebtoken::decode_header(id_token(&config)).unwrap();
+        let access_header = jsonwebtoken::decode_header(token(&config)).unwrap();
+        assert_eq!(id_header.alg, Algorithm::RS256);
+        assert_eq!(id_header.kid.as_deref(), Some("rsa-1"));
+        assert_eq!(access_header.alg, Algorithm::ES256);
+        assert_eq!(access_header.kid.as_deref(), Some("ec-1"));
+
+        assert_eq!(config.id_token_algorithm(), Algorithm::RS256);
+        assert_eq!(config.id_token_key_id(), Some("rsa-1"));
+        assert_eq!(config.algorithm(), Algorithm::ES256);
+        assert!(
+            config
+                .validate_oidc_id_token(&id_token(&config), "client-1", None)
+                .is_ok()
+        );
+        assert!(
+            config
+                .validate_session_access_token(&token(&config))
+                .is_ok()
+        );
+        // The ID token is still not usable as an access token.
+        assert!(
+            config
+                .validate_session_access_token(&id_token(&config))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn hmac_sessions_can_issue_verifiable_id_tokens() {
+        let rsa = rsa_pair();
+        let config = config(
+            KeyMaterial::from_secret(Some("hmac".to_string()), Algorithm::HS256, b"secret")
+                .unwrap(),
+            vec![signing("rsa-1", Algorithm::RS256, &rsa)],
+        )
+        .with_id_token_key("rsa-1")
+        .unwrap();
+
+        let id_header = jsonwebtoken::decode_header(id_token(&config)).unwrap();
+        assert_eq!(id_header.alg, Algorithm::RS256);
+        // Only the RSA key is published; the HMAC secret never is.
+        let jwks = config.public_jwks().unwrap();
+        assert_eq!(jwks.keys.len(), 1);
+        assert_eq!(jwks.keys[0].common.key_id.as_deref(), Some("rsa-1"));
+    }
+
+    #[test]
+    fn id_token_key_must_exist_and_be_able_to_sign() {
+        let rsa = rsa_pair();
+        let other = rsa_pair();
+        let base = || {
+            config(
+                signing("k1", Algorithm::RS256, &rsa),
+                vec![verifying("k2", Algorithm::RS256, &other)],
+            )
+        };
+
+        assert!(base().with_id_token_key("missing").is_err());
+        assert!(base().with_id_token_key("k2").is_err(), "public-only key");
+        let same = base().with_id_token_key("k1").unwrap();
+        assert_eq!(same.id_token_key_id(), Some("k1"));
+        // Default: the active key.
+        assert_eq!(base().id_token_key_id(), Some("k1"));
+    }
 }

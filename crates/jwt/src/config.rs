@@ -33,6 +33,9 @@ pub struct JwtConfig {
     /// The active signing key first, then verification-only keys. Tokens
     /// are verified with the key named by their `kid` header.
     keys: Vec<KeyMaterial>,
+    /// Index in `keys` of the key that signs OIDC ID tokens: the active key
+    /// unless another one is designated (see [`Self::with_id_token_key`]).
+    id_token_key: usize,
     /// Expected `iss` claim, enforced on every validation. Captured once at
     /// construction from the same source (`issuer_from_env`) that token
     /// generation uses, so self-issued tokens validate and tokens minted for
@@ -172,25 +175,52 @@ impl JwtConfig {
         keys.extend(additional);
         Ok(Self {
             keys,
+            id_token_key: 0,
             issuer: crate::claims::issuer_from_env(),
             access_exp,
             refresh_exp,
         })
     }
 
+    /// Sign OIDC ID tokens with the key `key_id` instead of the active key,
+    /// e.g. an RS256 key (required by OpenID Connect) while access and
+    /// session tokens use an EC key. The key must be loaded with its private
+    /// key.
+    pub fn with_id_token_key(mut self, key_id: &str) -> Result<Self, KeyError> {
+        let index = self
+            .keys
+            .iter()
+            .position(|key| key.key_id() == Some(key_id))
+            .ok_or_else(|| KeyError::new(format!("unknown ID token key '{key_id}'")))?;
+        if !self.keys[index].can_sign() {
+            return Err(KeyError::new(format!(
+                "ID token key '{key_id}' needs its private key"
+            )));
+        }
+        self.id_token_key = index;
+        Ok(self)
+    }
+
     fn active(&self) -> &KeyMaterial {
         &self.keys[0]
     }
 
+    fn id_token_signer(&self) -> &KeyMaterial {
+        &self.keys[self.id_token_key]
+    }
+
     /// Generate a JWT token
     pub fn generate_token(&self, claims: &Claims) -> Result<String, jsonwebtoken::errors::Error> {
-        let active = self.active();
-        let mut header = Header::new(active.algorithm);
-        header.kid = active.key_id.clone();
-        let encoding = active
+        Self::sign(self.active(), claims)
+    }
+
+    fn sign(key: &KeyMaterial, claims: &Claims) -> Result<String, jsonwebtoken::errors::Error> {
+        let mut header = Header::new(key.algorithm);
+        header.kid = key.key_id.clone();
+        let encoding = key
             .encoding
             .as_ref()
-            .expect("the active JWT key can sign");
+            .expect("signing keys are checked to have a private key");
         encode(&header, claims, encoding)
     }
 
@@ -264,7 +294,7 @@ impl JwtConfig {
         // require `bearer` or `refresh`.
         let mut claims = self.timed_claims(claims, TOKEN_TYPE_ID_TOKEN, self.access_exp);
         claims.typ = None;
-        self.generate_token(&claims)
+        Self::sign(self.id_token_signer(), &claims)
     }
 
     fn decode_without_audience(&self, token: &str) -> Result<Claims, JwtValidationError> {
@@ -388,6 +418,16 @@ impl JwtConfig {
     /// Key id of the active signing key.
     pub fn key_id(&self) -> Option<&str> {
         self.active().key_id()
+    }
+
+    /// Algorithm OIDC ID tokens are signed with (for discovery metadata).
+    pub fn id_token_algorithm(&self) -> Algorithm {
+        self.id_token_signer().algorithm
+    }
+
+    /// Key id OIDC ID tokens are signed with.
+    pub fn id_token_key_id(&self) -> Option<&str> {
+        self.id_token_signer().key_id()
     }
 
     /// Ids of all keys tokens are accepted from, active first.
