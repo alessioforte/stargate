@@ -108,15 +108,6 @@ fn generate_key(args: GenerateKeyArgs) -> io::Result<()> {
         )));
     }
 
-    // Keep the pre-keyring key published and accepted after the switch.
-    if let Some(active_algorithm) = active_algorithm
-        && let Some(dir) = jwt_keyring::adopt_legacy(&args.jwks_dir, &active_kid, active_algorithm)?
-    {
-        println!(
-            "Moved the current key '{active_kid}' into {}",
-            dir.display()
-        );
-    }
     let dir = jwt_keyring::generate(&args.jwks_dir, &args.kid, algorithm)?;
     println!(
         "Generated JWT signing key '{}' ({algorithm:?}) in {}",

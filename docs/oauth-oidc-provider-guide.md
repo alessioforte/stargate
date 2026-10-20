@@ -96,10 +96,6 @@ missing key fails startup instead of silently minting an unpublished key.
 `JWT_ALGORITHM` may be left unset; when set it must match the active key, or
 startup fails.
 
-Installations from before the keyring keep `.stargate/jwks/private.pem` and
-`public.pem` (`es256/`, `es384/` for EC keys) as the active key until the first
-rotation, which moves them into `keys/<current JWT_KID>/`.
-
 Rotate without logging anyone out:
 
 1. Create the next key: `stargate jwt generate-key --kid stargate-2026-11`
@@ -137,16 +133,13 @@ Important fields:
 - `audiences`: allowed resource audiences
 - `attrs`: optional client flags
 
-First-party clients skip consent (see "Consent" below) when one of these
-attrs is true:
+First-party clients skip consent (see "Consent" below) with:
 
 ```json
 {
   "first_party": true
 }
 ```
-
-Also accepted: `firstParty` and `trusted`.
 
 Confidential clients must send PKCE by default. OpenID Connect Core does not
 require it, so a confidential client can opt out (public clients cannot):
@@ -157,8 +150,8 @@ require it, so a confidential client can opt out (public clients cannot):
 }
 ```
 
-Also accepted: `requirePkce`. A code issued without a challenge is rejected at
-the token endpoint if the request carries a `code_verifier`.
+A code issued without a challenge is rejected at the token endpoint if the
+request carries a `code_verifier`.
 
 Privileged token operation clients can use:
 

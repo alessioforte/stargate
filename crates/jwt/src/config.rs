@@ -5,30 +5,13 @@ use jsonwebtoken::Algorithm;
 
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{Header, Validation, decode, decode_header, encode};
-use std::fs;
 use std::{error::Error, fmt};
 
 const TOKEN_TYPE_BEARER: &str = "bearer";
 const TOKEN_TYPE_REFRESH: &str = "refresh";
 const TOKEN_TYPE_ID_TOKEN: &str = "id_token";
 
-/// Represents the key material needed for a given JWT algorithm.
-pub enum KeySource {
-    /// HMAC-based algorithms (HS256, HS384, HS512)
-    Secret(String),
-    /// RSA-based algorithms (RS256, RS384, RS512) — paths to PEM files
-    Rsa {
-        private_key_path: String,
-        public_key_path: String,
-    },
-    /// EC-based algorithms (ES256, ES384) — paths to PEM files
-    Ec {
-        private_key_path: String,
-        public_key_path: String,
-    },
-}
-
-/// JWT Configuration struct to hold preloaded keys and algorithm
+/// JWT configuration: signing and verification keys plus token lifetimes.
 pub struct JwtConfig {
     /// The active signing key first, then verification-only keys. Tokens
     /// are verified with the key named by their `kid` header.
@@ -97,55 +80,9 @@ impl From<jsonwebtoken::errors::Error> for JwtValidationError {
 }
 
 impl JwtConfig {
-    pub fn new(
-        algorithm: Algorithm,
-        key_source: KeySource,
-        access_exp: Duration,
-        refresh_exp: Duration,
-    ) -> Self {
-        Self::new_with_key_id(algorithm, key_source, access_exp, refresh_exp, None)
-    }
-
-    pub fn new_with_key_id(
-        algorithm: Algorithm,
-        key_source: KeySource,
-        access_exp: Duration,
-        refresh_exp: Duration,
-        key_id: Option<String>,
-    ) -> Self {
-        let key = match key_source {
-            KeySource::Secret(secret) => {
-                KeyMaterial::from_secret(key_id, algorithm, secret.as_bytes())
-                    .expect("Invalid JWT secret configuration")
-            }
-            KeySource::Rsa {
-                private_key_path,
-                public_key_path,
-            }
-            | KeySource::Ec {
-                private_key_path,
-                public_key_path,
-            } => {
-                let private_pem =
-                    fs::read(&private_key_path).expect("Failed to read JWT private key");
-                let public_pem = fs::read(&public_key_path).expect("Failed to read JWT public key");
-                KeyMaterial::from_pem_parts(
-                    key_id.as_deref(),
-                    algorithm,
-                    Some(&private_pem),
-                    &public_pem,
-                )
-                .expect("Invalid JWT signing key")
-            }
-        };
-
-        Self::from_keyring(key, Vec::new(), access_exp, refresh_exp)
-            .expect("Invalid JWT signing key")
-    }
-
     /// A configuration that signs with `active` and also accepts tokens
     /// signed by `additional` keys (published in the JWKS). Key ids must be
-    /// unique; additional keys must have one.
+    /// unique.
     pub fn from_keyring(
         active: KeyMaterial,
         additional: Vec<KeyMaterial>,
@@ -157,16 +94,11 @@ impl JwtConfig {
         }
         let mut seen = std::collections::HashSet::new();
         for key in std::iter::once(&active).chain(&additional) {
-            match key.key_id() {
-                Some(key_id) if !seen.insert(key_id.to_string()) => {
-                    return Err(KeyError::new(format!("duplicate JWT key id '{key_id}'")));
-                }
-                None if !additional.is_empty() => {
-                    return Err(KeyError::new(
-                        "every JWT key needs a key id when several keys are configured",
-                    ));
-                }
-                _ => {}
+            if !seen.insert(key.key_id()) {
+                return Err(KeyError::new(format!(
+                    "duplicate JWT key id '{}'",
+                    key.key_id()
+                )));
             }
         }
 
@@ -190,7 +122,7 @@ impl JwtConfig {
         let index = self
             .keys
             .iter()
-            .position(|key| key.key_id() == Some(key_id))
+            .position(|key| key.key_id() == key_id)
             .ok_or_else(|| KeyError::new(format!("unknown ID token key '{key_id}'")))?;
         if !self.keys[index].can_sign() {
             return Err(KeyError::new(format!(
@@ -216,7 +148,7 @@ impl JwtConfig {
 
     fn sign(key: &KeyMaterial, claims: &Claims) -> Result<String, jsonwebtoken::errors::Error> {
         let mut header = Header::new(key.algorithm);
-        header.kid = key.key_id.clone();
+        header.kid = Some(key.key_id.clone());
         let encoding = key
             .encoding
             .as_ref()
@@ -224,20 +156,14 @@ impl JwtConfig {
         encode(&header, claims, encoding)
     }
 
-    /// The key a token claims to be signed with. A token without `kid` is
-    /// checked against the active key; an unknown `kid` is rejected.
+    /// The key named by the token's `kid`. Stargate always sets `kid`, so a
+    /// token without one, or with an unknown one, is rejected.
     fn verification_key(&self, token: &str) -> Result<&KeyMaterial, jsonwebtoken::errors::Error> {
         let header = decode_header(token)?;
-        let Some(key_id) = header.kid.as_deref() else {
-            return Ok(self.active());
-        };
-        self.keys
-            .iter()
-            .find(|key| key.key_id() == Some(key_id))
-            .or_else(|| {
-                // A single unnamed key accepts any kid (legacy configurations).
-                (self.keys.len() == 1 && self.active().key_id.is_none()).then(|| self.active())
-            })
+        header
+            .kid
+            .as_deref()
+            .and_then(|key_id| self.keys.iter().find(|key| key.key_id() == key_id))
             .ok_or_else(|| jsonwebtoken::errors::ErrorKind::InvalidSignature.into())
     }
 
@@ -416,7 +342,7 @@ impl JwtConfig {
     }
 
     /// Key id of the active signing key.
-    pub fn key_id(&self) -> Option<&str> {
+    pub fn key_id(&self) -> &str {
         self.active().key_id()
     }
 
@@ -426,13 +352,13 @@ impl JwtConfig {
     }
 
     /// Key id OIDC ID tokens are signed with.
-    pub fn id_token_key_id(&self) -> Option<&str> {
+    pub fn id_token_key_id(&self) -> &str {
         self.id_token_signer().key_id()
     }
 
     /// Ids of all keys tokens are accepted from, active first.
     pub fn key_ids(&self) -> Vec<&str> {
-        self.keys.iter().filter_map(KeyMaterial::key_id).collect()
+        self.keys.iter().map(KeyMaterial::key_id).collect()
     }
 
     /// Public JWKs of every asymmetric key, active first. HMAC secrets are
@@ -449,15 +375,19 @@ mod tests {
     use super::*;
     use jsonwebtoken::decode_header;
 
+    fn hmac_config(key_id: &str) -> JwtConfig {
+        JwtConfig::from_keyring(
+            KeyMaterial::from_secret(key_id, Algorithm::HS256, b"secret").unwrap(),
+            Vec::new(),
+            Duration::minutes(5),
+            Duration::minutes(5),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn generated_token_includes_key_id() {
-        let config = JwtConfig::new_with_key_id(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-            Some("stargate-test".to_string()),
-        );
+        let config = hmac_config("stargate-test");
 
         let claims = Claims::default().subject("user-1".to_string());
         let token = config.generate_token(&claims).unwrap();
@@ -468,13 +398,7 @@ mod tests {
 
     #[test]
     fn hmac_public_jwks_does_not_expose_secret() {
-        let config = JwtConfig::new_with_key_id(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-            Some("stargate-test".to_string()),
-        );
+        let config = hmac_config("stargate-test");
 
         let jwks = config.public_jwks().unwrap();
 
@@ -483,13 +407,7 @@ mod tests {
 
     #[test]
     fn validates_token_with_audience_without_resource_audience_policy() {
-        let config = JwtConfig::new_with_key_id(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-            Some("stargate-test".to_string()),
-        );
+        let config = hmac_config("stargate-test");
 
         let claims = Claims::default()
             .subject("client-1".to_string())
@@ -502,13 +420,7 @@ mod tests {
 
     #[test]
     fn rejects_token_with_wrong_issuer() {
-        let config = JwtConfig::new_with_key_id(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-            Some("stargate-test".to_string()),
-        );
+        let config = hmac_config("stargate-test");
 
         let claims = Claims::default()
             .subject("client-1".to_string())
@@ -520,12 +432,7 @@ mod tests {
 
     #[test]
     fn session_access_validation_requires_bearer_with_sid() {
-        let config = JwtConfig::new(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-        );
+        let config = hmac_config("stargate-test");
         let claims = Claims::default()
             .subject("alice@example.com".to_string())
             .sid("sid-1".to_string());
@@ -539,12 +446,7 @@ mod tests {
 
     #[test]
     fn session_access_validation_rejects_oauth_tokens() {
-        let config = JwtConfig::new(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-        );
+        let config = hmac_config("stargate-test");
         let mut claims = Claims::default()
             .subject("user-1".to_string())
             .sid("sid-1".to_string());
@@ -559,12 +461,7 @@ mod tests {
 
     #[test]
     fn oauth_access_validation_enforces_audience_when_requested() {
-        let config = JwtConfig::new(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-        );
+        let config = hmac_config("stargate-test");
         let mut claims = Claims::default().subject("user-1".to_string());
         claims.azp = Some("client-1".to_string());
         claims.aud = Some("gateway".to_string());
@@ -583,12 +480,7 @@ mod tests {
 
     #[test]
     fn oidc_id_token_has_no_typ_and_is_not_an_access_token() {
-        let config = JwtConfig::new(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-        );
+        let config = hmac_config("stargate-test");
         let claims = Claims::default()
             .subject("user-1".to_string())
             .aud("client-1".to_string());
@@ -601,12 +493,7 @@ mod tests {
 
     #[test]
     fn oidc_id_token_validation_enforces_audience_and_nonce() {
-        let config = JwtConfig::new(
-            Algorithm::HS256,
-            KeySource::Secret("secret".to_string()),
-            Duration::minutes(5),
-            Duration::minutes(5),
-        );
+        let config = hmac_config("stargate-test");
         let mut claims = Claims::default()
             .subject("user-1".to_string())
             .aud("client-1".to_string());

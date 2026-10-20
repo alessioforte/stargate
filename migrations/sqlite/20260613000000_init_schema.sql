@@ -97,32 +97,76 @@ CREATE TABLE IF NOT EXISTS "admin_keys" (
     "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE TABLE IF NOT EXISTS "audits" (
+-- Password history for the `not recently used` policy: previous password
+-- hashes per user, appended on password change and pruned to a fixed cap.
+CREATE TABLE IF NOT EXISTS "credential_history" (
     "id" TEXT PRIMARY KEY,
-    "timestamp" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    "actor_type" VARCHAR(50) NOT NULL,
-    "actor_id" TEXT,
-    "action" VARCHAR(100) NOT NULL,
-    "resource" VARCHAR(100) NOT NULL,
-    "resource_id" TEXT,
-    "request_id" TEXT,
-    "metadata" JSON NOT NULL DEFAULT '{}'
+    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "value" TEXT NOT NULL,
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+-- Memberships carry a role, free-form with the convention
+-- 'owner' | 'admin' | 'member'.
 CREATE TABLE IF NOT EXISTS "user_organizations" (
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
     "org_id" TEXT NOT NULL REFERENCES "organizations" ("id") ON DELETE CASCADE,
+    "role" TEXT NOT NULL DEFAULT 'member',
+    "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     PRIMARY KEY ("user_id", "org_id")
 );
 
+-- Optional org binding: a bound key always acts in that org. If the org is
+-- deleted the key degrades to an org-less key.
 CREATE TABLE IF NOT EXISTS "user_api_keys" (
     "api_key_id" TEXT PRIMARY KEY REFERENCES "api_keys" ("id") ON DELETE CASCADE,
-    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE
+    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS "service_account_api_keys" (
     "api_key_id" TEXT PRIMARY KEY REFERENCES "api_keys" ("id") ON DELETE CASCADE,
     "service_account_id" TEXT NOT NULL REFERENCES "service_accounts" ("id") ON DELETE CASCADE
+);
+
+-- Immutable raw audit events plus local delivery metadata, the same logical
+-- columns as PostgreSQL. Edge starts no relay, so published_at stays NULL.
+CREATE TABLE IF NOT EXISTS "outbox_events" (
+    "seq" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "event_id" TEXT NOT NULL UNIQUE
+        CHECK (length("event_id") = 26)
+        CHECK ("event_id" NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'),
+    "payload" TEXT NOT NULL
+        CHECK (length(CAST("payload" AS BLOB)) BETWEEN 2 AND 65536)
+        CHECK (json_valid("payload") = 1)
+        CHECK (json_type("payload") = 'object')
+        CHECK (json_type("payload", '$.event_id') = 'text')
+        CHECK (json_extract("payload", '$.event_id') = "event_id"),
+    "operation_id" TEXT
+        CHECK (
+            "operation_id" IS NULL
+            OR (
+                length("operation_id") = 26
+                AND "operation_id" NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'
+            )
+        ),
+    "created_at" TEXT NOT NULL
+        DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    "published_at" TEXT,
+    CHECK (
+        json_type("payload", '$.operation_id') IS NOT NULL
+        AND (
+            (
+                "operation_id" IS NULL
+                AND json_type("payload", '$.operation_id') = 'null'
+            )
+            OR (
+                "operation_id" IS NOT NULL
+                AND json_type("payload", '$.operation_id') = 'text'
+                AND json_extract("payload", '$.operation_id') = "operation_id"
+            )
+        )
+    )
 );
 
 -- Indexes on foreign keys
@@ -132,12 +176,17 @@ CREATE INDEX IF NOT EXISTS "idx_oauth_consents_user_client" ON "oauth_consents" 
 CREATE INDEX IF NOT EXISTS "idx_oauth_consents_client_id" ON "oauth_consents" ("client_id");
 CREATE INDEX IF NOT EXISTS "idx_oauth_consents_revoked_at" ON "oauth_consents" ("revoked_at");
 CREATE INDEX IF NOT EXISTS "idx_credentials_user_id" ON "credentials" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_credential_history_user_created" ON "credential_history" ("user_id", "created_at" DESC);
 CREATE INDEX IF NOT EXISTS "idx_super_admins_active" ON "super_admins" ("active");
 CREATE INDEX IF NOT EXISTS "idx_user_api_keys_user_id" ON "user_api_keys" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_user_api_keys_org_id" ON "user_api_keys" ("org_id");
 CREATE INDEX IF NOT EXISTS "idx_sa_api_keys_service_account_id" ON "service_account_api_keys" ("service_account_id");
 CREATE INDEX IF NOT EXISTS "idx_user_organizations_org_id" ON "user_organizations" ("org_id");
 
--- Indexes on audit query patterns
-CREATE INDEX IF NOT EXISTS "idx_audits_timestamp" ON "audits" ("timestamp");
-CREATE INDEX IF NOT EXISTS "idx_audits_actor" ON "audits" ("actor_type", "actor_id");
-CREATE INDEX IF NOT EXISTS "idx_audits_resource" ON "audits" ("resource", "resource_id");
+-- Outbox delivery and correlation
+CREATE INDEX IF NOT EXISTS "idx_outbox_events_unpublished"
+ON "outbox_events" ("seq")
+WHERE "published_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_outbox_events_operation_id"
+ON "outbox_events" ("operation_id")
+WHERE "operation_id" IS NOT NULL;

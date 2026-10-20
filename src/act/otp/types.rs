@@ -94,9 +94,7 @@ pub(crate) struct PendingMfaLogin {
     pub(crate) challenge: StoredOtpChallenge,
     pub(crate) auth_time: usize,
     /// Org explicitly requested at password login, honored when the session
-    /// is finally issued after MFA verification. Serde-default so pending
-    /// challenges created before this field deserialize.
-    #[serde(default)]
+    /// is finally issued after MFA verification.
     pub(crate) requested_org_id: Option<String>,
     pub(crate) created_at_unix: u64,
     pub(crate) expires_at_unix: u64,

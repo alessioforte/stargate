@@ -150,7 +150,7 @@ TTL is stored as an absolute `DateTime<Utc>` alongside each value (and per hash 
 ```rust
 // Starts a Tokio task. Interval adapts: halves when high expiry rate,
 // doubles (up to 300s) when low expiry rate.
-store.run_cleaner(60); // base interval in seconds
+store.run_adaptive_cleaner(60); // base interval in seconds
 ```
 
 ### Extra operations (not part of the `Store` trait)
@@ -217,9 +217,6 @@ let store = MemoryStore::load_from_json("data/store.json").await?;
 
 // Simple JSON — human-readable, no TTL metadata, AtomicI64 restored as Simple
 store.export_to_simple_json("data/export.json").await?;
-
-// Load with automatic fallback from simple JSON format
-let store = MemoryStore::load_from_json_with_fallback("data/store.json").await?;
 
 // Utility
 let info = MemoryStore::file_info("data/store.bin").await?; // Option<(size, modified)>
@@ -319,7 +316,7 @@ struct Session { user_id: String, ip: String }
 #[tokio::main]
 async fn main() -> store::StoreResult<()> {
     let store = MemoryStore::new();
-    store.run_cleaner(60);
+    store.run_adaptive_cleaner(60);
 
     // Simple value with 1h TTL
     store.set("session:abc", &Session { user_id: "u1".into(), ip: "1.2.3.4".into() }, Some(3600)).await?;

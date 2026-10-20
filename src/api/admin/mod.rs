@@ -150,19 +150,7 @@ async fn resolve_authorization(
                         && subject.sub_type == crate::etc::auth::subject::SubjectType::User
                         && claims.sub_id.as_deref() == Some(subject.id.as_str())
                     {
-                        match crate::act::sessions::ensure_session_registered(
-                            &subject.id,
-                            &sid,
-                            subject.org_id.as_deref(),
-                            claims.auth_time.unwrap_or(claims.iat) as u64,
-                        )
-                        .await
-                        {
-                            Ok(()) => authenticated = true,
-                            Err(err) => {
-                                tracing::error!("Failed to register admin session: {}", err);
-                            }
-                        }
+                        authenticated = true;
                     }
                     if authenticated
                         && let Some(user_id) = claims.sub_id.as_deref()

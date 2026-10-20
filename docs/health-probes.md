@@ -9,10 +9,9 @@ from service traffic without restarting it.
 | --- | --- | --- | --- |
 | `GET /livez` | `200 {"status":"alive"}` | No application-level failure status; an unresponsive server fails the caller's probe | Startup and liveness |
 | `GET /readyz` | `200 {"status":"ready"}` | `503 {"status":"not_ready"}` | Traffic readiness |
-| `GET /health` | `200 {"name":"stargate","version":"<version>","status":"healthy"}` | `503` with the same fields and `status: "unhealthy"` | Compatibility with existing health clients |
 | `GET /admin/health` | `200` with component status, latency, backend kinds, and timestamp | `503` with component diagnostics | Authenticated operator diagnostics |
 
-The three public endpoints also support `HEAD`, return `Cache-Control: no-store`,
+The two public endpoints also support `HEAD`, return `Cache-Control: no-store`,
 and bypass authentication, API rate limiting, gateway ingress/process admission,
 and gateway routing policies.
 They use the normal HTTP or HTTPS listener; no extra port is required.
@@ -56,7 +55,7 @@ On SIGTERM or SIGINT, Stargate marks readiness false immediately. It keeps
 the listener open for `SERVER_DRAIN_DELAY_SECS` (default `5`, `0` disables the
 delay), allowing traffic already in transit to finish reaching the pod while
 load balancers learn that it is unavailable. During this window `/livez`
-returns `200` and `/readyz` and `/health` return `503` without dependency I/O.
+returns `200` and `/readyz` returns `503` without dependency I/O.
 An in-flight readiness check rechecks the lifecycle before returning success.
 
 After the delay, the server closes listeners and drains active connections,
@@ -73,15 +72,10 @@ connection draining, and persistence hooks. The Helm chart defaults to 40
 seconds. Tune the delay to your load balancer's propagation behavior; it is
 not a guarantee that every load balancer has stopped routing traffic.
 
-## Helm and migration
+## Helm
 
 The chart uses `/livez` for startup/liveness and `/readyz` for readiness and
-the Helm connection test. Custom `probes.*` overrides remain supported.
+the Helm connection test. Custom `probes.*` overrides are supported.
 The default three-second probe timeout exceeds the one-second dependency
 deadline. Probe intervals and failure thresholds determine how quickly
 Kubernetes reacts to failures.
-
-Existing `/health` clients retain the same JSON shape, but the endpoint now
-also reflects Redis availability in cluster mode and lifecycle readiness.
-Move any liveness checks still pointing at `/health` to `/livez`. Deploy an
-image containing these endpoints when upgrading the chart defaults.

@@ -1743,11 +1743,6 @@ impl MemoryStore {
             }
         });
     }
-
-    /// Legacy cleaner method - maintained for backward compatibility
-    pub fn run_cleaner(&self, interval: u64) {
-        self.run_adaptive_cleaner(interval);
-    }
 }
 
 #[cfg(test)]

@@ -108,7 +108,6 @@ pub(crate) struct PendingAuthorization {
     /// is not older than this was authenticated for this request.
     pub(crate) created_at: i64,
     /// Present when the request waits for the user's consent.
-    #[serde(default)]
     pub(crate) consent: Option<ConsentStage>,
 }
 
@@ -121,7 +120,6 @@ pub(crate) struct ConsentStage {
     pub(crate) scopes: Vec<String>,
     pub(crate) audience: Option<String>,
     /// Set once the user approves on the consent page.
-    #[serde(default)]
     pub(crate) approved: bool,
 }
 

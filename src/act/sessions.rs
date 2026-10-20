@@ -42,7 +42,6 @@ pub struct SessionRecord {
     pub authenticated_at_unix: u64,
     pub last_seen_at_unix: u64,
     pub expires_at_unix: u64,
-    #[serde(default)]
     pub client_ids: Vec<String>,
 }
 
@@ -133,47 +132,9 @@ pub async fn register_session(
     Ok(())
 }
 
-/// Backfill a pre-registry session the first time it participates in a newer
-/// flow. Existing per-user expiry is preserved rather than extended.
-pub async fn ensure_session_registered(
-    user_id: &str,
-    sid: &str,
-    org_id: Option<&str>,
-    authenticated_at_unix: u64,
-) -> Result<(), StoreError> {
-    let store = use_store();
-    if store.hexists(SESSION_DIRECTORY_KEY, sid).await? {
-        return Ok(());
-    }
-
-    let existing = store
-        .hget::<SessionIndexEntry>(&index_key(user_id), sid)
-        .await?;
-    let expires_at_unix = existing
-        .as_ref()
-        .map(|entry| entry.expires_at_unix)
-        .unwrap_or_else(|| {
-            now_unix().saturating_add(jwt_config().refresh_exp.as_seconds_f64().max(1.0) as u64)
-        });
-    let Some(ttl_secs) = ttl_until(expires_at_unix) else {
-        return Ok(());
-    };
-    let record = SessionRecord {
-        id: sid.to_string(),
-        user_id: user_id.to_string(),
-        org_id: org_id.map(str::to_string),
-        authenticated_at_unix,
-        last_seen_at_unix: now_unix(),
-        expires_at_unix,
-        client_ids: Vec::new(),
-    };
-    store_record(&record, ttl_secs).await
-}
-
 /// Atomically consume one native refresh token and install its successor.
-///
-/// A missing rotation record is initialized once to support sessions created
-/// before refresh replay protection was stored separately.
+/// Every login stores its first rotation record, so a missing one means the
+/// session is gone and the token is rejected.
 pub async fn rotate_refresh_token(
     sid: &str,
     presented_jti: &str,
@@ -187,7 +148,7 @@ pub async fn rotate_refresh_token(
     };
 
     let Some(current) = store.get::<RefreshRotation>(&key).await? else {
-        return store.set_if_absent(&key, &next, Some(ttl_secs)).await;
+        return Ok(false);
     };
     if current.current_jti != presented_jti {
         return Ok(false);
@@ -199,30 +160,27 @@ pub async fn rotate_refresh_token(
 }
 
 /// Renew session metadata after a refresh token was successfully rotated.
+/// Returns false when the session is no longer registered (e.g. revoked
+/// concurrently): it must not be brought back.
 pub async fn renew_session(
     user_id: &str,
     sid: &str,
     org_id: Option<&str>,
-    authenticated_at_unix: u64,
     ttl_secs: u64,
-) -> Result<(), StoreError> {
-    let now = now_unix();
-    let mut record = use_store()
+) -> Result<bool, StoreError> {
+    let Some(mut record) = use_store()
         .hget::<SessionRecord>(SESSION_DIRECTORY_KEY, sid)
         .await?
-        .unwrap_or_else(|| SessionRecord {
-            id: sid.to_string(),
-            user_id: user_id.to_string(),
-            org_id: org_id.map(str::to_string),
-            authenticated_at_unix,
-            last_seen_at_unix: now,
-            expires_at_unix: now.saturating_add(ttl_secs),
-            client_ids: Vec::new(),
-        });
+        .filter(|record| record.user_id == user_id)
+    else {
+        return Ok(false);
+    };
+    let now = now_unix();
     record.org_id = org_id.map(str::to_string);
     record.last_seen_at_unix = now;
     record.expires_at_unix = now.saturating_add(ttl_secs);
-    store_record(&record, ttl_secs).await
+    store_record(&record, ttl_secs).await?;
+    Ok(true)
 }
 
 /// Associate an OAuth/OIDC client with an existing login session.
@@ -374,34 +332,24 @@ pub async fn forget_session(user_id: &str, sid: &str) {
     }
 }
 
-/// Delete every live session of the user. Directory records are authoritative;
-/// legacy sid-index entries are also cleaned up during rolling upgrades.
+/// Delete every live session of the user (directory records are
+/// authoritative) and the user's session index.
 pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
     let store = use_store();
-    let key = index_key(user_id);
     let records = store
         .hgetall::<SessionRecord>(SESSION_DIRECTORY_KEY)
         .await?;
     let mut revoked = 0;
-    let mut registered_sids = HashSet::new();
     for (sid, record) in records {
         if record.user_id != user_id {
             continue;
         }
-        registered_sids.insert(sid.clone());
         store.delete(&sid).await?;
         store.delete(&refresh_rotation_key(&sid)).await?;
         store.hdel(SESSION_DIRECTORY_KEY, &sid).await?;
         revoked += 1;
     }
-
-    for indexed_id in store.hkeys(&key).await? {
-        if !registered_sids.contains(&indexed_id) && store.delete(&indexed_id).await? {
-            store.delete(&refresh_rotation_key(&indexed_id)).await?;
-            revoked += 1;
-        }
-    }
-    store.delete(&key).await?;
+    store.delete(&index_key(user_id)).await?;
     Ok(revoked)
 }
 
@@ -477,15 +425,6 @@ pub async fn authenticated_session(
     if claims.sub_id.as_deref() != Some(&subject.id) {
         return Err(invalid());
     }
-
-    ensure_session_registered(
-        &subject.id,
-        &sid,
-        subject.org_id.as_deref(),
-        claims.auth_time.unwrap_or(claims.iat) as u64,
-    )
-    .await
-    .map_err(ErrorResponse::internal)?;
 
     let user = crate::db::get_user_by_id(&subject.id)
         .await
@@ -568,7 +507,7 @@ fn select_org<'a>(
         return Ok(Some(membership));
     }
 
-    // Oldest membership; entries backfilled without a timestamp sort first.
+    // Oldest membership.
     Ok(memberships
         .iter()
         .min_by_key(|membership| membership.member_since))
@@ -687,29 +626,37 @@ mod index_tests {
     }
 
     #[tokio::test]
-    async fn first_refresh_safely_initializes_legacy_rotation_state() {
+    async fn refresh_without_rotation_state_is_rejected() {
         let sid = unique("sid");
 
         assert!(
-            rotate_refresh_token(&sid, "legacy-jti", "jti-1", 60)
+            !rotate_refresh_token(&sid, "any-jti", "jti-1", 60)
                 .await
                 .unwrap()
         );
         assert!(
-            !rotate_refresh_token(&sid, "legacy-jti", "jti-2", 60)
+            !use_store()
+                .exists(&refresh_rotation_key(&sid))
                 .await
                 .unwrap()
         );
-        assert!(
-            rotate_refresh_token(&sid, "jti-1", "jti-2", 60)
-                .await
-                .unwrap()
+    }
+
+    #[tokio::test]
+    async fn renewal_does_not_resurrect_a_revoked_session() {
+        let user = unique("user");
+        let sid = unique("sid");
+        seed_session(&user, &sid, None).await;
+
+        assert!(renew_session(&user, &sid, Some("org_a"), 60).await.unwrap());
+        assert_eq!(
+            get_session(&sid).await.unwrap().unwrap().org_id.as_deref(),
+            Some("org_a")
         );
 
-        use_store()
-            .delete(&refresh_rotation_key(&sid))
-            .await
-            .unwrap();
+        revoke_session(&sid).await.unwrap();
+        assert!(!renew_session(&user, &sid, None, 60).await.unwrap());
+        assert!(get_session(&sid).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -738,21 +685,21 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use db::ent::Organization;
 
-    fn membership(org_id: &str, role: &str, member_since_unix: Option<i64>) -> OrgMembership {
+    fn membership(org_id: &str, role: &str, member_since_unix: i64) -> OrgMembership {
         let mut organization = Organization::new(org_id.to_string(), None);
         organization.id = org_id.to_string();
         OrgMembership {
             organization,
             role: role.to_string(),
-            member_since: member_since_unix.map(|secs| Utc.timestamp_opt(secs, 0).unwrap()),
+            member_since: Utc.timestamp_opt(member_since_unix, 0).unwrap(),
         }
     }
 
     #[test]
     fn requested_org_wins_and_must_be_a_membership() {
         let memberships = vec![
-            membership("org_a", "member", Some(100)),
-            membership("org_b", "admin", Some(200)),
+            membership("org_a", "member", 100),
+            membership("org_b", "admin", 200),
         ];
 
         let selected = select_org(&memberships, Some("org_b"), Some("org_a"))
@@ -766,8 +713,8 @@ mod tests {
     #[test]
     fn stale_default_org_falls_back_to_oldest_membership() {
         let memberships = vec![
-            membership("org_b", "admin", Some(200)),
-            membership("org_a", "member", Some(100)),
+            membership("org_b", "admin", 200),
+            membership("org_a", "member", 100),
         ];
 
         let selected = select_org(&memberships, None, Some("org_gone"))
@@ -779,8 +726,8 @@ mod tests {
     #[test]
     fn default_org_beats_oldest_membership() {
         let memberships = vec![
-            membership("org_a", "member", Some(100)),
-            membership("org_b", "admin", Some(200)),
+            membership("org_a", "member", 100),
+            membership("org_b", "admin", 200),
         ];
 
         let selected = select_org(&memberships, None, Some("org_b"))
@@ -793,16 +740,5 @@ mod tests {
     fn no_memberships_selects_none() {
         assert!(select_org(&[], None, None).unwrap().is_none());
         assert!(select_org(&[], None, Some("org_a")).unwrap().is_none());
-    }
-
-    #[test]
-    fn backfilled_membership_without_timestamp_counts_as_oldest() {
-        let memberships = vec![
-            membership("org_a", "member", Some(100)),
-            membership("org_b", "admin", None),
-        ];
-
-        let selected = select_org(&memberships, None, None).unwrap().unwrap();
-        assert_eq!(selected.organization.id, "org_b");
     }
 }

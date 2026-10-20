@@ -1,28 +1,4 @@
--- Enum types (idempotent: only created if they don't already exist)
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'credential_type') THEN
-        CREATE TYPE credential_type AS ENUM ('password', 'oauth');
-    END IF;
-END $$;
-
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action_type') THEN
-        CREATE TYPE action_type AS ENUM ('create', 'update', 'delete', 'read', 'login', 'logout');
-    END IF;
-END $$;
-
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'actor_type') THEN
-        CREATE TYPE actor_type AS ENUM ('admin', 'admin_key', 'user', 'api_key', 'system', 'anonymous');
-    END IF;
-END $$;
-
--- Add missing enum values to existing types (safe on repeated runs)
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'admin_key' AND enumtypid = 'actor_type'::regtype) THEN
-        ALTER TYPE actor_type ADD VALUE IF NOT EXISTS 'admin_key';
-    END IF;
-END $$;
+CREATE TYPE credential_type AS ENUM ('password', 'oauth');
 
 CREATE TABLE IF NOT EXISTS "organizations" (
     "id" TEXT PRIMARY KEY,
@@ -121,65 +97,74 @@ CREATE TABLE IF NOT EXISTS "admin_keys" (
     "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- The audits table doubles as the transactional outbox: each row is inserted in
--- the same SQL transaction as the mutation it records. `seq` is a monotonic claim
--- cursor for the relay; `published_at` is NULL until a relay node ships the row to
--- the message broker (Redis Streams) in cluster deployments. Edge deployments never
--- run a relay, so `published_at` simply stays NULL and is ignored.
-CREATE TABLE IF NOT EXISTS "audits" (
+-- Password history for the `not recently used` policy: previous password
+-- hashes per user, appended on password change and pruned to a fixed cap.
+CREATE TABLE IF NOT EXISTS "credential_history" (
     "id" TEXT PRIMARY KEY,
-    "timestamp" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    "actor_type" actor_type NOT NULL,
-    "actor_id" TEXT,
-    "action" action_type NOT NULL,
-    "resource" VARCHAR(100) NOT NULL,
-    "resource_id" TEXT,
-    "request_id" TEXT,
-    "metadata" JSONB NOT NULL DEFAULT '{}'::jsonb,
-    "seq" BIGINT GENERATED ALWAYS AS IDENTITY,
-    "published_at" TIMESTAMPTZ
+    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "value" TEXT NOT NULL,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Outbox columns for deployments whose `audits` table predates the outbox model.
--- Both blocks are guarded on column existence so they run exactly once, at the boot
--- where the column is first added. In particular the `published_at` backfill MUST NOT
--- run unconditionally: marking pre-existing history as already-published is correct,
--- but doing it on every boot would mark relay-pending rows as published and drop them
--- from the stream. Adding `seq` rewrites the table to assign identity values to
--- existing rows — a one-time cost proportional to the current audit history size.
-DO $$ BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = current_schema() AND table_name = 'audits' AND column_name = 'seq'
-    ) THEN
-        ALTER TABLE "audits" ADD COLUMN "seq" BIGINT GENERATED ALWAYS AS IDENTITY;
-    END IF;
-END $$;
-
-DO $$ BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = current_schema() AND table_name = 'audits' AND column_name = 'published_at'
-    ) THEN
-        ALTER TABLE "audits" ADD COLUMN "published_at" TIMESTAMPTZ;
-        UPDATE "audits" SET "published_at" = NOW();
-    END IF;
-END $$;
-
+-- Memberships carry a role, free-form with the convention
+-- 'owner' | 'admin' | 'member'.
 CREATE TABLE IF NOT EXISTS "user_organizations" (
     "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
     "org_id" TEXT NOT NULL REFERENCES "organizations" ("id") ON DELETE CASCADE,
+    "role" TEXT NOT NULL DEFAULT 'member',
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY ("user_id", "org_id")
 );
 
+-- Optional org binding: a bound key always acts in that org. If the org is
+-- deleted the key degrades to an org-less key.
 CREATE TABLE IF NOT EXISTS "user_api_keys" (
     "api_key_id" TEXT PRIMARY KEY REFERENCES "api_keys" ("id") ON DELETE CASCADE,
-    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE
+    "user_id" TEXT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "org_id" TEXT REFERENCES "organizations" ("id") ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS "service_account_api_keys" (
     "api_key_id" TEXT PRIMARY KEY REFERENCES "api_keys" ("id") ON DELETE CASCADE,
     "service_account_id" TEXT NOT NULL REFERENCES "service_accounts" ("id") ON DELETE CASCADE
+);
+
+-- Immutable raw audit events, inserted in the same transaction as the mutation
+-- they record. `seq` is the relay's claim cursor; `published_at` stays NULL until
+-- a relay node ships the row to Redis Streams (cluster deployments only).
+CREATE TABLE IF NOT EXISTS "outbox_events" (
+    "event_id" CHAR(26) PRIMARY KEY
+        CHECK ("event_id" ~ '^[0-9A-HJKMNP-TV-Z]{26}$'),
+    "payload" TEXT NOT NULL
+        CHECK (octet_length("payload") BETWEEN 2 AND 65536)
+        CHECK (jsonb_typeof("payload"::jsonb) = 'object')
+        CHECK (
+            "payload"::jsonb ? 'event_id'
+            AND jsonb_typeof("payload"::jsonb -> 'event_id') = 'string'
+            AND "payload"::jsonb ->> 'event_id' = btrim("event_id")
+        ),
+    "seq" BIGINT GENERATED ALWAYS AS IDENTITY UNIQUE,
+    "operation_id" CHAR(26)
+        CHECK (
+            "operation_id" IS NULL
+            OR "operation_id" ~ '^[0-9A-HJKMNP-TV-Z]{26}$'
+        ),
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "published_at" TIMESTAMPTZ,
+    CHECK (
+        "payload"::jsonb ? 'operation_id'
+        AND (
+            (
+                "operation_id" IS NULL
+                AND jsonb_typeof("payload"::jsonb -> 'operation_id') = 'null'
+            )
+            OR (
+                "operation_id" IS NOT NULL
+                AND jsonb_typeof("payload"::jsonb -> 'operation_id') = 'string'
+                AND "payload"::jsonb ->> 'operation_id' = btrim("operation_id")
+            )
+        )
+    )
 );
 
 -- Indexes on foreign keys
@@ -189,17 +174,18 @@ CREATE INDEX IF NOT EXISTS "idx_oauth_consents_user_client" ON "oauth_consents" 
 CREATE INDEX IF NOT EXISTS "idx_oauth_consents_client_id" ON "oauth_consents" ("client_id");
 CREATE INDEX IF NOT EXISTS "idx_oauth_consents_revoked_at" ON "oauth_consents" ("revoked_at");
 CREATE INDEX IF NOT EXISTS "idx_credentials_user_id" ON "credentials" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_credential_history_user_created" ON "credential_history" ("user_id", "created_at" DESC);
 CREATE INDEX IF NOT EXISTS "idx_super_admins_active" ON "super_admins" ("active");
 CREATE INDEX IF NOT EXISTS "idx_user_api_keys_user_id" ON "user_api_keys" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_user_api_keys_org_id" ON "user_api_keys" ("org_id");
 CREATE INDEX IF NOT EXISTS "idx_sa_api_keys_service_account_id" ON "service_account_api_keys" ("service_account_id");
 CREATE INDEX IF NOT EXISTS "idx_user_organizations_org_id" ON "user_organizations" ("org_id");
 
--- Indexes on audit query patterns
-CREATE INDEX IF NOT EXISTS "idx_audits_timestamp" ON "audits" ("timestamp");
-CREATE INDEX IF NOT EXISTS "idx_audits_actor" ON "audits" ("actor_type", "actor_id");
-CREATE INDEX IF NOT EXISTS "idx_audits_resource" ON "audits" ("resource", "resource_id");
-
--- Outbox claim index: keeps the relay's "next unpublished rows, ordered by seq" scan
--- cheap. Partial on published_at IS NULL so it only holds the unpublished backlog,
--- shrinking to near-empty once the relay keeps up.
-CREATE INDEX IF NOT EXISTS "idx_audits_unpublished" ON "audits" ("seq") WHERE "published_at" IS NULL;
+-- Outbox claim index: the relay's "next unpublished rows by seq" scan. Partial on
+-- published_at IS NULL, so it only holds the unpublished backlog.
+CREATE INDEX IF NOT EXISTS "idx_outbox_events_unpublished"
+ON "outbox_events" ("seq")
+WHERE "published_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "idx_outbox_events_operation_id"
+ON "outbox_events" ("operation_id")
+WHERE "operation_id" IS NOT NULL;

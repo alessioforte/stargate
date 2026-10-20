@@ -2211,7 +2211,6 @@ mod sqlite_tests {
             Vec::new(),
             serde_json::json!({
                 "first_party": true,
-                "trusted": true,
                 "system": true,
             }),
         )
@@ -2394,7 +2393,7 @@ mod sqlite_tests {
             .expect("membership exists");
         assert_eq!(membership.role, "member");
         assert_eq!(membership.organization.id, org.id);
-        let member_since = membership.member_since.expect("member_since set");
+        let member_since = membership.member_since;
 
         let error = svc
             .add_user_to_organization(
@@ -2426,7 +2425,7 @@ mod sqlite_tests {
             .expect("query membership")
             .expect("membership exists");
         assert_eq!(membership.role, "admin");
-        assert_eq!(membership.member_since, Some(member_since));
+        assert_eq!(membership.member_since, member_since);
         assert_eq!(svc.count_organization_users(&org.id).await.unwrap(), 1);
     }
 

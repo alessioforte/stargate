@@ -42,7 +42,6 @@ The resulting `stargate_console` OAuth client is a public browser client:
   "scopes": ["openid", "email", "profile", "offline_access"],
   "attrs": {
     "first_party": true,
-    "trusted": true,
     "system": true
   }
 }

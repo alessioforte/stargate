@@ -14,7 +14,7 @@ pub struct AccountOrganizationSchema {
     pub name: String,
     pub description: Option<String>,
     pub role: String,
-    pub member_since: Option<String>,
+    pub member_since: String,
     /// Whether this org is the active context of the current session.
     pub active: bool,
 }
@@ -61,7 +61,7 @@ pub async fn get_account_organizations(req: Request) -> Result<Response, ErrorRe
             name: membership.organization.name,
             description: membership.organization.description,
             role: membership.role,
-            member_since: membership.member_since.map(|at| at.to_rfc3339()),
+            member_since: membership.member_since.to_rfc3339(),
         })
         .collect();
 

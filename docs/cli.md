@@ -18,9 +18,7 @@ stargate jwt generate-key
 `jwt generate-key --kid <kid> [--algorithm ES256] [--id-token] [--jwks-dir .stargate/jwks]`
 creates the next JWT signing key in `keys/<kid>/` (refusing to overwrite) and
 prints the rotation steps. With `--id-token` the key is RS256 and meant for
-`JWT_ID_TOKEN_KID` (also with an HMAC `JWT_ALGORITHM`). On the first rotation it also moves the legacy
-`private.pem`/`public.pem` into `keys/<current JWT_KID>/` so the current key
-stays published. It needs no database. See
+`JWT_ID_TOKEN_KID` (also with an HMAC `JWT_ALGORITHM`). It needs no database. See
 [Signing keys and rotation](oauth-oidc-provider-guide.md#signing-keys-and-rotation).
 
 ## Bootstrap the instance

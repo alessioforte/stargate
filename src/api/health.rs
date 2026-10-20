@@ -10,13 +10,6 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct Health {
-    name: &'static str,
-    version: &'static str,
-    status: &'static str,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
 pub struct Probe {
     status: &'static str,
 }
@@ -26,7 +19,6 @@ pub fn router(lifecycle: Lifecycle) -> Router {
     Router::new()
         .route("/livez", get(get_livez))
         .route("/readyz", get(get_readyz))
-        .route("/health", get(get_health))
         .with_state(lifecycle)
 }
 
@@ -61,31 +53,6 @@ pub async fn get_readyz(State(lifecycle): State<Lifecycle>) -> Response {
         readiness_status(ready),
         Probe {
             status: if ready { "ready" } else { "not_ready" },
-        },
-    )
-}
-
-#[utoipa::path(
-    get,
-    path = "/health",
-    tags = ["Health"],
-    summary = "Readiness compatibility endpoint",
-    description = "Same readiness checks and HTTP status as /readyz, preserving the legacy name, version, and healthy/unhealthy status fields. No authentication or rate limiting.",
-    responses(
-        (status = 200, description = "Ready for traffic", body = Health),
-        (status = 503, description = "Not ready for traffic", body = Health)
-    )
-)]
-pub async fn get_health(State(lifecycle): State<Lifecycle>) -> Response {
-    let ready = lifecycle
-        .check_ready(async { check_dependencies().await.is_healthy() })
-        .await;
-    respond(
-        readiness_status(ready),
-        Health {
-            name: "stargate",
-            version: env!("CARGO_PKG_VERSION"),
-            status: if ready { "healthy" } else { "unhealthy" },
         },
     )
 }
@@ -144,15 +111,6 @@ mod tests {
                     StatusCode::SERVICE_UNAVAILABLE,
                     json!({"status": "not_ready"}),
                 ),
-                (
-                    "/health",
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    json!({
-                        "name": "stargate",
-                        "version": env!("CARGO_PKG_VERSION"),
-                        "status": "unhealthy",
-                    }),
-                ),
             ] {
                 let response = request(app.clone(), Method::GET, path).await;
                 assert_eq!(response.status(), status, "{phase}: {path}");
@@ -184,10 +142,9 @@ mod tests {
     fn openapi_publishes_probe_contracts() {
         let doc = serde_json::to_value(crate::api::ApiDoc::openapi()).unwrap();
         assert!(doc["paths"]["/livez"]["get"]["responses"]["200"].is_object());
-        for path in ["/health", "/readyz"] {
-            for status in ["200", "503"] {
-                assert!(doc["paths"][path]["get"]["responses"][status].is_object());
-            }
+        for status in ["200", "503"] {
+            assert!(doc["paths"]["/readyz"]["get"]["responses"][status].is_object());
         }
+        assert!(doc["paths"]["/health"].is_null());
     }
 }

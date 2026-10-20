@@ -46,9 +46,8 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
     let (active, additional) = match configured {
         Some(algorithm @ (Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512)) => {
             let secret = env::var("JWT_SECRET").unwrap_or_else(|_| load_or_generate_secret());
-            let active =
-                KeyMaterial::from_secret(Some(key_id.clone()), algorithm, secret.as_bytes())
-                    .unwrap_or_else(|error| invalid(error.to_string()));
+            let active = KeyMaterial::from_secret(&key_id, algorithm, secret.as_bytes())
+                .unwrap_or_else(|error| invalid(error.to_string()));
             let additional = match id_token_key_id.as_deref() {
                 Some(id_key) => jwt_keyring::load_for_id_tokens(root, id_key)
                     .unwrap_or_else(|error| invalid(error)),
@@ -68,9 +67,12 @@ pub static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| {
 
     info!("JWT signing key: {} ({:?})", key_id, active.algorithm());
     for key in &additional {
-        let kid = key.key_id().unwrap_or_default();
-        if Some(kid) != id_token_key_id.as_deref() {
-            info!("JWT verification key: {} ({:?})", kid, key.algorithm());
+        if Some(key.key_id()) != id_token_key_id.as_deref() {
+            info!(
+                "JWT verification key: {} ({:?})",
+                key.key_id(),
+                key.algorithm()
+            );
         }
     }
 

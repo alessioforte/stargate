@@ -305,19 +305,14 @@ pub fn parse_stored_permissions(
     let mut permissions = HashSet::new();
     for value in values {
         let value = value.as_ref();
-        if let Some(permission) = Permission::parse(value) {
-            permissions.insert(permission);
-            continue;
+        match Permission::parse(value) {
+            Some(permission) => {
+                permissions.insert(permission);
+            }
+            None => {
+                warn_stored_permission_once(key_id, value, "ignoring unknown admin-key permission")
+            }
         }
-
-        let legacy = legacy_permissions(value);
-        if legacy.is_empty() {
-            warn_stored_permission_once(key_id, value, "ignoring unknown admin-key permission");
-            continue;
-        }
-
-        warn_stored_permission_once(key_id, value, "expanding legacy admin-key permission");
-        permissions.extend(legacy.iter().copied());
     }
     permissions
 }
@@ -348,66 +343,6 @@ pub fn canonical_permission_strings(values: impl IntoIterator<Item = Permission>
         .into_iter()
         .map(|permission| permission.as_str().to_string())
         .collect()
-}
-
-fn legacy_permissions(value: &str) -> &'static [Permission] {
-    match value {
-        "users" => &[
-            Permission::UsersRead,
-            Permission::UsersCreate,
-            Permission::UsersInvite,
-            Permission::UsersUpdate,
-            Permission::UsersUpdateAttrs,
-            Permission::UsersDelete,
-            Permission::SuperAdminsRead,
-            Permission::MembershipsRead,
-            Permission::MembershipsCreate,
-            Permission::MembershipsUpdate,
-            Permission::MembershipsDelete,
-        ],
-        "organizations" => &[
-            Permission::OrganizationsRead,
-            Permission::OrganizationsCreate,
-            Permission::OrganizationsUpdate,
-            Permission::OrganizationsDelete,
-        ],
-        "api_keys" => &[
-            Permission::ApiKeysRead,
-            Permission::ApiKeysCreate,
-            Permission::ApiKeysUpdateAttrs,
-            Permission::ApiKeysRevoke,
-            Permission::ApiKeysDelete,
-        ],
-        "oauth_clients" => &[
-            Permission::OAuthClientsRead,
-            Permission::OAuthClientsCreate,
-            Permission::OAuthClientsUpdate,
-            Permission::OAuthClientsUpdateStatus,
-            Permission::OAuthClientsRotateSecret,
-            Permission::OAuthClientsDelete,
-        ],
-        "oauth_tokens" => &[
-            Permission::OAuthTokensIntrospect,
-            Permission::OAuthTokensRevoke,
-        ],
-        "service_accounts" => &[
-            Permission::ServiceAccountsRead,
-            Permission::ServiceAccountsCreate,
-            Permission::ServiceAccountsUpdate,
-            Permission::ServiceAccountsDelete,
-        ],
-        "configurations" => &[
-            Permission::ConfigurationsRead,
-            Permission::ConfigurationsUpdate,
-        ],
-        "access_control" => &[
-            Permission::AccessControlRead,
-            Permission::AccessControlUpdate,
-            Permission::AccessControlValidate,
-            Permission::AccessControlEvaluate,
-        ],
-        _ => &[],
-    }
 }
 
 #[cfg(test)]
@@ -456,19 +391,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_permissions_expand_to_a_fixed_set() {
-        let permissions = parse_stored_permissions("key-1", ["users"]);
-
-        assert!(permissions.contains(&Permission::UsersRead));
-        assert!(permissions.contains(&Permission::UsersDelete));
-        assert!(permissions.contains(&Permission::SuperAdminsRead));
-        assert!(permissions.contains(&Permission::MembershipsCreate));
-        assert!(!permissions.contains(&Permission::SessionsRevoke));
-    }
-
-    #[test]
     fn unknown_stored_permissions_fail_closed() {
-        assert!(parse_stored_permissions("key-1", ["users:*", "super_admin"]).is_empty());
+        assert!(parse_stored_permissions("key-1", ["users", "users:*", "super_admin"]).is_empty());
     }
 
     #[test]

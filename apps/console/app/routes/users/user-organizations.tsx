@@ -143,12 +143,10 @@ const UserOrganizations: React.FC<Props> = ({ userId }) => {
                 <Text size="sm" truncate>
                   {membership.name}
                 </Text>
-                {membership.memberSince && (
-                  <Text size="xs" c="dimmed">
-                    {t("memberSince")}{" "}
-                    {new Date(membership.memberSince).toLocaleDateString()}
-                  </Text>
-                )}
+                <Text size="xs" c="dimmed">
+                  {t("memberSince")}{" "}
+                  {new Date(membership.memberSince).toLocaleDateString()}
+                </Text>
               </Stack>
               {editingId === membership.id && (
                 <InlineEditor

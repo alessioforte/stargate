@@ -386,8 +386,7 @@ Verify that:
 6. terminating one pod does not invalidate sessions or OAuth state.
 
 The readiness probe `/readyz` checks PostgreSQL and Redis in cluster mode.
-Startup and liveness use `/livez`, which has no external dependency checks.
-`/health` is a readiness compatibility endpoint. See
+Startup and liveness use `/livez`, which has no external dependency checks. See
 [Health and readiness probes](health-probes.md) for semantics and shutdown timing.
 
 ## Chart guarantees
@@ -407,8 +406,7 @@ Chart `0.2.0` provides:
   extension points;
 - schema validation and idempotent bootstrap hooks.
 
-See the [chart README](../k8s/stargate/README.md) for all operational and
-0.1.x migration notes.
+See the [chart README](../k8s/stargate/README.md) for all operational notes.
 
 ## References
 

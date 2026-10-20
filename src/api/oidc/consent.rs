@@ -26,7 +26,7 @@ pub struct ConsentClient {
     pub client_id: String,
     pub name: String,
     pub description: Option<String>,
-    /// From the client's `attrs` (`logo_uri` / `logoUri`), HTTP(S) only.
+    /// From the client's `attrs.logo_uri`, HTTP(S) only.
     pub logo_uri: Option<String>,
     pub client_uri: Option<String>,
     pub policy_uri: Option<String>,
@@ -240,10 +240,10 @@ fn consent_client(client: &db::ent::OAuthClient, redirect_uri: Option<&str>) -> 
         client_id: client.client_id.clone(),
         name: client.name.clone(),
         description: client.description.clone(),
-        logo_uri: http_attr(&client.attrs, &["logo_uri", "logoUri"]),
-        client_uri: http_attr(&client.attrs, &["client_uri", "clientUri"]),
-        policy_uri: http_attr(&client.attrs, &["policy_uri", "policyUri"]),
-        tos_uri: http_attr(&client.attrs, &["tos_uri", "tosUri"]),
+        logo_uri: http_attr(&client.attrs, "logo_uri"),
+        client_uri: http_attr(&client.attrs, "client_uri"),
+        policy_uri: http_attr(&client.attrs, "policy_uri"),
+        tos_uri: http_attr(&client.attrs, "tos_uri"),
         redirect_host: redirect_uri
             .and_then(|uri| url::Url::parse(uri).ok())
             .and_then(|url| url.host_str().map(str::to_string)),
@@ -252,9 +252,10 @@ fn consent_client(client: &db::ent::OAuthClient, redirect_uri: Option<&str>) -> 
 
 /// A client-provided link, kept only when it is an absolute HTTP(S) URL so
 /// the page never renders `javascript:` or other schemes.
-fn http_attr(attrs: &serde_json::Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| attrs.get(key).and_then(serde_json::Value::as_str))
+fn http_attr(attrs: &serde_json::Value, key: &str) -> Option<String> {
+    attrs
+        .get(key)
+        .and_then(serde_json::Value::as_str)
         .and_then(|value| url::Url::parse(value.trim()).ok())
         .filter(|url| matches!(url.scheme(), "http" | "https"))
         .map(|url| url.to_string())
@@ -280,16 +281,16 @@ mod tests {
     fn client_links_must_be_http_urls() {
         let attrs = serde_json::json!({
             "logo_uri": "https://app.example.com/logo.png",
-            "clientUri": "javascript:alert(1)",
+            "client_uri": "javascript:alert(1)",
             "policy_uri": "not a url",
         });
 
         assert_eq!(
-            http_attr(&attrs, &["logo_uri", "logoUri"]).as_deref(),
+            http_attr(&attrs, "logo_uri").as_deref(),
             Some("https://app.example.com/logo.png")
         );
-        assert!(http_attr(&attrs, &["client_uri", "clientUri"]).is_none());
-        assert!(http_attr(&attrs, &["policy_uri", "policyUri"]).is_none());
+        assert!(http_attr(&attrs, "client_uri").is_none());
+        assert!(http_attr(&attrs, "policy_uri").is_none());
     }
 
     #[test]

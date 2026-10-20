@@ -19,7 +19,6 @@ pub struct AuthorizationCodeRecord {
     pub code_challenge: String,
     pub code_challenge_method: String,
     pub auth_time: DateTime<Utc>,
-    #[serde(default)]
     pub sid: Option<String>,
 }
 

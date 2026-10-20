@@ -46,7 +46,7 @@ pub struct UserOrganizationSchema {
     pub created_at: String,
     pub updated_at: String,
     pub role: String,
-    pub member_since: Option<String>,
+    pub member_since: String,
 }
 
 /// A member of an organization, with the membership role.
@@ -64,7 +64,7 @@ pub struct OrganizationUserSchema {
     pub created_at: String,
     pub updated_at: String,
     pub role: String,
-    pub member_since: Option<String>,
+    pub member_since: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]

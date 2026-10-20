@@ -31,7 +31,7 @@ impl Error for KeyError {}
 
 /// One signing or verification key.
 pub struct KeyMaterial {
-    pub(crate) key_id: Option<String>,
+    pub(crate) key_id: String,
     pub(crate) algorithm: Algorithm,
     pub(crate) encoding: Option<EncodingKey>,
     pub(crate) decoding: DecodingKey,
@@ -49,22 +49,10 @@ impl KeyMaterial {
         public_pem: &[u8],
     ) -> Result<Self, KeyError> {
         validate_key_id(key_id)?;
-        Self::from_pem_parts(Some(key_id), algorithm, private_pem, public_pem)
-    }
-
-    /// Like [`Self::from_pem`], also allowing a key without id (single-key
-    /// configurations built from [`crate::KeySource`]).
-    pub(crate) fn from_pem_parts(
-        key_id: Option<&str>,
-        algorithm: Algorithm,
-        private_pem: Option<&[u8]>,
-        public_pem: &[u8],
-    ) -> Result<Self, KeyError> {
-        let label = key_id.unwrap_or("default");
         let public = PublicKey::parse(public_pem)?;
         if !public.supports(algorithm) {
             return Err(KeyError::new(format!(
-                "key '{label}' is a {} key and cannot use {algorithm:?}",
+                "key '{key_id}' is a {} key and cannot use {algorithm:?}",
                 public.describe()
             )));
         }
@@ -73,7 +61,7 @@ impl KeyMaterial {
             PublicKey::Rsa(_) => DecodingKey::from_rsa_pem(public_pem),
             PublicKey::P256(_) | PublicKey::P384(_) => DecodingKey::from_ec_pem(public_pem),
         }
-        .map_err(|error| KeyError::new(format!("key '{label}' public key: {error}")))?;
+        .map_err(|error| KeyError::new(format!("key '{key_id}' public key: {error}")))?;
 
         let encoding = private_pem
             .map(|pem| match public {
@@ -81,14 +69,14 @@ impl KeyMaterial {
                 PublicKey::P256(_) | PublicKey::P384(_) => EncodingKey::from_ec_pem(pem),
             })
             .transpose()
-            .map_err(|error| KeyError::new(format!("key '{label}' private key: {error}")))?;
+            .map_err(|error| KeyError::new(format!("key '{key_id}' private key: {error}")))?;
         if let Some(encoding) = &encoding {
-            ensure_pair(label, algorithm, encoding, &decoding)?;
+            ensure_pair(key_id, algorithm, encoding, &decoding)?;
         }
 
         let jwk = public.jwk(key_id, algorithm)?;
         Ok(Self {
-            key_id: key_id.map(str::to_string),
+            key_id: key_id.to_string(),
             algorithm,
             encoding,
             decoding,
@@ -98,10 +86,11 @@ impl KeyMaterial {
 
     /// An HMAC secret (HS256/384/512). Signs and verifies; never published.
     pub fn from_secret(
-        key_id: Option<String>,
+        key_id: &str,
         algorithm: Algorithm,
         secret: &[u8],
     ) -> Result<Self, KeyError> {
+        validate_key_id(key_id)?;
         if !matches!(
             algorithm,
             Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
@@ -111,7 +100,7 @@ impl KeyMaterial {
             )));
         }
         Ok(Self {
-            key_id,
+            key_id: key_id.to_string(),
             algorithm,
             encoding: Some(EncodingKey::from_secret(secret)),
             decoding: DecodingKey::from_secret(secret),
@@ -119,8 +108,8 @@ impl KeyMaterial {
         })
     }
 
-    pub fn key_id(&self) -> Option<&str> {
-        self.key_id.as_deref()
+    pub fn key_id(&self) -> &str {
+        &self.key_id
     }
 
     pub fn algorithm(&self) -> Algorithm {
@@ -206,7 +195,7 @@ impl PublicKey {
         }
     }
 
-    fn jwk(&self, key_id: Option<&str>, algorithm: Algorithm) -> Result<Jwk, KeyError> {
+    fn jwk(&self, key_id: &str, algorithm: Algorithm) -> Result<Jwk, KeyError> {
         use p256::elliptic_curve::sec1::ToSec1Point as _;
         use rsa::traits::PublicKeyParts as _;
 
@@ -223,17 +212,13 @@ impl PublicKey {
             Self::P256(key) => ec_jwk(key_id, &alg, "P-256", key.to_sec1_point(false).as_bytes()),
             Self::P384(key) => ec_jwk(key_id, &alg, "P-384", key.to_sec1_point(false).as_bytes()),
         };
-        serde_json::from_value(value).map_err(|error| {
-            KeyError::new(format!(
-                "key '{}' JWK: {error}",
-                key_id.unwrap_or("default")
-            ))
-        })
+        serde_json::from_value(value)
+            .map_err(|error| KeyError::new(format!("key '{key_id}' JWK: {error}")))
     }
 }
 
 /// JWK of an uncompressed SEC1 point (`0x04 || X || Y`).
-fn ec_jwk(key_id: Option<&str>, alg: &str, curve: &str, point: &[u8]) -> serde_json::Value {
+fn ec_jwk(key_id: &str, alg: &str, curve: &str, point: &[u8]) -> serde_json::Value {
     let coordinates = &point[1..];
     let (x, y) = coordinates.split_at(coordinates.len() / 2);
     serde_json::json!({
@@ -349,7 +334,7 @@ mod tests {
         let retired = config(signing("k2", Algorithm::ES256, &new), vec![]);
         assert!(retired.validate_session_access_token(&old_token).is_err());
         assert!(retired.validate_session_access_token(&new_token).is_ok());
-        assert_eq!(rotated.key_id(), Some("k2"));
+        assert_eq!(rotated.key_id(), "k2");
         assert_eq!(rotated.key_ids(), vec!["k2", "k1"]);
     }
 
@@ -511,7 +496,7 @@ mod tests {
         assert_eq!(access_header.kid.as_deref(), Some("ec-1"));
 
         assert_eq!(config.id_token_algorithm(), Algorithm::RS256);
-        assert_eq!(config.id_token_key_id(), Some("rsa-1"));
+        assert_eq!(config.id_token_key_id(), "rsa-1");
         assert_eq!(config.algorithm(), Algorithm::ES256);
         assert!(
             config
@@ -535,8 +520,7 @@ mod tests {
     fn hmac_sessions_can_issue_verifiable_id_tokens() {
         let rsa = rsa_pair();
         let config = config(
-            KeyMaterial::from_secret(Some("hmac".to_string()), Algorithm::HS256, b"secret")
-                .unwrap(),
+            KeyMaterial::from_secret("hmac", Algorithm::HS256, b"secret").unwrap(),
             vec![signing("rsa-1", Algorithm::RS256, &rsa)],
         )
         .with_id_token_key("rsa-1")
@@ -564,8 +548,8 @@ mod tests {
         assert!(base().with_id_token_key("missing").is_err());
         assert!(base().with_id_token_key("k2").is_err(), "public-only key");
         let same = base().with_id_token_key("k1").unwrap();
-        assert_eq!(same.id_token_key_id(), Some("k1"));
+        assert_eq!(same.id_token_key_id(), "k1");
         // Default: the active key.
-        assert_eq!(base().id_token_key_id(), Some("k1"));
+        assert_eq!(base().id_token_key_id(), "k1");
     }
 }

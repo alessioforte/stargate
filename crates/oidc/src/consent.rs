@@ -1,10 +1,9 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
+/// First-party clients (`attrs.first_party = true`) skip the consent step.
 pub fn client_is_first_party(attrs: &Value) -> bool {
-    ["first_party", "firstParty", "trusted"]
-        .into_iter()
-        .any(|key| attrs.get(key).and_then(Value::as_bool) == Some(true))
+    attrs.get("first_party").and_then(Value::as_bool) == Some(true)
 }
 
 pub fn consent_covers(
@@ -36,14 +35,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_party_accepts_legacy_trusted_attr_names() {
+    fn first_party_is_an_explicit_attr() {
         assert!(client_is_first_party(
             &serde_json::json!({"first_party": true})
         ));
-        assert!(client_is_first_party(
-            &serde_json::json!({"firstParty": true})
+        assert!(!client_is_first_party(
+            &serde_json::json!({"first_party": "true"})
         ));
-        assert!(client_is_first_party(&serde_json::json!({"trusted": true})));
+        assert!(!client_is_first_party(&serde_json::json!({})));
     }
 
     #[test]

@@ -14,12 +14,10 @@ pub struct RefreshTokenFamily {
     pub scope: String,
     pub audience: Option<String>,
     pub auth_time: DateTime<Utc>,
-    #[serde(default)]
     pub nonce: Option<String>,
     pub expires_at: DateTime<Utc>,
     pub generation: u64,
     pub revoked_at: Option<DateTime<Utc>>,
-    #[serde(default)]
     pub sid: Option<String>,
 }
 

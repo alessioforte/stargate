@@ -458,7 +458,7 @@ export interface Organization {
 /** An organization a user belongs to, with the membership metadata. */
 export interface UserOrganization extends Organization {
   role: string;
-  memberSince?: string | null;
+  memberSince: string;
 }
 
 export interface OrganizationMembershipRequest {

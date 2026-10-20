@@ -190,7 +190,6 @@ test use `/readyz`. Readiness checks SQLite in edge mode and PostgreSQL plus
 Redis in cluster mode, with concurrent one-second dependency timeouts.
 The public probes bypass authentication and rate limiting.
 
-`/health` follows readiness semantics while retaining its legacy JSON fields.
 `/admin/health` provides authenticated dependency diagnostics. See
 [Health and readiness probes](../../docs/health-probes.md) for response contracts
 and shutdown behavior. `SERVER_DRAIN_DELAY_SECS` defaults to 5 seconds;
@@ -217,28 +216,6 @@ Use:
 - `runtimeSecret.existingSecret` for confidential runtime values.
 - `extraEnv` and `extraEnvFrom` for additional integrations.
 - `gatewayConfig` for gateway routes and ACE policies.
-
-## Upgrade from chart 0.1.x
-
-Chart `0.2.0` intentionally removes unsafe values and resources:
-
-| 0.1.x | 0.2.0 |
-| --- | --- |
-| `configmap.*` | `runtimeConfig.*` and `runtimeSecret.*` |
-| `persistentVolume*` | `persistence.*` |
-| `volumes` / `volumeMounts` | `persistence` or `extraVolumes` / `extraVolumeMounts` |
-| Static `stargate-pv` hostPath | Dynamic PVC or `persistence.existingClaim` |
-| `securityContext` | `containerSecurityContext` |
-| `livenessProbe` / `readinessProbe` | `probes.*` |
-
-The image now runs as numeric UID/GID `10001`. Confirm that reused volumes can
-be written by that identity or by `fsGroup: 10001`.
-
-Because the old Deployment selector does not change, normal Helm upgrades can
-retain the Deployment. For an old edge release named `stargate`, set
-`persistence.existingClaim=stargate-pvc` to reuse its claim. The removed static
-PV was cluster-scoped and Helm-managed; back up or migrate its data before
-upgrading. Review the rendered diff before applying it.
 
 ## Validation
 

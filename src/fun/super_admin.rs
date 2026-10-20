@@ -90,7 +90,6 @@ pub async fn bootstrap_instance(
         Vec::new(),
         serde_json::json!({
             "first_party": true,
-            "trusted": true,
             "system": true,
         }),
     );

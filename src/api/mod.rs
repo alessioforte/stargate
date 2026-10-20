@@ -16,7 +16,6 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::api::health::get_health,
         crate::api::health::get_livez,
         crate::api::health::get_readyz,
         crate::api::internal_context::get_internal_context_jwks,
@@ -356,7 +355,7 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["openapi"].is_string());
-        assert!(json["paths"]["/health"].is_object());
+        assert!(json["paths"]["/readyz"].is_object());
         assert!(json["paths"]["/docs/errors"].is_object());
         assert!(json["paths"]["/i18n/{locale}"].is_object());
         assert!(json["paths"]["/.well-known/jwks.json"].is_object());

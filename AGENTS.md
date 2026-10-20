@@ -7,10 +7,8 @@ binary, two deployment profiles:
 - **Edge**: SQLite + in-memory store (single node)
 - **Cluster**: PostgreSQL + Redis (horizontally scalable)
 
-The gateway uses only the explicit `stargate/v1` configuration model. Supplied
-YAML and admin JSON must declare `schema: stargate/v1`; missing or other
-identifiers (including the old `stargate/v2alpha1`) are rejected without
-conversion.
+The gateway uses the `stargate/v1` configuration model. Supplied YAML and admin
+JSON must declare `schema: stargate/v1`; other identifiers are rejected.
 
 This file is the single source of project context for coding agents.
 `.claude/CLAUDE.md` (gitignored) only imports it; update this file when the
@@ -333,9 +331,8 @@ Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
   probe-checked at load; inactive keys need only `public.pem`.
 - First start generates `keys/<JWT_KID>/` (and `keys/<JWT_ID_TOKEN_KID>/`, RS256) only on
   a fresh keyring; afterwards a missing named key fails startup (no silent new keys).
-  The legacy `private.pem`/`public.pem` (`es256/`, `es384/`) stays active until
-  `stargate jwt generate-key` moves it into `keys/<current kid>/`. `JWT_ALGORITHM`
-  mismatch with the active key fails startup.
+  `alg` is inferred from the public key when absent. Tokens without a known `kid` are
+  rejected. `JWT_ALGORITHM` mismatch with the active key fails startup.
 - Rotation: generate next key + restart (published), wait JWKS cache, set `JWT_KID`
   + restart, remove the old dir after `JWT_REFRESH_EXP`. HMAC (`HS*`) is single-key.
 - ID tokens: `JWT_ID_TOKEN_KID` names an RS256 key (loaded with its private key,
@@ -366,8 +363,8 @@ Client notes:
 - Public clients use `token_endpoint_auth_method = none` and always need PKCE.
 - Confidential clients require PKCE unless `attrs.require_pkce = false`; a code
   issued without a challenge rejects a `code_verifier` (downgrade protection).
-- First-party clients skip consent with `attrs.first_party`, `attrs.firstParty`, or
-  `attrs.trusted`. The consent page shows `logo_uri` / `client_uri` / `policy_uri` /
+- First-party clients skip consent with `attrs.first_party` (the only accepted name;
+  client attrs use snake_case). The consent page shows `logo_uri` / `client_uri` / `policy_uri` /
   `tos_uri` attrs when they are HTTP(S) URLs.
 - Privileged token operations: `oauth:introspect` / `oauth:revoke` scopes or
   `attrs.can_introspect` / `attrs.can_revoke`.
@@ -430,7 +427,8 @@ Guide: `docs/password-policies-guide.md`.
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_history`,
 `api_keys`, `admin_keys`, `service_accounts`, `oauth_clients`, `oauth_consents`,
 `user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`.
-The legacy `audits` table was dropped.
+One migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
+creates the full schema; add new forward migrations from there.
 
 IDs are ULIDs stored as text. `outbox_events` holds the immutable JSON payload,
 `seq`, optional `operation_id`, `created_at`, and nullable `published_at`, with
@@ -482,7 +480,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `PASSWORD_PEPPER` | - | Optional Argon2 secret |
 | `SMTP_*`, `GOOGLE_OAUTH_*`, `GITHUB_OAUTH_*` | - | Email delivery, social login |
 
-Full list: `.env.example`. `GATEWAY_REPLAY_BODY_LIMIT` was removed (use `runtime.replay_body_bytes`).
+Full list: `.env.example`.
 
 ## Build & Run
 
@@ -515,7 +513,7 @@ cargo run --features edge -- admin bootstrap \
   --name "Admin User" --nickname admin \
   --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 
-# Next JWT signing key in .stargate/jwks/keys/<kid>/ (adopts the legacy pair first);
+# Next JWT signing key in .stargate/jwks/keys/<kid>/;
 # --id-token creates the RS256 key for JWT_ID_TOKEN_KID
 cargo run --features edge -- jwt generate-key --kid stargate-2026-11
 
@@ -531,7 +529,7 @@ need no database. Docs: `docs/cli.md`.
 ## API Overview
 
 - `GET /livez` (process liveness), `GET /readyz` (initialized, not draining, SQL and
-  cluster Redis up), `GET /health` (readiness compatibility). See `docs/health-probes.md`.
+  cluster Redis up). See `docs/health-probes.md`.
 - `GET /docs` (Swagger UI), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
 - `/.well-known/*`: OAuth/OIDC metadata, JWKS, `stargate-context-jwks.json`
 - `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA

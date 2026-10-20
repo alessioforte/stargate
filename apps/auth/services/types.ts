@@ -90,7 +90,7 @@ export interface AccountOrganization {
   name: string;
   description?: string | null;
   role: string;
-  memberSince?: string | null;
+  memberSince: string;
   active: boolean;
 }
 

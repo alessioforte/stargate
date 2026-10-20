@@ -325,8 +325,6 @@ mod sqlite_tests {
         RawAuditEventBuilder,
     };
 
-    const PRE_OUTBOX_MIGRATION: i64 = 20_260_712_000_000;
-    const PRE_PAIR_ROLE_REMOVAL_MIGRATION: i64 = 20_260_719_010_000;
     static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/sqlite");
 
     fn validated_event(event_id: &str, operation_id: Option<&str>) -> ValidatedAuditEvent {
@@ -351,32 +349,17 @@ mod sqlite_tests {
         builder.build().expect("test event must validate")
     }
 
-    async fn empty_pool() -> crate::backend::Pool {
-        sqlx::sqlite::SqlitePoolOptions::new()
+    async fn migrated_pool() -> crate::backend::Pool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
-            .expect("in-memory SQLite pool must connect")
-    }
-
-    async fn migrated_pool() -> crate::backend::Pool {
-        let pool = empty_pool().await;
+            .expect("in-memory SQLite pool must connect");
         SQLITE_MIGRATOR
             .run(&pool)
             .await
             .expect("SQLite migrations must apply");
         pool
-    }
-
-    async fn table_exists(pool: &crate::backend::Pool, table: &str) -> bool {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $1",
-        )
-        .bind(table)
-        .fetch_one(pool)
-        .await
-        .expect("SQLite schema lookup must succeed")
-            == 1
     }
 
     #[tokio::test]
@@ -401,7 +384,6 @@ mod sqlite_tests {
                 "published_at",
             ]
         );
-        assert!(!table_exists(&pool, "audits").await);
 
         let indexes = sqlx::query_scalar::<_, String>(
             "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'outbox_events'",
@@ -419,60 +401,6 @@ mod sqlite_tests {
                 .iter()
                 .any(|name| name == "idx_outbox_events_operation_id")
         );
-    }
-
-    #[tokio::test]
-    async fn audit_outbox_sqlite_upgrades_pre_refactor_schema_and_drops_legacy_audits() {
-        let pool = empty_pool().await;
-        SQLITE_MIGRATOR
-            .run_to(PRE_OUTBOX_MIGRATION, &pool)
-            .await
-            .expect("pre-outbox migrations must apply");
-        assert!(!table_exists(&pool, OUTBOX_EVENT).await);
-
-        SQLITE_MIGRATOR
-            .run(&pool)
-            .await
-            .expect("outbox migration must apply after the current schema");
-        assert!(table_exists(&pool, OUTBOX_EVENT).await);
-        assert!(!table_exists(&pool, "audits").await);
-    }
-
-    #[tokio::test]
-    async fn audit_outbox_sqlite_pair_role_removal_preserves_correlated_events() {
-        let pool = empty_pool().await;
-        SQLITE_MIGRATOR
-            .run_to(PRE_PAIR_ROLE_REMOVAL_MIGRATION, &pool)
-            .await
-            .expect("pre-removal migrations must apply");
-
-        let operation_id = "01JZ000000000000000000000X";
-        let event = validated_event("01JZ0000000000000000000001", Some(operation_id));
-        sqlx::query(
-            "INSERT INTO outbox_events (event_id, payload, operation_id, pair_role)
-             VALUES ($1, $2, $3, 'control_plane')",
-        )
-        .bind(event.event_id().as_str())
-        .bind(event.payload())
-        .bind(operation_id)
-        .execute(&pool)
-        .await
-        .expect("legacy correlated event must insert");
-
-        SQLITE_MIGRATOR
-            .run(&pool)
-            .await
-            .expect("pair-role removal migration must apply");
-
-        let stored = OutboxRepository::new()
-            .get_by_event_id(&pool, event.event_id().as_str())
-            .await
-            .expect("migrated event must be readable")
-            .expect("migrated event must remain present");
-        assert_eq!(stored.payload, event.payload());
-        assert_eq!(stored.operation_id.as_deref(), Some(operation_id));
-        assert_eq!(stored.seq, 1);
-        assert_eq!(stored.published_at, None);
     }
 
     #[tokio::test]
@@ -728,7 +656,6 @@ mod postgres_tests {
         RawAuditEventBuilder,
     };
 
-    const PRE_OUTBOX_MIGRATION: i64 = 20_260_712_000_000;
     static POSTGRES_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/postgres");
 
     fn database_url() -> String {
@@ -838,68 +765,6 @@ mod postgres_tests {
                 "published_at",
             ]
         );
-        let audits_exist =
-            sqlx::query_scalar::<_, bool>("SELECT to_regclass('audits') IS NOT NULL")
-                .fetch_one(&mut connection)
-                .await
-                .expect("PostgreSQL legacy audit lookup must succeed");
-        assert!(!audits_exist);
-        let legacy_types_exist = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS (
-                SELECT 1
-                FROM pg_type type
-                JOIN pg_namespace namespace ON namespace.oid = type.typnamespace
-                WHERE namespace.nspname = current_schema()
-                  AND type.typname IN ('action_type', 'actor_type')
-            )",
-        )
-        .fetch_one(&mut connection)
-        .await
-        .expect("PostgreSQL legacy audit type lookup must succeed");
-        assert!(!legacy_types_exist);
-
-        drop_isolated_schema(&mut connection, &schema).await;
-    }
-
-    #[tokio::test]
-    #[ignore = "requires a live PostgreSQL test database"]
-    async fn audit_outbox_postgres_upgrades_pre_refactor_schema_and_drops_legacy_audits() {
-        let (mut connection, schema) = isolated_connection().await;
-        POSTGRES_MIGRATOR
-            .run_direct(Some(PRE_OUTBOX_MIGRATION), &mut connection, false)
-            .await
-            .expect("pre-outbox PostgreSQL migrations must apply");
-
-        POSTGRES_MIGRATOR
-            .run_direct(None, &mut connection, false)
-            .await
-            .expect("PostgreSQL outbox migration must apply");
-        let outbox_exists =
-            sqlx::query_scalar::<_, bool>("SELECT to_regclass('outbox_events') IS NOT NULL")
-                .fetch_one(&mut connection)
-                .await
-                .expect("PostgreSQL outbox table lookup must succeed");
-        let legacy_audits_exist =
-            sqlx::query_scalar::<_, bool>("SELECT to_regclass('audits') IS NOT NULL")
-                .fetch_one(&mut connection)
-                .await
-                .expect("legacy PostgreSQL audit lookup must succeed");
-        let legacy_types_exist = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS (
-                SELECT 1
-                FROM pg_type type
-                JOIN pg_namespace namespace ON namespace.oid = type.typnamespace
-                WHERE namespace.nspname = current_schema()
-                  AND type.typname IN ('action_type', 'actor_type')
-            )",
-        )
-        .fetch_one(&mut connection)
-        .await
-        .expect("legacy PostgreSQL audit type lookup must succeed");
-        assert!(outbox_exists);
-        assert!(!legacy_audits_exist);
-        assert!(!legacy_types_exist);
-
         drop_isolated_schema(&mut connection, &schema).await;
     }
 

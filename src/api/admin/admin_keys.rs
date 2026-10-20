@@ -381,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_legacy_permissions_for_new_admin_keys() {
+    fn rejects_coarse_permissions_for_new_admin_keys() {
         let payload: CreateAdminKeyRequest = serde_json::from_value(serde_json::json!({
             "permissions": ["users"]
         }))
@@ -407,13 +407,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_stored_permissions_are_returned_as_canonical_effective_permissions() {
+    fn unknown_stored_permissions_grant_nothing() {
         let key = db::ent::AdminKey::new("hash".to_string(), None, vec!["users".to_string()]);
-        let permissions = admin_key_permissions(&key);
 
-        assert!(permissions.contains(&Permission::UsersRead));
-        assert!(permissions.contains(&Permission::UsersDelete));
-        assert!(permissions.contains(&Permission::MembershipsCreate));
-        assert!(!permissions.contains(&Permission::OrganizationsRead));
+        assert!(admin_key_permissions(&key).is_empty());
     }
 }

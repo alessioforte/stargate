@@ -426,14 +426,6 @@ async fn current_authorized_user(token: Option<String>) -> OAuthResult<Option<Au
     let Some(auth_time) = claims.auth_time else {
         return Ok(None);
     };
-    crate::act::sessions::ensure_session_registered(
-        &user.id,
-        sid,
-        subject.org_id.as_deref(),
-        auth_time as u64,
-    )
-    .await
-    .map_err(OAuthErrorResponse::internal)?;
     let auth_time = Utc
         .timestamp_opt(auth_time as i64, 0)
         .single()

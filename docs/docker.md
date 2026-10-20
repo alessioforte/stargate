@@ -11,7 +11,7 @@ transactional mail templates. The final image serves:
 - Console: `/stargate`
 - Auth UI: `/auth`
 - API routes: `/account/*`, `/admin/*`, `/oauth/*`, `/.well-known/*`
-- Probes: `/livez` (liveness), `/readyz` (readiness), `/health` (readiness compatibility)
+- Probes: `/livez` (liveness), `/readyz` (readiness)
 
 Published release images (`ghcr.io/alessioforte/stargate:<version>`) are built
 with the `cluster` profile for `linux/amd64` and `linux/arm64`. There is no

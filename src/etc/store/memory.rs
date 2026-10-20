@@ -22,7 +22,7 @@ pub static STORE: Lazy<MemoryStore> = Lazy::new(|| {
         ..MemoryStoreConfig::default()
     };
     let store = MemoryStore::with_config(config);
-    store.run_cleaner(60);
+    store.run_adaptive_cleaner(60);
     store
 });
 

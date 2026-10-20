@@ -6,16 +6,14 @@ use sha2::{Digest, Sha256};
 
 /// Whether an authorization request from this client must carry a PKCE
 /// challenge. Public clients always need one; confidential clients default to
-/// requiring it (OAuth 2.1) but can opt out with `attrs.require_pkce = false`
-/// (or `requirePkce`), since OpenID Connect Core does not mandate PKCE.
+/// requiring it (OAuth 2.1) but can opt out with `attrs.require_pkce = false`,
+/// since OpenID Connect Core does not mandate PKCE.
 pub fn client_requires_pkce(public_client: bool, attrs: &serde_json::Value) -> bool {
-    if public_client {
-        return true;
-    }
-    ["require_pkce", "requirePkce"]
-        .into_iter()
-        .find_map(|key| attrs.get(key).and_then(serde_json::Value::as_bool))
-        .unwrap_or(true)
+    public_client
+        || attrs
+            .get("require_pkce")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true)
 }
 
 pub fn valid_code_verifier(verifier: &str) -> bool {
@@ -106,7 +104,7 @@ mod tests {
             false,
             &serde_json::json!({ "require_pkce": false })
         ));
-        assert!(!client_requires_pkce(
+        assert!(client_requires_pkce(
             false,
             &serde_json::json!({ "requirePkce": false })
         ));

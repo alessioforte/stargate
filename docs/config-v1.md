@@ -143,7 +143,7 @@ returns `504 gateway.timeout` if it expires first. Process exhaustion retains
 `503 gateway.overloaded`. Allowed ingress checks do not overwrite resource
 response headers.
 
-`/livez`, `/readyz`, and `/health` bypass gateway admission and IAM rate limiting.
+`/livez` and `/readyz` bypass gateway admission and IAM rate limiting.
 Explicit IAM/admin endpoints retain their existing `default` rate-limit
 middleware; gateway ingress applies only to the gateway fallback. The console's
 gateway page exposes the mandatory ingress limit and store timeout. Editing
@@ -559,7 +559,7 @@ http:
 Admitted mirrors and eligible upstream attempts with possible later failover
 branches buffer the request body, including transport-only failover. A chain of
 local direct responses does not need a failover buffer. The per-request cap is `runtime.replay_body_bytes`
-(default `2097152`, or 2 MiB). `GATEWAY_REPLAY_BODY_LIMIT` has been removed.
+(default `2097152`, or 2 MiB).
 When only mirrors need replay, an oversized `Content-Length` skips mirrors and
 streams the primary request. A buffered body crossing the per-request cap
 returns `413 gateway.replay_payload_too_large`.

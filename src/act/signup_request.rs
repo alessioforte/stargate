@@ -16,7 +16,6 @@ pub struct PendingSignupProfile {
     pub picture: Option<String>,
     pub phone_number: Option<String>,
     pub attrs: Value,
-    #[serde(default)]
     pub membership: Option<NewOrganizationMembership>,
 }
 
@@ -70,22 +69,6 @@ pub async fn delete_signup_request(sid: &str) -> Result<bool, store::StoreError>
 #[cfg(test)]
 mod tests {
     use super::PendingSignupProfile;
-
-    #[test]
-    fn pending_profile_without_membership_remains_backward_compatible() {
-        let profile: PendingSignupProfile = serde_json::from_value(serde_json::json!({
-            "email": "legacy@example.com",
-            "givenName": null,
-            "familyName": null,
-            "nickname": null,
-            "picture": null,
-            "phoneNumber": null,
-            "attrs": {}
-        }))
-        .expect("deserialize legacy pending profile");
-
-        assert!(profile.membership.is_none());
-    }
 
     #[test]
     fn pending_profile_roundtrips_server_owned_membership() {

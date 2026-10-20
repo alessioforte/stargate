@@ -464,17 +464,6 @@ impl MemoryStore {
         Ok(store)
     }
 
-    /// Loads store data preferring the full JSON format and falling back to the
-    /// simple JSON backup format for backward compatibility.
-    pub async fn load_from_json_with_fallback<P: AsRef<Path>>(path: P) -> StoreResult<Self> {
-        let path = path.as_ref();
-        match Self::load_from_json(path).await {
-            Ok(store) => Ok(store),
-            Err(StoreError::DeserializationFailed(_)) => Self::load_from_simple_json(path).await,
-            Err(err) => Err(err),
-        }
-    }
-
     /// Saves only the keys and values to a JSON file (without expiration times and stats)
     /// This creates a simpler, human-readable JSON format
     pub async fn export_to_simple_json<P: AsRef<Path>>(&self, path: P) -> StoreResult<()> {
@@ -767,31 +756,6 @@ mod tests {
         // as a corrupted null.
         let bad: Option<HashMap<u32, String>> = restored.get("bad").await?;
         assert_eq!(bad, None);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_load_from_json_with_fallback_from_simple_export() -> StoreResult<()> {
-        let temp_dir = std::env::temp_dir();
-        let file_path = temp_dir.join(format!(
-            "test_simple_restore_{}.json",
-            chrono::Utc::now().timestamp()
-        ));
-
-        let store = MemoryStore::new();
-        store.set("key1", &"value1", None).await?;
-        store.hset("hash1", "field1", &123_i32, None).await?;
-
-        // Legacy backup format in the app currently uses the simple JSON export.
-        store.export_to_simple_json(&file_path).await?;
-
-        let restored_store = MemoryStore::load_from_json_with_fallback(&file_path).await?;
-        let value: Option<String> = restored_store.get("key1").await?;
-        assert_eq!(value, Some("value1".to_string()));
-
-        let hash_value: Option<i32> = restored_store.hget("hash1", "field1").await?;
-        assert_eq!(hash_value, Some(123));
 
         Ok(())
     }

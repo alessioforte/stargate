@@ -530,7 +530,7 @@ async fn probes_are_exempt_and_iam_and_admin_keep_their_existing_middleware() {
         StatusCode::TOO_MANY_REQUESTS
     );
     let occupied = gate.resources.admit_primary().unwrap();
-    for path in ["/livez", "/readyz", "/health"] {
+    for path in ["/livez", "/readyz"] {
         for method in [http::Method::GET, http::Method::HEAD] {
             let mut req = request(&gate, &auth, path, "203.0.113.9:1000");
             *req.method_mut() = method;
