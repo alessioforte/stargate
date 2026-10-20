@@ -11,6 +11,7 @@
     "containerPort",
     "service",
     "runtimeConfig",
+    "jwt",
     "runtimeSecret",
     "gatewayConfig",
     "persistence",
@@ -229,6 +230,31 @@
         "data": { "$ref": "#/definitions/stringMap" }
       }
     },
+    "jwt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["activeKid", "idTokenKid", "keys"],
+      "properties": {
+        "activeKid": { "$ref": "#/definitions/keyId" },
+        "idTokenKid": { "$ref": "#/definitions/keyId" },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kid", "secretName"],
+            "properties": {
+              "kid": { "allOf": [{ "$ref": "#/definitions/keyId" }], "minLength": 1 },
+              "secretName": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+              }
+            }
+          }
+        }
+      }
+    },
     "runtimeSecret": {
       "type": "object",
       "additionalProperties": false,
@@ -354,6 +380,11 @@
     "topologySpreadConstraints": { "type": "array", "items": { "type": "object" } }
   },
   "definitions": {
+    "keyId": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]*$"
+    },
     "stringMap": {
       "type": "object",
       "additionalProperties": { "type": "string" }

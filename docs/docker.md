@@ -133,9 +133,10 @@ docker run --rm \
 At minimum, the cluster environment must provide `POSTGRES_ENDPOINT`,
 `POSTGRES_DATABASE`, `POSTGRES_USERNAME`, `POSTGRES_PASSWORD`, and `REDIS_URL`.
 Use service/container DNS names rather than `localhost` when the databases run
-in other containers. Also provide stable JWT signing material: configure an
-HMAC `JWT_SECRET`, or mount the asymmetric key directory at
-`/app/.stargate/jwks`. Otherwise, tokens issued before a container replacement
+in other containers. Also provide stable JWT signing material: mount the
+asymmetric key directory at `/app/.stargate/jwks`, or configure an HMAC
+`JWT_SECRET` (relying parties cannot verify HMAC ID tokens, so then also set
+an RS256 `JWT_ID_TOKEN_KID` key). Otherwise, tokens issued before a container replacement
 will no longer verify. Every node must see the same key directory; key rotation
 (`stargate jwt generate-key`) is described in the
 [provider guide](oauth-oidc-provider-guide.md#signing-keys-and-rotation).

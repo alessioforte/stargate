@@ -119,6 +119,11 @@ For a compromised key, skip the waits: activate a new key and delete the
 compromised directory at once. Every token it signed stops validating, so users
 sign in again.
 
+On Kubernetes, the Helm chart mounts one Secret per key at `keys/<kid>/` and
+sets `JWT_KID` / `JWT_ID_TOKEN_KID` from `jwt.activeKid` / `jwt.idTokenKid`;
+each step above is a `helm upgrade`. See the
+[chart README](../k8s/stargate/README.md#jwt-signing-keys).
+
 ## Client Model
 
 OAuth clients are stored in `oauth_clients`. Client secrets are returned only on create and rotate, then stored only as hashes.

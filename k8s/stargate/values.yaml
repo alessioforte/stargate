@@ -139,7 +139,23 @@ runtimeConfig:
   annotations: {}
   data:
     LOG_FILE_ENABLED: "false"
-    JWT_ALGORITHM: HS256
+
+# JWT signing keys. Edge keeps them on the PVC (generated as RS256 on first
+# start; rotate with `stargate jwt generate-key` in the pod). Cluster replicas
+# must share them: create one Secret per key from the directory written by
+# `stargate jwt generate-key` (private.pem, public.pem, alg) and list it in
+# `keys`. Each Secret is mounted read-only at .stargate/jwks/keys/<kid>/.
+jwt:
+  # Signing key (JWT_KID). Required in cluster mode unless JWT_ALGORITHM is HS*.
+  activeKid: ""
+  # Optional RS256 key that signs only OIDC ID tokens (JWT_ID_TOKEN_KID), for
+  # an ES256 or HMAC active key.
+  idTokenKid: ""
+  # Cluster only. Keys other than activeKid/idTokenKid only verify: the next
+  # key before activation and retired keys until their tokens expire.
+  keys: []
+  #  - kid: stargate-2026-10
+  #    secretName: stargate-jwt-2026-10
 
 # Prefer an externally managed Secret in production. `stringData` exists for
 # local development and is retained in Helm release history.

@@ -140,10 +140,14 @@ variable "redis_url" {
   sensitive   = true
 }
 
-variable "jwt_secret" {
-  description = "Stable high-entropy HMAC signing key shared by every replica."
+variable "jwt_kid" {
+  description = "Active JWT key id; also the Secret name suffix (lowercase, digits, '-', '.')."
   type        = string
-  sensitive   = true
+}
+
+variable "jwt_key_dir" {
+  description = "Directory written by `stargate jwt generate-key --kid <jwt_kid>`."
+  type        = string
 }
 
 variable "email_otp_pepper" {
@@ -189,8 +193,22 @@ resource "kubernetes_secret_v1" "runtime" {
     POSTGRES_USERNAME = var.postgres_username
     POSTGRES_PASSWORD = var.postgres_password
     REDIS_URL         = var.redis_url
-    JWT_SECRET        = var.jwt_secret
     EMAIL_OTP_PEPPER  = var.email_otp_pepper
+  }
+
+  type = "Opaque"
+}
+
+resource "kubernetes_secret_v1" "jwt_key" {
+  metadata {
+    name      = "stargate-jwt-${var.jwt_kid}"
+    namespace = kubernetes_namespace_v1.stargate.metadata[0].name
+  }
+
+  data = {
+    "private.pem" = file("${var.jwt_key_dir}/private.pem")
+    "public.pem"  = file("${var.jwt_key_dir}/public.pem")
+    alg           = file("${var.jwt_key_dir}/alg")
   }
 
   type = "Opaque"
@@ -210,8 +228,10 @@ resource "kubernetes_secret_v1" "bootstrap" {
 }
 ```
 
-`sensitive = true` redacts normal Terraform output but does not remove values
-from state. Protect and encrypt the backend, or replace these resources with
+Create the key directory once with the image's CLI, as described in the
+[chart README](../k8s/stargate/README.md#jwt-signing-keys). `sensitive = true`
+redacts normal Terraform output but does not remove values from state, and the
+JWT private key is stored there too. Protect and encrypt the backend, or replace these resources with
 the architecture's external-secret mechanism and pass only Secret names to
 Helm. Kubernetes Secrets also require encryption at rest and least-privilege
 RBAC.
@@ -258,7 +278,6 @@ resource "helm_release" "stargate" {
       runtimeConfig = {
         data = {
           LOG_FILE_ENABLED      = "false"
-          JWT_ALGORITHM         = "HS256"
           JWT_ISSUER            = local.public_url
           OAUTH_BASE_URL        = local.public_url
           CONSOLE_PUBLIC_URL    = local.public_url
@@ -276,6 +295,14 @@ resource "helm_release" "stargate" {
       runtimeSecret = {
         existingSecret = kubernetes_secret_v1.runtime.metadata[0].name
         rolloutToken   = kubernetes_secret_v1.runtime.metadata[0].resource_version
+      }
+
+      jwt = {
+        activeKid = var.jwt_kid
+        keys = [{
+          kid        = var.jwt_kid
+          secretName = kubernetes_secret_v1.jwt_key.metadata[0].name
+        }]
       }
 
       gatewayConfig = {
@@ -312,10 +339,14 @@ resource "helm_release" "stargate" {
 
   depends_on = [
     kubernetes_secret_v1.runtime,
+    kubernetes_secret_v1.jwt_key,
     kubernetes_secret_v1.bootstrap
   ]
 }
 ```
+
+To rotate the signing key, add a second key Secret and `jwt.keys` entry, then
+follow the three upgrade steps in the chart README.
 
 If the namespace is managed elsewhere, replace the namespace resource with an
 input. If the chart is published to an OCI or Helm repository, replace
@@ -399,6 +430,7 @@ Chart `0.2.0` provides:
 - fixed container port and named Service target port;
 - profile-aware persistence and update strategy;
 - gateway configuration and policy mounting;
+- Secret-backed JWT signing keys shared by every replica;
 - checksum-triggered rollouts for chart-owned configuration;
 - non-root security contexts and disabled service-account token mounting;
 - startup, liveness, and readiness probes;

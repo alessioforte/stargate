@@ -2,10 +2,16 @@ use crate::api::gateway::authentication::TestAuthenticator;
 use crate::etc::{
     auth::identity::VerifiedIdentity,
     gate::{Gate, test_support},
-    http::rate_limit::rate_limit_middleware,
+    http::rate_limit::{charge_admin_principal, ingress_limit_middleware},
 };
 use async_trait::async_trait;
-use axum::{Extension, Router, body::Body, middleware::from_fn, response::Response, routing::get};
+use axum::{
+    Extension, Router,
+    body::Body,
+    middleware::from_fn,
+    response::{IntoResponse, Response},
+    routing::get,
+};
 use gate::cfg::Config;
 use http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -133,20 +139,29 @@ async fn gateway_ingress_rate_and_quota_denials_emit_integer_retry_after_and_kee
 }
 
 #[tokio::test]
-async fn iam_admin_denials_emit_integer_retry_after_and_keep_rate_headers() {
+async fn iam_ingress_and_principal_denials_emit_integer_retry_after_and_keep_rate_headers() {
     for (duration, expected) in retry_cases() {
         let app = Router::new()
             .route("/", get(denied_handler))
-            .layer(from_fn(rate_limit_middleware))
-            .layer(Extension(gate("default", duration)));
+            .layer(from_fn(ingress_limit_middleware))
+            .layer(Extension(gate("ingress", duration)));
         let response = app.oneshot(Request::new(Body::empty())).await.unwrap();
+        assert_eq!(response.headers()["x-ratelimit-scope"], "ingress");
         assert_denial(
             response,
             expected,
             "x-ratelimit",
-            "gateway.rate_limit_exceeded",
+            "iam.ingress_rate_limit_exceeded",
         )
         .await;
+
+        let runtime = gate("default", duration).snapshot();
+        let response = charge_admin_principal(&runtime, "lim:admin:key:test")
+            .await
+            .unwrap_err()
+            .into_response();
+        assert_eq!(response.headers()["x-ratelimit-scope"], "subject");
+        assert_denial(response, expected, "x-ratelimit", "iam.rate_limit_exceeded").await;
     }
 }
 

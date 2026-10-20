@@ -108,6 +108,7 @@ fn generate_key(args: GenerateKeyArgs) -> io::Result<()> {
         )));
     }
 
+    let first = !jwt_keyring::has_keys(&args.jwks_dir).map_err(invalid)?;
     let dir = jwt_keyring::generate(&args.jwks_dir, &args.kid, algorithm)?;
     println!(
         "Generated JWT signing key '{}' ({algorithm:?}) in {}",
@@ -115,6 +116,19 @@ fn generate_key(args: GenerateKeyArgs) -> io::Result<()> {
         dir.display()
     );
     println!();
+    if first && !args.id_token {
+        // Nothing to rotate from: the key can sign right away.
+        println!(
+            "This is the first key in the keyring: set JWT_KID={} on every node and start Stargate.",
+            args.kid
+        );
+        if algorithm != jwt_keyring::ID_TOKEN_ALGORITHM {
+            println!(
+                "ID tokens would be {algorithm:?}; OpenID Connect requires RS256, so also set JWT_ID_TOKEN_KID (create it with --id-token)."
+            );
+        }
+        return Ok(());
+    }
     println!("Next steps (on every node, sharing this directory):");
     println!(
         "1. Restart Stargate. It publishes '{}' in /.well-known/jwks.json without signing with it yet.",

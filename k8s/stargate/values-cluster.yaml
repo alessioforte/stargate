@@ -15,7 +15,6 @@ persistence:
 runtimeConfig:
   data:
     LOG_FILE_ENABLED: "false"
-    JWT_ALGORITHM: HS256
     JWT_ISSUER: https://identity.example.com
     OAUTH_BASE_URL: https://identity.example.com
     CONSOLE_PUBLIC_URL: https://identity.example.com
@@ -30,6 +29,13 @@ runtimeConfig:
 
 runtimeSecret:
   existingSecret: stargate-runtime
+
+# One Secret per key, created from `stargate jwt generate-key` output.
+jwt:
+  activeKid: stargate-2026-10
+  keys:
+    - kid: stargate-2026-10
+      secretName: stargate-jwt-2026-10
 
 gatewayConfig:
   config: |

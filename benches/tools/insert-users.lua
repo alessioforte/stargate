@@ -15,9 +15,8 @@ local socket   = require("socket")
 -- ---------------------------------------------------------------------------
 -- Configuration
 -- ---------------------------------------------------------------------------
-local BASE_URL = os.getenv("BASE_URL") or "http://localhost:5050"
--- local API_KEY  = os.getenv("API_KEY") or "sk_live_c1RCdEZ3c200Q3FqUldYOERsNDlvdmFEMk84eW50NjQ"
-local API_KEY  = os.getenv("API_KEY") or "ak_live_dGpvQ0tZaEZkamVCQ3dJZGliUDZMaFBXWGFLMkdsUnc"
+local BASE_URL = os.getenv("BASE_URL") or "https://localhost:5050"
+local API_KEY  = os.getenv("API_KEY") or "ak_live_c2naaTYSPSnvkseyjEwNIgVubrndgqRNQi-WHqXf34k"
 local CSV_FILE = os.getenv("CSV_FILE") or "users.csv"
 local PAUSE_MS = tonumber(os.getenv("PAUSE_MS")) or 100 -- ms between requests
 

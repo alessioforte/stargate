@@ -498,41 +498,41 @@ async fn requests_pin_the_ingress_binding_and_reload_preserves_existing_allowanc
 }
 
 #[tokio::test]
-async fn probes_are_exempt_and_iam_and_admin_keep_their_existing_middleware() {
-    let mut config = config(1);
-    // The gateway's implicit resource check and IAM middleware retain their
-    // existing shared default/IP bucket, independently of ingress admission.
-    config.limits.insert(
-        "default".into(),
-        serde_json::from_value(
-            json!({"strategy":"gcra", "params":{"max_burst":3, "replenish_1_per":"1h"}}),
-        )
-        .unwrap(),
-    );
-    let gate = Arc::new(test_support::gate(config));
+async fn probes_are_exempt_and_iam_shares_the_client_ingress_allowance() {
+    // Gateway and IAM routes draw from one per-IP ingress allowance. IAM
+    // traffic never charges the gateway's `default` resource bucket.
+    let gate = Arc::new(test_support::gate(config(3)));
     let calls = Arc::new(AuthenticationCalls::default());
     let auth = calls.boundary(VerifiedIdentity::anonymous());
     let app = crate::api::server_router(crate::etc::server::health::Lifecycle::default());
+    let peer = "203.0.113.9:1000";
     assert_eq!(
         app.clone()
-            .oneshot(request(&gate, &auth, "/open", "203.0.113.9:1000"))
+            .oneshot(request(&gate, &auth, "/open", peer))
             .await
             .unwrap()
             .status(),
         StatusCode::OK
     );
-    assert_eq!(
-        app.clone()
-            .oneshot(request(&gate, &auth, "/open", "203.0.113.9:1000"))
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::TOO_MANY_REQUESTS
-    );
+    let response = app
+        .clone()
+        .oneshot(request(&gate, &auth, "/docs/errors", peer))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!response.headers().contains_key("x-ratelimit-limit"));
+    // Without an authenticated principal there is no principal bucket.
+    let response = app
+        .clone()
+        .oneshot(request(&gate, &auth, "/admin/configurations", peer))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(!response.headers().contains_key("x-ratelimit-limit"));
     let occupied = gate.resources.admit_primary().unwrap();
     for path in ["/livez", "/readyz"] {
         for method in [http::Method::GET, http::Method::HEAD] {
-            let mut req = request(&gate, &auth, path, "203.0.113.9:1000");
+            let mut req = request(&gate, &auth, path, peer);
             *req.method_mut() = method;
             let response = app.clone().oneshot(req).await.unwrap();
             assert_eq!(
@@ -549,28 +549,38 @@ async fn probes_are_exempt_and_iam_and_admin_keep_their_existing_middleware() {
     drop(occupied);
     let response = app
         .clone()
-        .oneshot(request(&gate, &auth, "/docs/errors", "203.0.113.9:1000"))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["x-ratelimit-remaining"], "1");
-    let response = app
-        .clone()
-        .oneshot(request(
-            &gate,
-            &auth,
-            "/admin/configurations",
-            "203.0.113.9:1000",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    assert_eq!(response.headers()["x-ratelimit-remaining"], "0");
-    let response = app
-        .oneshot(request(&gate, &auth, "/docs/errors", "203.0.113.9:1000"))
+        .oneshot(request(&gate, &auth, "/docs/errors", peer))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(error_code(response).await, "gateway.rate_limit_exceeded");
+    assert_eq!(response.headers()["x-ratelimit-scope"], "ingress");
+    assert_eq!(
+        error_code(response).await,
+        "iam.ingress_rate_limit_exceeded"
+    );
+    let response = app
+        .clone()
+        .oneshot(request(&gate, &auth, "/open", peer))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        error_code(response).await,
+        "gateway.ingress_rate_limit_exceeded"
+    );
+    let response = app
+        .oneshot(request(&gate, &auth, "/docs/errors", "203.0.113.10:1000"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    // Only the anonymous gateway request charged the address's resource bucket.
+    let resource = gate
+        .snapshot()
+        .core
+        .limiter
+        .check("default", "lim:203.0.113.9", None)
+        .await
+        .unwrap();
+    assert_eq!(resource.remaining, 98);
     assert_eq!(calls.counts(), (1, 0));
 }

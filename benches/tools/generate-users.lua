@@ -1,6 +1,7 @@
 -- generate_users.lua
 
-local RECORDS = os.getenv("RECORDS") or 10000
+local RECORDS = tonumber(os.getenv("RECORDS")) or 10000
+local PASSWORD_LENGTH = tonumber(os.getenv("PASSWORD_LENGTH")) or 12
 
 local names = {
     "Luca", "Giulia", "Marco", "Sofia", "Alessandro", "Francesca", "Matteo", "Chiara", "Davide", "Elena",
@@ -30,20 +31,64 @@ local surnames = {
 
 math.randomseed(os.time())
 
-local file = io.open("users.csv", "w")
+-- Character classes mirroring crates/pw/src/generator.rs, which is what the
+-- default Stargate password policy requires (lowercase, uppercase, digit and
+-- special character). The comma is omitted from SPECIAL so a password always
+-- remains a single CSV field for insert-users.lua.
+local UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+local LOWERCASE = "abcdefghijklmnopqrstuvwxyz"
+local DIGITS = "0123456789"
+local SPECIAL = "!@#$%^&*()-_=+[]{}|;:.<>?"
+
+local PASSWORD_CLASSES = { UPPERCASE, LOWERCASE, DIGITS, SPECIAL }
+local PASSWORD_CHARSET = table.concat(PASSWORD_CLASSES)
+
+local function random_char(chars)
+    local index = math.random(#chars)
+    return chars:sub(index, index)
+end
+
+local function contains(text, needle)
+    return string.find(text, needle, 1, true) ~= nil
+end
+
+-- Password guaranteed to satisfy the default policy: one character from every
+-- class (when the length allows it) plus no username/email substring.
+local function random_password(length, nickname, email)
+    local lowered_nickname = string.lower(nickname)
+    local lowered_email = string.lower(email)
+
+    local password
+    repeat
+        local result = {}
+
+        if length >= #PASSWORD_CLASSES then
+            for _, class in ipairs(PASSWORD_CLASSES) do
+                result[#result + 1] = random_char(class)
+            end
+        end
+
+        while #result < length do
+            result[#result + 1] = random_char(PASSWORD_CHARSET)
+        end
+
+        -- Fisher-Yates shuffle: the guaranteed characters must not always be first.
+        for i = #result, 2, -1 do
+            local j = math.random(i)
+            result[i], result[j] = result[j], result[i]
+        end
+
+        password = table.concat(result)
+    until not contains(string.lower(password), lowered_nickname)
+        and not contains(string.lower(password), lowered_email)
+
+    return password
+end
+
+local file = assert(io.open("users.csv", "w"))
 
 -- header
-file:write("nickname,givenName,familyName,email,password,\n")
-
-local function random_string(length)
-    local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    local result = {}
-    for i = 1, length do
-        local index = math.random(#chars)
-        result[i] = chars:sub(index, index)
-    end
-    return table.concat(result)
-end
+file:write("nickname,givenName,familyName,email,password\n")
 
 for i = 1, RECORDS do
     local givenName = names[math.random(#names)]
@@ -51,14 +96,14 @@ for i = 1, RECORDS do
 
     local nickname = string.lower(givenName .. familyName .. i)
     local email = string.lower(givenName .. "." .. familyName .. i .. "@example.com")
-    local password = random_string(12)
+    local password = random_password(PASSWORD_LENGTH, nickname, email)
 
     file:write(
         nickname .. "," ..
         givenName .. "," ..
         familyName .. "," ..
         email .. "," ..
-        password .. ",\n"
+        password .. "\n"
     )
 
     -- stampa progresso ogni 100k

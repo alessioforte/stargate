@@ -1,6 +1,8 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::{
-    gate::RuntimeSnapshot, http::headers::retry_after_header_value, observability::telemetry,
+    gate::RuntimeSnapshot,
+    limits::{ingress_key, limited_response},
+    observability::telemetry,
 };
 use lim::LimitKind;
 
@@ -18,9 +20,7 @@ pub(in crate::api::gateway) async fn apply_ingress_limit(
         telemetry::record_gateway_policy("ingress", "error");
         return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable));
     }
-    // This namespace never intersects subject/org rate or quota buckets, even
-    // when the ingress and resource policies reference the same named limit.
-    let key = format!("ingress:ip:{client_ip}");
+    let key = ingress_key(client_ip);
     let decision = match execution
         .run(
             "ingress",
@@ -54,12 +54,10 @@ pub(in crate::api::gateway) async fn apply_ingress_limit(
     }
     telemetry::record_gateway_policy("ingress", "denied");
     telemetry::record_gateway_rejection("ingress");
-    let retry_after = retry_after_header_value(decision.retry_after);
-    let mut error = ErrorResponse::new(ErrorCode::GatewayIngressRateLimitExceeded);
-    error
-        .insert_header("Retry-After", &retry_after)
-        .insert_header("X-RateLimit-Limit", &decision.limit.to_string())
-        .insert_header("X-RateLimit-Remaining", &decision.remaining.to_string())
-        .insert_header("X-RateLimit-Scope", "ingress");
-    Err(error)
+    Err(limited_response(
+        &decision,
+        "ingress",
+        ErrorCode::GatewayIngressRateLimitExceeded,
+        "x-ratelimit",
+    ))
 }

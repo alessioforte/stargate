@@ -17,12 +17,12 @@ pub mod users;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::auth::jwt::jwt_config;
 use crate::etc::auth::subject::Subject;
-use crate::etc::http::request::RequestExt;
+use crate::etc::http::{rate_limit, request::RequestExt};
 use crate::etc::request_context::{audit_request_from, take_trusted_audit_context_from};
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use store::Store;
 
 use authorization::{AdminAuthorization, parse_stored_permissions};
@@ -59,6 +59,15 @@ impl AdminPrincipal {
         match self {
             Self::User { claims, .. } => Some(claims.as_ref()),
             Self::AdminKey { .. } => None,
+        }
+    }
+
+    /// The principal's own control-plane bucket. Session and OAuth access by
+    /// one user share it; distinct users and admin keys never do.
+    fn rate_limit_key(&self) -> String {
+        match self {
+            Self::User { user_id, .. } => format!("lim:admin:user:{user_id}"),
+            Self::AdminKey { key_id } => format!("lim:admin:key:{key_id}"),
         }
     }
 }
@@ -281,13 +290,35 @@ async fn extract_authorization_for(
     let token = req.get_token();
     let raw_key = req.get_api_key();
     let resolution = resolve_authorization(token, raw_key).await;
+    // Authenticated control-plane principals are limited by identity, not by
+    // client address: an admin key's automation never drains a console user's
+    // budget behind the same IP. Unauthenticated requests are bounded by the
+    // IAM ingress allowance only.
+    let principal_limit = match (boundary, &resolution.authorization) {
+        (AuditRouteBoundary::AdminControlPlane, Some(authorization)) => {
+            let key = authorization.principal.rate_limit_key();
+            let charged = match limit_attrs::runtime(&req) {
+                Ok(runtime) => rate_limit::charge_admin_principal(&runtime, &key).await,
+                Err(error) => Err(error),
+            };
+            match charged {
+                Ok(decision) => Some(decision),
+                Err(error) => return error.into_response(),
+            }
+        }
+        _ => None,
+    };
     install_audit_context(req.extensions_mut(), resolution.actor, boundary);
     req.extensions_mut().insert(resolution.authentication);
     if let Some(authorization) = resolution.authorization {
         req.extensions_mut().insert(authorization.principal.clone());
         req.extensions_mut().insert(authorization);
     }
-    next.run(req).await
+    let mut response = next.run(req).await;
+    if let Some(decision) = principal_limit {
+        rate_limit::insert_principal_limit_headers(response.headers_mut(), &decision);
+    }
+    response
 }
 
 /// Authorization extraction reused by non-admin OAuth token operations. An admin
@@ -533,7 +564,9 @@ mod tests {
 
     use crate::etc::request_context::RequestContext;
 
-    use super::{AuditRouteBoundary, install_audit_context};
+    use super::{
+        AdminAuthenticationKind, AdminPrincipal, AuditRouteBoundary, install_audit_context,
+    };
 
     fn request_extensions() -> http::Extensions {
         let mut extensions = http::Extensions::new();
@@ -667,6 +700,30 @@ mod tests {
             .expect("authenticated context");
         assert_eq!(context.boundary().scope(), &AuditScopeSelector::Application);
         assert_eq!(context.actor().actor_type(), "admin");
+    }
+
+    #[test]
+    fn admin_rate_limit_keys_follow_the_principal_not_the_credential() {
+        let user = |kind| AdminPrincipal::User {
+            user_id: "01JZ000000000000000000000A".into(),
+            kind,
+            claims: Box::default(),
+        };
+        let key = AdminPrincipal::AdminKey {
+            key_id: "01JZ000000000000000000000A".into(),
+        };
+        assert_eq!(
+            user(AdminAuthenticationKind::Session).rate_limit_key(),
+            user(AdminAuthenticationKind::OAuth).rate_limit_key()
+        );
+        assert_eq!(
+            user(AdminAuthenticationKind::Session).rate_limit_key(),
+            "lim:admin:user:01JZ000000000000000000000A"
+        );
+        assert_eq!(
+            key.rate_limit_key(),
+            "lim:admin:key:01JZ000000000000000000000A"
+        );
     }
 
     #[test]

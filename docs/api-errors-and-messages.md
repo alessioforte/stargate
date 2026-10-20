@@ -101,7 +101,7 @@ mirror traffic. See [runtime budgets](config-v1.md#runtime-deadlines-and-resourc
 Ingress throttling includes integer-second `Retry-After`, `X-RateLimit-Limit`,
 `X-RateLimit-Remaining`, and `X-RateLimit-Scope: ingress`. An allowed admission
 leaves response limit headers to the selected resource policies. Probes bypass
-both ingress admission and IAM rate-limit middleware.
+both gateway and IAM limits.
 
 All ingress, resource rate/quota, and IAM/admin `429` responses use decimal
 seconds in `Retry-After`, rounding fractional seconds upward; a missing limiter
@@ -114,3 +114,15 @@ invalid upstream URIs and internal-context failures, stop dispatch without
 failover or upstream-health penalties. Eligible operations may fail over on
 `upstream.connection_failed` (502) or configured upstream response statuses;
 ordinary mutations return the first result. See [replay eligibility](config-v1.md#automatic-replay-and-mutations).
+
+## IAM limit errors
+
+IAM endpoints share the gateway's per-IP ingress allowance; authenticated
+`/admin/*` principals also have a bucket of their own. See
+[IAM and admin limits](config-v1.md#iam-and-admin-limits).
+
+| Code | HTTP status | Condition |
+| --- | --- | --- |
+| `iam.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its ingress allowance on an IAM endpoint, before authentication (`X-RateLimit-Scope: ingress`) |
+| `iam.rate_limit_exceeded` | 429 | An authenticated admin user or admin key exhausted its own `/admin/*` budget (`X-RateLimit-Scope: subject`) |
+| `iam.limiter_unavailable` | 503 | The IAM limiter store fails, or the ingress check exceeds `ingress.timeout`; `params.scope` is `ingress` or `subject` |

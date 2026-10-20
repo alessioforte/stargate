@@ -28,7 +28,7 @@ tasks retain their generation. A successful activation starts the new health
 probes and retires the old probe tasks. Failed preparation changes neither the
 active snapshot/version nor its probes.
 
-IAM/admin rate-limit middleware also pins a snapshot for downstream handlers.
+The IAM ingress middleware also pins a snapshot for downstream handlers.
 Admin overview reports its graph counts and `configVersion` together. The
 independent ACE policy engine/revision pair is loaded once per request; policy
 file updates change that revision without changing `configVersion`.
@@ -116,7 +116,7 @@ zero token-bucket capacity/refill rate, overflowing bucket lifetimes, and invali
 reload, and admin saves. `ingress.timeout` defaults to `250ms` and must be a
 positive, representable duration. Generated configs and the Helm defaults use
 burst 100 with one request replenished every `100ms` (10/s); tune these values
-for the traffic sharing each client IP.
+for the gateway and IAM traffic sharing each client IP (NAT, VPN, office egress).
 
 Gateway requests first acquire process admission, then resolve the client IP and
 consume its ingress allowance, before credential verification, database lookup,
@@ -126,7 +126,10 @@ changing credentials or client headers cannot choose another bucket. Existing
 `TRUSTED_PROXIES` rules accept `X-Forwarded-For`/`X-Real-IP` only from trusted
 peers; an untrusted peer is keyed by its socket address. Without a peer address,
 requests share the conservative `unknown` bucket. Keep trusted-proxy CIDRs
-restricted to the deployment's actual proxy peers.
+restricted to the deployment's actual proxy peers. Behind a load balancer or
+ingress controller, `TRUSTED_PROXIES` is required: otherwise every client
+resolves to the proxy's address and shares one allowance, so a single client
+can exhaust it for everyone, IAM logins included.
 
 Ingress uses its own key namespace, distinct from resource subject/org rate and
 quota buckets even when both reference the same named limit. After admission,
@@ -143,9 +146,30 @@ returns `504 gateway.timeout` if it expires first. Process exhaustion retains
 `503 gateway.overloaded`. Allowed ingress checks do not overwrite resource
 response headers.
 
-`/livez` and `/readyz` bypass gateway admission and IAM rate limiting.
-Explicit IAM/admin endpoints retain their existing `default` rate-limit
-middleware; gateway ingress applies only to the gateway fallback. The console's
+### IAM and admin limits
+
+IAM endpoints (`/account/*`, `/oauth/*`, `/signup/*`, `/admin/*`, `/docs`,
+`/i18n`, `/.well-known/*`, and the hosted `/auth` and `/stargate` apps) consume
+the same per-IP ingress allowance as the gateway, with the same key and before
+any credential is read: one allowance per client address for the whole process.
+IAM denials return `429 iam.ingress_rate_limit_exceeded` with
+`X-RateLimit-Scope: ingress`; a failing or timed-out limiter store returns
+`503 iam.limiter_unavailable`. Allowed IAM ingress checks add no limit headers.
+
+Authenticated `/admin/*` principals then charge their own bucket of the named
+`default` limit, keyed by identity: one per super-admin user (session and OAuth
+access share it) and one per admin key. Automation through an admin key cannot
+exhaust a console user's budget, or another key's, even from the same address.
+Admin responses carry `X-RateLimit-*` headers with `X-RateLimit-Scope: subject`;
+a denial returns `429 iam.rate_limit_exceeded`. These buckets have their own
+namespace and never share state with gateway subject, org, or ingress buckets.
+Requests without an authenticated admin principal are bounded by ingress only.
+
+Credential brute-force protection is separate from these limits: the login
+guard throttles failed logins per IP and per account, and OTP flows have their
+own request and attempt throttles.
+
+`/livez` and `/readyz` bypass gateway admission and IAM limits. The console's
 gateway page exposes the mandatory ingress limit and store timeout. Editing
 named objects preserves this top-level binding; when renaming/removing its
 selected limit, select an existing replacement before saving.
@@ -827,8 +851,9 @@ http:
 ```
 
 Every supplied config must include `limits.default`, using GCRA or a positive,
-representable token bucket. The implicit resource check and IAM/admin middleware
-select this default by name; deleting it is a compile error. Generated configs
+representable token bucket. The implicit resource check and the per-principal
+`/admin/*` limit select this default by name; deleting it is a compile error.
+Generated configs
 provide GCRA burst `100` replenishing one request per `1s`, alongside the separate
 mandatory ingress limit. There is no allow-on-missing or resource rate-limit
 disable switch. Rate policies must reference rate strategies, and quota policies

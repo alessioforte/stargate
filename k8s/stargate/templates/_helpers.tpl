@@ -129,6 +129,22 @@ Referenced resource names.
 {{- end -}}
 
 {{/*
+JWT_ALGORITHM from the chart's runtime ConfigMap, upper-cased; empty when unset
+(the server then uses the active key's algorithm).
+*/}}
+{{- define "stargate.jwtAlgorithm" -}}
+{{- upper (toString (default "" (get (default (dict) .Values.runtimeConfig.data) "JWT_ALGORITHM"))) -}}
+{{- end -}}
+
+{{/*
+Mount point of the Secret holding JWT key `<kid>`; the server reads its keyring
+from .stargate/jwks/keys/ under the image's /app working directory.
+*/}}
+{{- define "stargate.jwtKeyPath" -}}
+{{- printf "/app/.stargate/jwks/keys/%s" . -}}
+{{- end -}}
+
+{{/*
 Cross-field validation that JSON Schema cannot express.
 */}}
 {{- define "stargate.validateValues" -}}
@@ -171,9 +187,49 @@ Cross-field validation that JSON Schema cannot express.
     {{- fail (printf "runtimeConfig.data.%s is chart-managed and must be removed" $key) -}}
   {{- end -}}
 {{- end -}}
+{{- range $key, $value := dict "JWT_KID" "jwt.activeKid" "JWT_ID_TOKEN_KID" "jwt.idTokenKid" -}}
+  {{- if hasKey $runtimeData $key -}}
+    {{- fail (printf "runtimeConfig.data.%s is chart-managed; set %s instead" $key $value) -}}
+  {{- end -}}
+{{- end -}}
 {{- range $key := list "POSTGRES_PASSWORD" "REDIS_URL" "JWT_SECRET" "EMAIL_OTP_PEPPER" "PASSWORD_PEPPER" "SMTP_PASSWORD" -}}
   {{- if hasKey $runtimeData $key -}}
     {{- fail (printf "runtimeConfig.data.%s is sensitive; use runtimeSecret instead" $key) -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $jwt := .Values.jwt -}}
+{{- $jwtAlgorithm := include "stargate.jwtAlgorithm" . -}}
+{{- $hmac := hasPrefix "HS" $jwtAlgorithm -}}
+{{- $kids := list -}}
+{{- range $key := $jwt.keys -}}
+  {{- if or (eq $key.kid ".") (eq $key.kid "..") -}}
+    {{- fail (printf "jwt.keys: %q is not a valid kid" $key.kid) -}}
+  {{- end -}}
+  {{- if has $key.kid $kids -}}
+    {{- fail (printf "jwt.keys: kid %q is listed twice" $key.kid) -}}
+  {{- end -}}
+  {{- $kids = append $kids $key.kid -}}
+{{- end -}}
+{{- if eq $mode "edge" -}}
+  {{- if $kids -}}
+    {{- fail "jwt.keys is cluster-only: edge keeps its JWT keys on the PVC (rotate them with `stargate jwt generate-key` in the pod)" -}}
+  {{- end -}}
+{{- else if eq $mode "cluster" -}}
+  {{- if $hmac -}}
+    {{- if $jwt.activeKid -}}
+      {{- fail (printf "jwt.activeKid names a key pair, but JWT_ALGORITHM=%s signs with JWT_SECRET; use jwt.idTokenKid for the RS256 ID token key" $jwtAlgorithm) -}}
+    {{- end -}}
+    {{- if and $kids (not $jwt.idTokenKid) -}}
+      {{- fail "jwt.keys is unused with an HMAC JWT_ALGORITHM unless jwt.idTokenKid names one of them" -}}
+    {{- end -}}
+  {{- else if and (or .Values.runtimeConfig.create $kids) (not $jwt.activeKid) -}}
+    {{- fail "cluster replicas must share their JWT signing keys: set jwt.activeKid and jwt.keys (one Secret per key), or JWT_ALGORITHM=HS256 with JWT_SECRET" -}}
+  {{- end -}}
+  {{- range $name, $kid := dict "jwt.activeKid" $jwt.activeKid "jwt.idTokenKid" $jwt.idTokenKid -}}
+    {{- if and $kid (not (has $kid $kids)) -}}
+      {{- fail (printf "%s %q is not in jwt.keys" $name $kid) -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 
@@ -186,8 +242,7 @@ Cross-field validation that JSON Schema cannot express.
       {{- fail (printf "cluster mode with runtimeSecret.create=true requires %s in runtimeConfig.data or runtimeSecret.stringData" $key) -}}
     {{- end -}}
   {{- end -}}
-  {{- $algorithm := upper (default "HS256" (get $runtimeData "JWT_ALGORITHM")) -}}
-  {{- if and (hasPrefix "HS" $algorithm) (empty (get $secretData "JWT_SECRET")) -}}
+  {{- if and $hmac (empty (get $secretData "JWT_SECRET")) -}}
     {{- fail "cluster mode with an HMAC JWT algorithm requires runtimeSecret.stringData.JWT_SECRET" -}}
   {{- end -}}
 {{- end -}}

@@ -179,6 +179,11 @@ fn key_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     Ok(dirs)
 }
 
+/// Whether `root` holds any key directory.
+pub(crate) fn has_keys(root: &Path) -> Result<bool, String> {
+    Ok(!key_dirs(root)?.is_empty())
+}
+
 /// No key directories other than the `named` ones.
 fn is_fresh(root: &Path, named: &[Option<&str>]) -> Result<bool, String> {
     Ok(key_dirs(root)?
@@ -397,6 +402,44 @@ mod tests {
         // The active key may also sign ID tokens.
         assert!(load(&root, "k1", Some("k1"), None).is_ok());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The Helm chart mounts one Secret per key at `keys/<kid>/`. Kubernetes
+    /// projects each file as a symlink into a hidden `..data` directory.
+    #[cfg(unix)]
+    #[test]
+    fn loads_keys_from_kubernetes_secret_volumes() {
+        use std::os::unix::fs::symlink;
+
+        let generated = temp_root("jwt-keyring-generated");
+        generate(&generated, "k1", Algorithm::ES256).unwrap();
+        generate(&generated, "k0", Algorithm::RS256).unwrap();
+
+        let root = temp_root("jwt-keyring-secret-volumes");
+        for (kid, files) in [
+            ("k1", &["private.pem", "public.pem", "alg"][..]),
+            // A retired key whose Secret keeps only the public key.
+            ("k0", &["public.pem"][..]),
+        ] {
+            let dir = key_dir(&root, kid);
+            let timestamped = dir.join("..2026_10_20_14_19_11.1837088673");
+            fs::create_dir_all(&timestamped).unwrap();
+            symlink("..2026_10_20_14_19_11.1837088673", dir.join("..data")).unwrap();
+            for file in files {
+                fs::copy(key_dir(&generated, kid).join(file), timestamped.join(file)).unwrap();
+                symlink(format!("..data/{file}"), dir.join(file)).unwrap();
+            }
+        }
+        assert!(has_keys(&root).unwrap());
+
+        let keyring = load(&root, "k1", None, None).unwrap();
+        assert_eq!(keyring.active.algorithm(), Algorithm::ES256);
+        assert!(keyring.active.can_sign());
+        assert_eq!(keyring.additional.len(), 1);
+        assert_eq!(keyring.additional[0].key_id(), "k0");
+        assert_eq!(keyring.additional[0].algorithm(), Algorithm::RS256);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(generated).unwrap();
     }
 
     #[test]

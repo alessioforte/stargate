@@ -1,88 +1,152 @@
+//! IAM/admin request limits.
+//!
+//! Every IAM route first charges the client IP's ingress allowance, the same
+//! bucket the gateway uses, before any credential is read. Authenticated
+//! `/admin/*` principals then charge a bucket of their own
+//! ([`charge_admin_principal`]), so one principal's automation never drains
+//! the budget of another principal behind the same address.
+
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::headers::retry_after_header_value;
+use crate::etc::gate::{Gate, RuntimeSnapshot, retain_runtime};
 use crate::etc::http::request::RequestExt;
+use crate::etc::limits::{ingress_key, insert_limit_headers, limited_response};
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use http::HeaderMap;
+use lim::RateLimitDecision;
 use std::sync::Arc;
 
-pub async fn rate_limit_middleware(mut req: Request, next: Next) -> Response {
+/// Named limit charged per authenticated admin principal.
+const ADMIN_PRINCIPAL_LIMIT: &str = "default";
+
+pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response {
     let gate = req
         .extensions()
-        .get::<Arc<crate::etc::gate::Gate>>()
+        .get::<Arc<Gate>>()
         .cloned()
         .expect("Gate extension must be set");
 
     let runtime = gate.snapshot();
     req.extensions_mut().insert(runtime.clone());
-    let limiter = &runtime.core.limiter;
     let client_ip = req.get_client_ip();
-
-    let mut key = String::with_capacity(4 + client_ip.len());
-    key.push_str("lim:");
-    key.push_str(&client_ip);
-
-    if let Err(error) =
-        crate::etc::limits::validate_limit(limiter, "default", lim::LimitKind::Rate, "ip")
-    {
+    if let Err(error) = check_ingress(&runtime, &client_ip).await {
         return error.into_response();
     }
-    let decision = match limiter.check("default", &key, None).await {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::error!("Rate limiter error: {}", e);
-            return ErrorResponse::new(ErrorCode::GatewayLimiterUnavailable).into_response();
+    next.run(req)
+        .await
+        .map(|body| retain_runtime(body, runtime))
+}
+
+async fn check_ingress(runtime: &RuntimeSnapshot, client_ip: &str) -> Result<(), ErrorResponse> {
+    let ingress = &runtime.ingress;
+    let key = ingress_key(client_ip);
+    let check = runtime.core.limiter.check(&ingress.limit, &key, None);
+    let decision = match tokio::time::timeout(ingress.timeout, check).await {
+        Ok(Ok(decision)) => decision,
+        Ok(Err(error)) => {
+            tracing::error!(%error, "IAM ingress limiter failed");
+            return Err(unavailable("ingress"));
+        }
+        Err(_) => {
+            tracing::warn!("IAM ingress limiter exceeded its store deadline");
+            return Err(unavailable("ingress"));
         }
     };
-
-    let limit = decision.limit.to_string();
-    let remaining = decision.remaining.to_string();
-
-    if decision.allowed {
-        let mut response = next.run(req).await;
-        let headers = response.headers_mut();
-        headers.insert(
-            http::header::HeaderName::from_static("x-ratelimit-limit"),
-            limit.parse().unwrap(),
-        );
-        headers.insert(
-            http::header::HeaderName::from_static("x-ratelimit-remaining"),
-            remaining.parse().unwrap(),
-        );
-        response.map(|body| crate::etc::gate::retain_runtime(body, runtime))
-    } else {
-        let retry_after = retry_after_header_value(decision.retry_after);
-
-        let mut err = ErrorResponse::new(ErrorCode::GatewayRateLimitExceeded);
-        err.insert_header("Retry-After", &retry_after)
-            .insert_header("X-RateLimit-Limit", &limit)
-            .insert_header("X-RateLimit-Remaining", &remaining);
-        err.into_response()
+    if decision.is_allowed() {
+        return Ok(());
     }
+    Err(limited_response(
+        &decision,
+        "ingress",
+        ErrorCode::IamIngressRateLimitExceeded,
+        "x-ratelimit",
+    ))
+}
+
+/// Charges an authenticated admin principal's own `default` bucket. `key`
+/// must identify the principal, never the client address.
+pub async fn charge_admin_principal(
+    runtime: &RuntimeSnapshot,
+    key: &str,
+) -> Result<RateLimitDecision, ErrorResponse> {
+    let decision = runtime
+        .core
+        .limiter
+        .check(ADMIN_PRINCIPAL_LIMIT, key, None)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "IAM principal limiter failed");
+            unavailable("subject")
+        })?;
+    if decision.is_allowed() {
+        return Ok(decision);
+    }
+    Err(limited_response(
+        &decision,
+        "subject",
+        ErrorCode::IamRateLimitExceeded,
+        "x-ratelimit",
+    ))
+}
+
+pub fn insert_principal_limit_headers(headers: &mut HeaderMap, decision: &RateLimitDecision) {
+    insert_limit_headers(headers, decision, "subject", "x-ratelimit");
+}
+
+fn unavailable(scope: &'static str) -> ErrorResponse {
+    ErrorResponse::new(ErrorCode::IamLimiterUnavailable).with_param("scope", scope)
 }
 
 #[cfg(all(test, feature = "memory"))]
 mod tests {
-    use super::rate_limit_middleware;
+    use super::{charge_admin_principal, ingress_limit_middleware};
     use crate::etc::gate::{RuntimeSnapshot, prepare_config, test_support};
     use axum::{Extension, Router, body::Body, middleware::from_fn, routing::get};
-    use http::Request;
+    use http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use std::sync::Arc;
     use tokio::sync::Barrier;
     use tower::ServiceExt;
 
-    fn config(capacity: u64) -> gate::cfg::Config {
+    fn config(ingress_burst: u64, default_burst: u64) -> gate::cfg::Config {
         serde_json::from_value(serde_json::json!({
             "schema": gate::cfg::SCHEMA,
             "ingress": {"limit": "ingress", "timeout": "250ms"},
-            "limits": {"ingress": {"strategy": "gcra", "params": {"max_burst": 100, "replenish_1_per": "100ms"}}, "default": {"strategy": "token_bucket", "params": {"capacity": capacity, "refill_rate": 1}}},
-        })).unwrap()
+            "limits": {
+                "ingress": {"strategy": "gcra", "params": {"max_burst": ingress_burst, "replenish_1_per": "1h"}},
+                "default": {"strategy": "gcra", "params": {"max_burst": default_burst, "replenish_1_per": "1h"}},
+            },
+        }))
+        .unwrap()
+    }
+
+    fn app(gate: Arc<crate::etc::gate::Gate>) -> Router {
+        Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(from_fn(ingress_limit_middleware))
+            .layer(Extension(gate))
+    }
+
+    fn request(peer: &str) -> Request<Body> {
+        let mut req = Request::builder().uri("/").body(Body::empty()).unwrap();
+        req.extensions_mut().insert(axum::extract::ConnectInfo(
+            peer.parse::<std::net::SocketAddr>().unwrap(),
+        ));
+        req
+    }
+
+    async fn error_code(response: axum::response::Response) -> String {
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 
     #[tokio::test]
     async fn iam_middleware_and_downstream_reader_share_the_ingress_generation() {
-        let gate = Arc::new(test_support::gate(config(7)));
+        let gate = Arc::new(test_support::gate(config(100, 100)));
         let pinned = Arc::new(Barrier::new(2));
         let resume = Arc::new(Barrier::new(2));
         let app = Router::new()
@@ -108,7 +172,7 @@ mod tests {
                     }
                 }),
             )
-            .layer(from_fn(rate_limit_middleware))
+            .layer(from_fn(ingress_limit_middleware))
             .layer(Extension(gate.clone()));
         let pending = tokio::spawn(
             app.clone().oneshot(
@@ -120,10 +184,10 @@ mod tests {
             ),
         );
         pinned.wait().await;
-        gate.activate(prepare_config(config(70)).unwrap()).unwrap();
+        gate.activate(prepare_config(config(100, 100)).unwrap())
+            .unwrap();
         resume.wait().await;
         let response = pending.await.unwrap().unwrap();
-        assert_eq!(response.headers()["x-ratelimit-limit"], "7");
         assert_eq!(
             response.into_body().collect().await.unwrap().to_bytes(),
             "0"
@@ -133,10 +197,80 @@ mod tests {
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.headers()["x-ratelimit-limit"], "70");
         assert_eq!(
             response.into_body().collect().await.unwrap().to_bytes(),
             "1"
         );
+    }
+
+    #[tokio::test]
+    async fn iam_routes_charge_the_ingress_allowance_not_the_default_limit() {
+        // `default` would deny the second request; only ingress may apply.
+        let gate = Arc::new(test_support::gate(config(2, 1)));
+        let app = app(gate.clone());
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(request("203.0.113.1:1000"))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(!response.headers().contains_key("x-ratelimit-limit"));
+        }
+
+        let response = app
+            .clone()
+            .oneshot(request("203.0.113.1:1000"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()["x-ratelimit-scope"], "ingress");
+        assert_eq!(response.headers()["x-ratelimit-remaining"], "0");
+        assert!(response.headers().contains_key("retry-after"));
+        assert_eq!(
+            error_code(response).await,
+            "iam.ingress_rate_limit_exceeded"
+        );
+
+        // Another address has its own allowance.
+        let response = app.oneshot(request("203.0.113.2:1000")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn admin_principals_have_independent_buckets_outside_the_ingress_namespace() {
+        let gate = test_support::gate(config(1, 2));
+        let runtime = gate.snapshot();
+        for remaining in [1, 0] {
+            let decision = charge_admin_principal(&runtime, "lim:admin:key:automation")
+                .await
+                .unwrap();
+            assert_eq!(decision.remaining, remaining);
+        }
+        let error = charge_admin_principal(&runtime, "lim:admin:key:automation")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, crate::err::ErrorCode::IamRateLimitExceeded);
+        let response = axum::response::IntoResponse::into_response(error);
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()["x-ratelimit-scope"], "subject");
+        assert!(response.headers().contains_key("retry-after"));
+
+        // The exhausted automation key does not affect the console user, and
+        // neither touches the per-IP ingress allowance.
+        charge_admin_principal(&runtime, "lim:admin:user:console")
+            .await
+            .unwrap();
+        let ingress = runtime
+            .core
+            .limiter
+            .check(
+                "ingress",
+                &crate::etc::limits::ingress_key("127.0.0.1"),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(ingress.is_allowed());
     }
 }

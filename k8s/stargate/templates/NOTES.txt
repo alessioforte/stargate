@@ -6,6 +6,12 @@ Edge mode is intentionally limited to one replica and uses PVC-backed local stat
 Cluster mode uses shared PostgreSQL and Redis and does not mount local state.
 {{- end }}
 
+{{- $jwtAlgorithm := include "stargate.jwtAlgorithm" . }}
+{{- if and (hasPrefix "HS" $jwtAlgorithm) (not .Values.jwt.idTokenKid) }}
+WARNING: JWT_ALGORITHM={{ $jwtAlgorithm }} also signs OIDC ID tokens with JWT_SECRET, which
+relying parties cannot verify. Set jwt.idTokenKid to an RS256 key.
+{{- end }}
+
 {{- if .Values.bootstrap.enabled }}
 The idempotent bootstrap hook provisions the first administrator and Console OAuth client.
 Inspect it with:

@@ -125,6 +125,14 @@ spec:
               value: {{ .Values.gatewayConfig.mountPath | quote }}
             - name: CONFIG_FILENAME
               value: {{ .Values.gatewayConfig.fileName | quote }}
+            {{- with .Values.jwt.activeKid }}
+            - name: JWT_KID
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.jwt.idTokenKid }}
+            - name: JWT_ID_TOKEN_KID
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -145,6 +153,11 @@ spec:
             {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
+            {{- range $index, $key := .Values.jwt.keys }}
+            - name: jwt-key-{{ $index }}
+              mountPath: {{ include "stargate.jwtKeyPath" $key.kid }}
+              readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -180,6 +193,12 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "stargate.persistenceClaimName" . }}
+        {{- end }}
+        {{- range $index, $key := .Values.jwt.keys }}
+        - name: jwt-key-{{ $index }}
+          secret:
+            secretName: {{ $key.secretName }}
+            defaultMode: 0440
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

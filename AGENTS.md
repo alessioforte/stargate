@@ -75,7 +75,7 @@ stargate/
 - `auth/`: access control, subjects, session JWT config, password helpers.
   `identity.rs` owns verified facts; `verification.rs` owns credential/backing-state checks.
 - `http/`: request extraction, trusted proxies, origins/CORS (`origin.rs` trusted-origin
-  middleware), security and retry headers, IAM/admin rate limiting, message envelopes.
+  middleware), security and retry headers, IAM limits (`rate_limit.rs`), message envelopes.
 - `request_context/`: request metadata, ingress headers, lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
 - `observability/`: logging and the telemetry provider (`telemetry/metrics.rs`,
@@ -340,6 +340,10 @@ Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
   `id_token_algorithm()`. Works with an EC or HMAC active key. Without it a non-RS256
   active key logs a warning and fails the Config OP discovery check (OIDC requires
   RS256). Rotate it with `jwt generate-key --id-token`, same steps.
+- Helm: edge keeps the keyring on the PVC; cluster mounts one Secret per key (`jwt.keys`)
+  read-only at `keys/<kid>/`, and `jwt.activeKid` / `jwt.idTokenKid` set `JWT_KID` /
+  `JWT_ID_TOKEN_KID` (chart-managed). Cluster needs `jwt.activeKid` unless `JWT_ALGORITHM`
+  is HMAC; rotation is one `helm upgrade` per step (`k8s/stargate/README.md`).
 
 Grants: `client_credentials`, Authorization Code + PKCE (`S256`), `refresh_token`
 with opaque rotating families.
@@ -541,8 +545,17 @@ need no database. Docs: `docs/cli.md`.
   permissions (`src/api/admin/authorization.rs`).
 - `/auth/*` (hosted auth app), `/stargate/*` (console), everything else: gateway fallback.
 
-`api::server_router` applies IAM/admin rate limiting and merges probe routes outside
+`api::server_router` applies the IAM ingress limit and merges probe routes outside
 it; `main.rs` adds security headers, tracing, CORS, compression, and normalize-path.
+
+IAM limits (`src/etc/http/rate_limit.rs`): every IAM route charges the client IP's
+ingress allowance, the same `ingress:ip:{ip}` bucket as the gateway, before
+credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
+`/admin/*` principals then charge their own `default` bucket, keyed
+`lim:admin:user:{id}` / `lim:admin:key:{id}` in `extract_admin_authorization`
+(`429 iam.rate_limit_exceeded`, scope `subject`), so one admin key cannot throttle
+the console or other keys behind the same IP. Limiter failures: `503 iam.limiter_unavailable`.
+Login brute force is handled separately by `act/login_guard.rs` and OTP throttles.
 
 ## Error Response Format
 
@@ -571,7 +584,8 @@ Statuses in use: 400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503
 `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-scope`, `x-quota-limit`,
 `x-quota-remaining`, `x-quota-scope`, `retry-after`. Scope is `subject`, `org`, `ip`,
 or `ingress`. `429` `retry-after` is whole seconds rounded up (missing duration
--> 60); `503` uses 10.
+-> 60); `503` uses 10. Shared helpers (`ingress_key`, `limited_response`,
+`insert_limit_headers`) live in `src/etc/limits.rs`.
 
 ## Graceful Shutdown
 
