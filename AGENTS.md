@@ -443,6 +443,19 @@ response time does not reveal the account either; delivery errors are only logge
 A pending request (`change_password_requests:{email}`, 1h) is reused and its link
 resent, bounded by the per-recipient throttle, so a failed delivery can be retried.
 
+Signup (`POST /signup`): always `200 signup.requested` for a valid address
+(`400 request.invalid` otherwise). In the background a new address gets the
+verification link, a pending signup has its link resent (same `sid`), and an
+existing account gets a `SignupAccountExists` sign-in reminder, so neither the
+response nor its timing reveals the account. Admin invitations
+(`send_invitation`) keep `409` conflicts and wait for delivery.
+
+Emails: templates come from `apps/mail/emails/*.tsx` (`npm run export` writes
+`.stargate/transactional/*.html`). Action URLs are built by the server
+(`src/fun/auth_links.rs`: `signup_url`, `change_password_url`, `login_url`, based on
+`AUTH_PUBLIC_BASE_URL` or the local auth app) and rendered as `{{link}}`; `{{name}}`
+is the only other placeholder.
+
 ## Database Schema (migrations/)
 
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_history`,
@@ -451,10 +464,23 @@ Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_his
 One migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
 creates the full schema; add new forward migrations from there.
 
-`users.email` is stored canonical (trimmed, lowercased: `db::ent::canonical_email`,
-applied by the users repository on insert/update) and looked up the same way, so
-one mailbox is one account whatever the casing; nicknames and phone numbers match
-exactly. Store keys derived from emails use the canonical form too.
+User identity (`crates/db/src/ent/user.rs`, enforced by the users repository on
+every insert/update):
+- `email` and `nickname` are stored canonical (trimmed, lowercased:
+  `canonical_email` / `canonical_nickname`) and looked up the same way, so one
+  mailbox or handle is one account whatever the casing.
+- `nickname_is_valid`: a nickname is non-empty and may contain `@` only when it
+  equals the account's own email (the default nickname), so no account can take
+  another person's address as its handle. A nickname that mirrored the email
+  follows it when the email changes (`update_user`).
+- Login (`get_user_by_login`) dispatches by shape: an identifier with `@` matches
+  emails only, anything else nicknames only. Phone numbers are unverified profile
+  data and never log in.
+- Flows keyed by an address (signup, invitations, forgot/reset, passwordless,
+  social login) use `get_user_by_email`; session flows (profile, refresh) use
+  `sub_id`. API writes pre-check with `act::nicknames::ensure_nickname_available`
+  (`400 user.nickname_invalid`, `409 user.nickname_already_exists`).
+Store keys derived from emails use the canonical form too.
 
 IDs are ULIDs stored as text. `outbox_events` holds the immutable JSON payload,
 `seq`, optional `operation_id`, `created_at`, and nullable `published_at`, with

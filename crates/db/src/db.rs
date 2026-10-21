@@ -41,7 +41,11 @@ pub trait DbStore {
         value: &str,
         ctx: TrustedAuditContext,
     ) -> Result<User>;
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
+    async fn get_user_by_email(&self, email: &str) -> Result<Option<User>>;
+    async fn get_user_by_nickname(&self, nickname: &str) -> Result<Option<User>>;
+    /// Resolves a login identifier by its shape: an address matches emails
+    /// only, anything else matches nicknames only. Phone numbers never log in.
+    async fn get_user_by_login(&self, identifier: &str) -> Result<Option<User>>;
     async fn get_user_by_id(&self, id: &str) -> Result<Option<User>>;
     async fn get_all_users(&self, limit: i64, offset: i64) -> Result<Vec<User>>;
     async fn count_users(&self) -> Result<i64>;

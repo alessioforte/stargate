@@ -59,7 +59,13 @@ pub async fn put_refresh_token(
         }
     };
 
-    let user = crate::db::get_user_by_username(&claims.sub)
+    // By id: the email in `sub` may have changed, and a lookup by address
+    // must never resolve to another account's nickname.
+    let user_id = claims
+        .sub_id
+        .as_deref()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
+    let user = crate::db::get_user_by_id(user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;

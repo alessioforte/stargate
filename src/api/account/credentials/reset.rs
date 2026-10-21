@@ -53,7 +53,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         return Err(ErrorResponse::new(ErrorCode::PasswordResetRequestInvalid));
     }
 
-    let user = crate::db::get_user_by_username(&email)
+    let user = crate::db::get_user_by_email(&email)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
@@ -87,7 +87,6 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         .template(Template::PasswordChangedNotification)
         .to(user.email.clone())
         .name(Some(format_name(&given_name, &family_name)))
-        .token(token)
         .build()
         .and_then(|smtp| smtp.send())
     {

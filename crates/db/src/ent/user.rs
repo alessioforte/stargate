@@ -8,6 +8,37 @@ pub fn canonical_email(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
 
+/// The stored and compared form of a nickname: handles match
+/// case-insensitively, so `Admin` and `admin` are one handle.
+pub fn canonical_nickname(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+/// Nicknames and emails share the login field, so a nickname may look like an
+/// email address only when it is the account's own address: no account can
+/// take another person's email as its handle.
+pub fn nickname_is_valid(nickname: &str, email: &str) -> bool {
+    let nickname = canonical_nickname(nickname);
+    !nickname.is_empty() && (!nickname.contains('@') || nickname == canonical_email(email))
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::{canonical_nickname, nickname_is_valid};
+
+    #[test]
+    fn nicknames_are_case_insensitive_and_cannot_claim_another_address() {
+        assert_eq!(canonical_nickname("  Admin "), "admin");
+        assert!(nickname_is_valid("Alice", "alice@example.com"));
+        assert!(nickname_is_valid("Alice@Example.com", "alice@example.com"));
+        assert!(!nickname_is_valid(
+            "victim@example.com",
+            "mallory@example.com"
+        ));
+        assert!(!nickname_is_valid("   ", "alice@example.com"));
+    }
+}
+
 #[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct User {

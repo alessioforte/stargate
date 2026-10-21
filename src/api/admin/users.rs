@@ -365,7 +365,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
     let organization = get_membership_organization(membership.as_ref()).await?;
 
-    if let Ok(Some(_)) = crate::db::get_user_by_username(&payload.email).await {
+    if let Ok(Some(_)) = crate::db::get_user_by_email(&payload.email).await {
         return Err(ErrorResponse::new(ErrorCode::UserEmailAlreadyExists)
             .with_param("email", payload.email.clone()));
     }
@@ -374,6 +374,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .nickname
         .clone()
         .unwrap_or_else(|| payload.email.clone());
+    crate::act::nicknames::ensure_nickname_available(&nickname, &payload.email, None).await?;
 
     let password_validation = match organization.as_ref() {
         Some(organization) => crate::act::password_policy::validate_for_organization(
@@ -434,7 +435,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
     get_membership_organization(membership.as_ref()).await?;
 
-    if crate::db::get_user_by_username(&payload.email)
+    if crate::db::get_user_by_email(&payload.email)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -447,13 +448,8 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
         .nickname
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-        && crate::db::get_user_by_username(nickname)
-            .await
-            .map_err(ErrorResponse::internal)?
-            .is_some()
     {
-        return Err(ErrorResponse::new(ErrorCode::UserNicknameAlreadyExists)
-            .with_param("nickname", nickname));
+        crate::act::nicknames::ensure_nickname_available(nickname, &payload.email, None).await?;
     }
 
     let profile = PendingSignupProfile {
@@ -466,7 +462,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
         attrs: payload.attrs,
         membership,
     };
-    crate::api::signup::request::send_signup_request(profile).await?;
+    crate::api::signup::request::send_invitation(profile).await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -487,6 +483,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 409, description = "Conflict - nickname already exists", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
@@ -501,6 +498,17 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
+
+    // An unchanged nickname that mirrored the old email follows the new one
+    // in the repository; an explicit nickname is checked here.
+    if let Some(nickname) = &payload.nickname {
+        crate::act::nicknames::ensure_nickname_available(
+            nickname,
+            &payload.email,
+            Some(&existing.id),
+        )
+        .await?;
+    }
 
     let mut updated = db::ent::User::new(
         payload.email.clone(),
@@ -535,6 +543,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 409, description = "Conflict - nickname already exists", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
@@ -560,6 +569,12 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
         existing.family_name = payload.family_name.clone();
     }
     if let Some(nickname) = &payload.nickname {
+        crate::act::nicknames::ensure_nickname_available(
+            nickname,
+            &existing.email,
+            Some(&existing.id),
+        )
+        .await?;
         existing.nickname = nickname.clone();
     }
     if payload.picture.is_some() {

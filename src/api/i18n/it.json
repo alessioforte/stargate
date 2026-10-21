@@ -23,6 +23,7 @@
     "user.not_found": "Utente non trovato",
     "user.email_already_exists": "Esiste già un utente con questo indirizzo email",
     "user.nickname_already_exists": "Esiste già un utente con questo nome utente",
+    "user.nickname_invalid": "Il nome utente non può essere vuoto e può contenere '@' solo se coincide con l'email dell'account",
     "user.super_admin_delete_forbidden": "Gli utenti super amministratori non possono essere eliminati",
     "organization.not_found": "Organizzazione non trovata",
     "organization.name_required": "Il nome dell'organizzazione è obbligatorio",
@@ -134,7 +135,7 @@
   },
   "messages": {
     "signup.completed": "Utente creato correttamente",
-    "signup.requested": "La richiesta di registrazione è stata inviata. Controlla la tua email.",
+    "signup.requested": "Abbiamo inviato i passaggi successivi a questo indirizzo. Controlla la tua email.",
     "auth.logout_completed": "Disconnessione completata",
     "auth.all_sessions_logged_out": "Tutte le sessioni sono state disconnesse",
     "organization.deleted": "Organizzazione eliminata correttamente",

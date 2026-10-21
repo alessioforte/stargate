@@ -42,9 +42,21 @@ pub async fn create_user(
         .inspect_err(|e| tracing::error!("Error creating user: {:?}", e))
 }
 
-pub async fn get_user_by_username(username: &str) -> Result<Option<User>> {
+/// Resolves a login identifier by its shape: an address matches emails only,
+/// anything else matches nicknames only.
+pub async fn get_user_by_login(identifier: &str) -> Result<Option<User>> {
     let svc = service();
-    svc.get_user_by_username(username).await
+    svc.get_user_by_login(identifier).await
+}
+
+pub async fn get_user_by_nickname(nickname: &str) -> Result<Option<User>> {
+    let svc = service();
+    svc.get_user_by_nickname(nickname).await
+}
+
+pub async fn get_user_by_email(email: &str) -> Result<Option<User>> {
+    let svc = service();
+    svc.get_user_by_email(email).await
 }
 
 pub async fn get_user_by_id(id: &str) -> Result<Option<User>> {

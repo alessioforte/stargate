@@ -1,5 +1,5 @@
-use crate::ent::{User, canonical_email};
-use anyhow::Result;
+use crate::ent::{User, canonical_email, canonical_nickname, nickname_is_valid};
+use anyhow::{Result, ensure};
 use chrono::Utc;
 
 pub const USER: &str = "users";
@@ -21,6 +21,7 @@ impl Default for UserRepository {
 
 impl UserRepository {
     pub async fn create(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
+        ensure_nickname_is_valid(&user)?;
         let row = sqlx::query_as::<_, User>(
             sqlx::AssertSqlSafe(format!(
                 "
@@ -35,7 +36,7 @@ impl UserRepository {
         .bind(canonical_email(&user.email))
         .bind(&user.given_name)
         .bind(&user.family_name)
-        .bind(&user.nickname)
+        .bind(canonical_nickname(&user.nickname))
         .bind(&user.picture)
         .bind(&user.phone_number)
         .bind(&user.attrs)
@@ -70,18 +71,31 @@ impl UserRepository {
         Ok(rows)
     }
 
-    pub async fn get_by_username<'c, E>(&self, ex: E, username: &str) -> Result<Option<User>>
+    pub async fn get_by_nickname<'c, E>(&self, ex: E, nickname: &str) -> Result<Option<User>>
     where
         E: crate::backend::ReadExecutor<'c>,
     {
         let row = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
-            "
-            SELECT * FROM {users} WHERE nickname = $1 OR email = $2 OR phone_number = $1
-        ",
+            "SELECT * FROM {users} WHERE nickname = $1",
             users = USER
         )))
-        .bind(username)
-        .bind(canonical_email(username))
+        .bind(canonical_nickname(nickname))
+        .fetch_optional(ex)
+        .await?;
+
+        Ok(row)
+    }
+
+    /// Email-only lookup for flows keyed by an address.
+    pub async fn get_by_email<'c, E>(&self, ex: E, email: &str) -> Result<Option<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let row = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+            "SELECT * FROM {users} WHERE email = $1",
+            users = USER
+        )))
+        .bind(canonical_email(email))
         .fetch_optional(ex)
         .await?;
 
@@ -89,6 +103,7 @@ impl UserRepository {
     }
 
     pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
+        ensure_nickname_is_valid(&user)?;
         let updated_at = Utc::now();
         let row = sqlx::query_as::<_, User>(
             sqlx::AssertSqlSafe(format!(
@@ -105,7 +120,7 @@ impl UserRepository {
         .bind(canonical_email(&user.email))
         .bind(&user.given_name)
         .bind(&user.family_name)
-        .bind(&user.nickname)
+        .bind(canonical_nickname(&user.nickname))
         .bind(&user.picture)
         .bind(&user.phone_number)
         .bind(&user.attrs)
@@ -240,4 +255,14 @@ impl UserRepository {
 
         Ok(())
     }
+}
+
+/// Every write path goes through the repository, so this is the invariant's
+/// last line: callers validate first to answer with a precise error.
+fn ensure_nickname_is_valid(user: &User) -> Result<()> {
+    ensure!(
+        nickname_is_valid(&user.nickname, &user.email),
+        "nickname must not be empty and may contain '@' only as the account's own email"
+    );
+    Ok(())
 }

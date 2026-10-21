@@ -72,7 +72,9 @@ impl MessageCode {
     pub const fn message(self) -> &'static str {
         match self {
             Self::SignupCompleted => "User created successfully",
-            Self::SignupRequested => "A signup request has been sent. Please check your email.",
+            Self::SignupRequested => {
+                "We sent the next steps to this address. Please check your email."
+            }
             Self::LogoutCompleted => "User logged out successfully",
             Self::AllSessionsLoggedOut => "All sessions logged out successfully",
             Self::OrganizationDeleted => "Organization deleted successfully",

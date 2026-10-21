@@ -78,7 +78,7 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
         audit_request,
     );
 
-    let mut user = crate::db::get_user_by_username(&google_user.email)
+    let mut user = crate::db::get_user_by_email(&google_user.email)
         .await
         .map_err(|e| {
             tracing::error!("Database error during Google OAuth: {}", e);

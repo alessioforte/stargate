@@ -10,7 +10,8 @@ use crate::ent::{
     AuditScopeSelector, Credential, CredentialHistory, CredentialType, NewOrganizationMembership,
     OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
     OrganizationMembershipMutation, OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount,
-    SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent,
+    SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent, canonical_email,
+    canonical_nickname,
 };
 use crate::repo::ApiKeyAuditRecord;
 use anyhow::{Context, Result, bail, ensure};
@@ -693,7 +694,7 @@ impl DbStore for Service {
                 .context("bootstrap requires --email and a password when no super admin exists")?;
             ensure!(
                 self.user
-                    .get_by_username(&mut *tx, &profile.email)
+                    .get_by_email(&mut *tx, &profile.email)
                     .await?
                     .is_none(),
                 "user with email '{}' already exists",
@@ -902,8 +903,20 @@ impl DbStore for Service {
         Ok(record)
     }
 
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>> {
-        self.user.get_by_username(&self.pool, username).await
+    async fn get_user_by_email(&self, email: &str) -> Result<Option<User>> {
+        self.user.get_by_email(&self.pool, email).await
+    }
+
+    async fn get_user_by_nickname(&self, nickname: &str) -> Result<Option<User>> {
+        self.user.get_by_nickname(&self.pool, nickname).await
+    }
+
+    async fn get_user_by_login(&self, identifier: &str) -> Result<Option<User>> {
+        if identifier.contains('@') {
+            self.get_user_by_email(identifier).await
+        } else {
+            self.get_user_by_nickname(identifier).await
+        }
     }
 
     async fn get_user_by_id(&self, id: &str) -> Result<Option<User>> {
@@ -948,6 +961,15 @@ impl DbStore for Service {
             .get_by_id_for_update(&mut tx, &user.id)
             .await?
             .context("cannot audit update for a missing user")?;
+        let mut user = user;
+        // A nickname that mirrored the old address follows the new one, so an
+        // email change never leaves the account holding a foreign address.
+        if before.nickname == before.email
+            && canonical_nickname(&user.nickname) == before.nickname
+            && canonical_email(&user.email) != before.email
+        {
+            user.nickname = canonical_email(&user.email);
+        }
         let updated_user = self.user.update(&mut tx, user).await?;
         let changed_fields = user_changed_fields(&before, &updated_user);
         let event = build_outbox_event(
@@ -2316,7 +2338,7 @@ mod sqlite_tests {
 
         assert!(error.to_string().contains("organization not found"));
         assert!(
-            svc.get_user_by_username(email)
+            svc.get_user_by_email(email)
                 .await
                 .expect("query rolled-back user")
                 .is_none()
@@ -2356,7 +2378,7 @@ mod sqlite_tests {
 
         assert!(error.to_string().contains("request.user_agent exceeds 512"));
         assert!(
-            svc.get_user_by_username(email)
+            svc.get_user_by_email(email)
                 .await
                 .expect("query rolled-back user")
                 .is_none()
@@ -2614,47 +2636,58 @@ mod sqlite_tests {
         )
     }
 
+    async fn create_identity(svc: &Service, email: &str, nickname: &str) -> Result<User> {
+        svc.create_user(
+            Profile::new(email.to_string(), nickname.to_string()).phone_number(Some(format!(
+                "+39{}",
+                &ulid::Ulid::generate().to_string()[17..]
+            ))),
+            CredentialType::Password,
+            "hash",
+            None,
+            trusted_ctx(),
+        )
+        .await
+    }
+
     #[tokio::test]
-    async fn emails_are_stored_canonical_and_matched_case_insensitively() {
+    async fn logins_resolve_canonical_emails_and_nicknames_by_shape() {
         let svc = test_service().await;
-        let user = svc
-            .create_user(
-                Profile::new(" Alice@Example.COM ".to_string(), "Alice".to_string()),
-                CredentialType::Password,
-                "hash",
-                None,
-                trusted_ctx(),
-            )
+        let user = create_identity(&svc, " Alice@Example.COM ", " Alice ")
             .await
             .expect("create user");
         assert_eq!(user.email, "alice@example.com");
+        assert_eq!(user.nickname, "alice");
 
         for login in [
             "alice@example.com",
             "ALICE@example.com",
             " Alice@Example.com",
+            "alice",
+            "ALICE",
+            " Alice ",
         ] {
             let found = svc
-                .get_user_by_username(login)
+                .get_user_by_login(login)
                 .await
                 .expect("lookup")
                 .unwrap_or_else(|| panic!("{login:?} must find the account"));
             assert_eq!(found.id, user.id);
         }
-        // Nicknames keep exact matching.
-        assert!(svc.get_user_by_username("alice").await.unwrap().is_none());
+        let phone = user.phone_number.clone().expect("phone");
+        assert!(svc.get_user_by_login(&phone).await.unwrap().is_none());
 
-        // One mailbox is one account.
-        let duplicate = svc
-            .create_user(
-                Profile::new("ALICE@example.com".to_string(), "alice-2".to_string()),
-                CredentialType::Password,
-                "hash",
-                None,
-                trusted_ctx(),
-            )
-            .await;
-        assert!(duplicate.is_err());
+        // One mailbox is one account, one handle is one account.
+        assert!(
+            create_identity(&svc, "ALICE@example.com", "alice-2")
+                .await
+                .is_err()
+        );
+        assert!(
+            create_identity(&svc, "other@example.com", "ALICE")
+                .await
+                .is_err()
+        );
 
         let mut changed = user.clone();
         changed.email = "Alice.New@Example.com".to_string();
@@ -2663,6 +2696,47 @@ mod sqlite_tests {
             .await
             .expect("update user");
         assert_eq!(updated.email, "alice.new@example.com");
+        assert_eq!(updated.nickname, "alice");
+    }
+
+    #[tokio::test]
+    async fn nicknames_cannot_claim_another_accounts_address() {
+        let svc = test_service().await;
+        assert!(
+            create_identity(&svc, "mallory@example.com", "victim@example.com")
+                .await
+                .is_err()
+        );
+
+        // The default nickname is the account's own address, in any casing.
+        let user = create_identity(&svc, "carol@example.com", "Carol@Example.com")
+            .await
+            .expect("own address as nickname");
+        assert_eq!(user.nickname, "carol@example.com");
+
+        // It follows the address when the email changes.
+        let mut changed = user.clone();
+        changed.email = "carol@new.example.com".to_string();
+        let updated = svc
+            .update_user(changed, trusted_ctx())
+            .await
+            .expect("update email");
+        assert_eq!(updated.nickname, "carol@new.example.com");
+
+        // An explicit foreign address is refused on update too.
+        let mut squatting = updated.clone();
+        squatting.nickname = "victim@example.com".to_string();
+        assert!(svc.update_user(squatting, trusted_ctx()).await.is_err());
+
+        let victim = create_identity(&svc, "Victim@Example.com", "victim")
+            .await
+            .expect("create victim");
+        let found = svc
+            .get_user_by_login("VICTIM@example.com")
+            .await
+            .expect("lookup")
+            .expect("victim by email");
+        assert_eq!(found.id, victim.id);
     }
 
     #[tokio::test]
@@ -3109,7 +3183,7 @@ mod sqlite_tests {
         assert!(error.to_string().contains("redirect_uris"));
         assert!(!svc.super_admin_exists().await.expect("query super admin"));
         assert!(
-            svc.get_user_by_username("root@example.com")
+            svc.get_user_by_email("root@example.com")
                 .await
                 .expect("query rolled-back user")
                 .is_none()
@@ -3147,7 +3221,7 @@ mod sqlite_tests {
                 .contains("request.user_agent exceeds 512")
         );
         assert!(
-            svc.get_user_by_username(email)
+            svc.get_user_by_email(email)
                 .await
                 .expect("query rolled-back user")
                 .is_none()
@@ -4191,7 +4265,7 @@ mod tests {
                 .contains("request.user_agent exceeds 512")
         );
         assert!(
-            svc.get_user_by_username(&email)
+            svc.get_user_by_email(&email)
                 .await
                 .expect("query user")
                 .is_none()

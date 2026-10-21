@@ -147,3 +147,9 @@ Denied requests are not counted, so a continuing flood does not extend the windo
 not an account uses the address, and sends the email in the background, so
 neither the response nor its timing reveals the account. While a reset request
 is pending, a new request resends its link.
+
+`POST /signup` likewise answers `200 signup.requested` for any valid address:
+a new address receives a verification link, a pending signup has its link
+resent, and an address that already has an account receives a sign-in reminder
+instead. `signup.user_already_exists` and `signup.request_already_exists` remain
+for admin invitations and for completing a signup with a verified token.

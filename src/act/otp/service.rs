@@ -43,16 +43,12 @@ pub(crate) async fn start_passwordless_email_otp(
     let config = email_otp_config()?;
     let pepper = email_otp_pepper()?;
     let fake_response = fake_challenge_response(now, &config)?;
-    let Some(user) = crate::db::get_user_by_username(&email)
+    let Some(user) = crate::db::get_user_by_email(&email)
         .await
         .map_err(ErrorResponse::internal)?
     else {
         return Ok(fake_response);
     };
-
-    if user.email != db::ent::canonical_email(&email) {
-        return Ok(fake_response);
-    }
 
     let issued = issue_email_challenge(
         &user,

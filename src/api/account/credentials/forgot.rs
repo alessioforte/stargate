@@ -3,9 +3,9 @@ use crate::act::email_throttle::EmailFlow;
 use crate::err::ErrorResponse;
 use crate::etc;
 use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::fun::format_name;
+use crate::fun::{change_password_url, format_name};
 use axum::Json;
-use db::ent::{User, canonical_email};
+use db::ent::User;
 use serde::{Deserialize, Serialize};
 use smtp::{Smtp, Template};
 use utoipa::ToSchema;
@@ -34,12 +34,11 @@ pub async fn post_credentials(
     act::email_throttle::check_and_record_email_request(EmailFlow::PasswordReset, &body.email)
         .await?;
 
-    // Only an exact email match may receive a link: a nickname or phone number
-    // would select a recipient outside the per-recipient throttle's bucket.
-    let user = crate::db::get_user_by_username(&body.email)
+    // Email only: a nickname or phone number would select a recipient outside
+    // the per-recipient throttle's bucket.
+    let user = crate::db::get_user_by_email(&body.email)
         .await
-        .map_err(ErrorResponse::internal)?
-        .filter(|user| user.email == canonical_email(&body.email));
+        .map_err(ErrorResponse::internal)?;
 
     if let Some(user) = user {
         // Reuse the pending request so a lost or failed email can be resent;
@@ -84,7 +83,7 @@ fn send_reset_email(user: &User, sid: String) -> anyhow::Result<()> {
         .template(Template::ChangePasswordRequest)
         .to(user.email.clone())
         .name(Some(format_name(&given_name, &family_name)))
-        .token(token)
+        .link(change_password_url(&token))
         .build()
         .and_then(|smtp| smtp.send())?;
     Ok(())

@@ -66,13 +66,17 @@ pub(crate) async fn verify_login_password(
 ) -> Result<(db::ent::User, db::ent::Credential), ErrorResponse> {
     let login_identifier = username.trim();
 
-    let user = crate::db::get_user_by_username(login_identifier)
+    let user = crate::db::get_user_by_login(login_identifier)
         .await
         .map_err(ErrorResponse::internal)?;
 
     let throttle = match user.as_ref() {
         Some(u) => login_guard::LoginThrottle::for_user(client_ip, &u.id),
-        None => login_guard::LoginThrottle::for_identifier(client_ip, login_identifier),
+        // Identifiers match case-insensitively, so casing never opens a
+        // fresh bucket for an unknown one.
+        None => {
+            login_guard::LoginThrottle::for_identifier(client_ip, &login_identifier.to_lowercase())
+        }
     };
 
     let allowed = login_guard::check_login_allowed(&throttle)

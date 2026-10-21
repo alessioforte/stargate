@@ -14,11 +14,11 @@ import {
 } from "@react-email/components";
 
 interface ChangePasswordRequestProps {
-  token: string;
+  changePasswordUrl: string;
 }
 
 export const ChangePasswordRequest = ({
-  token = "{{token}}",
+  changePasswordUrl = "{{link}}",
 }: ChangePasswordRequestProps) => {
   return (
     <Html>
@@ -46,7 +46,7 @@ export const ChangePasswordRequest = ({
                     <Column className="text-center" colSpan={2}>
                       <Button
                         className="bg-[#007ee6] rounded border border-solid border-black/10 text-white font-bold cursor-pointer inline-block px-[30px] py-3 no-underline"
-                        href={`https://stargate.so/change-password?token=${token}`}
+                        href={changePasswordUrl}
                       >
                         Change Password
                       </Button>

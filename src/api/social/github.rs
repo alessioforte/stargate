@@ -82,7 +82,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
         audit_request,
     );
 
-    let mut user = crate::db::get_user_by_username(&github_user.email)
+    let mut user = crate::db::get_user_by_email(&github_user.email)
         .await
         .map_err(|e| {
             tracing::error!("Database error during GitHub OAuth: {}", e);

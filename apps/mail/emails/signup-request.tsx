@@ -18,7 +18,7 @@ interface SignupRequestProps {
 }
 
 export const SignupRequest = ({
-  signupUrl = "{{signup_url}}",
+  signupUrl = "{{link}}",
 }: SignupRequestProps) => {
   return (
     <Html>

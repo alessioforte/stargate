@@ -57,7 +57,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         return Err(ErrorResponse::new(ErrorCode::SignupEmailMismatch));
     }
 
-    if crate::db::get_user_by_username(&signup.email)
+    if crate::db::get_user_by_email(&signup.email)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -71,13 +71,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         body.nickname.trim().to_string()
     };
 
-    if crate::db::get_user_by_username(&nickname)
-        .await
-        .map_err(ErrorResponse::internal)?
-        .is_some()
-    {
-        return Err(ErrorResponse::new(ErrorCode::UserNicknameAlreadyExists));
-    }
+    act::nicknames::ensure_nickname_available(&nickname, &signup.email, None).await?;
 
     let organization = match signup.membership.as_ref() {
         Some(membership) => Some(

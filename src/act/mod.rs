@@ -3,6 +3,7 @@ mod change_password;
 pub mod email_throttle;
 mod email_verification;
 pub mod login_guard;
+pub mod nicknames;
 pub mod oauth_state;
 pub mod orgs;
 pub mod otp;

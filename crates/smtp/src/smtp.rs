@@ -39,6 +39,7 @@ pub enum SmtpError {
 
 pub enum Template {
     SignupRequest,
+    SignupAccountExists,
     SignupCompleted,
     ChangePasswordRequest,
     PasswordChangedNotification,
@@ -49,6 +50,7 @@ impl Template {
     pub fn subject(&self) -> &str {
         match self {
             Template::SignupRequest => "Signup Request",
+            Template::SignupAccountExists => "You already have an account",
             Template::ChangePasswordRequest => "Change Password Request",
             Template::PasswordChangedNotification => "Password Changed",
             Template::SignupCompleted => "Welcome to Stargate!",
@@ -58,6 +60,7 @@ impl Template {
     pub fn filename(&self) -> &str {
         match self {
             Template::SignupRequest => "signup-request",
+            Template::SignupAccountExists => "signup-account-exists",
             Template::ChangePasswordRequest => "change-password-request",
             Template::PasswordChangedNotification => "password-changed",
             Template::SignupCompleted => "signup-completed",
@@ -65,10 +68,14 @@ impl Template {
     }
 }
 
+/// Whether `value` parses as a deliverable recipient address.
+pub fn is_valid_address(value: &str) -> bool {
+    value.parse::<lettre::Address>().is_ok()
+}
+
 pub struct Smtp {
     message: Option<Message>,
     email: String,
-    token: String,
     link: String,
     template: Template,
     name: Option<String>,
@@ -87,7 +94,6 @@ impl Smtp {
         Smtp {
             message: None,
             email: "".to_string(),
-            token: "".to_string(),
             link: "".to_string(),
             template: Template::SignupRequest,
             name: None,
@@ -106,11 +112,8 @@ impl Smtp {
         self
     }
 
-    pub fn token(&mut self, token: String) -> &mut Self {
-        self.token = token;
-        self
-    }
-
+    /// The action URL a template renders as `{{link}}`, always built by the
+    /// server so recipients only ever see links to this deployment.
     pub fn link(&mut self, link: String) -> &mut Self {
         self.link = link;
         self
@@ -167,8 +170,7 @@ impl Smtp {
     fn render_template(&self, content: String) -> String {
         content
             .replace("{{name}}", self.name.as_deref().unwrap_or(""))
-            .replace("{{token}}", &self.token)
-            .replace("{{signup_url}}", &self.link)
+            .replace("{{link}}", &self.link)
     }
 
     fn build_mailer(
@@ -268,12 +270,12 @@ mod tests {
     }
 
     #[test]
-    fn render_template_replaces_signup_url() {
+    fn render_template_replaces_the_action_link() {
         let mut smtp = Smtp::new();
         smtp.link("https://auth.example.com/signup?token=abc".to_string());
 
         assert_eq!(
-            smtp.render_template("<a href=\"{{signup_url}}\">Sign up</a>".to_string()),
+            smtp.render_template("<a href=\"{{link}}\">Sign up</a>".to_string()),
             "<a href=\"https://auth.example.com/signup?token=abc\">Sign up</a>"
         );
     }

@@ -60,6 +60,11 @@ pub async fn bootstrap_instance(
                 .await
                 .context("failed to hash bootstrap password")?;
             let nickname = nickname.unwrap_or_else(|| email.clone());
+            if !db::ent::nickname_is_valid(&nickname, &email) {
+                bail!(
+                    "nickname must not be empty and may contain '@' only as the account's own email"
+                );
+            }
             (
                 Some(Profile::new(email, nickname).given_name(name)),
                 Some(hash),
