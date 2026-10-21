@@ -1,6 +1,9 @@
 use super::SignupRequestBody;
 use crate::{
-    act::{self, PendingSignupProfile},
+    act::{
+        self, PendingSignupProfile,
+        email_throttle::{EmailFlow, check_and_record_email_request},
+    },
     err::{ErrorCode, ErrorResponse},
     etc::http::messages::{MessageCode, MessageResponse},
     fun::signup_url,
@@ -17,12 +20,16 @@ use smtp::{Smtp, Template};
         (status = 200, description = "OK", body = MessageResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 409, description = "Conflict", body = ErrorResponse),
+        (status = 429, description = "Too many emails requested for this address", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn post_signup(
     Json(body): Json<SignupRequestBody>,
 ) -> Result<Json<MessageResponse>, ErrorResponse> {
+    // Public requests only: admin invitations reuse `send_signup_request` and
+    // are bounded by the admin principal's limit instead.
+    check_and_record_email_request(EmailFlow::Signup, &body.email).await?;
     send_signup_request(PendingSignupProfile::email_only(body.email)).await?;
 
     Ok(Json(MessageResponse::new(MessageCode::SignupRequested)))

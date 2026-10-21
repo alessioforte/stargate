@@ -1,4 +1,5 @@
 use crate::act;
+use crate::act::email_throttle::EmailFlow;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
 use crate::etc::http::messages::{MessageCode, MessageResponse};
@@ -23,12 +24,16 @@ pub struct ForgotPasswordRequestBody {
     responses(
         (status = 200, description = "OK", body = MessageResponse),
         (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 429, description = "Too many emails requested for this address", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
 pub async fn post_credentials(
     Json(body): Json<ForgotPasswordRequestBody>,
 ) -> Result<Json<MessageResponse>, ErrorResponse> {
+    act::email_throttle::check_and_record_email_request(EmailFlow::PasswordReset, &body.email)
+        .await?;
+
     let user = crate::db::get_user_by_username(&body.email)
         .await
         .map_err(ErrorResponse::internal)?

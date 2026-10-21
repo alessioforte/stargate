@@ -32,6 +32,12 @@ pub(crate) async fn start_passwordless_email_otp(
         &format!("passwordless:{}", email.to_ascii_lowercase()),
     )
     .await?;
+    // Charged for unknown addresses too, so a denial reveals no account.
+    crate::act::email_throttle::check_and_record_email_request(
+        crate::act::email_throttle::EmailFlow::PasswordlessOtp,
+        &email,
+    )
+    .await?;
 
     let now = current_unix_time()?;
     let config = email_otp_config()?;

@@ -1,5 +1,6 @@
 pub mod access_control_rules;
 mod change_password;
+pub mod email_throttle;
 mod email_verification;
 pub mod login_guard;
 pub mod oauth_state;

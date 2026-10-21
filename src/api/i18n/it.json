@@ -85,6 +85,7 @@
     "otp.code_invalid": "Il codice di verifica non è valido",
     "otp.attempts_exceeded": "Troppi tentativi di verifica non validi",
     "otp.request_rate_limited": "Troppe richieste di codici di verifica",
+    "email.recipient_rate_limited": "Troppe email richieste per questo indirizzo",
     "otp.challenge_changed": "La verifica è cambiata; riprova",
     "otp.unavailable": "La verifica OTP non è temporaneamente disponibile",
     "otp.email_unavailable": "La verifica OTP via email non è temporaneamente disponibile",

@@ -167,7 +167,9 @@ Requests without an authenticated admin principal are bounded by ingress only.
 
 Credential brute-force protection is separate from these limits: the login
 guard throttles failed logins per IP and per account, and OTP flows have their
-own request and attempt throttles.
+own request and attempt throttles. Password-reset, signup, and passwordless
+requests are also limited per recipient address, whatever the client IP
+(see [per-recipient email limits](api-errors-and-messages.md#per-recipient-email-limits)).
 
 `/livez` and `/readyz` bypass gateway admission and IAM limits. The console's
 gateway page exposes the mandatory ingress limit and store timeout. Editing

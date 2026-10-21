@@ -419,6 +419,16 @@ Delivery: `smtp::Smtp` on `spawn_blocking`; passwordless delivery is backgrounde
 against enumeration timing. Only email OTP is wired; TOTP/HOTP and SMS exist as
 primitives only.
 
+Per-recipient email throttle (`src/act/email_throttle.rs`): unauthenticated flows
+that email an address from the request body (`POST /account/credentials`,
+`POST /signup`, `POST /account/login/otp/email`) charge
+`account:email:recipient:{flow}:{sha256(lowercased, trimmed address)}` before any
+account lookup, so denials look the same for unknown addresses. Limits per hour:
+5 for password reset and signup, 10 for passwordless OTP; flows have separate
+buckets. Over-limit requests are not counted (the window does not slide under a
+flood) and get `429 email.recipient_rate_limited` with `Retry-After: 3600`.
+Admin invitations reuse `send_signup_request` without this throttle.
+
 ## Passwords
 
 Argon2id with tunable params and optional pepper (hash upgrades on login), global

@@ -126,3 +126,19 @@ IAM endpoints share the gateway's per-IP ingress allowance; authenticated
 | `iam.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its ingress allowance on an IAM endpoint, before authentication (`X-RateLimit-Scope: ingress`) |
 | `iam.rate_limit_exceeded` | 429 | An authenticated admin user or admin key exhausted its own `/admin/*` budget (`X-RateLimit-Scope: subject`) |
 | `iam.limiter_unavailable` | 503 | The IAM limiter store fails, or the ingress check exceeds `ingress.timeout`; `params.scope` is `ingress` or `subject` |
+
+## Per-recipient email limits
+
+Unauthenticated requests that send email to an address from the request body
+(`POST /account/credentials`, `POST /signup`, `POST /account/login/otp/email`)
+are also limited per recipient, independently of the client IP, so one address
+cannot be flooded from many sources. The address is compared case-insensitively
+and the check runs before any account lookup: unknown addresses are counted and
+denied the same way.
+
+| Code | HTTP status | Condition |
+| --- | --- | --- |
+| `email.recipient_rate_limited` | 429 | The address reached its hourly limit for this flow: 5 password-reset or signup requests, 10 passwordless codes. `Retry-After: 3600` |
+
+Each flow has its own budget, so flooding one does not block the others.
+Denied requests are not counted, so a continuing flood does not extend the window.
