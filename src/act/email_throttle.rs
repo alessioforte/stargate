@@ -75,8 +75,7 @@ pub async fn check_and_record_email_request(
 /// Case and surrounding whitespace never select another bucket. The address is
 /// hashed: keys stay bounded and the store holds no recipient addresses.
 fn recipient_key(flow: EmailFlow, email: &str) -> String {
-    let canonical = email.trim().to_lowercase();
-    let digest = Sha256::digest(canonical.as_bytes());
+    let digest = Sha256::digest(db::ent::canonical_email(email).as_bytes());
     let hex = digest
         .iter()
         .map(|byte| format!("{byte:02x}"))

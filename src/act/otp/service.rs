@@ -50,7 +50,7 @@ pub(crate) async fn start_passwordless_email_otp(
         return Ok(fake_response);
     };
 
-    if !user.email.eq_ignore_ascii_case(&email) {
+    if user.email != db::ent::canonical_email(&email) {
         return Ok(fake_response);
     }
 

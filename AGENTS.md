@@ -436,6 +436,13 @@ password policy from `PASSWORD_POLICY_*` with per-org override in
 `organizations.attrs.password_policy`, history in `credential_history`.
 Guide: `docs/password-policies-guide.md`.
 
+Forgot password (`POST /account/credentials`): always `200 password.reset_requested`,
+whether or not an account uses the address (only exact email matches get a link,
+never nickname/phone). The JWT and SMTP delivery run on `spawn_blocking`, so
+response time does not reveal the account either; delivery errors are only logged.
+A pending request (`change_password_requests:{email}`, 1h) is reused and its link
+resent, bounded by the per-recipient throttle, so a failed delivery can be retried.
+
 ## Database Schema (migrations/)
 
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_history`,
@@ -443,6 +450,11 @@ Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_his
 `user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`.
 One migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
 creates the full schema; add new forward migrations from there.
+
+`users.email` is stored canonical (trimmed, lowercased: `db::ent::canonical_email`,
+applied by the users repository on insert/update) and looked up the same way, so
+one mailbox is one account whatever the casing; nicknames and phone numbers match
+exactly. Store keys derived from emails use the canonical form too.
 
 IDs are ULIDs stored as text. `outbox_events` holds the immutable JSON payload,
 `seq`, optional `operation_id`, `created_at`, and nullable `published_at`, with

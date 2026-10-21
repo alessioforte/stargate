@@ -1,10 +1,11 @@
 use crate::act;
 use crate::act::email_throttle::EmailFlow;
-use crate::err::{ErrorCode, ErrorResponse};
+use crate::err::ErrorResponse;
 use crate::etc;
 use crate::etc::http::messages::{MessageCode, MessageResponse};
 use crate::fun::format_name;
 use axum::Json;
+use db::ent::{User, canonical_email};
 use serde::{Deserialize, Serialize};
 use smtp::{Smtp, Template};
 use utoipa::ToSchema;
@@ -19,11 +20,10 @@ pub struct ForgotPasswordRequestBody {
     path = "/account/credentials",
     tags = ["Account"],
     summary = "Initiate Password Reset",
-    description = "Initiate a password reset request by providing the user's email address. If the email exists in the system, a password reset link will be sent to that email.",
+    description = "Request a password-reset link for an email address. The response is the same whether or not an account uses the address. While a reset request is pending, a new request resends its link.",
     request_body = ForgotPasswordRequestBody,
     responses(
         (status = 200, description = "OK", body = MessageResponse),
-        (status = 404, description = "User not found", body = ErrorResponse),
         (status = 429, description = "Too many emails requested for this address", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
@@ -34,44 +34,58 @@ pub async fn post_credentials(
     act::email_throttle::check_and_record_email_request(EmailFlow::PasswordReset, &body.email)
         .await?;
 
+    // Only an exact email match may receive a link: a nickname or phone number
+    // would select a recipient outside the per-recipient throttle's bucket.
     let user = crate::db::get_user_by_username(&body.email)
         .await
         .map_err(ErrorResponse::internal)?
-        .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
+        .filter(|user| user.email == canonical_email(&body.email));
 
-    if let Ok(Some(_)) = act::get_change_password_request(&user.email).await {
-        return Ok(Json(MessageResponse::new(
-            MessageCode::PasswordResetAlreadyRequested,
-        )));
+    if let Some(user) = user {
+        // Reuse the pending request so a lost or failed email can be resent;
+        // the per-recipient throttle bounds the repeats.
+        let sid = match act::get_change_password_request(&user.email)
+            .await
+            .map_err(ErrorResponse::internal)?
+        {
+            Some(sid) => sid,
+            None => act::create_change_password_request(&user.email)
+                .await
+                .map_err(ErrorResponse::internal)?,
+        };
+        spawn_reset_email(user, sid);
     }
 
-    let sid = act::create_change_password_request(&user.email)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    // Same response and no delivery wait either way, so neither the body nor
+    // the response time reveals whether the address has an account.
+    Ok(Json(MessageResponse::new(
+        MessageCode::PasswordResetRequested,
+    )))
+}
 
+fn spawn_reset_email(user: User, sid: String) {
+    std::mem::drop(tokio::task::spawn_blocking(move || {
+        if let Err(error) = send_reset_email(&user, sid) {
+            tracing::error!(%error, user_id = %user.id, "failed to send password-reset email");
+        }
+    }));
+}
+
+fn send_reset_email(user: &User, sid: String) -> anyhow::Result<()> {
     let claim = jwt::Claims::default()
         .sub_id(user.id.clone())
         .email(user.email.clone())
         .sid(sid);
-
-    let token = etc::auth::jwt::jwt_config()
-        .generate_token(&claim)
-        .map_err(ErrorResponse::internal)?;
+    let token = etc::auth::jwt::jwt_config().generate_token(&claim)?;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
-    let name = format_name(&given_name, &family_name);
-
     Smtp::new()
         .template(Template::ChangePasswordRequest)
         .to(user.email.clone())
-        .name(Some(name))
+        .name(Some(format_name(&given_name, &family_name)))
         .token(token)
         .build()
-        .and_then(|smtp| smtp.send())
-        .map_err(ErrorResponse::internal)?;
-
-    Ok(Json(MessageResponse::new(
-        MessageCode::PasswordResetRequested,
-    )))
+        .and_then(|smtp| smtp.send())?;
+    Ok(())
 }

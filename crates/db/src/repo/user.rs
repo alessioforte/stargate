@@ -1,4 +1,4 @@
-use crate::ent::User;
+use crate::ent::{User, canonical_email};
 use anyhow::Result;
 use chrono::Utc;
 
@@ -32,7 +32,7 @@ impl UserRepository {
             )),
         )
         .bind(&user.id)
-        .bind(&user.email)
+        .bind(canonical_email(&user.email))
         .bind(&user.given_name)
         .bind(&user.family_name)
         .bind(&user.nickname)
@@ -76,11 +76,12 @@ impl UserRepository {
     {
         let row = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
             "
-            SELECT * FROM {users} WHERE nickname = $1 OR email = $1 OR phone_number = $1
+            SELECT * FROM {users} WHERE nickname = $1 OR email = $2 OR phone_number = $1
         ",
             users = USER
         )))
         .bind(username)
+        .bind(canonical_email(username))
         .fetch_optional(ex)
         .await?;
 
@@ -101,7 +102,7 @@ impl UserRepository {
             )),
         )
         .bind(&user.id)
-        .bind(&user.email)
+        .bind(canonical_email(&user.email))
         .bind(&user.given_name)
         .bind(&user.family_name)
         .bind(&user.nickname)

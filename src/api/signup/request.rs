@@ -38,6 +38,12 @@ pub async fn post_signup(
 pub(crate) async fn send_signup_request(
     profile: PendingSignupProfile,
 ) -> Result<(), ErrorResponse> {
+    // Canonical before the pending-request key and the stored profile, so
+    // casing variants cannot open parallel signups for one mailbox.
+    let profile = PendingSignupProfile {
+        email: db::ent::canonical_email(&profile.email),
+        ..profile
+    };
     let user = crate::db::get_user_by_username(&profile.email)
         .await
         .map_err(ErrorResponse::internal)?;

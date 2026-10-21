@@ -2615,6 +2615,57 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
+    async fn emails_are_stored_canonical_and_matched_case_insensitively() {
+        let svc = test_service().await;
+        let user = svc
+            .create_user(
+                Profile::new(" Alice@Example.COM ".to_string(), "Alice".to_string()),
+                CredentialType::Password,
+                "hash",
+                None,
+                trusted_ctx(),
+            )
+            .await
+            .expect("create user");
+        assert_eq!(user.email, "alice@example.com");
+
+        for login in [
+            "alice@example.com",
+            "ALICE@example.com",
+            " Alice@Example.com",
+        ] {
+            let found = svc
+                .get_user_by_username(login)
+                .await
+                .expect("lookup")
+                .unwrap_or_else(|| panic!("{login:?} must find the account"));
+            assert_eq!(found.id, user.id);
+        }
+        // Nicknames keep exact matching.
+        assert!(svc.get_user_by_username("alice").await.unwrap().is_none());
+
+        // One mailbox is one account.
+        let duplicate = svc
+            .create_user(
+                Profile::new("ALICE@example.com".to_string(), "alice-2".to_string()),
+                CredentialType::Password,
+                "hash",
+                None,
+                trusted_ctx(),
+            )
+            .await;
+        assert!(duplicate.is_err());
+
+        let mut changed = user.clone();
+        changed.email = "Alice.New@Example.com".to_string();
+        let updated = svc
+            .update_user(changed, trusted_ctx())
+            .await
+            .expect("update user");
+        assert_eq!(updated.email, "alice.new@example.com");
+    }
+
+    #[tokio::test]
     async fn audit_user_lifecycle_uses_control_plane_safe_snapshots_without_legacy_writes() {
         let svc = test_service().await;
         let create_secret = "CREATE_PASSWORD_HASH_SECRET";

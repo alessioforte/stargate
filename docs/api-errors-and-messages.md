@@ -142,3 +142,8 @@ denied the same way.
 
 Each flow has its own budget, so flooding one does not block the others.
 Denied requests are not counted, so a continuing flood does not extend the window.
+
+`POST /account/credentials` answers `200 password.reset_requested` whether or
+not an account uses the address, and sends the email in the background, so
+neither the response nor its timing reveals the account. While a reset request
+is pending, a new request resends its link.

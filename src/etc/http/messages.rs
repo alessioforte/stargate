@@ -22,7 +22,6 @@ pub enum MessageCode {
     UserRemovedFromOrganization,
     ApiKeyDeleted,
     ApiKeyRevoked,
-    PasswordResetAlreadyRequested,
     PasswordResetRequested,
     PasswordChanged,
 }
@@ -44,7 +43,6 @@ impl MessageCode {
         Self::UserRemovedFromOrganization,
         Self::ApiKeyDeleted,
         Self::ApiKeyRevoked,
-        Self::PasswordResetAlreadyRequested,
         Self::PasswordResetRequested,
         Self::PasswordChanged,
     ];
@@ -66,7 +64,6 @@ impl MessageCode {
             Self::UserRemovedFromOrganization => "user.removed_from_organization",
             Self::ApiKeyDeleted => "api_key.deleted",
             Self::ApiKeyRevoked => "api_key.revoked",
-            Self::PasswordResetAlreadyRequested => "password.reset_already_requested",
             Self::PasswordResetRequested => "password.reset_requested",
             Self::PasswordChanged => "password.changed",
         }
@@ -89,10 +86,9 @@ impl MessageCode {
             Self::UserRemovedFromOrganization => "User removed from organization successfully",
             Self::ApiKeyDeleted => "API key deleted successfully",
             Self::ApiKeyRevoked => "API key revoked successfully",
-            Self::PasswordResetAlreadyRequested => {
-                "A password-reset request has already been sent. Please check your email."
+            Self::PasswordResetRequested => {
+                "If an account uses this address, a password-reset link has been sent. Please check your email."
             }
-            Self::PasswordResetRequested => "Password-reset request sent. Please check your email.",
             Self::PasswordChanged => "Password changed successfully",
         }
     }

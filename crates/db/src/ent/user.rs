@@ -2,6 +2,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The stored and compared form of an email address. One mailbox is one
+/// account, whatever casing is used at signup, login, or recovery.
+pub fn canonical_email(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
 #[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct User {

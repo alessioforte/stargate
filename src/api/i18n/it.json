@@ -148,8 +148,7 @@
     "user.removed_from_organization": "Utente rimosso dall'organizzazione correttamente",
     "api_key.deleted": "Chiave API eliminata correttamente",
     "api_key.revoked": "Chiave API revocata correttamente",
-    "password.reset_already_requested": "È già stata inviata una richiesta di reimpostazione della password. Controlla la tua email.",
-    "password.reset_requested": "Richiesta di reimpostazione della password inviata. Controlla la tua email.",
+    "password.reset_requested": "Se un account usa questo indirizzo, è stato inviato un link per reimpostare la password. Controlla la tua email.",
     "password.changed": "Password modificata correttamente"
   }
 }
