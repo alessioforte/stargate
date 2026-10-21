@@ -1,7 +1,8 @@
-// Prerenders the login route into `login.html` after `vite build`, so the
-// page works without JavaScript (the form posts natively to /oauth/login)
-// and hydrates when JavaScript runs. Also inlines Mantine's color scheme
-// script into every HTML entry to avoid a flash of the wrong theme.
+// Prerenders the pages the provider sends browsers to into `<route>.html`
+// after `vite build`, so they work without JavaScript (their forms post
+// natively to /oauth/login and /oauth/logout/confirm) and hydrate when
+// JavaScript runs. Also inlines Mantine's color scheme script into every
+// HTML entry to avoid a flash of the wrong theme.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,6 +14,8 @@ const appRoot = path.resolve(
 );
 const ssrOutDir = path.join(appRoot, "node_modules", ".prerender");
 const ROOT_PLACEHOLDER = '<div id="root"></div>';
+// Served by src/api/auth_app.rs; keep the two lists in sync.
+const PRERENDERED_ROUTES = ["login", "logout", "signed-out"];
 
 const config = await resolveConfig({ root: appRoot }, "build", "production");
 const outDir = path.resolve(config.root, config.build.outDir);
@@ -39,15 +42,16 @@ if (!template.includes(ROOT_PLACEHOLDER)) {
 }
 const withScheme = template.replace("</head>", `${colorSchemeScript()}</head>`);
 
-const loginPath = `${basename === "/" ? "" : basename}/login`;
-const markup = await render(loginPath, basename);
 fs.writeFileSync(indexPath, withScheme);
-fs.writeFileSync(
-  path.join(outDir, "login.html"),
-  withScheme.replace(ROOT_PLACEHOLDER, `<div id="root">${markup}</div>`),
-);
+for (const route of PRERENDERED_ROUTES) {
+  const routePath = `${basename === "/" ? "" : basename}/${route}`;
+  const markup = await render(routePath, basename);
+  fs.writeFileSync(
+    path.join(outDir, `${route}.html`),
+    withScheme.replace(ROOT_PLACEHOLDER, `<div id="root">${markup}</div>`),
+  );
+  console.log(
+    `prerendered ${routePath} -> ${path.relative(appRoot, outDir)}/${route}.html`,
+  );
+}
 fs.rmSync(ssrOutDir, { recursive: true, force: true });
-
-console.log(
-  `prerendered ${loginPath} -> ${path.relative(appRoot, outDir)}/login.html`,
-);

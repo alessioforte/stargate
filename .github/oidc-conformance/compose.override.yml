@@ -1,6 +1,13 @@
 # Layered over the conformance suite's docker-compose-prebuilt.yml so the suite
-# server can reach the Stargate process running on the CI host.
+# server can reach the Stargate process running on the CI host, and Stargate can
+# verify the suite's TLS certificate when it delivers back-channel logout tokens
+# (SUITE_TLS_DIR holds a certificate for localhost.emobix.co.uk signed by a test
+# CA that Stargate trusts through BACKCHANNEL_LOGOUT_CA_FILE).
 services:
   server:
     extra_hosts:
       - "stargate.local:host-gateway"
+  nginx:
+    volumes:
+      - ${SUITE_TLS_DIR:?set SUITE_TLS_DIR}/suite.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro
+      - ${SUITE_TLS_DIR:?set SUITE_TLS_DIR}/suite.key:/etc/ssl/private/nginx-selfsigned.key:ro

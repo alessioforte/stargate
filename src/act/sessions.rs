@@ -10,7 +10,11 @@
 //! account endpoints resolve subjects from the store by sid, and the
 //! refresh flow requires the sid record to rotate — a cryptographically
 //! valid JWT with no session behind it is rejected everywhere.
+//!
+//! Every function that ends sessions here also notifies the relying parties
+//! linked to them (OIDC Back-Channel Logout, see `backchannel_logout`).
 
+use super::backchannel_logout::{self, LogoutDelivery};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::auth::jwt::jwt_config;
 use crate::etc::auth::subject::{Subject, SubjectType};
@@ -306,30 +310,23 @@ pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreErr
     store.delete(&refresh_rotation_key(&record.id)).await?;
     store.hdel(&index_key(&record.user_id), sid).await?;
     store.hdel(SESSION_DIRECTORY_KEY, sid).await?;
+    backchannel_logout::notify(std::slice::from_ref(&record));
     Ok(Some(record))
 }
 
-/// Drop a session's registry and refresh-rotation metadata. The subject record
-/// is deleted by the caller.
-pub async fn forget_session(user_id: &str, sid: &str) {
+/// End the user's own session `sid` (logout): delete its subject, refresh
+/// rotation, and registry entries, whether or not the registry still knows
+/// it, and notify its relying parties.
+pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, StoreError> {
     let store = use_store();
-    if let Err(error) = store.delete(&refresh_rotation_key(sid)).await {
-        tracing::warn!(user_id, sid, "failed to remove refresh rotation: {error}");
-    }
-    if let Err(error) = store.hdel(&index_key(user_id), sid).await {
-        tracing::warn!(
-            user_id,
-            sid,
-            "failed to remove session from user index: {error}"
-        );
-    }
-    if let Err(error) = store.hdel(SESSION_DIRECTORY_KEY, sid).await {
-        tracing::warn!(
-            user_id,
-            sid,
-            "failed to remove session from directory: {error}"
-        );
-    }
+    let record = get_session(sid)
+        .await?
+        .filter(|record| record.user_id == user_id);
+    store.delete(sid).await?;
+    store.delete(&refresh_rotation_key(sid)).await?;
+    store.hdel(&index_key(user_id), sid).await?;
+    store.hdel(SESSION_DIRECTORY_KEY, sid).await?;
+    Ok(backchannel_logout::notify(record.as_slice()))
 }
 
 /// Delete every live session of the user (directory records are
@@ -339,7 +336,7 @@ pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
     let records = store
         .hgetall::<SessionRecord>(SESSION_DIRECTORY_KEY)
         .await?;
-    let mut revoked = 0;
+    let mut revoked = Vec::new();
     for (sid, record) in records {
         if record.user_id != user_id {
             continue;
@@ -347,10 +344,11 @@ pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
         store.delete(&sid).await?;
         store.delete(&refresh_rotation_key(&sid)).await?;
         store.hdel(SESSION_DIRECTORY_KEY, &sid).await?;
-        revoked += 1;
+        revoked.push(record);
     }
     store.delete(&index_key(user_id)).await?;
-    Ok(revoked)
+    backchannel_logout::notify(&revoked);
+    Ok(revoked.len())
 }
 
 /// Delete the user's sessions whose active org is `org_id`; org-less and
@@ -362,6 +360,7 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
     let entries = store.hgetall::<SessionIndexEntry>(&key).await?;
     let now = now_unix();
     let mut revoked = 0;
+    let mut records = Vec::new();
     for (sid, entry) in entries {
         let expired = entry.expires_at_unix <= now;
         let matches = entry.org_id.as_deref() == Some(org_id);
@@ -371,6 +370,7 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
                 store.delete(&refresh_rotation_key(&record.id)).await?;
                 store.hdel(SESSION_DIRECTORY_KEY, &sid).await?;
                 revoked += 1;
+                records.push(record);
             } else if store.delete(&sid).await? {
                 store.delete(&refresh_rotation_key(&sid)).await?;
                 revoked += 1;
@@ -380,6 +380,7 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
             let _ = store.hdel(&key, &sid).await;
         }
     }
+    backchannel_logout::notify(&records);
     Ok(revoked)
 }
 
@@ -568,16 +569,36 @@ mod index_tests {
     }
 
     #[tokio::test]
-    async fn forget_session_removes_the_index_entry_but_not_the_record() {
+    async fn end_session_removes_the_session_and_its_registry_entries() {
         let user = unique("user");
         let sid = unique("sid");
+        let other = unique("sid");
         seed_session(&user, &sid, None).await;
+        seed_session(&user, &other, None).await;
 
-        forget_session(&user, &sid).await;
+        end_session(&user, &sid).await.unwrap();
 
-        // The sid record is the caller's to delete; registry entries are gone.
-        assert!(use_store().exists(&sid).await.unwrap());
-        assert_eq!(revoke_all_sessions(&user).await.unwrap(), 0);
+        assert!(!use_store().exists(&sid).await.unwrap());
+        assert!(get_session(&sid).await.unwrap().is_none());
+        assert!(
+            !rotate_refresh_token(&sid, "refresh-jti", "next", 60)
+                .await
+                .unwrap()
+        );
+        // Other sessions of the user are untouched.
+        assert_eq!(revoke_all_sessions(&user).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn end_session_ignores_another_users_registry_record() {
+        let owner = unique("user");
+        let sid = unique("sid");
+        seed_session(&owner, &sid, None).await;
+
+        // A mismatched user still removes the sid but notifies nobody.
+        end_session("someone-else", &sid).await.unwrap();
+
+        assert!(!use_store().exists(&sid).await.unwrap());
     }
 
     #[tokio::test]

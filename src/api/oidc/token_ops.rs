@@ -165,11 +165,9 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
                 && let (Some(user_id), Some(sid)) =
                     (claims.sub_id.as_deref(), claims.sid.as_deref())
             {
-                crate::etc::store::use_store()
-                    .delete(sid)
+                crate::act::sessions::end_session(user_id, sid)
                     .await
                     .map_err(OAuthErrorResponse::internal)?;
-                crate::act::sessions::forget_session(user_id, sid).await;
             }
         }
         Err(_) => {

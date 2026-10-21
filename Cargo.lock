@@ -4424,6 +4424,7 @@ dependencies = [
  "otp",
  "pw",
  "redis",
+ "reqwest",
  "rsa",
  "rustls",
  "rustls-pemfile",

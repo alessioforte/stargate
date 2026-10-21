@@ -50,6 +50,7 @@
     "oauth_client.auth_method_unsupported": "Il metodo di autenticazione del client OAuth non è supportato",
     "oauth_client.redirect_uri_invalid": "L'URI di reindirizzamento del client OAuth non è valido",
     "oauth_client.redirect_uri_insecure": "L'URI di reindirizzamento del client OAuth deve usare HTTPS",
+    "oauth_client.backchannel_logout_uri_invalid": "L'URI di logout back-channel del client OAuth deve essere un URL HTTPS assoluto senza frammento",
     "oauth_client.grant_types_required": "È obbligatorio almeno un tipo di autorizzazione OAuth",
     "oauth_client.confidential_required": "Questa autorizzazione OAuth richiede un client riservato",
     "oauth_client.code_response_type_required": "I client Authorization Code devono supportare il tipo di risposta code",

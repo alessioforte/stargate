@@ -12,11 +12,15 @@ on:
       - "crates/oidc/**"
       - "src/api/oidc/**"
       - "src/etc/auth/**"
+      - "src/act/sessions.rs"
+      - "src/act/backchannel_logout.rs"
       - "src/api/account/login.rs"
+      - "src/api/account/logout.rs"
       - "src/api/account/session.rs"
       - "src/fun/build_jwt_cookie.rs"
       - "src/api/auth_app.rs"
       - "apps/auth/**"
+      - "migrations/**"
       - "Cargo.lock"
       - ".github/oidc-conformance/**"
       - ".github/workflows/oidc-conformance.yml"
@@ -26,11 +30,15 @@ on:
       - "crates/oidc/**"
       - "src/api/oidc/**"
       - "src/etc/auth/**"
+      - "src/act/sessions.rs"
+      - "src/act/backchannel_logout.rs"
       - "src/api/account/login.rs"
+      - "src/api/account/logout.rs"
       - "src/api/account/session.rs"
       - "src/fun/build_jwt_cookie.rs"
       - "src/api/auth_app.rs"
       - "apps/auth/**"
+      - "migrations/**"
       - "Cargo.lock"
       - ".github/oidc-conformance/**"
       - ".github/workflows/oidc-conformance.yml"
@@ -54,7 +62,7 @@ env:
 
 jobs:
   conformance:
-    name: Config OP and Basic OP plans
+    name: Config, Basic, and logout OP plans
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -70,11 +78,30 @@ jobs:
         with:
           key: oidc-conformance
 
+      # Stargate delivers back-channel logout tokens to the suite over TLS and
+      # verifies its certificate: a test CA signs one with the suite's
+      # hostname, which the override mounts into the suite's nginx.
+      - name: Create suite TLS certificate
+        run: |
+          dir="$RUNNER_TEMP/suite-tls"
+          mkdir -p "$dir" && cd "$dir"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=Conformance test CA" \
+            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign" \
+            -keyout ca.key -out ca.crt
+          openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost.emobix.co.uk" \
+            -keyout suite.key -out suite.csr
+          printf 'subjectAltName=DNS:localhost.emobix.co.uk\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\n' > ext.cnf
+          openssl x509 -req -in suite.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 \
+            -extfile ext.cnf -out suite.crt
+          chmod 644 suite.key
+          echo "SUITE_TLS_DIR=$dir" >> "$GITHUB_ENV"
+
       - name: Start conformance suite
         run: |
           git clone --quiet --depth 1 --branch "$SUITE_VERSION" \
             https://gitlab.com/openid/conformance-suite.git "$RUNNER_TEMP/conformance-suite"
-          # The override maps stargate.local to the runner, where Stargate listens.
+          # The override maps stargate.local to the runner, where Stargate listens,
+          # and serves the suite with the certificate created above.
           IMAGE_TAG="$SUITE_VERSION" docker compose --project-name oidc-conformance \
             -f "$RUNNER_TEMP/conformance-suite/docker-compose-prebuilt.yml" \
             -f .github/oidc-conformance/compose.override.yml \
@@ -113,6 +140,7 @@ jobs:
           export TLS_ENABLED=true TLS_CERT="$PWD/cert.pem" TLS_KEY="$PWD/key.pem" PORT=5443 \
             JWT_ISSUER=https://stargate.local:5443 MFA_MODE=off \
             AUTH_APP_DIR="$GITHUB_WORKSPACE/.stargate/apps/auth" \
+            BACKCHANNEL_LOGOUT_CA_FILE="$SUITE_TLS_DIR/ca.crt" \
             LOG_FILE_ENABLED=false LOG_CONSOLE_ENABLED=true
           "$GITHUB_WORKSPACE/target/debug/stargate" admin bootstrap \
             --email "$OIDC_TEST_USERNAME" --password "$OIDC_TEST_PASSWORD" \
@@ -143,17 +171,36 @@ jobs:
 
       # Full Authorization Code logins through the suite's headless browser.
       # REVIEW results (screenshots for certification) are not failures here.
+      # The configuration (static clients, browser scripts) also serves the
+      # logout plans below.
       - name: Run Basic OP plan
         run: |
-          API_URL=https://127.0.0.1:5443 .github/oidc-conformance/basic-op-setup.sh \
+          API_URL=https://127.0.0.1:5443 .github/oidc-conformance/op-setup.sh \
             https://stargate.local:5443 "$OIDC_TEST_USERNAME" "$OIDC_TEST_PASSWORD" \
-            "$RUNNER_TEMP/basic-op.json"
+            "$RUNNER_TEMP/op.json"
           "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
             --verbose --export-dir "$RUNNER_TEMP/results" \
             --expected-failures-file .github/oidc-conformance/basic-op-expected-failures.json \
             --expected-skips-file .github/oidc-conformance/basic-op-expected-skips.json \
             "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]" \
-            "$RUNNER_TEMP/basic-op.json"
+            "$RUNNER_TEMP/op.json"
+
+      # end_session_endpoint: logout with and without id_token_hint, the
+      # confirmation page, signed-out page, and error pages (REVIEW screenshots).
+      - name: Run RP-Initiated Logout OP plan
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
+            --verbose --export-dir "$RUNNER_TEMP/results" \
+            "oidcc-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" \
+            "$RUNNER_TEMP/op.json"
+
+      # Logout tokens delivered to the suite's backchannel_logout_uri.
+      - name: Run Back-Channel Logout OP plan
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
+            --verbose --export-dir "$RUNNER_TEMP/results" \
+            "oidcc-backchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" \
+            "$RUNNER_TEMP/op.json"
 
       - name: Collect suite logs
         if: always()

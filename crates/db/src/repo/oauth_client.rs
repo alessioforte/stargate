@@ -29,13 +29,16 @@ impl OAuthClientRepository {
                 grant_types,
                 response_types,
                 redirect_uris,
+                post_logout_redirect_uris,
+                backchannel_logout_uri,
+                backchannel_logout_session_required,
                 scopes,
                 audiences,
                 attrs,
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING *
         ",
             tbl = OAUTH_CLIENT
@@ -49,6 +52,9 @@ impl OAuthClientRepository {
         .bind(&client.grant_types)
         .bind(&client.response_types)
         .bind(&client.redirect_uris)
+        .bind(&client.post_logout_redirect_uris)
+        .bind(&client.backchannel_logout_uri)
+        .bind(client.backchannel_logout_session_required)
         .bind(&client.scopes)
         .bind(&client.audiences)
         .bind(&client.attrs)
@@ -192,10 +198,13 @@ impl OAuthClientRepository {
                 grant_types = $5,
                 response_types = $6,
                 redirect_uris = $7,
-                scopes = $8,
-                audiences = $9,
-                attrs = $10,
-                updated_at = $11
+                post_logout_redirect_uris = $8,
+                backchannel_logout_uri = $9,
+                backchannel_logout_session_required = $10,
+                scopes = $11,
+                audiences = $12,
+                attrs = $13,
+                updated_at = $14
             WHERE client_id = $1
             RETURNING *
         ",
@@ -208,6 +217,9 @@ impl OAuthClientRepository {
         .bind(&client.grant_types)
         .bind(&client.response_types)
         .bind(&client.redirect_uris)
+        .bind(&client.post_logout_redirect_uris)
+        .bind(&client.backchannel_logout_uri)
+        .bind(client.backchannel_logout_session_required)
         .bind(&client.scopes)
         .bind(&client.audiences)
         .bind(&client.attrs)

@@ -114,6 +114,28 @@ const OAuthClientFormFields: React.FC<Props> = ({
       <TagsInput
         disabled={disabled}
         variant="filled"
+        label={t("postLogoutRedirectUris")}
+        description={t("postLogoutRedirectUrisDescription")}
+        {...form.getInputProps("postLogoutRedirectUris")}
+      />
+      <TextInput
+        readOnly={disabled}
+        variant="filled"
+        label={t("backchannelLogoutUri")}
+        description={t("backchannelLogoutUriDescription")}
+        {...form.getInputProps("backchannelLogoutUri")}
+      />
+      <Checkbox
+        disabled={disabled}
+        label={t("backchannelLogoutSessionRequired")}
+        description={t("backchannelLogoutSessionRequiredDescription")}
+        {...form.getInputProps("backchannelLogoutSessionRequired", {
+          type: "checkbox",
+        })}
+      />
+      <TagsInput
+        disabled={disabled}
+        variant="filled"
         label={t("scopes")}
         {...form.getInputProps("scopes")}
       />

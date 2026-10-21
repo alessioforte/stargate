@@ -5,9 +5,11 @@ import ConsentPage from "./routes/consent";
 import HomeRedirect from "./routes/home-redirect";
 import LoginPage from "./routes/login";
 import LoginMFAPage from "./routes/login-mfa";
+import LogoutPage from "./routes/logout";
 import PasswordlessLoginPage from "./routes/login-passwordless";
 import ResetPasswordPage from "./routes/reset-password";
 import SelectOrganizationPage from "./routes/select-organization";
+import SignedOutPage from "./routes/signed-out";
 import SignupPage from "./routes/signup";
 
 /**
@@ -37,6 +39,14 @@ export const routeObjects: RouteObject[] = [
       {
         path: "consent",
         element: <ConsentPage />,
+      },
+      {
+        path: "logout",
+        element: <LogoutPage />,
+      },
+      {
+        path: "signed-out",
+        element: <SignedOutPage />,
       },
       {
         path: "select-organization",

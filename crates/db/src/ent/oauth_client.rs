@@ -15,6 +15,12 @@ pub struct OAuthClient {
     pub grant_types: sqlx::types::Json<Vec<String>>,
     pub response_types: sqlx::types::Json<Vec<String>>,
     pub redirect_uris: sqlx::types::Json<Vec<String>>,
+    /// Where RP-Initiated Logout may send the browser afterwards (exact match).
+    pub post_logout_redirect_uris: sqlx::types::Json<Vec<String>>,
+    /// Back-Channel Logout endpoint that receives logout tokens.
+    pub backchannel_logout_uri: Option<String>,
+    /// Logout tokens must carry `sid` (always true for Stargate's tokens).
+    pub backchannel_logout_session_required: bool,
     pub scopes: sqlx::types::Json<Vec<String>>,
     pub audiences: sqlx::types::Json<Vec<String>>,
     pub attrs: Value,
@@ -48,6 +54,9 @@ impl OAuthClient {
             grant_types: sqlx::types::Json(grant_types),
             response_types: sqlx::types::Json(response_types),
             redirect_uris: sqlx::types::Json(redirect_uris),
+            post_logout_redirect_uris: sqlx::types::Json(Vec::new()),
+            backchannel_logout_uri: None,
+            backchannel_logout_session_required: false,
             scopes: sqlx::types::Json(scopes),
             audiences: sqlx::types::Json(audiences),
             attrs,

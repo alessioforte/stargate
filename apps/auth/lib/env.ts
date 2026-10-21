@@ -26,6 +26,11 @@ export function oauthLoginAction() {
   return `${cleanUrl(import.meta.env.VITE_API_URL) ?? ""}/oauth/login`;
 }
 
+/** Native form target of the logout confirmation page. */
+export function oauthLogoutConfirmAction() {
+  return `${cleanUrl(import.meta.env.VITE_API_URL) ?? ""}/oauth/logout/confirm`;
+}
+
 export function getAuthAppConfig(): AuthAppConfig {
   return {
     apiUrl: cleanUrl(import.meta.env.VITE_API_URL) ?? browserOrigin(),

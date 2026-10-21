@@ -407,6 +407,9 @@ export interface OAuthClient {
   grantTypes: OAuthGrantType[];
   name: string;
   redirectUris: string[];
+  postLogoutRedirectUris: string[];
+  backchannelLogoutUri?: string | null;
+  backchannelLogoutSessionRequired: boolean;
   responseTypes: OAuthResponseType[];
   scopes: string[];
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;
@@ -421,6 +424,9 @@ export interface CreateOAuthClientRequest {
   grantTypes: OAuthGrantType[];
   name: string;
   redirectUris?: string[] | null;
+  postLogoutRedirectUris?: string[] | null;
+  backchannelLogoutUri?: string | null;
+  backchannelLogoutSessionRequired?: boolean | null;
   responseTypes?: OAuthResponseType[] | null;
   scopes?: string[] | null;
   tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod | null;
@@ -437,6 +443,9 @@ export interface UpdateOAuthClientRequest {
   grantTypes: OAuthGrantType[];
   name: string;
   redirectUris?: string[];
+  postLogoutRedirectUris?: string[];
+  backchannelLogoutUri?: string | null;
+  backchannelLogoutSessionRequired?: boolean;
   responseTypes?: OAuthResponseType[];
   scopes?: string[];
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;

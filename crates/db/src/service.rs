@@ -129,6 +129,9 @@ struct OAuthClientAuditSnapshot<'a> {
     grant_types: &'a [String],
     response_types: &'a [String],
     redirect_uris: &'a [String],
+    post_logout_redirect_uris: &'a [String],
+    backchannel_logout_uri: Option<&'a str>,
+    backchannel_logout_session_required: bool,
     scopes: &'a [String],
     audiences: &'a [String],
 }
@@ -142,6 +145,9 @@ impl<'a> From<&'a OAuthClient> for OAuthClientAuditSnapshot<'a> {
             grant_types: client.grant_types.as_slice(),
             response_types: client.response_types.as_slice(),
             redirect_uris: client.redirect_uris.as_slice(),
+            post_logout_redirect_uris: client.post_logout_redirect_uris.as_slice(),
+            backchannel_logout_uri: client.backchannel_logout_uri.as_deref(),
+            backchannel_logout_session_required: client.backchannel_logout_session_required,
             scopes: client.scopes.as_slice(),
             audiences: client.audiences.as_slice(),
         }
@@ -490,6 +496,15 @@ fn oauth_client_changed_fields(before: &OAuthClient, after: &OAuthClient) -> Vec
     }
     if before.redirect_uris != after.redirect_uris {
         fields.push("redirect_uris");
+    }
+    if before.post_logout_redirect_uris != after.post_logout_redirect_uris {
+        fields.push("post_logout_redirect_uris");
+    }
+    if before.backchannel_logout_uri != after.backchannel_logout_uri {
+        fields.push("backchannel_logout_uri");
+    }
+    if before.backchannel_logout_session_required != after.backchannel_logout_session_required {
+        fields.push("backchannel_logout_session_required");
     }
     if before.scopes != after.scopes {
         fields.push("scopes");
@@ -4144,9 +4159,13 @@ mod tests {
         assert_eq!(event["action"], "user.created");
         assert_eq!(event["scope"]["kind"], "control_plane");
         assert_eq!(event["actor"]["type"], "admin");
+        // Emails and nicknames are stored canonical (lowercase).
         assert_eq!(
             event["after"],
-            serde_json::json!({ "email": email, "nickname": nickname })
+            serde_json::json!({
+                "email": email.to_lowercase(),
+                "nickname": nickname.to_lowercase(),
+            })
         );
         assert_eq!(event["metadata"]["source"], "admin_api");
         assert!(!payload.contains(password_secret));

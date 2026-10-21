@@ -214,6 +214,9 @@ under `account:session-refresh:{sid}`. The store keeps a per-user index plus the
 `account:sessions:directory` hash (sid, org, times, linked OAuth client ids).
 Removing a session invalidates linked OAuth tokens for Stargate's own checks
 (admin, userinfo, introspection, OAuth refresh). Admin endpoints list/revoke sessions.
+Every function in `act/sessions.rs` that ends sessions (`end_session` for a user's
+own logout, `revoke_session`, `revoke_all_sessions`, `revoke_org_sessions`) also
+notifies the linked clients through OIDC Back-Channel Logout (`act/backchannel_logout.rs`).
 
 ### Multi-Org
 
@@ -280,6 +283,7 @@ Endpoints:
 - `/oauth/token` (`Cache-Control: no-store`)
 - `GET`/`POST /oauth/userinfo` (POST also accepts form `access_token`)
 - `/oauth/introspect`, `/oauth/revoke`
+- `GET`/`POST /oauth/logout` (`end_session_endpoint`), `POST /oauth/logout/confirm`
 - `/admin/oauth/clients/*`
 
 Provider login (one login UI, the hosted auth app):
@@ -289,9 +293,9 @@ Provider login (one login UI, the hosted auth app):
   setting the `oauth_interaction` cookie (`SameSite=Strict`, `Path=/oauth/login`).
 - With JS the SPA signs in via `/account/login` and follows `return_to`; a session
   newer than the parked request satisfies `prompt=login` / `max_age`.
-- The `apps/auth` build prerenders the login route (`scripts/prerender.mjs`,
-  `app/entry-server.tsx`) into `login.html`, served by `src/api/auth_app.rs` for
-  `/auth/login`; `app/main.tsx` hydrates it. Keep the first render of hydrated
+- The `apps/auth` build prerenders the login, logout, and signed-out routes
+  (`scripts/prerender.mjs`, `app/entry-server.tsx`) into `<route>.html`, served by
+  `src/api/auth_app.rs` (same list) for `/auth/<route>`; `app/main.tsx` hydrates them. Keep the first render of hydrated
   routes free of URL/storage reads (`lib/hydration.ts` `useHydrated`).
 - Without JS the form posts natively to `POST /oauth/login` (`src/api/oidc/login.rs`):
   password-only, redirects only; MFA / expired password -> `error=javascript_required`.
@@ -315,12 +319,37 @@ Consent (`src/api/oidc/consent.rs`, SPA `app/routes/consent.tsx`, JS only):
 - Writes take the user's `TrustedAuditContext` (actor `user`, application scope; the
   service rejects other users) and emit `oauth_consent.granted` / `.updated` / `.revoked`.
 
+Logout (`src/api/oidc/logout.rs`, RP-Initiated Logout 1.0; `act/backchannel_logout.rs`,
+Back-Channel Logout 1.0):
+- `/oauth/logout` takes `id_token_hint` (may be expired), `client_id`,
+  `post_logout_redirect_uri` (exact match against the client's
+  `post_logout_redirect_uris`), and `state`. Invalid hint, unregistered or client-less
+  redirect, or unknown client -> `400`, no redirect, session kept. A cross-site `POST`
+  (no `SameSite=Lax` session cookie) is bounced to the `GET` form.
+- A hint naming the browser's current session (user and `sid`) ends it at once.
+  Otherwise the request is parked (`oauth:logout-request:{id}`, 10 min, id in the
+  `oauth_logout` cookie, `SameSite=Strict`, `Path=/oauth/logout`) and the user confirms
+  on the prerendered `/auth/logout` page, whose form posts natively to
+  `/oauth/logout/confirm` (`action=logout|cancel`). Then `post_logout_redirect_uri`
+  (+`state`) or `/auth/signed-out`; the session cookie is cleared.
+- Ending a session notifies each linked client with a `backchannel_logout_uri`: a
+  `logout_token` (`typ: logout+jwt`, ID token key, `sub`, `aud`, `sid`, `events`, 2 min)
+  posted in-process, best effort (5s timeout, 2 retries on network errors/5xx, none on
+  4xx, no redirects, not persisted). RP-Initiated Logout waits up to 3s before redirecting.
+  `BACKCHANNEL_LOGOUT_CA_FILE` adds trusted roots. Expiring sessions are not announced.
+- The Console logs out through `/oauth/logout` with its ID token; `admin bootstrap`
+  registers the Console root (callback URI without `/auth/callback`) as its
+  `post_logout_redirect_uri`.
+
 Authorization request handling:
 - Errors after the client and `redirect_uri` are verified are redirected with
   OAuth codes (`invalid_request`, `unsupported_response_type`, `unauthorized_client`,
   `invalid_scope`, `login_required`, `consent_required`, `interaction_required`,
   `request_not_supported`, `request_uri_not_supported`); before that, `400`.
 - Unregistered scopes are dropped; `openid` is required. `max_age=0` = `prompt=login`.
+- `id_token_hint` must verify (else `invalid_request`); a session of another user is
+  `login_required` with `prompt=none` or after a resumed sign-in, else the login page
+  prefilled with the hinted user's email.
 - A replayed authorization code revokes the access token and refresh family it issued.
 
 Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
@@ -360,10 +389,13 @@ Provider state:
 - SQL: `oauth_clients`, `oauth_consents`.
 - Store: `oauth:authorization-code:{code_hash}` (pending/redeemed, TTL),
   `oauth:refresh-family:{family_id}` (CAS rotation), `oauth:authorize-interaction:{id}`,
-  and JWT `jti` revocations until expiry.
+  `oauth:logout-request:{id}`, and JWT `jti` revocations until expiry.
 
 Client notes:
 - Client secrets are returned only on create/rotate and stored as hashes.
+- Logout metadata are columns (`post_logout_redirect_uris`, same rules as
+  `redirect_uris`; `backchannel_logout_uri`, absolute HTTPS or loopback HTTP, no
+  fragment; `backchannel_logout_session_required`, informational since `sid` is always sent).
 - Public clients use `token_endpoint_auth_method = none` and always need PKCE.
 - Confidential clients require PKCE unless `attrs.require_pkce = false`; a code
   issued without a challenge rejects a `code_verifier` (downgrade protection).
@@ -377,8 +409,11 @@ Client notes:
 - The Console uses the reserved public client `stargate_console`, created by
   `admin bootstrap`.
 
-Conformance: Config OP and Basic OP plans run in `.github/workflows/oidc-conformance.yml`
-(builds `apps/auth` too). Expected warnings/skips are in `.github/oidc-conformance/`.
+Conformance: Config OP, Basic OP, RP-Initiated Logout OP, and Back-Channel Logout OP
+plans run in `.github/workflows/oidc-conformance.yml` (builds `apps/auth` too; one
+`op-setup.sh` config for the last three). The suite is served with a test-CA certificate
+that Stargate trusts for back-channel delivery. Expected warnings/skips are in
+`.github/oidc-conformance/`.
 Docs: `docs/oauth-oidc-provider-guide.md`, `docs/oidc-conformance.md`.
 
 ## OTP, Passwordless Login, and MFA
@@ -500,6 +535,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
 | `OAUTH_BASE_URL` | issuer | Public base URL for provider endpoint links |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
+| `BACKCHANNEL_LOGOUT_CA_FILE` | - | PEM roots trusted (with the system ones) for back-channel logout endpoints |
 | `INTERNAL_CONTEXT_*` | see `.env.example` | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue |
 | `POSTGRES_ENDPOINT` / `_USERNAME` / `_PASSWORD` / `_DATABASE` | - | Postgres (cluster) |
 | `REDIS_URL` | - | Redis (cluster) |
@@ -650,9 +686,11 @@ audit relay -> save in-memory store -> flush telemetry.
   service accounts, sessions, audit outbox, gateway config, access-control
   policies). Reference implementation of the layering below. Served at `/stargate`.
 - `auth`: hosted login / auth-flow UI (password login, passwordless email OTP,
-  login MFA, reset/change password, organization choice). Same stack and
-  layering. Served at `/auth`; its login route is prerendered and hydrated (see
-  "Provider login"), other routes are client-rendered from `index.html`.
+  login MFA, reset/change password, organization choice, OIDC consent, logout
+  confirmation and signed-out pages). Same stack and
+  layering. Served at `/auth`; its login, logout, and signed-out routes are
+  prerendered and hydrated (see "Provider login"), other routes are client-rendered
+  from `index.html`.
 - `mail`: transactional email templates (`react-email`). A build-time template
   project, **not** a runtime SPA; it does not follow the layering below.
 

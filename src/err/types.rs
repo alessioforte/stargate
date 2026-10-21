@@ -90,6 +90,7 @@ pub enum ErrorCode {
     OAuthClientAuthMethodUnsupported,
     OAuthClientRedirectUriInvalid,
     OAuthClientRedirectUriInsecure,
+    OAuthClientBackchannelLogoutUriInvalid,
     OAuthClientGrantTypesRequired,
     OAuthClientConfidentialRequired,
     OAuthClientCodeResponseTypeRequired,
@@ -226,6 +227,7 @@ impl ErrorCode {
         Self::OAuthClientAuthMethodUnsupported,
         Self::OAuthClientRedirectUriInvalid,
         Self::OAuthClientRedirectUriInsecure,
+        Self::OAuthClientBackchannelLogoutUriInvalid,
         Self::OAuthClientGrantTypesRequired,
         Self::OAuthClientConfidentialRequired,
         Self::OAuthClientCodeResponseTypeRequired,
@@ -364,6 +366,9 @@ impl ErrorCode {
             Self::OAuthClientAuthMethodUnsupported => "oauth_client.auth_method_unsupported",
             Self::OAuthClientRedirectUriInvalid => "oauth_client.redirect_uri_invalid",
             Self::OAuthClientRedirectUriInsecure => "oauth_client.redirect_uri_insecure",
+            Self::OAuthClientBackchannelLogoutUriInvalid => {
+                "oauth_client.backchannel_logout_uri_invalid"
+            }
             Self::OAuthClientGrantTypesRequired => "oauth_client.grant_types_required",
             Self::OAuthClientConfidentialRequired => "oauth_client.confidential_required",
             Self::OAuthClientCodeResponseTypeRequired => "oauth_client.code_response_type_required",
@@ -665,6 +670,11 @@ impl ErrorCode {
                 Status::BAD_REQUEST,
                 Validation,
                 "OAuth client redirect URI must use HTTPS",
+            ),
+            Self::OAuthClientBackchannelLogoutUriInvalid => definition(
+                Status::BAD_REQUEST,
+                Validation,
+                "OAuth client back-channel logout URI must be an absolute HTTPS URL without a fragment",
             ),
             Self::OAuthClientGrantTypesRequired => definition(
                 Status::BAD_REQUEST,

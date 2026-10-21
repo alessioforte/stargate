@@ -244,6 +244,31 @@ export async function revokeToken(token: string, tokenTypeHint?: string) {
   }
 }
 
+/**
+ * The Console root, registered as the client's post_logout_redirect_uri by
+ * `admin bootstrap`: the callback URI without `/auth/callback`.
+ */
+function postLogoutRedirectUri(redirectUri: string) {
+  const callback = "/auth/callback";
+  return redirectUri.endsWith(callback)
+    ? `${redirectUri.slice(0, -callback.length)}/`
+    : null;
+}
+
+/** OpenID Connect RP-Initiated Logout request for the stored ID token. */
+export function buildEndSessionUrl(idToken: string) {
+  const config = getOAuthConfig();
+  const params = new URLSearchParams({
+    id_token_hint: idToken,
+    client_id: config.clientId,
+  });
+  const postLogout = postLogoutRedirectUri(config.redirectUri);
+  if (postLogout) {
+    params.set("post_logout_redirect_uri", postLogout);
+  }
+  return `${config.apiUrl}/oauth/logout?${params.toString()}`;
+}
+
 export async function logoutAndRedirect(returnPath = "/") {
   const tokens = getStoredTokens();
 
@@ -253,5 +278,12 @@ export async function logoutAndRedirect(returnPath = "/") {
 
   clearTokens();
   clearOAuthRequest();
+  // Ending the Stargate sign-in session too, so the next visit signs in
+  // again instead of silently reusing it. The provider sends the browser
+  // back to the Console root.
+  if (tokens?.id_token) {
+    window.location.assign(buildEndSessionUrl(tokens.id_token));
+    return;
+  }
   await redirectToHostedLogin(returnPath);
 }

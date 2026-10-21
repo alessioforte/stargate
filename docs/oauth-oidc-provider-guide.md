@@ -20,6 +20,8 @@ OAuth/OIDC:
 - `POST /oauth/userinfo`
 - `POST /oauth/introspect`
 - `POST /oauth/revoke`
+- `GET /oauth/logout`, `POST /oauth/logout` (`end_session_endpoint`, see "Logout")
+- `POST /oauth/logout/confirm` (form post of the hosted logout page)
 
 Admin client registry:
 
@@ -134,6 +136,12 @@ Important fields:
 - `grant_types`: `client_credentials`, `authorization_code`, `refresh_token`
 - `response_types`: `code`
 - `redirect_uris`: exact redirect URIs, no wildcards
+- `post_logout_redirect_uris`: where RP-Initiated Logout may return the browser
+  (exact match, same rules as `redirect_uris`)
+- `backchannel_logout_uri`: absolute HTTPS URL (HTTP only on loopback hosts),
+  no fragment, that receives Back-Channel Logout tokens
+- `backchannel_logout_session_required`: the client needs `sid` in logout
+  tokens; Stargate always sends it
 - `scopes`: allowed scopes
 - `audiences`: allowed resource audiences
 - `attrs`: optional client flags
@@ -304,6 +312,13 @@ With `prompt=none` Stargate never shows the login page and redirects back with:
 ```text
 error=login_required
 ```
+
+`id_token_hint` names the user the client expects: an ID token Stargate issued
+(possibly expired). A hint that does not verify (signature, issuer) fails with
+`invalid_request`. When the signed-in user is someone else, `prompt=none`, or a
+request resumed after sign-in, fails with `login_required`; otherwise the
+browser goes to the login page prefilled with the hinted user's email (unless
+the request has its own `login_hint`).
 
 The session cookie is `SameSite=Lax`, so a user already signed in to Stargate
 is recognized when a relying party on another site redirects to
@@ -519,6 +534,84 @@ Broader revocation requires:
 
 JWT revocation stores revoked `jti` state until token expiry. Invisible or inactive tokens are no-op success.
 
+## Logout
+
+### RP-Initiated Logout
+
+Discovery advertises `end_session_endpoint` (`/oauth/logout`, OpenID Connect
+RP-Initiated Logout 1.0). Send the browser there with:
+
+```text
+GET /oauth/logout?
+  id_token_hint=<ID token issued to the client>&
+  post_logout_redirect_uri=https%3A%2F%2Fapp.example.com%2Flogged-out&
+  state=opaque-state
+```
+
+- `id_token_hint` is recommended and may be expired. It must verify, and
+  `client_id`, when also sent, must equal its audience.
+- `post_logout_redirect_uri` must exactly match one of the client's
+  `post_logout_redirect_uris`; the client comes from `client_id` or the hint.
+  `state` is returned unchanged. Without it Stargate shows the auth app's
+  signed-out page (`/auth/signed-out`).
+- `logout_hint` and `ui_locales` are accepted and ignored.
+- `POST` takes the same form-encoded parameters. A cross-site form post
+  arrives without the `SameSite=Lax` session cookie, so it is redirected to
+  the `GET` form first.
+
+When the hint names the browser's current session (same user and `sid`), the
+session ends at once. Otherwise, with no hint, a hint for another user, or a
+hint for an older session, Stargate parks the request for 10 minutes and the
+user confirms on the auth app's logout page (`/auth/logout`), so a link on
+another site cannot sign users out. The page is prerendered and its form posts
+natively to `/oauth/logout/confirm`, with or without JavaScript; the parked
+request travels in the `oauth_logout` cookie (`HttpOnly`, `SameSite=Strict`,
+`Path=/oauth/logout`). "Stay signed in" returns to the client (or the auth
+app) without signing out. A browser without a session is sent straight to
+the destination.
+
+An invalid hint, an unregistered or client-less `post_logout_redirect_uri`, or
+an unknown `client_id` answers `400 invalid_request` and never redirects, and
+the session stays.
+
+Ending the session deletes the browser's login session (`sid`) and clears the
+session cookie. Every OAuth token linked to that session stops working for
+Stargate's own checks (userinfo, introspection, refresh), and relying parties
+linked to it receive back-channel logout tokens.
+
+### Back-Channel Logout
+
+Discovery advertises `backchannel_logout_supported` and
+`backchannel_logout_session_supported` (OpenID Connect Back-Channel Logout
+1.0). Clients that registered a `backchannel_logout_uri` and received tokens in
+a session get a `POST` with a form-encoded `logout_token` whenever that session
+ends:
+
+- RP-Initiated Logout and `DELETE /account/logout`;
+- `POST /account/logout/all` and the revocation of a native refresh token;
+- admin session revocation (one session or all of a user's) and user deletion;
+- removal from an organization, or its deletion, for the sessions acting in it.
+
+A session that simply expires is not announced; clients rely on token expiry.
+
+The logout token is a JWT signed with the ID token key (`typ: logout+jwt`,
+RS256 when `JWT_ID_TOKEN_KID` is set) with `iss`, `sub` (the ID token
+subject), `aud` (the client), `iat`, `exp` (two minutes), `jti`, `sid`, and
+`events: {"http://schemas.openid.net/event/backchannel-logout": {}}`, and no
+`nonce`. Verify it with the JWKS like an ID token.
+
+Delivery runs in the Stargate process, best effort: a 5-second timeout, two
+retries (after 1 and 3 seconds) on network errors and `5xx`, none on `4xx`,
+redirects not followed. RP-Initiated Logout waits up to 3 seconds for delivery
+before redirecting the browser. Nothing is persisted, so notifications in
+flight during a restart are lost. Relying parties behind a private CA can be
+trusted with `BACKCHANNEL_LOGOUT_CA_FILE` (PEM bundle, added to the system
+roots).
+
+The Console logs out this way: it sends its ID token to `/oauth/logout` and
+returns to its root, its registered `post_logout_redirect_uri` (`admin
+bootstrap` registers the callback URI without `/auth/callback`).
+
 ## Current Limits
 
 - Dynamic client registration is not supported.
@@ -530,3 +623,5 @@ JWT revocation stores revoked `jti` state until token expiry. Invisible or inact
 - OAuth AS metadata does not advertise `scopes_supported`; there is no global OAuth scope registry.
 - OAuth clients cannot broadly introspect/revoke API keys; admin grants still handle API-key revocation.
 - Full end-to-end OAuth/OIDC integration tests are still pending.
+- Front-Channel Logout and OIDC Session Management (`check_session_iframe`) are not supported.
+- Back-channel logout delivery is in-process and not persisted (see "Back-Channel Logout").

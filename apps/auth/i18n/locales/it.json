@@ -86,5 +86,15 @@
     "interaction_expired": "Questa richiesta di accesso è scaduta. Torna all'applicazione e riprova.",
     "javascript_required": "L'accesso a questo account richiede un passaggio aggiuntivo (codice di verifica o cambio password) che necessita di JavaScript. Abilita JavaScript e riprova.",
     "server_error": "Si è verificato un errore. Riprova più tardi."
-  }
+  },
+  "logoutTitle": "Vuoi uscire?",
+  "logoutDescription": "Un'applicazione ha chiesto di farti uscire da Stargate. Uscirai da tutte le applicazioni che usano questo accesso.",
+  "logoutConfirm": "Esci",
+  "logoutCancel": "Resta connesso",
+  "logoutErrors": {
+    "logout_expired": "Questa richiesta di uscita è scaduta. Torna all'applicazione ed esci di nuovo."
+  },
+  "signedOutTitle": "Sei uscito",
+  "signedOutDescription": "La tua sessione Stargate è terminata. Puoi chiudere questa pagina.",
+  "signInAgain": "Accedi di nuovo"
 }

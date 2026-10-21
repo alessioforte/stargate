@@ -3,6 +3,7 @@ pub(crate) mod authorize;
 pub(crate) mod consent;
 mod interactions;
 pub(crate) mod login;
+pub(crate) mod logout;
 mod pkce;
 mod refresh_tokens;
 mod shared;
@@ -14,6 +15,7 @@ pub(crate) mod well_known;
 pub use authorize::{get_authorize, post_authorize};
 pub use consent::{get_interaction, post_consent};
 pub use login::post_login;
+pub use logout::{get_logout, post_logout, post_logout_confirm};
 pub use token::post_token;
 pub use token_ops::{post_introspect, post_revoke};
 pub use userinfo::{get_userinfo, post_userinfo};
@@ -43,6 +45,12 @@ pub fn router() -> axum::Router {
         .route(
             "/oauth/login",
             post(post_login).layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
+        )
+        .route("/oauth/logout", get(get_logout).post(post_logout))
+        .route(
+            "/oauth/logout/confirm",
+            post(post_logout_confirm)
+                .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
         )
         .route("/oauth/interactions/{interaction_id}", get(get_interaction))
         .route(

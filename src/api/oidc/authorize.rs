@@ -37,6 +37,8 @@ pub struct AuthorizeQuery {
     prompt: Option<String>,
     max_age: Option<String>,
     pub(crate) login_hint: Option<String>,
+    /// A previously issued ID token naming the expected user (may be expired).
+    id_token_hint: Option<String>,
     request: Option<String>,
     request_uri: Option<String>,
     /// Resumes a request parked while the user signed in.
@@ -57,9 +59,10 @@ impl AuthorizeQuery {
     }
 }
 
-struct AuthorizedUser {
-    user: db::ent::User,
-    sid: String,
+/// The browser's signed-in user, from the session cookie.
+pub(super) struct AuthorizedUser {
+    pub(super) user: db::ent::User,
+    pub(super) sid: String,
     auth_time: chrono::DateTime<Utc>,
 }
 
@@ -153,7 +156,32 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
         Err(err) => return error_redirect(&err.error, err.description()),
     };
 
+    let hinted_subject = match query
+        .id_token_hint
+        .as_deref()
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+    {
+        Some(hint) => match crate::etc::auth::jwt::jwt_config().validate_id_token_hint(hint) {
+            Ok(claims) => Some(claims.sub),
+            Err(_) => return error_redirect("invalid_request", "id_token_hint is invalid"),
+        },
+        None => None,
+    };
+
     let user = current_authorized_user(token).await?;
+    // The session must belong to the user the hint names (OIDC Core 3.1.2.1).
+    if let (Some(user), Some(subject)) = (&user, &hinted_subject)
+        && user.user.id != *subject
+    {
+        if prompt.none || parked_at.is_some() {
+            return error_redirect(
+                "login_required",
+                "the signed-in user is not the one named by id_token_hint",
+            );
+        }
+        return login_redirect(query, hinted_subject.as_deref()).await;
+    }
     // A parked consent stage only counts for the user it was created for.
     let stage_for_user = |user: &AuthorizedUser| {
         consent_stage
@@ -167,7 +195,7 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
         Some(user) if parked_at.is_some_and(|at| user.auth_time.timestamp() >= at) => user,
         Some(user) if !prompt.login && !max_age_exceeded(&user, request.max_age) => user,
         _ if prompt.none => return error_redirect("login_required", "login required"),
-        _ => return login_redirect(query).await,
+        _ => return login_redirect(query, hinted_subject.as_deref()).await,
     };
 
     let approved = stage_for_user(&user).is_some_and(|stage| stage.approved);
@@ -209,9 +237,21 @@ fn max_age_exceeded(user: &AuthorizedUser, max_age: Option<i64>) -> bool {
 }
 
 /// Park the request and send the browser to the hosted auth app's login
-/// page, which resumes it after a successful sign-in.
-async fn login_redirect(mut query: AuthorizeQuery) -> OAuthResult<Response> {
+/// page, which resumes it after a successful sign-in. Without a `login_hint`,
+/// the user named by `id_token_hint` is prefilled.
+async fn login_redirect(
+    mut query: AuthorizeQuery,
+    hinted_subject: Option<&str>,
+) -> OAuthResult<Response> {
     query.interaction = None;
+    if query.login_hint.is_none()
+        && let Some(subject) = hinted_subject
+    {
+        query.login_hint = crate::db::get_user_by_id(subject)
+            .await
+            .map_err(OAuthErrorResponse::internal)?
+            .map(|user| user.email);
+    }
     let login_hint = query.login_hint.clone();
     let id = interactions::park(query).await?;
     let mut response = found_redirect(interactions::login_page_url(interactions::LoginPage {
@@ -383,7 +423,9 @@ fn validate_authorize_prompt(prompt: Option<&str>) -> OAuthResult<AuthorizePromp
     })
 }
 
-async fn current_authorized_user(token: Option<String>) -> OAuthResult<Option<AuthorizedUser>> {
+pub(super) async fn current_authorized_user(
+    token: Option<String>,
+) -> OAuthResult<Option<AuthorizedUser>> {
     let Some(token) = token else {
         return Ok(None);
     };

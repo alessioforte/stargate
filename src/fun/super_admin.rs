@@ -74,7 +74,8 @@ pub async fn bootstrap_instance(
         _ => bail!("bootstrap requires both an email and a password for the first super admin"),
     };
 
-    let client = OAuthClient::new(
+    let post_logout_redirect_uri = console_post_logout_redirect_uri(&redirect_uri);
+    let mut client = OAuthClient::new(
         client_id.clone(),
         None,
         "Stargate Console".to_string(),
@@ -98,6 +99,7 @@ pub async fn bootstrap_instance(
             "system": true,
         }),
     );
+    client.post_logout_redirect_uris.0 = post_logout_redirect_uri.into_iter().collect();
     let result = crate::db::bootstrap_instance(
         profile,
         password_hash.as_deref(),
@@ -116,6 +118,14 @@ pub async fn bootstrap_instance(
         info!("Console OAuth client '{}' bootstrapped", client_id);
     }
     Ok(result)
+}
+
+/// The Console root, where it lands after RP-Initiated Logout: its callback
+/// URI without `/auth/callback` (the Console derives the same value).
+fn console_post_logout_redirect_uri(redirect_uri: &str) -> Option<String> {
+    redirect_uri
+        .strip_suffix("/auth/callback")
+        .map(|base| format!("{base}/"))
 }
 
 fn nonempty_env(key: &str) -> Option<String> {
@@ -168,6 +178,19 @@ fn validate_console_oauth_redirect_uri(redirect_uri: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn console_post_logout_redirect_uri_is_the_console_root() {
+        assert_eq!(
+            console_post_logout_redirect_uri("https://id.example.com/stargate/auth/callback")
+                .as_deref(),
+            Some("https://id.example.com/stargate/")
+        );
+        assert_eq!(
+            console_post_logout_redirect_uri("https://id.example.com/callback"),
+            None
+        );
+    }
 
     #[test]
     fn validates_console_client_id() {

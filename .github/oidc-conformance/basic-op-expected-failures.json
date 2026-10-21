@@ -2,7 +2,7 @@
     {
         "test-name": "oidcc-scope-profile",
         "variant": "*",
-        "configuration-filename": "*basic-op*.json",
+        "configuration-filename": "*op.json",
         "current-block": "",
         "condition": "VerifyScopesReturnedInUserInfoClaims",
         "expected-result": "warning",
@@ -11,7 +11,7 @@
     {
         "test-name": "oidcc-scope-email",
         "variant": "*",
-        "configuration-filename": "*basic-op*.json",
+        "configuration-filename": "*op.json",
         "current-block": "Verify authorization endpoint response",
         "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
         "expected-result": "warning",
@@ -20,7 +20,7 @@
     {
         "test-name": "oidcc-alternate-happy-flow",
         "variant": "*",
-        "configuration-filename": "*basic-op*.json",
+        "configuration-filename": "*op.json",
         "current-block": "Verify authorization endpoint response",
         "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
         "expected-result": "warning",
@@ -29,7 +29,7 @@
     {
         "test-name": "oidcc-ensure-request-with-acr-values-succeeds",
         "variant": "*",
-        "configuration-filename": "*basic-op*.json",
+        "configuration-filename": "*op.json",
         "current-block": "Verify authorization endpoint response",
         "condition": "ValidateIdTokenACRClaimAgainstAcrValuesRequest",
         "expected-result": "warning",
@@ -38,7 +38,7 @@
     {
         "test-name": "oidcc-claims-essential",
         "variant": "*",
-        "configuration-filename": "*basic-op*.json",
+        "configuration-filename": "*op.json",
         "current-block": "",
         "condition": "EnsureUserInfoContainsName",
         "expected-result": "warning",

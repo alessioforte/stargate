@@ -36,6 +36,9 @@ pub struct OAuthClientSchema {
     pub grant_types: Vec<String>,
     pub response_types: Vec<String>,
     pub redirect_uris: Vec<String>,
+    pub post_logout_redirect_uris: Vec<String>,
+    pub backchannel_logout_uri: Option<String>,
+    pub backchannel_logout_session_required: bool,
     pub scopes: Vec<String>,
     pub audiences: Vec<String>,
     pub attrs: Value,
@@ -56,6 +59,9 @@ impl From<OAuthClient> for OAuthClientSchema {
             grant_types: client.grant_types.0,
             response_types: client.response_types.0,
             redirect_uris: client.redirect_uris.0,
+            post_logout_redirect_uris: client.post_logout_redirect_uris.0,
+            backchannel_logout_uri: client.backchannel_logout_uri,
+            backchannel_logout_session_required: client.backchannel_logout_session_required,
             scopes: client.scopes.0,
             audiences: client.audiences.0,
             attrs: client.attrs,
@@ -118,6 +124,12 @@ pub struct CreateOAuthClientRequest {
     #[serde(default)]
     pub redirect_uris: Option<Vec<String>>,
     #[serde(default)]
+    pub post_logout_redirect_uris: Option<Vec<String>>,
+    #[serde(default)]
+    pub backchannel_logout_uri: Option<String>,
+    #[serde(default)]
+    pub backchannel_logout_session_required: Option<bool>,
+    #[serde(default)]
     pub scopes: Option<Vec<String>>,
     #[serde(default)]
     pub audiences: Option<Vec<String>>,
@@ -137,6 +149,12 @@ pub struct UpdateOAuthClientRequest {
     pub response_types: Vec<String>,
     #[serde(default)]
     pub redirect_uris: Vec<String>,
+    #[serde(default)]
+    pub post_logout_redirect_uris: Vec<String>,
+    #[serde(default)]
+    pub backchannel_logout_uri: Option<String>,
+    #[serde(default)]
+    pub backchannel_logout_session_required: bool,
     #[serde(default)]
     pub scopes: Vec<String>,
     #[serde(default)]
@@ -161,6 +179,13 @@ pub struct PatchOAuthClientRequest {
     #[serde(default)]
     pub redirect_uris: Option<Vec<String>>,
     #[serde(default)]
+    pub post_logout_redirect_uris: Option<Vec<String>>,
+    /// An empty string removes the endpoint.
+    #[serde(default)]
+    pub backchannel_logout_uri: Option<String>,
+    #[serde(default)]
+    pub backchannel_logout_session_required: Option<bool>,
+    #[serde(default)]
     pub scopes: Option<Vec<String>>,
     #[serde(default)]
     pub audiences: Option<Vec<String>>,
@@ -175,6 +200,9 @@ struct NormalizedClientInput {
     grant_types: Vec<String>,
     response_types: Vec<String>,
     redirect_uris: Vec<String>,
+    post_logout_redirect_uris: Vec<String>,
+    backchannel_logout_uri: Option<String>,
+    backchannel_logout_session_required: bool,
     scopes: Vec<String>,
     audiences: Vec<String>,
     attrs: Value,
@@ -289,6 +317,27 @@ fn validate_redirect_uris(redirect_uris: &[String]) -> Result<(), ErrorResponse>
     Ok(())
 }
 
+/// Back-Channel Logout 1.0 §2.2: an absolute URL without a fragment; HTTPS
+/// except on loopback hosts, as for redirect URIs.
+fn validate_backchannel_logout_uri(uri: Option<&str>) -> Result<(), ErrorResponse> {
+    let Some(uri) = uri else {
+        return Ok(());
+    };
+    let invalid = || {
+        ErrorResponse::new(ErrorCode::OAuthClientBackchannelLogoutUriInvalid)
+            .with_param("uri", uri.to_string())
+    };
+    if uri.contains('#') || uri.chars().any(char::is_whitespace) {
+        return Err(invalid());
+    }
+    let parsed = url::Url::parse(uri).map_err(|_| invalid())?;
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if is_loopback_redirect_host(parsed.host_str()) => Ok(()),
+        _ => Err(invalid()),
+    }
+}
+
 fn is_loopback_redirect_host(host: Option<&str>) -> bool {
     matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
 }
@@ -306,6 +355,8 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
     )?;
     validate_allowed_values("response_types", &input.response_types, &[RESPONSE_CODE])?;
     validate_redirect_uris(&input.redirect_uris)?;
+    validate_redirect_uris(&input.post_logout_redirect_uris)?;
+    validate_backchannel_logout_uri(input.backchannel_logout_uri.as_deref())?;
 
     if input.grant_types.is_empty() {
         return Err(ErrorResponse::new(ErrorCode::OAuthClientGrantTypesRequired));
@@ -390,6 +441,14 @@ fn normalize_create_payload(
             "response_types",
         )?,
         redirect_uris: normalize_list(payload.redirect_uris.unwrap_or_default(), "redirect_uris")?,
+        post_logout_redirect_uris: normalize_list(
+            payload.post_logout_redirect_uris.unwrap_or_default(),
+            "post_logout_redirect_uris",
+        )?,
+        backchannel_logout_uri: normalize_optional_string(payload.backchannel_logout_uri),
+        backchannel_logout_session_required: payload
+            .backchannel_logout_session_required
+            .unwrap_or(false),
         scopes: normalize_list(payload.scopes.unwrap_or_default(), "scopes")?,
         audiences: normalize_list(payload.audiences.unwrap_or_default(), "audiences")?,
         attrs: payload.attrs.unwrap_or_else(|| serde_json::json!({})),
@@ -408,6 +467,12 @@ fn normalize_update_payload(
         grant_types: normalize_list(payload.grant_types, "grant_types")?,
         response_types: normalize_list(payload.response_types, "response_types")?,
         redirect_uris: normalize_list(payload.redirect_uris, "redirect_uris")?,
+        post_logout_redirect_uris: normalize_list(
+            payload.post_logout_redirect_uris,
+            "post_logout_redirect_uris",
+        )?,
+        backchannel_logout_uri: normalize_optional_string(payload.backchannel_logout_uri),
+        backchannel_logout_session_required: payload.backchannel_logout_session_required,
         scopes: normalize_list(payload.scopes, "scopes")?,
         audiences: normalize_list(payload.audiences, "audiences")?,
         attrs: payload.attrs.unwrap_or_else(|| serde_json::json!({})),
@@ -445,6 +510,17 @@ fn normalize_patch_payload(
             Some(values) => normalize_list(values, "redirect_uris")?,
             None => existing.redirect_uris.0.clone(),
         },
+        post_logout_redirect_uris: match payload.post_logout_redirect_uris {
+            Some(values) => normalize_list(values, "post_logout_redirect_uris")?,
+            None => existing.post_logout_redirect_uris.0.clone(),
+        },
+        backchannel_logout_uri: match payload.backchannel_logout_uri {
+            Some(value) => normalize_optional_string(Some(value)),
+            None => existing.backchannel_logout_uri.clone(),
+        },
+        backchannel_logout_session_required: payload
+            .backchannel_logout_session_required
+            .unwrap_or(existing.backchannel_logout_session_required),
         scopes: match payload.scopes {
             Some(values) => normalize_list(values, "scopes")?,
             None => existing.scopes.0.clone(),
@@ -475,6 +551,9 @@ fn apply_input(
     existing.grant_types.0 = input.grant_types;
     existing.response_types.0 = input.response_types;
     existing.redirect_uris.0 = input.redirect_uris;
+    existing.post_logout_redirect_uris.0 = input.post_logout_redirect_uris;
+    existing.backchannel_logout_uri = input.backchannel_logout_uri;
+    existing.backchannel_logout_session_required = input.backchannel_logout_session_required;
     existing.scopes.0 = input.scopes;
     existing.audiences.0 = input.audiences;
     existing.attrs = input.attrs;
@@ -601,7 +680,7 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     let client_secret =
         is_confidential(&input.token_endpoint_auth_method).then(pw::generate_api_key);
     let client_secret_hash = client_secret.as_deref().map(pw::hash_api_key);
-    let client = OAuthClient::new(
+    let mut client = OAuthClient::new(
         client_id,
         client_secret_hash,
         input.name,
@@ -614,6 +693,9 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
         input.audiences,
         input.attrs,
     );
+    client.post_logout_redirect_uris.0 = input.post_logout_redirect_uris;
+    client.backchannel_logout_uri = input.backchannel_logout_uri;
+    client.backchannel_logout_session_required = input.backchannel_logout_session_required;
 
     let client = crate::db::create_oauth_client(client, ctx)
         .await
@@ -816,6 +898,21 @@ mod tests {
         let uris = vec!["http://evil.example.com/cb".to_string()];
 
         assert!(validate_redirect_uris(&uris).is_err());
+    }
+
+    #[test]
+    fn backchannel_logout_uri_is_absolute_https_without_fragment() {
+        assert!(validate_backchannel_logout_uri(None).is_ok());
+        assert!(validate_backchannel_logout_uri(Some("https://app.example/logout?x=1")).is_ok());
+        assert!(validate_backchannel_logout_uri(Some("http://localhost:3000/logout")).is_ok());
+        for uri in [
+            "http://app.example/logout",
+            "https://app.example/logout#frag",
+            "/logout",
+            "https://app.example/log out",
+        ] {
+            assert!(validate_backchannel_logout_uri(Some(uri)).is_err(), "{uri}");
+        }
     }
 
     #[test]

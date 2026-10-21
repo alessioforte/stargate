@@ -21,6 +21,9 @@ export interface OAuthClientFormValues {
   grantTypes: OAuthGrantTypeValue[];
   responseTypes: OAuthResponseTypeValue[];
   redirectUris: string[];
+  postLogoutRedirectUris: string[];
+  backchannelLogoutUri: string;
+  backchannelLogoutSessionRequired: boolean;
   scopes: string[];
   audiences: string[];
   attrs: string;
@@ -34,6 +37,9 @@ export const emptyOAuthClientFormValues: OAuthClientFormValues = {
   grantTypes: [],
   responseTypes: [],
   redirectUris: [],
+  postLogoutRedirectUris: [],
+  backchannelLogoutUri: "",
+  backchannelLogoutSessionRequired: false,
   scopes: [],
   audiences: [],
   attrs: "{}",
@@ -60,6 +66,10 @@ export function oauthClientToFormValues(
     grantTypes: oauthClient.grantTypes,
     responseTypes: oauthClient.responseTypes,
     redirectUris: oauthClient.redirectUris,
+    postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
+    backchannelLogoutUri: oauthClient.backchannelLogoutUri ?? "",
+    backchannelLogoutSessionRequired:
+      oauthClient.backchannelLogoutSessionRequired,
     scopes: oauthClient.scopes,
     audiences: oauthClient.audiences,
     attrs: JSON.stringify(oauthClient.attrs ?? {}, null, 2),
@@ -141,6 +151,9 @@ export function toCreateOAuthClientRequest(
     grantTypes: values.grantTypes,
     responseTypes: values.responseTypes,
     redirectUris: cleanList(values.redirectUris),
+    postLogoutRedirectUris: cleanList(values.postLogoutRedirectUris),
+    backchannelLogoutUri: optionalString(values.backchannelLogoutUri),
+    backchannelLogoutSessionRequired: values.backchannelLogoutSessionRequired,
     scopes: cleanList(values.scopes),
     audiences: cleanList(values.audiences),
     attrs: JSON.parse(values.attrs) ?? {},
@@ -158,6 +171,9 @@ export function toUpdateOAuthClientRequest(
     grantTypes: values.grantTypes,
     responseTypes: values.responseTypes,
     redirectUris: cleanList(values.redirectUris),
+    postLogoutRedirectUris: cleanList(values.postLogoutRedirectUris),
+    backchannelLogoutUri: optionalString(values.backchannelLogoutUri),
+    backchannelLogoutSessionRequired: values.backchannelLogoutSessionRequired,
     scopes: cleanList(values.scopes),
     audiences: cleanList(values.audiences),
     attrs,

@@ -86,5 +86,15 @@
     "interaction_expired": "This sign-in request has expired. Return to the application and try again.",
     "javascript_required": "Signing in to this account needs an extra step (verification code or password change) that requires JavaScript. Enable JavaScript and try again.",
     "server_error": "Something went wrong. Please try again later."
-  }
+  },
+  "logoutTitle": "Sign out?",
+  "logoutDescription": "An application asked to sign you out of Stargate. You will be signed out of every application that uses this sign-in.",
+  "logoutConfirm": "Sign out",
+  "logoutCancel": "Stay signed in",
+  "logoutErrors": {
+    "logout_expired": "This sign-out request has expired. Return to the application and sign out again."
+  },
+  "signedOutTitle": "You have signed out",
+  "signedOutDescription": "Your Stargate session has ended. You can close this page.",
+  "signInAgain": "Sign in again"
 }

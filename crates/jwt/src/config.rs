@@ -5,11 +5,14 @@ use jsonwebtoken::Algorithm;
 
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{Header, Validation, decode, decode_header, encode};
+use serde::Serialize;
 use std::{error::Error, fmt};
 
 const TOKEN_TYPE_BEARER: &str = "bearer";
 const TOKEN_TYPE_REFRESH: &str = "refresh";
 const TOKEN_TYPE_ID_TOKEN: &str = "id_token";
+/// JOSE `typ` of Back-Channel Logout tokens (OIDC Back-Channel Logout 1.0 §2.4).
+const LOGOUT_TOKEN_HEADER_TYPE: &str = "logout+jwt";
 
 /// JWT configuration: signing and verification keys plus token lifetimes.
 pub struct JwtConfig {
@@ -146,9 +149,23 @@ impl JwtConfig {
         Self::sign(self.active(), claims)
     }
 
-    fn sign(key: &KeyMaterial, claims: &Claims) -> Result<String, jsonwebtoken::errors::Error> {
+    fn sign<T: Serialize>(
+        key: &KeyMaterial,
+        claims: &T,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        Self::sign_with_type(key, None, claims)
+    }
+
+    fn sign_with_type<T: Serialize>(
+        key: &KeyMaterial,
+        typ: Option<&str>,
+        claims: &T,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
         let mut header = Header::new(key.algorithm);
         header.kid = Some(key.key_id.clone());
+        if let Some(typ) = typ {
+            header.typ = Some(typ.to_string());
+        }
         let encoding = key
             .encoding
             .as_ref()
@@ -168,10 +185,19 @@ impl JwtConfig {
     }
 
     fn decode_claims(&self, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+        self.decode_claims_checking_expiry(token, true)
+    }
+
+    fn decode_claims_checking_expiry(
+        &self,
+        token: &str,
+        validate_exp: bool,
+    ) -> Result<Claims, jsonwebtoken::errors::Error> {
         let key = self.verification_key(token)?;
         // The algorithm comes from the key, never from the token header.
         let mut validation = Validation::new(key.algorithm);
         validation.validate_aud = false;
+        validation.validate_exp = validate_exp;
         validation.set_issuer(&[self.issuer.as_str()]);
         Ok(decode::<Claims>(token, &key.decoding, &validation)?.claims)
     }
@@ -221,6 +247,19 @@ impl JwtConfig {
         let mut claims = self.timed_claims(claims, TOKEN_TYPE_ID_TOKEN, self.access_exp);
         claims.typ = None;
         Self::sign(self.id_token_signer(), &claims)
+    }
+
+    /// Sign an OIDC Back-Channel Logout token with the ID token key; the
+    /// claims (`events`, no `nonce`) are built by the caller.
+    pub fn generate_logout_token<T: Serialize>(
+        &self,
+        claims: &T,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        Self::sign_with_type(
+            self.id_token_signer(),
+            Some(LOGOUT_TOKEN_HEADER_TYPE),
+            claims,
+        )
     }
 
     fn decode_without_audience(&self, token: &str) -> Result<Claims, JwtValidationError> {
@@ -333,6 +372,22 @@ impl JwtConfig {
                 }
             }
         }
+        Ok(claims)
+    }
+
+    /// Validate an `id_token_hint`: an ID token this provider issued, possibly
+    /// expired (OIDC Core 3.1.2.1, RP-Initiated Logout 1.0 §2). Checks the
+    /// signature, issuer, and ID token shape; callers compare `aud` and `sub`.
+    pub fn validate_id_token_hint(&self, token: &str) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_claims_checking_expiry(token, false)?;
+        if claims.typ.is_some() {
+            return Err(JwtValidationError::InvalidType {
+                expected: TOKEN_TYPE_ID_TOKEN,
+                actual: claims.typ.clone(),
+            });
+        }
+        Self::require_non_empty_claim(Some(claims.sub.as_str()), "sub")?;
+        Self::require_non_empty_claim(claims.aud.as_deref(), "aud")?;
         Ok(claims)
     }
 
@@ -509,5 +564,64 @@ mod tests {
             config.validate_oidc_id_token(&token, "client-1", Some("bad")),
             Err(JwtValidationError::NonceMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn id_token_hint_accepts_expired_id_tokens_only() {
+        let mut config = hmac_config("stargate-test");
+        config.access_exp = Duration::minutes(-10);
+        let id_token = config
+            .generate_oidc_id_token(
+                Claims::default()
+                    .subject("user-1".to_string())
+                    .aud("client-1".to_string()),
+            )
+            .unwrap();
+        assert!(config.validate_token(&id_token).is_err(), "expired");
+
+        let hint = config.validate_id_token_hint(&id_token).unwrap();
+        assert_eq!(hint.sub, "user-1");
+        assert_eq!(hint.aud.as_deref(), Some("client-1"));
+
+        // Session tokens are not ID tokens.
+        let session = config
+            .generate_session_access_token(
+                Claims::default()
+                    .subject("user-1".to_string())
+                    .sid("sid-1".to_string()),
+            )
+            .unwrap();
+        assert!(matches!(
+            config.validate_id_token_hint(&session),
+            Err(JwtValidationError::InvalidType { .. })
+        ));
+
+        // Another signer's token is rejected.
+        let other = JwtConfig::from_keyring(
+            KeyMaterial::from_secret("stargate-test", Algorithm::HS256, b"other").unwrap(),
+            Vec::new(),
+            Duration::minutes(5),
+            Duration::minutes(5),
+        )
+        .unwrap()
+        .generate_oidc_id_token(
+            Claims::default()
+                .subject("user-1".to_string())
+                .aud("client-1".to_string()),
+        )
+        .unwrap();
+        assert!(config.validate_id_token_hint(&other).is_err());
+    }
+
+    #[test]
+    fn logout_token_is_typed_and_signed_with_the_id_token_key() {
+        let config = hmac_config("stargate-test");
+        let token = config
+            .generate_logout_token(&serde_json::json!({ "sub": "user-1" }))
+            .unwrap();
+        let header = decode_header(&token).unwrap();
+
+        assert_eq!(header.typ.as_deref(), Some("logout+jwt"));
+        assert_eq!(header.kid.as_deref(), Some(config.id_token_key_id()));
     }
 }

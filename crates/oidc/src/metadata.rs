@@ -72,6 +72,11 @@ pub struct OpenIdConfiguration {
     request_parameter_supported: bool,
     /// Discovery defaults this to `true`, so it is stated explicitly.
     request_uri_parameter_supported: bool,
+    /// RP-Initiated Logout 1.0.
+    end_session_endpoint: String,
+    /// Back-Channel Logout 1.0: logout tokens always carry `sid`.
+    backchannel_logout_supported: bool,
+    backchannel_logout_session_supported: bool,
 }
 
 pub fn endpoint_base_url(issuer: &str, configured_base_url: Option<&str>, port: &str) -> String {
@@ -237,6 +242,7 @@ pub fn openid_configuration(
             "exp".to_string(),
             "auth_time".to_string(),
             "nonce".to_string(),
+            "sid".to_string(),
             "email".to_string(),
             "email_verified".to_string(),
             "name".to_string(),
@@ -257,6 +263,9 @@ pub fn openid_configuration(
         claims_parameter_supported: false,
         request_parameter_supported: false,
         request_uri_parameter_supported: false,
+        end_session_endpoint: endpoint_url(base_url, "/oauth/logout"),
+        backchannel_logout_supported: true,
+        backchannel_logout_session_supported: true,
     }
 }
 

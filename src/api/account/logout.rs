@@ -33,13 +33,18 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         .await
         .map_err(ErrorResponse::internal)?;
 
-    use_store()
-        .delete(&sid)
-        .await
-        .map_err(ErrorResponse::internal)?;
-
-    if let Some(user_id) = claims.sub_id.as_deref() {
-        crate::act::sessions::forget_session(user_id, &sid).await;
+    match claims.sub_id.as_deref() {
+        Some(user_id) => {
+            crate::act::sessions::end_session(user_id, &sid)
+                .await
+                .map_err(ErrorResponse::internal)?;
+        }
+        None => {
+            use_store()
+                .delete(&sid)
+                .await
+                .map_err(ErrorResponse::internal)?;
+        }
     }
 
     Ok(Json(MessageResponse::new(MessageCode::LogoutCompleted)))
