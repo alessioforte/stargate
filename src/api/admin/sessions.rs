@@ -46,6 +46,8 @@ pub struct AdminSession {
     last_seen_at: String,
     expires_at: String,
     client_ids: Vec<String>,
+    /// How the user authenticated (OIDC `amr`: `pwd`, `otp`, `mfa`, `fed`).
+    authentication_methods: Vec<String>,
     current: bool,
 }
 
@@ -174,6 +176,7 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
             last_seen_at: timestamp(session.last_seen_at_unix)?,
             expires_at: timestamp(session.expires_at_unix)?,
             client_ids: session.client_ids,
+            authentication_methods: session.amr,
         });
     }
 

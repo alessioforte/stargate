@@ -329,7 +329,8 @@ codes: `invalid_request`, `unsupported_response_type`, `invalid_scope`,
 `unauthorized_client`, `login_required`, `interaction_required`,
 `consent_required`, `request_not_supported`, and `request_uri_not_supported`.
 Scopes the client is not registered for are ignored. Unknown parameters
-(`display`, `ui_locales`, `acr_values`, ...) are ignored.
+(`display`, `ui_locales`, ...) are ignored. `acr_values` is described in
+"Authentication context" below.
 
 ### Consent
 
@@ -400,6 +401,49 @@ Response:
 Token responses carry `Cache-Control: no-store`. An authorization code works
 once; presenting it again fails with `invalid_grant` and revokes the access
 token and refresh-token family issued for it.
+
+### Authentication context (`amr`, `acr`)
+
+Every login session records how the user signed in, as OpenID Connect `amr`
+values (RFC 8176):
+
+| Sign-in | `amr` | `acr` |
+|---|---|---|
+| Password (hosted login, `/oauth/login`, `/account/login`) | `["pwd"]` | `urn:stargate:acr:single-factor` |
+| Password and email code (login MFA) | `["pwd", "otp", "mfa"]` | `urn:stargate:acr:multi-factor` |
+| Email code only (passwordless) | `["otp"]` | `urn:stargate:acr:single-factor` |
+| Google or GitHub | `["fed"]` | `urn:stargate:acr:single-factor` |
+
+`fed` is not registered by RFC 8176; other providers use it for federated
+sign-in. An email code verified later in the session (`POST
+/account/mfa/challenges`, any purpose) adds `otp`, and `mfa` after a password
+or an external provider. The level stays for the session's lifetime;
+switching organization keeps it.
+
+ID tokens and OAuth access tokens carry `acr` and `amr`, introspection
+returns them with `auth_time` (RFC 9470), and tokens from a refresh keep the
+values of the original grant. Discovery advertises both levels in
+`acr_values_supported`.
+
+A client asks for a level with `acr_values` (space-separated, most preferred
+first; unknown values are ignored). Stargate issues the highest requested
+level the session reaches. When every requested level is above it (a
+single-factor session asked for `urn:stargate:acr:multi-factor`):
+
+- the request is parked and the browser goes to the hosted step-up page
+  (`/auth/step-up?interaction=...`, JavaScript required). The user enters an
+  email code there; the session gains `otp` and `mfa` and the request resumes;
+- an email-code-only session cannot gain a second factor from another email
+  code, so the user signs in with a password first, then steps up. If they
+  sign in with an email code again, the actual level is issued instead of
+  looping;
+- with `prompt=none` the client gets `interaction_required`;
+- when MFA is unavailable (`MFA_MODE=off`, or email is not one of the user's
+  MFA methods) the session's actual level is issued: `acr_values` is
+  voluntary, so the client decides whether it is enough.
+
+Admin session listings (`GET /admin/sessions`) show each session's
+`authenticationMethods`.
 
 ## Refresh Token Grant
 
@@ -624,4 +668,5 @@ bootstrap` registers the callback URI without `/auth/callback`).
 - OAuth clients cannot broadly introspect/revoke API keys; admin grants still handle API-key revocation.
 - Full end-to-end OAuth/OIDC integration tests are still pending.
 - Front-Channel Logout and OIDC Session Management (`check_session_iframe`) are not supported.
+- `acr` can only be requested with `acr_values`: the `claims` parameter (essential `acr`) is not supported. The step-up page needs JavaScript and offers email codes only.
 - Back-channel logout delivery is in-process and not persisted (see "Back-Channel Logout").

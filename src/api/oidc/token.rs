@@ -272,6 +272,7 @@ fn issue_user_token_response(
     audience: Option<String>,
     auth_time: chrono::DateTime<Utc>,
     nonce: Option<String>,
+    authentication: &oidc::authentication::Authentication,
     refresh_token: Option<String>,
 ) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
     let jwt = crate::etc::auth::jwt::jwt_config();
@@ -284,9 +285,17 @@ fn issue_user_token_response(
         scope.clone(),
         audience,
         auth_time,
+        authentication,
     );
-    let id_claims =
-        oidc::claims::id_token_claims(&profile, &client.client_id, sid, scopes, auth_time, nonce);
+    let id_claims = oidc::claims::id_token_claims(
+        &profile,
+        &client.client_id,
+        sid,
+        scopes,
+        auth_time,
+        nonce,
+        authentication,
+    );
     // Fix the jti up front so a replayed authorization code can revoke it.
     let access_jti = ulid::Ulid::generate().to_string();
     access_claims.jti = Some(access_jti.clone());
@@ -354,6 +363,7 @@ async fn issue_authorization_code_token(
                 code.audience.clone(),
                 code.auth_time,
                 code.nonce.clone(),
+                code.authentication.clone(),
                 refresh_token_ttl_secs(),
             )
             .await?,
@@ -370,6 +380,7 @@ async fn issue_authorization_code_token(
         code.audience.clone(),
         code.auth_time,
         code.nonce.clone(),
+        &code.authentication,
         refresh_token,
     )
 }
@@ -408,7 +419,7 @@ async fn issue_authorization_code_grant(
     let code_hash = pw::hash_api_key(code);
 
     let record = match authorization_codes::get(&code_hash).await? {
-        CodeLookup::Pending(record) => record,
+        CodeLookup::Pending(record) => *record,
         CodeLookup::Missing => return Err(oauth_invalid_grant("invalid authorization code")),
         CodeLookup::Redeemed(grant) => {
             revoke_replayed_code_grant(grant).await;
@@ -537,6 +548,7 @@ async fn issue_refresh_token_grant(
         family.audience.clone(),
         family.auth_time,
         family.nonce.clone(),
+        &family.authentication,
         Some(new_refresh_token),
     )
     .map(|(response, _)| response)

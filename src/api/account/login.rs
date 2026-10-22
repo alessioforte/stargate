@@ -52,7 +52,13 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         return Ok(response);
     }
 
-    issue_user_session(user, auth_time, credentials.org_id.as_deref()).await
+    issue_user_session(
+        user,
+        auth_time,
+        credentials.org_id.as_deref(),
+        vec![oidc::authentication::AMR_PASSWORD.to_string()],
+    )
+    .await
 }
 
 /// Check a username/password pair under the login guard: throttling,

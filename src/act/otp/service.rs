@@ -107,6 +107,14 @@ pub(crate) async fn complete_passwordless_email_otp(
     Ok((user, auth_time))
 }
 
+/// Whether the user can verify an email code in a signed-in session, which
+/// adds a factor to it (OIDC step-up). False when MFA is off or email is not
+/// one of the user's methods.
+pub(crate) async fn email_mfa_available(user: &db::ent::User) -> Result<bool, ErrorResponse> {
+    let policy = mfa_policy_for_user(user).await?;
+    Ok(ensure_method_allowed(&policy, OtpMethod::Email).is_ok())
+}
+
 /// Whether signing in this user needs an MFA step, without starting one.
 pub(crate) async fn login_mfa_required(user: &db::ent::User) -> Result<bool, ErrorResponse> {
     Ok(mfa_policy_for_user(user).await?.required)
@@ -314,6 +322,10 @@ pub(crate) async fn complete_mfa_challenge(
 
     let marker =
         store_mfa_verified_marker(&auth, challenge.method, &challenge.purpose, now).await?;
+    // The code is also a factor of the session itself (OIDC `amr` / `acr`).
+    crate::act::sessions::add_otp_factor(&auth.sid, &auth.user.id)
+        .await
+        .map_err(ErrorResponse::internal)?;
     Ok(MfaVerificationResponse {
         method: marker.method,
         purpose: marker.purpose,

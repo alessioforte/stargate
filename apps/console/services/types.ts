@@ -138,6 +138,8 @@ export interface AdminSessionUser {
 
 export interface AdminSession {
   authenticatedAt: string;
+  /** OIDC `amr` values: `pwd`, `otp`, `mfa`, `fed`. */
+  authenticationMethods: string[];
   clientIds: string[];
   current: boolean;
   expiresAt: string;

@@ -96,5 +96,9 @@
   },
   "signedOutTitle": "You have signed out",
   "signedOutDescription": "Your Stargate session has ended. You can close this page.",
-  "signInAgain": "Sign in again"
+  "signInAgain": "Sign in again",
+  "stepUpTitle": "Verify it's you",
+  "stepUpDescription": "This application needs an extra verification. Enter the code we sent to your email.",
+  "stepUpResend": "Send a new code",
+  "stepUpMissing": "This verification request is invalid. Return to the application and try again."
 }

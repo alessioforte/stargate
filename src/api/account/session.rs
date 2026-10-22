@@ -9,10 +9,13 @@ use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
 use store::Store;
 
+/// Sign `user` in: a new session authenticated at `auth_time` with the
+/// methods `amr` (OIDC `amr` values, e.g. `pwd`).
 pub(crate) async fn issue_user_session(
     user: db::ent::User,
     auth_time: usize,
     requested_org_id: Option<&str>,
+    amr: Vec<String>,
 ) -> Result<Response, ErrorResponse> {
     let org = sessions::resolve_org_context(&user, requested_org_id).await?;
 
@@ -58,10 +61,13 @@ pub(crate) async fn issue_user_session(
         .await
         .map_err(ErrorResponse::internal)?;
     if let Err(error) = sessions::register_session(
-        &user.id,
-        &sid,
-        subject.org_id.as_deref(),
-        auth_time as u64,
+        sessions::NewSession {
+            user_id: &user.id,
+            sid: &sid,
+            org_id: subject.org_id.as_deref(),
+            authenticated_at_unix: auth_time as u64,
+            amr,
+        },
         &tokens.refresh_jti,
         sttl,
     )

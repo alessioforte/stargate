@@ -47,6 +47,9 @@ pub struct SessionRecord {
     pub last_seen_at_unix: u64,
     pub expires_at_unix: u64,
     pub client_ids: Vec<String>,
+    /// How the user authenticated (OIDC `amr`); an email OTP verified in the
+    /// session adds `otp` and, after another factor, `mfa`.
+    pub amr: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,24 +103,32 @@ async fn store_record(record: &SessionRecord, ttl_secs: u64) -> Result<(), Store
     Ok(())
 }
 
+/// A newly authenticated login: who, when, and how (`amr`).
+pub struct NewSession<'a> {
+    pub user_id: &'a str,
+    pub sid: &'a str,
+    pub org_id: Option<&'a str>,
+    pub authenticated_at_unix: u64,
+    pub amr: Vec<String>,
+}
+
 /// Register a newly authenticated login under its stable session id.
 pub async fn register_session(
-    user_id: &str,
-    sid: &str,
-    org_id: Option<&str>,
-    authenticated_at_unix: u64,
+    session: NewSession<'_>,
     refresh_jti: &str,
     ttl_secs: u64,
 ) -> Result<(), StoreError> {
     let now = now_unix();
+    let sid = session.sid;
     let record = SessionRecord {
         id: sid.to_string(),
-        user_id: user_id.to_string(),
-        org_id: org_id.map(str::to_string),
-        authenticated_at_unix,
+        user_id: session.user_id.to_string(),
+        org_id: session.org_id.map(str::to_string),
+        authenticated_at_unix: session.authenticated_at_unix,
         last_seen_at_unix: now,
         expires_at_unix: now.saturating_add(ttl_secs),
         client_ids: Vec::new(),
+        amr: session.amr,
     };
     let store = use_store();
     store
@@ -217,6 +228,21 @@ pub async fn register_session_client(
     store
         .hset(SESSION_DIRECTORY_KEY, sid, &record, Some(ttl_secs))
         .await?;
+    Ok(true)
+}
+
+/// Record an email OTP the user verified in session `sid` (an MFA step-up):
+/// `otp`, and `mfa` when the session already had another factor. Returns
+/// false when the session is gone.
+pub async fn add_otp_factor(sid: &str, user_id: &str) -> Result<bool, StoreError> {
+    let Some(mut record) = get_active_session(sid, user_id).await? else {
+        return Ok(false);
+    };
+    record.amr = oidc::authentication::with_otp(&record.amr);
+    let Some(ttl_secs) = ttl_until(record.expires_at_unix) else {
+        return Ok(false);
+    };
+    store_record(&record, ttl_secs).await?;
     Ok(true)
 }
 
@@ -391,6 +417,7 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
 pub struct AuthenticatedSession {
     pub user: db::ent::User,
     pub subject: Subject,
+    pub sid: String,
     pub auth_time: Option<usize>,
 }
 
@@ -435,6 +462,7 @@ pub async fn authenticated_session(
     Ok(AuthenticatedSession {
         user,
         subject,
+        sid,
         auth_time: claims.auth_time,
     })
 }
@@ -524,9 +552,19 @@ mod index_tests {
             .set(sid, &json!({ "id": user_id }), Some(60))
             .await
             .unwrap();
-        register_session(user_id, sid, org, now_unix(), "refresh-jti", 60)
-            .await
-            .unwrap();
+        register_session(
+            NewSession {
+                user_id,
+                sid,
+                org_id: org,
+                authenticated_at_unix: now_unix(),
+                amr: vec!["pwd".to_string()],
+            },
+            "refresh-jti",
+            60,
+        )
+        .await
+        .unwrap();
     }
 
     fn unique(prefix: &str) -> String {
@@ -566,6 +604,24 @@ mod index_tests {
         assert!(!use_store().exists(&sid_target).await.unwrap());
         assert!(use_store().exists(&sid_other_org).await.unwrap());
         assert!(use_store().exists(&sid_orgless).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_verified_email_code_adds_a_factor_to_the_session() {
+        let user = unique("user");
+        let sid = unique("sid");
+        seed_session(&user, &sid, None).await;
+
+        assert!(add_otp_factor(&sid, &user).await.unwrap());
+        assert_eq!(
+            get_session(&sid).await.unwrap().unwrap().amr,
+            vec!["pwd", "otp", "mfa"]
+        );
+        // Idempotent, and bound to the session's own user.
+        assert!(add_otp_factor(&sid, &user).await.unwrap());
+        assert_eq!(get_session(&sid).await.unwrap().unwrap().amr.len(), 3);
+        assert!(!add_otp_factor(&sid, "someone-else").await.unwrap());
+        assert!(!add_otp_factor(&unique("sid"), &user).await.unwrap());
     }
 
     #[tokio::test]
@@ -609,9 +665,19 @@ mod index_tests {
             .set(&sid, &json!({ "id": &user }), Some(60))
             .await
             .unwrap();
-        register_session(&user, &sid, None, now_unix(), "jti-1", 60)
-            .await
-            .unwrap();
+        register_session(
+            NewSession {
+                user_id: &user,
+                sid: &sid,
+                org_id: None,
+                authenticated_at_unix: now_unix(),
+                amr: vec!["pwd".to_string()],
+            },
+            "jti-1",
+            60,
+        )
+        .await
+        .unwrap();
 
         assert!(
             rotate_refresh_token(&sid, "jti-1", "jti-2", 60)

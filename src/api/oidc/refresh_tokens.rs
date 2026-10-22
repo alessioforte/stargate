@@ -12,6 +12,7 @@ pub(super) async fn issue(
     audience: Option<String>,
     auth_time: DateTime<Utc>,
     nonce: Option<String>,
+    authentication: oidc::authentication::Authentication,
     ttl_secs: u64,
 ) -> OAuthResult<String> {
     oidc::refresh::issue(
@@ -23,6 +24,7 @@ pub(super) async fn issue(
         audience,
         auth_time,
         nonce,
+        authentication,
         ttl_secs,
     )
     .await
@@ -63,6 +65,10 @@ mod tests {
             Some("gateway".to_string()),
             Utc::now(),
             Some("nonce-1".to_string()),
+            oidc::authentication::Authentication {
+                amr: vec!["pwd".to_string()],
+                acr: oidc::authentication::ACR_SINGLE_FACTOR.to_string(),
+            },
             60,
         )
         .await

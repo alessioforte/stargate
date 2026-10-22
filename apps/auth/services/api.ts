@@ -9,6 +9,7 @@ import type {
   LoginResponse,
   GeneralResponse,
   MFAMethodsResponse,
+  MfaVerificationResponse,
   OtpChallengeResponse,
   SignupCompleteRequest,
   SignupVerificationResponse,
@@ -124,6 +125,28 @@ export default class AuthService {
     const response = await this.http.request<AccountOrganizationsResponse>({
       method: "GET",
       url: `${this.baseURL}/account/organizations`,
+    });
+    return response;
+  }
+
+  /**
+   * Email code for the signed-in session (session cookie). Verifying it adds
+   * a factor to the session, which an application may require (OIDC step-up).
+   */
+  async startSessionMfaChallenge(purpose: string) {
+    const response = await this.http.request<OtpChallengeResponse>({
+      method: "POST",
+      url: `${this.baseURL}/account/mfa/challenges`,
+      data: { method: "email", purpose },
+    });
+    return response;
+  }
+
+  async verifySessionMfaChallenge(challengeId: string, code: string) {
+    const response = await this.http.request<MfaVerificationResponse>({
+      method: "PUT",
+      url: `${this.baseURL}/account/mfa/challenges/${encodeURIComponent(challengeId)}`,
+      data: { code },
     });
     return response;
   }

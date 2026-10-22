@@ -11,6 +11,7 @@ import ResetPasswordPage from "./routes/reset-password";
 import SelectOrganizationPage from "./routes/select-organization";
 import SignedOutPage from "./routes/signed-out";
 import SignupPage from "./routes/signup";
+import StepUpPage from "./routes/step-up";
 
 /**
  * Route tree shared by the browser router and the build-time prerender
@@ -39,6 +40,10 @@ export const routeObjects: RouteObject[] = [
       {
         path: "consent",
         element: <ConsentPage />,
+      },
+      {
+        path: "step-up",
+        element: <StepUpPage />,
       },
       {
         path: "logout",

@@ -53,6 +53,14 @@ export interface OtpChallengeResponse {
   ttlSeconds: number;
 }
 
+/** A verified MFA challenge of the signed-in session (step-up). */
+export interface MfaVerificationResponse {
+  method: OtpMethod;
+  purpose: string;
+  verifiedAtUnix: number;
+  expiresAtUnix: number;
+}
+
 export interface GeneralResponse {
   message: string;
   code: string;

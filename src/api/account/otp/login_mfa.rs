@@ -46,8 +46,15 @@ pub async fn put_login_mfa_challenge(
         return Ok(response);
     }
 
-    crate::api::account::session::issue_user_session(user, auth_time, requested_org_id.as_deref())
-        .await
+    let password_and_code =
+        oidc::authentication::with_otp(&[oidc::authentication::AMR_PASSWORD.to_string()]);
+    crate::api::account::session::issue_user_session(
+        user,
+        auth_time,
+        requested_org_id.as_deref(),
+        password_and_code,
+    )
+    .await
 }
 
 pub(crate) async fn maybe_start_login_mfa(

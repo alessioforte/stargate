@@ -86,6 +86,26 @@ export type ConsentLoadResult =
       message: string;
     };
 
+export type StepUpStartResult =
+  | {
+      status: "success";
+      challenge: OtpChallengeResponse;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
+export type StepUpVerifyResult =
+  | {
+      status: "success";
+      redirectTo: string;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
+
 export type ConsentDecisionResult =
   | {
       status: "success";
@@ -111,6 +131,9 @@ export interface State {
   consentPrompt: ConsentPromptResponse | null;
   consentError: string | null;
   consentSubmitting: boolean;
+  stepUpChallenge: OtpChallengeResponse | null;
+  stepUpError: string | null;
+  stepUpSubmitting: boolean;
   language: string;
 }
 
@@ -143,5 +166,10 @@ export interface Actions {
     interactionId: string,
     approve: boolean,
   ) => Promise<ConsentDecisionResult>;
+  startStepUp: () => Promise<StepUpStartResult>;
+  verifyStepUp: (
+    interactionId: string,
+    code: string,
+  ) => Promise<StepUpVerifyResult>;
   clearAuthError: () => void;
 }

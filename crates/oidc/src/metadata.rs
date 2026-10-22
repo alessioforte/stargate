@@ -63,6 +63,8 @@ pub struct OpenIdConfiguration {
     grant_types_supported: Vec<String>,
     subject_types_supported: Vec<String>,
     id_token_signing_alg_values_supported: Vec<String>,
+    /// Session assurance levels a client can ask for with `acr_values`.
+    acr_values_supported: Vec<String>,
     scopes_supported: Vec<String>,
     claims_supported: Vec<String>,
     code_challenge_methods_supported: Vec<String>,
@@ -228,6 +230,7 @@ pub fn openid_configuration(
             .map(str::to_string)
             .into_iter()
             .collect(),
+        acr_values_supported: crate::authentication::acr_values_supported(),
         scopes_supported: vec![
             SCOPE_OPENID.to_string(),
             SCOPE_EMAIL.to_string(),
@@ -241,6 +244,8 @@ pub fn openid_configuration(
             "iat".to_string(),
             "exp".to_string(),
             "auth_time".to_string(),
+            "acr".to_string(),
+            "amr".to_string(),
             "nonce".to_string(),
             "sid".to_string(),
             "email".to_string(),

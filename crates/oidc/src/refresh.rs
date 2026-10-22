@@ -1,4 +1,5 @@
 use crate::OAuthError;
+use crate::authentication::Authentication;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use store::Store;
@@ -19,6 +20,7 @@ pub struct RefreshTokenFamily {
     pub generation: u64,
     pub revoked_at: Option<DateTime<Utc>>,
     pub sid: Option<String>,
+    pub authentication: Authentication,
 }
 
 pub fn family_key(family_id: &str) -> String {
@@ -54,6 +56,7 @@ pub async fn issue<S: Store>(
     audience: Option<String>,
     auth_time: DateTime<Utc>,
     nonce: Option<String>,
+    authentication: Authentication,
     ttl_secs: u64,
 ) -> Result<String, OAuthError> {
     let ttl_secs = ttl_secs.max(1);
@@ -72,6 +75,7 @@ pub async fn issue<S: Store>(
         expires_at,
         generation: 0,
         revoked_at: None,
+        authentication,
     };
 
     store
@@ -165,12 +169,21 @@ mod tests {
             Some("gateway".to_string()),
             Utc::now(),
             Some("nonce-1".to_string()),
+            Authentication {
+                amr: vec!["pwd".to_string(), "otp".to_string(), "mfa".to_string()],
+                acr: crate::authentication::ACR_MULTI_FACTOR.to_string(),
+            },
             60,
         )
         .await
         .unwrap();
 
         let rotated = rotate(&store, &token, "client-1").await.unwrap();
+        // Refreshed tokens report the original authentication.
+        assert_eq!(
+            rotated.as_ref().unwrap().1.authentication.acr,
+            crate::authentication::ACR_MULTI_FACTOR
+        );
         assert_eq!(
             rotated.as_ref().unwrap().1.nonce.as_deref(),
             Some("nonce-1")

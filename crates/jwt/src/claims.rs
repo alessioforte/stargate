@@ -30,6 +30,8 @@ pub struct Claims {
     pub role: Option<String>,               // role
     pub org_id: Option<String>,             // active organization
     pub auth_time: Option<usize>,           // authentication time
+    pub acr: Option<String>,                // authentication context class
+    pub amr: Option<Vec<String>>,           // authentication methods
     pub nonce: Option<String>,              // OIDC nonce
     pub preferred_username: Option<String>, // OIDC preferred username
     pub picture: Option<String>,            // OIDC profile picture
@@ -59,6 +61,8 @@ impl Default for Claims {
             role: None,
             org_id: None,
             auth_time: None,
+            acr: None,
+            amr: None,
             nonce: None,
             preferred_username: None,
             picture: None,

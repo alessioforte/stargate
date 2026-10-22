@@ -168,10 +168,13 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
         ErrorResponse::new(ErrorCode::SystemInternal)
     })?;
     if let Err(error) = crate::act::sessions::register_session(
-        &user.id,
-        &sid,
-        subject.org_id.as_deref(),
-        auth_time as u64,
+        crate::act::sessions::NewSession {
+            user_id: &user.id,
+            sid: &sid,
+            org_id: subject.org_id.as_deref(),
+            authenticated_at_unix: auth_time as u64,
+            amr: vec![oidc::authentication::AMR_FEDERATED.to_string()],
+        },
         &tokens.refresh_jti,
         sttl,
     )

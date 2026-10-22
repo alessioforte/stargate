@@ -10,6 +10,10 @@
 //! When the signed-in user has not consented to the client, the request is
 //! parked again with a [`ConsentStage`] bound to that user, and the browser
 //! goes to the app's consent page (see `consent.rs`).
+//!
+//! When the client asks for multi-factor `acr_values` and the session has a
+//! single factor, the request is parked with a [`StepUpStage`] and the browser
+//! goes to the app's step-up page, where the user verifies an email code.
 
 use super::authorize::AuthorizeQuery;
 use super::shared::OAuthResult;
@@ -90,6 +94,17 @@ fn login_page_url_from(auth_app: &str, endpoint_base: &str, page: LoginPage) -> 
     }
 }
 
+/// The hosted auth app's step-up page (email code) for a parked request.
+pub(crate) fn step_up_page_url(id: &str) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("interaction", id)
+        .finish();
+    format!(
+        "{}/step-up?{query}",
+        crate::fun::auth_app_href().trim_end_matches('/')
+    )
+}
+
 /// The hosted auth app's consent page for a parked request.
 pub(crate) fn consent_page_url(id: &str) -> String {
     let query = url::form_urlencoded::Serializer::new(String::new())
@@ -109,6 +124,15 @@ pub(crate) struct PendingAuthorization {
     pub(crate) created_at: i64,
     /// Present when the request waits for the user's consent.
     pub(crate) consent: Option<ConsentStage>,
+    /// Present when the request waits for the user to add a factor.
+    pub(crate) step_up: Option<StepUpStage>,
+}
+
+/// A request parked for an MFA step-up. The login checks already passed for
+/// `user_id`, so resuming only needs that same user's session.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub(crate) struct StepUpStage {
+    pub(crate) user_id: String,
 }
 
 /// A request parked for consent. The login checks already passed for
@@ -136,22 +160,34 @@ fn valid_id(id: &str) -> bool {
 }
 
 pub(crate) async fn park(query: AuthorizeQuery) -> OAuthResult<String> {
-    park_with(query, None).await
+    park_with(query, None, None).await
 }
 
 pub(crate) async fn park_for_consent(
     query: AuthorizeQuery,
     stage: ConsentStage,
 ) -> OAuthResult<String> {
-    park_with(query, Some(stage)).await
+    park_with(query, Some(stage), None).await
 }
 
-async fn park_with(query: AuthorizeQuery, consent: Option<ConsentStage>) -> OAuthResult<String> {
+pub(crate) async fn park_for_step_up(
+    query: AuthorizeQuery,
+    stage: StepUpStage,
+) -> OAuthResult<String> {
+    park_with(query, None, Some(stage)).await
+}
+
+async fn park_with(
+    query: AuthorizeQuery,
+    consent: Option<ConsentStage>,
+    step_up: Option<StepUpStage>,
+) -> OAuthResult<String> {
     let id = format!("{}_{}", ulid::Ulid::generate(), pw::generate_api_key());
     let pending = PendingAuthorization {
         query,
         created_at: chrono::Utc::now().timestamp(),
         consent,
+        step_up,
     };
     save(&id, &pending).await?;
     Ok(id)

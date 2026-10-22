@@ -44,6 +44,13 @@ pub struct IntrospectionResponse {
     iss: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     jti: Option<String>,
+    /// Session assurance level and methods (RFC 9470 §6.2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    acr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auth_time: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amr: Option<Vec<String>>,
 }
 
 impl IntrospectionResponse {
@@ -60,6 +67,9 @@ impl IntrospectionResponse {
             aud: None,
             iss: None,
             jti: None,
+            acr: None,
+            auth_time: None,
+            amr: None,
         }
     }
 }
@@ -269,6 +279,9 @@ async fn introspect_jwt_claims(claims: jwt::Claims) -> OAuthResult<Introspection
         aud: claims.aud.clone(),
         iss: Some(claims.iss.clone()),
         jti: claims.jti.clone(),
+        acr: claims.acr.clone(),
+        auth_time: claims.auth_time,
+        amr: claims.amr.clone(),
     })
 }
 
@@ -300,7 +313,7 @@ async fn introspect_api_key(token: &str) -> OAuthResult<IntrospectionResponse> {
         sub: Some(key.id),
         aud: None,
         iss: Some(jwt::issuer_from_env()),
-        jti: None,
+        ..IntrospectionResponse::inactive()
     })
 }
 

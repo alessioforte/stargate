@@ -27,15 +27,6 @@
         "comment": "Stargate includes scope-granted email claims in the ID token as well as userinfo, which relying parties rely on."
     },
     {
-        "test-name": "oidcc-ensure-request-with-acr-values-succeeds",
-        "variant": "*",
-        "configuration-filename": "*op.json",
-        "current-block": "Verify authorization endpoint response",
-        "condition": "ValidateIdTokenACRClaimAgainstAcrValuesRequest",
-        "expected-result": "warning",
-        "comment": "acr_values is ignored and no acr claim is issued (SHOULD, not MUST)."
-    },
-    {
         "test-name": "oidcc-claims-essential",
         "variant": "*",
         "configuration-filename": "*op.json",

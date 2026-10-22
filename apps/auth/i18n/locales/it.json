@@ -96,5 +96,9 @@
   },
   "signedOutTitle": "Sei uscito",
   "signedOutDescription": "La tua sessione Stargate è terminata. Puoi chiudere questa pagina.",
-  "signInAgain": "Accedi di nuovo"
+  "signInAgain": "Accedi di nuovo",
+  "stepUpTitle": "Conferma la tua identità",
+  "stepUpDescription": "Questa applicazione richiede una verifica aggiuntiva. Inserisci il codice che ti abbiamo inviato via email.",
+  "stepUpResend": "Invia un nuovo codice",
+  "stepUpMissing": "Questa richiesta di verifica non è valida. Torna all'applicazione e riprova."
 }

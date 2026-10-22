@@ -1,4 +1,5 @@
 use crate::OAuthError;
+use crate::authentication::Authentication;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use store::Store;
@@ -20,6 +21,7 @@ pub struct AuthorizationCodeRecord {
     pub code_challenge_method: String,
     pub auth_time: DateTime<Utc>,
     pub sid: Option<String>,
+    pub authentication: Authentication,
 }
 
 /// Tokens issued for a redeemed code, revoked if the code is replayed.
@@ -41,7 +43,7 @@ enum StoredAuthorizationCode {
 #[derive(Clone, Debug, PartialEq)]
 pub enum CodeLookup {
     Missing,
-    Pending(AuthorizationCodeRecord),
+    Pending(Box<AuthorizationCodeRecord>),
     /// Already exchanged. Carries the issued tokens once they are recorded.
     Redeemed(Option<RedeemedGrant>),
 }
@@ -74,7 +76,7 @@ pub async fn get<S: Store>(store: &S, code_hash: &str) -> Result<CodeLookup, OAu
     let key = code_key(code_hash);
     Ok(match store.get::<StoredAuthorizationCode>(&key).await? {
         None => CodeLookup::Missing,
-        Some(StoredAuthorizationCode::Pending(record)) => CodeLookup::Pending(*record),
+        Some(StoredAuthorizationCode::Pending(record)) => CodeLookup::Pending(record),
         Some(StoredAuthorizationCode::Consumed) => CodeLookup::Redeemed(None),
         Some(StoredAuthorizationCode::Redeemed(grant)) => CodeLookup::Redeemed(Some(grant)),
     })
@@ -127,6 +129,10 @@ pub(crate) mod tests_support {
             code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_string(),
             code_challenge_method: "S256".to_string(),
             auth_time: chrono::Utc::now(),
+            authentication: crate::authentication::Authentication {
+                amr: vec!["pwd".to_string()],
+                acr: crate::authentication::ACR_SINGLE_FACTOR.to_string(),
+            },
         }
     }
 }
@@ -148,6 +154,10 @@ mod tests {
             code_challenge: "challenge".to_string(),
             code_challenge_method: "S256".to_string(),
             auth_time: Utc::now(),
+            authentication: crate::authentication::Authentication {
+                amr: vec!["pwd".to_string()],
+                acr: crate::authentication::ACR_SINGLE_FACTOR.to_string(),
+            },
         }
     }
 

@@ -1,3 +1,4 @@
+use crate::authentication::Authentication;
 use crate::scopes::{SCOPE_EMAIL, SCOPE_PROFILE, contains};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +43,7 @@ pub fn user_access_claims(
     scope: Option<String>,
     audience: Option<String>,
     auth_time: chrono::DateTime<chrono::Utc>,
+    authentication: &Authentication,
 ) -> jwt::Claims {
     let mut claims = jwt::Claims::default()
         .subject(user.id.clone())
@@ -51,6 +53,9 @@ pub fn user_access_claims(
     claims.scope = scope;
     claims.aud = audience;
     claims.auth_time = Some(auth_time.timestamp() as usize);
+    // For resource servers that require a level (RFC 9068 §2.2.1, RFC 9470).
+    claims.acr = Some(authentication.acr.clone());
+    claims.amr = Some(authentication.amr.clone());
     claims
 }
 
@@ -61,6 +66,7 @@ pub fn id_token_claims(
     scopes: &[String],
     auth_time: chrono::DateTime<chrono::Utc>,
     nonce: Option<String>,
+    authentication: &Authentication,
 ) -> jwt::Claims {
     // Only registered ID token claims: no Stargate-internal `sub_id`.
     let mut claims = jwt::Claims::default()
@@ -70,6 +76,8 @@ pub fn id_token_claims(
     claims.sid = sid.map(str::to_string);
     claims.auth_time = Some(auth_time.timestamp() as usize);
     claims.nonce = nonce;
+    claims.acr = Some(authentication.acr.clone());
+    claims.amr = Some(authentication.amr.clone());
 
     if contains(scopes, SCOPE_EMAIL) {
         claims.email = Some(user.email.clone());
@@ -93,6 +101,13 @@ mod tests {
     use crate::scopes::{SCOPE_EMAIL, SCOPE_OPENID, SCOPE_PROFILE};
     use chrono::Utc;
 
+    fn mfa() -> Authentication {
+        Authentication {
+            amr: vec!["pwd".to_string(), "otp".to_string(), "mfa".to_string()],
+            acr: crate::authentication::ACR_MULTI_FACTOR.to_string(),
+        }
+    }
+
     fn user() -> UserClaimsProfile {
         UserClaimsProfile {
             id: "user-1".to_string(),
@@ -113,9 +128,22 @@ mod tests {
             &[SCOPE_OPENID.to_string()],
             Utc::now(),
             None,
+            &mfa(),
         );
 
         assert_eq!(claims.sid.as_deref(), Some("session-1"));
+        assert_eq!(
+            claims.acr.as_deref(),
+            Some(crate::authentication::ACR_MULTI_FACTOR)
+        );
+        assert_eq!(
+            claims.amr,
+            Some(vec![
+                "pwd".to_string(),
+                "otp".to_string(),
+                "mfa".to_string()
+            ])
+        );
         assert!(claims.sub_id.is_none());
         assert!(claims.email.is_none());
         assert!(claims.name.is_none());
@@ -134,6 +162,7 @@ mod tests {
             ],
             Utc::now(),
             Some("nonce-1".to_string()),
+            &mfa(),
         );
 
         assert_eq!(claims.email.as_deref(), Some("alice@example.com"));

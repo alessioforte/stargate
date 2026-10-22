@@ -23,6 +23,14 @@ function emptyValue() {
   return <Text c="dimmed">—</Text>;
 }
 
+/** Labels for the OIDC `amr` values Stargate records; others show as is. */
+const AUTHENTICATION_METHOD_LABELS: Record<string, string> = {
+  pwd: "amrPassword",
+  otp: "amrEmailCode",
+  fed: "amrExternalProvider",
+  mfa: "amrMultiFactor",
+};
+
 export const columns: ColumnDef<AdminSession>[] = [
   {
     accessorKey: "current",
@@ -55,6 +63,29 @@ export const columns: ColumnDef<AdminSession>[] = [
         </Text>
       </Stack>
     ),
+  },
+  {
+    accessorKey: "authenticationMethods",
+    header: () => getTranslation("authenticationMethods").toLowerCase(),
+    size: 170,
+    cell: ({ row }) =>
+      row.original.authenticationMethods.length > 0 ? (
+        <Group gap={4}>
+          {row.original.authenticationMethods.map((method) => (
+            <Badge
+              key={method}
+              variant="light"
+              color={method === "mfa" ? "green" : "gray"}
+            >
+              {AUTHENTICATION_METHOD_LABELS[method]
+                ? getTranslation(AUTHENTICATION_METHOD_LABELS[method])
+                : method}
+            </Badge>
+          ))}
+        </Group>
+      ) : (
+        emptyValue()
+      ),
   },
   {
     accessorKey: "id",

@@ -21,8 +21,8 @@ use url::Url;
 /// Authorization request parameters. Everything is optional so that a
 /// missing or malformed value can be reported to the client's redirect_uri
 /// (OIDC Core 3.1.2.6) instead of failing before the client is known.
-/// Unrecognized parameters (`display`, `ui_locales`, `acr_values`, ...) are
-/// ignored as OIDC Core requires.
+/// Unrecognized parameters (`display`, `ui_locales`, ...) are ignored as OIDC
+/// Core requires.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::IntoParams)]
 pub struct AuthorizeQuery {
     response_type: Option<String>,
@@ -39,6 +39,8 @@ pub struct AuthorizeQuery {
     pub(crate) login_hint: Option<String>,
     /// A previously issued ID token naming the expected user (may be expired).
     id_token_hint: Option<String>,
+    /// Requested assurance levels, most preferred first (voluntary).
+    acr_values: Option<String>,
     request: Option<String>,
     request_uri: Option<String>,
     /// Resumes a request parked while the user signed in.
@@ -64,6 +66,19 @@ pub(super) struct AuthorizedUser {
     pub(super) user: db::ent::User,
     pub(super) sid: String,
     auth_time: chrono::DateTime<Utc>,
+    /// How the session authenticated (OIDC `amr`).
+    amr: Vec<String>,
+}
+
+/// How a single-factor session can reach the multi-factor level.
+enum StepUpRoute {
+    /// Verify an email code on the hosted step-up page.
+    EmailCode,
+    /// Sign in with a password first (an email code alone cannot add a
+    /// factor to an email-code session).
+    SignIn,
+    /// Not possible: the actual level is issued (`acr_values` is voluntary).
+    Unavailable,
 }
 
 #[derive(Default)]
@@ -120,16 +135,21 @@ pub async fn post_authorize(req: Request) -> OAuthResult<Response> {
 async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<Response> {
     // A resumed request replays the parked parameters; the rest of this
     // request's query is ignored.
-    let (query, parked_at, consent_stage) = match query.interaction.as_deref() {
+    let (query, parked_at, consent_stage, step_up_stage) = match query.interaction.as_deref() {
         Some(id) => {
             let Some(pending) = interactions::take(id).await? else {
                 return Err(oauth_bad_request(
                     "authorization request expired or was already completed",
                 ));
             };
-            (pending.query, Some(pending.created_at), pending.consent)
+            (
+                pending.query,
+                Some(pending.created_at),
+                pending.consent,
+                pending.step_up,
+            )
         }
-        None => (query, None, None),
+        None => (query, None, None, None),
     };
 
     let client = authorization_client(&query).await?;
@@ -188,14 +208,44 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
             .as_ref()
             .filter(|stage| stage.user_id == user.user.id)
     };
+    let stepped_up = |user: &AuthorizedUser| {
+        step_up_stage
+            .as_ref()
+            .is_some_and(|stage| stage.user_id == user.user.id)
+    };
     let user = match user {
-        // Parked for consent after this user passed the login checks.
-        Some(user) if stage_for_user(&user).is_some() => user,
+        // Parked for consent or step-up after this user passed the login checks.
+        Some(user) if stage_for_user(&user).is_some() || stepped_up(&user) => user,
         // Signed in on the login page for this very request.
         Some(user) if parked_at.is_some_and(|at| user.auth_time.timestamp() >= at) => user,
         Some(user) if !prompt.login && !max_age_exceeded(&user, request.max_age) => user,
         _ if prompt.none => return error_redirect("login_required", "login required"),
         _ => return login_redirect(query, hinted_subject.as_deref()).await,
+    };
+
+    // Assurance level: `acr_values` asks for one (OIDC Core 3.1.2.1).
+    let level = oidc::authentication::AssuranceLevel::of(&user.amr);
+    let acr = match oidc::authentication::decide_acr(query.acr_values.as_deref(), level) {
+        oidc::authentication::AcrDecision::Satisfied(acr) => acr,
+        oidc::authentication::AcrDecision::StepUp => {
+            match step_up_route(&user, parked_at.is_some()).await? {
+                StepUpRoute::Unavailable => level.acr(),
+                _ if prompt.none => {
+                    return error_redirect(
+                        "interaction_required",
+                        "multi-factor authentication required",
+                    );
+                }
+                StepUpRoute::EmailCode => return step_up_redirect(query, &user).await,
+                StepUpRoute::SignIn => {
+                    return login_redirect(query, hinted_subject.as_deref()).await;
+                }
+            }
+        }
+    };
+    let authentication = oidc::authentication::Authentication {
+        amr: user.amr.clone(),
+        acr: acr.to_string(),
     };
 
     let approved = stage_for_user(&user).is_some_and(|stage| stage.approved);
@@ -224,7 +274,7 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
         .await;
     }
 
-    let code = store_authorization_code(&client, &query, &user, &request).await?;
+    let code = store_authorization_code(&client, &query, &user, &request, authentication).await?;
     oauth_code_redirect(redirect_uri, &code, state)
 }
 
@@ -265,6 +315,44 @@ async fn login_redirect(
         cookie.parse().map_err(OAuthErrorResponse::internal)?,
     );
     Ok(response)
+}
+
+/// How `user` can add a factor. `signed_in_for_request`: the request was
+/// already parked, so the user has just signed in (or stepped up) for it.
+async fn step_up_route(
+    user: &AuthorizedUser,
+    signed_in_for_request: bool,
+) -> OAuthResult<StepUpRoute> {
+    let available = crate::act::otp::service::email_mfa_available(&user.user)
+        .await
+        .map_err(|error| OAuthErrorResponse::internal(error.message))?;
+    Ok(if !available {
+        StepUpRoute::Unavailable
+    } else if oidc::authentication::otp_adds_factor(&user.amr) {
+        StepUpRoute::EmailCode
+    } else if signed_in_for_request {
+        // Signed in with an email code again: do not loop.
+        StepUpRoute::Unavailable
+    } else {
+        StepUpRoute::SignIn
+    })
+}
+
+/// Park the request until the signed-in user verifies an email code, and send
+/// the browser to the hosted auth app's step-up page, which resumes it.
+async fn step_up_redirect(
+    mut query: AuthorizeQuery,
+    user: &AuthorizedUser,
+) -> OAuthResult<Response> {
+    query.interaction = None;
+    let id = interactions::park_for_step_up(
+        query,
+        interactions::StepUpStage {
+            user_id: user.user.id.clone(),
+        },
+    )
+    .await?;
+    found_redirect(interactions::step_up_page_url(&id))
 }
 
 /// Park the request for the signed-in user's consent and send the browser to
@@ -468,6 +556,12 @@ pub(super) async fn current_authorized_user(
     let Some(auth_time) = claims.auth_time else {
         return Ok(None);
     };
+    let Some(session) = crate::act::sessions::get_active_session(sid, &user.id)
+        .await
+        .map_err(OAuthErrorResponse::internal)?
+    else {
+        return Ok(None);
+    };
     let auth_time = Utc
         .timestamp_opt(auth_time as i64, 0)
         .single()
@@ -477,6 +571,7 @@ pub(super) async fn current_authorized_user(
         user,
         sid: sid.to_string(),
         auth_time,
+        amr: session.amr,
     }))
 }
 
@@ -632,6 +727,7 @@ async fn store_authorization_code(
     query: &AuthorizeQuery,
     user: &AuthorizedUser,
     request: &ValidatedAuthorizeRequest,
+    authentication: oidc::authentication::Authentication,
 ) -> OAuthResult<String> {
     let code = oidc::codes::authorization_code();
     let code_hash = pw::hash_api_key(&code);
@@ -651,6 +747,7 @@ async fn store_authorization_code(
             .map(|_| PKCE_METHOD_S256.to_string())
             .unwrap_or_default(),
         auth_time: user.auth_time,
+        authentication,
     };
 
     authorization_codes::store(&code_hash, record, AUTHORIZATION_CODE_TTL_SECS as u64).await?;
@@ -813,6 +910,7 @@ mod tests {
             user: db::ent::User::new("alice@example.com".to_string(), "alice".to_string()),
             sid: "sid-1".to_string(),
             auth_time: Utc::now(),
+            amr: vec!["pwd".to_string()],
         };
 
         assert!(max_age_exceeded(&user, Some(0)));

@@ -83,7 +83,8 @@ pub async fn post_login(req: Request) -> Response {
     }
 
     let auth_time = chrono::Utc::now().timestamp() as usize;
-    let session = match issue_user_session(user, auth_time, None).await {
+    let password = vec![oidc::authentication::AMR_PASSWORD.to_string()];
+    let session = match issue_user_session(user, auth_time, None, password).await {
         Ok(session) => session,
         Err(_) => return back_to_login(page(), "server_error"),
     };

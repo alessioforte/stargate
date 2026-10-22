@@ -6,6 +6,7 @@ import {
   storePendingMfa,
   storePendingPasswordless,
 } from "@/lib/auth-flow";
+import { getAuthAppConfig } from "@/lib/env";
 import services from "@/services";
 import type { LoginMFAResponse, LoginResponse } from "@/services/types";
 import type {
@@ -37,6 +38,9 @@ const initialState: State = {
   consentPrompt: null,
   consentError: null,
   consentSubmitting: false,
+  stepUpChallenge: null,
+  stepUpError: null,
+  stepUpSubmitting: false,
   language: "en",
 };
 
@@ -555,6 +559,60 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     // Stays submitting: the page navigates away to redirectTo.
     return { status: "success", redirectTo: response.data.redirectTo };
   },
+  startStepUp: async () => {
+    set({ stepUpChallenge: null, stepUpError: null });
+
+    const response =
+      await services.auth.startSessionMfaChallenge(STEP_UP_PURPOSE);
+    if (response.error || !response.data) {
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Failed to send the verification code",
+      );
+      set({ stepUpError: message });
+      return { status: "error", message };
+    }
+
+    set({ stepUpChallenge: response.data });
+    return { status: "success", challenge: response.data };
+  },
+  verifyStepUp: async (interactionId, code) => {
+    const challenge = get().stepUpChallenge;
+    if (!challenge) {
+      const message = "Request a new verification code";
+      set({ stepUpError: message });
+      return { status: "error", message };
+    }
+    set({ stepUpError: null, stepUpSubmitting: true });
+
+    const response = await services.auth.verifySessionMfaChallenge(
+      challenge.challengeId,
+      code,
+    );
+    if (response.error) {
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Invalid or expired verification code",
+      );
+      set({ stepUpError: message, stepUpSubmitting: false });
+      return { status: "error", message };
+    }
+
+    // The session now has a second factor: resume the parked authorization
+    // request. Stays submitting while the page navigates away.
+    const resume = `/oauth/authorize?interaction=${encodeURIComponent(interactionId)}`;
+    return {
+      status: "success",
+      redirectTo: `${getAuthAppConfig().apiUrl}${resume}`,
+    };
+  },
 });
+
+/** MFA challenge purpose of the OpenID Connect step-up. */
+const STEP_UP_PURPOSE = "authentication";
 
 export default create(devtools(store));

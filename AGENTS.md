@@ -217,6 +217,11 @@ Removing a session invalidates linked OAuth tokens for Stargate's own checks
 Every function in `act/sessions.rs` that ends sessions (`end_session` for a user's
 own logout, `revoke_session`, `revoke_all_sessions`, `revoke_org_sessions`) also
 notifies the linked clients through OIDC Back-Channel Logout (`act/backchannel_logout.rs`).
+Each record also keeps how the user signed in (`amr`, RFC 8176), set by the sign-in
+path through `issue_user_session` / `NewSession`: `pwd`, `pwd otp mfa` (login MFA),
+`otp` (passwordless), `fed` (Google/GitHub). An email code verified in the session
+(`PUT /account/mfa/challenges/{id}`) calls `add_otp_factor` (`oidc::authentication::with_otp`);
+an org switch keeps the methods.
 
 ### Multi-Org
 
@@ -350,6 +355,13 @@ Authorization request handling:
 - `id_token_hint` must verify (else `invalid_request`); a session of another user is
   `login_required` with `prompt=none` or after a resumed sign-in, else the login page
   prefilled with the hinted user's email.
+- `acr_values` (`crates/oidc/src/authentication.rs`): two levels,
+  `urn:stargate:acr:single-factor` / `urn:stargate:acr:multi-factor`, from the session's
+  `amr`; the highest requested level the session reaches is issued, unknown values are
+  ignored. If none is reached: park with a `StepUpStage` and send the browser to
+  `/auth/step-up?interaction={id}` (JS only; email code via the session MFA API), or to
+  the login page for an email-code-only session; `prompt=none` -> `interaction_required`;
+  MFA unavailable (`email_mfa_available`) or a resumed email-code sign-in -> the actual level.
 - A replayed authorization code revokes the access token and refresh family it issued.
 
 Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
@@ -384,6 +396,8 @@ Scopes/claims:
   `picture`, `updated_at`
 - `offline_access`: refresh tokens when the client allows `refresh_token`
 - ID tokens carry no private `typ` / `sub_id` claims.
+- ID tokens and OAuth access tokens carry `acr` and `amr`; introspection adds them with
+  `auth_time`; codes and refresh families keep the grant's `Authentication`.
 
 Provider state:
 - SQL: `oauth_clients`, `oauth_consents`.
@@ -433,7 +447,8 @@ Account endpoints:
 - `PUT /account/login/mfa/challenges/{challenge_id}` - complete login MFA.
 - `GET /account/mfa/methods` - effective MFA policy/methods.
 - `POST /account/mfa/challenges` - authenticated challenge (email only).
-- `PUT /account/mfa/challenges/{challenge_id}` - verify and store a step-up marker.
+- `PUT /account/mfa/challenges/{challenge_id}` - verify and store a step-up marker; also
+  adds the factor to the session (`amr`), which the OIDC step-up relies on.
 
 Login behavior:
 - `POST /account/login` verifies the password first; if MFA is required it returns
@@ -688,8 +703,8 @@ audit relay -> save in-memory store -> flush telemetry.
   service accounts, sessions, audit outbox, gateway config, access-control
   policies). Reference implementation of the layering below. Served at `/stargate`.
 - `auth`: hosted login / auth-flow UI (password login, passwordless email OTP,
-  login MFA, reset/change password, organization choice, OIDC consent, logout
-  confirmation and signed-out pages). Same stack and
+  login MFA, reset/change password, organization choice, OIDC consent and step-up,
+  logout confirmation and signed-out pages). Same stack and
   layering. Served at `/auth`; its login, logout, and signed-out routes are
   prerendered and hydrated (see "Provider login"), other routes are client-rendered
   from `index.html`.

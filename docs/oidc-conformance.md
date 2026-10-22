@@ -64,7 +64,7 @@ Current results:
     UserInfo.
   - The profile claims Stargate does not store (`website`, `gender`,
     `birthdate`, `zoneinfo`, `locale`, ...) are missing.
-  - `acr_values` and the `claims` parameter are ignored.
+  - The `claims` parameter is ignored.
   - The `address` and `phone` scopes and request objects are not supported.
 - RP-Initiated Logout OP: 12 modules, no failures or warnings. Eight tests end
   in `REVIEW` for screenshots, which the browser steps capture: the
