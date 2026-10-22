@@ -32,15 +32,20 @@ demand:
 4. Runs `oidcc-basic-certification-test-plan` (the **Basic OP** profile, static
    client, discovery). [`op-setup.sh`](../.github/oidc-conformance/op-setup.sh)
    registers three first-party confidential clients (`client`, `client2`, and a
-   `client_secret_post` one), with the suite's `post_logout_redirect` and
-   `backchannel_logout` URLs, and writes the plan config shared with the logout
-   plans, including the browser steps for the hosted login page
+   `client_secret_post` one) with the suite's `post_logout_redirect` URL, and
+   writes `op.json`, including the browser steps for the hosted login page
    (`/auth/login`) and the logout pages. The suite's HtmlUnit browser cannot
    run the app's ES module bundle, so it uses the pages' prerendered forms,
    which post natively to `/oauth/login` and `/oauth/logout/confirm`.
 5. Runs `oidcc-rp-initiated-logout-certification-test-plan` (**RP-Initiated
-   Logout OP**) and `oidcc-backchannel-rp-initiated-logout-certification-test-plan`
-   (**Back-Channel Logout OP**) with the same config.
+   Logout OP**) with `op.json`, and
+   `oidcc-backchannel-rp-initiated-logout-certification-test-plan`
+   (**Back-Channel Logout OP**) with `backchannel-op.json`: the same config
+   with a fourth client that also registers the suite's `backchannel_logout`
+   URL. The other clients must not register it: Stargate notifies every
+   linked client that has one when a session ends, and the RP-Initiated Logout
+   tests fail on any request to a suite URL they do not serve
+   (`UnexpectedHttpRequestReceived`).
 6. Fails on any unexpected failure, warning, or skip, and uploads the exported
    plan results and server logs as the `oidc-conformance-results` artifact.
 
@@ -109,7 +114,7 @@ venv/bin/python conformance-suite/scripts/run-test-plan.py \
   oidcc-config-certification-test-plan <stargate>/.github/oidc-conformance/config-op.json
 
 API_URL=https://127.0.0.1:5443 <stargate>/.github/oidc-conformance/op-setup.sh \
-  https://stargate.local:5443 oidc-tester@example.com 'Blue-Harbor-7319!' op.json
+  https://stargate.local:5443 oidc-tester@example.com 'Blue-Harbor-7319!' op.json backchannel-op.json
 venv/bin/python conformance-suite/scripts/run-test-plan.py \
   --expected-failures-file <stargate>/.github/oidc-conformance/basic-op-expected-failures.json \
   --expected-skips-file <stargate>/.github/oidc-conformance/basic-op-expected-skips.json \
@@ -118,7 +123,7 @@ venv/bin/python conformance-suite/scripts/run-test-plan.py \
 venv/bin/python conformance-suite/scripts/run-test-plan.py \
   "oidcc-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" op.json
 venv/bin/python conformance-suite/scripts/run-test-plan.py \
-  "oidcc-backchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" op.json
+  "oidcc-backchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" backchannel-op.json
 ```
 
 The expected-results files match the config by name (`*op.json`).

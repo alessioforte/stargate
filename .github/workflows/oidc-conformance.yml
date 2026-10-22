@@ -172,12 +172,13 @@ jobs:
       # Full Authorization Code logins through the suite's headless browser.
       # REVIEW results (screenshots for certification) are not failures here.
       # The configuration (static clients, browser scripts) also serves the
-      # logout plans below.
+      # RP-Initiated Logout plan; the Back-Channel Logout plan gets a copy with
+      # a client that registers the suite's backchannel_logout URL.
       - name: Run Basic OP plan
         run: |
           API_URL=https://127.0.0.1:5443 .github/oidc-conformance/op-setup.sh \
             https://stargate.local:5443 "$OIDC_TEST_USERNAME" "$OIDC_TEST_PASSWORD" \
-            "$RUNNER_TEMP/op.json"
+            "$RUNNER_TEMP/op.json" "$RUNNER_TEMP/backchannel-op.json"
           "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
             --verbose --export-dir "$RUNNER_TEMP/results" \
             --expected-failures-file .github/oidc-conformance/basic-op-expected-failures.json \
@@ -200,7 +201,7 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
             --verbose --export-dir "$RUNNER_TEMP/results" \
             "oidcc-backchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" \
-            "$RUNNER_TEMP/op.json"
+            "$RUNNER_TEMP/backchannel-op.json"
 
       - name: Collect suite logs
         if: always()

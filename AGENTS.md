@@ -410,8 +410,10 @@ Client notes:
   `admin bootstrap`.
 
 Conformance: Config OP, Basic OP, RP-Initiated Logout OP, and Back-Channel Logout OP
-plans run in `.github/workflows/oidc-conformance.yml` (builds `apps/auth` too; one
-`op-setup.sh` config for the last three). The suite is served with a test-CA certificate
+plans run in `.github/workflows/oidc-conformance.yml` (builds `apps/auth` too).
+`op-setup.sh` writes `op.json` (Basic, RP-Initiated) and `backchannel-op.json`; only the
+latter's client registers a `backchannel_logout_uri`, since an unexpected back-channel
+post fails the RP-Initiated tests. The suite is served with a test-CA certificate
 that Stargate trusts for back-channel delivery. Expected warnings/skips are in
 `.github/oidc-conformance/`.
 Docs: `docs/oauth-oidc-provider-guide.md`, `docs/oidc-conformance.md`.

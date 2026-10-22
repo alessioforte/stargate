@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Registers the conformance suite's static clients on a running Stargate and
-# writes the configuration (with the generated client secrets) shared by the
-# Basic OP, RP-Initiated Logout OP, and Back-Channel Logout OP plans.
+# writes the plan configurations (with the generated client secrets).
 #
-# Usage: op-setup.sh <issuer-url> <admin-username> <admin-password> <output.json>
+# Usage: op-setup.sh <issuer-url> <admin-username> <admin-password> <output.json> [<backchannel.json>]
+#
+# <output.json> serves the Basic OP and RP-Initiated Logout OP plans. Its
+# clients register no backchannel_logout_uri: Stargate notifies every client
+# that has one when a session ends, and the RP-Initiated Logout tests fail on
+# any request to a suite URL they do not serve. <backchannel.json>, when given,
+# is the same configuration with a fourth client that registers the suite's
+# backchannel_logout URL, for the Back-Channel Logout OP plan.
 #
 # <issuer-url> is Stargate as the suite sees it. Set API_URL when this script
 # reaches Stargate under another address (default: <issuer-url>). The admin
@@ -14,6 +20,7 @@ base_url="${1:?stargate url}"
 username="${2:?admin username}"
 password="${3:?admin password}"
 output="${4:?output path}"
+backchannel_output="${5:-}"
 api_url="${API_URL:-$base_url}"
 
 # Must match the suite's alias in the generated config (callback path).
@@ -30,22 +37,25 @@ access_token="$(
 )"
 
 # First-party so the suite is not asked for consent; PKCE optional because
-# OpenID Connect Core does not require it for confidential clients. Prints
-# {client_id, client_secret} in the suite's config format.
+# OpenID Connect Core does not require it for confidential clients. With
+# <backchannel> true the client also registers the suite's backchannel_logout
+# URL. Prints {client_id, client_secret} in the suite's config format.
 create_client() {
-  local name="$1" auth_method="$2"
-  jq -n --arg name "$name" --arg auth_method "$auth_method" --arg suite_url "$suite_url" '{
+  local name="$1" auth_method="$2" backchannel="${3:-false}"
+  jq -n --arg name "$name" --arg auth_method "$auth_method" --arg suite_url "$suite_url" \
+    --argjson backchannel "$backchannel" '{
       name: $name,
       tokenEndpointAuthMethod: $auth_method,
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
       redirectUris: [($suite_url + "/callback")],
       postLogoutRedirectUris: [($suite_url + "/post_logout_redirect")],
-      backchannelLogoutUri: ($suite_url + "/backchannel_logout"),
-      backchannelLogoutSessionRequired: true,
       scopes: ["openid", "email", "profile", "offline_access"],
       attrs: {first_party: true, require_pkce: false}
-    }' |
+    } + (if $backchannel then {
+      backchannelLogoutUri: ($suite_url + "/backchannel_logout"),
+      backchannelLogoutSessionRequired: true
+    } else {} end)' |
     curl -skf -X POST "${api_url}/admin/oauth/clients" \
       -H "authorization: Bearer ${access_token}" \
       -H 'content-type: application/json' --data-binary @- |
@@ -166,3 +176,10 @@ jq -n \
   }' >"$output"
 
 echo "Registered conformance clients $(jq -r .client_id <<<"$client"), $(jq -r .client_id <<<"$client2"), $(jq -r .client_id <<<"$client_post")"
+
+if [[ -n "$backchannel_output" ]]; then
+  # The Back-Channel Logout test uses only `client`.
+  client_backchannel="$(create_client "OpenID conformance suite (back-channel)" client_secret_basic true)"
+  jq --argjson client "$client_backchannel" '.client = $client' "$output" >"$backchannel_output"
+  echo "Registered back-channel conformance client $(jq -r .client_id <<<"$client_backchannel")"
+fi
