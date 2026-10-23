@@ -25,9 +25,17 @@ CREATE TABLE IF NOT EXISTS "oauth_clients" (
     "description" TEXT,
     "enabled" BOOLEAN NOT NULL DEFAULT TRUE,
     "token_endpoint_auth_method" TEXT NOT NULL,
+    -- Public keys of private_key_jwt clients (OIDC Core 9, RFC 7523): an
+    -- inline JWK Set or a URL that serves one.
+    "jwks" JSONB,
+    "jwks_uri" TEXT,
     "grant_types" JSONB NOT NULL DEFAULT '[]'::jsonb,
     "response_types" JSONB NOT NULL DEFAULT '[]'::jsonb,
     "redirect_uris" JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- RP-Initiated Logout 1.0 and Back-Channel Logout 1.0 metadata.
+    "post_logout_redirect_uris" JSONB NOT NULL DEFAULT '[]'::jsonb,
+    "backchannel_logout_uri" TEXT,
+    "backchannel_logout_session_required" BOOLEAN NOT NULL DEFAULT FALSE,
     "scopes" JSONB NOT NULL DEFAULT '[]'::jsonb,
     "audiences" JSONB NOT NULL DEFAULT '[]'::jsonb,
     "attrs" JSONB NOT NULL DEFAULT '{}'::jsonb,
