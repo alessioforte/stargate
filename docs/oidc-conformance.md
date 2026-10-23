@@ -17,8 +17,8 @@ demand:
    (`SUITE_VERSION`) with Docker Compose;
    [`compose.override.yml`](../.github/oidc-conformance/compose.override.yml)
    serves the suite with that certificate (from `SUITE_TLS_DIR`), so Stargate
-   can verify it when it delivers back-channel logout tokens
-   (`BACKCHANNEL_LOGOUT_CA_FILE`).
+   can verify it when it delivers back-channel logout tokens or fetches a
+   client's `jwks_uri` (`OAUTH_CLIENT_CA_FILE`).
 2. Builds the `edge` profile and the hosted auth app (`apps/auth`), bootstraps a
    test user, and runs Stargate with TLS on `https://stargate.local:5443`, a
    name the suite container resolves to the runner. It seeds
@@ -37,6 +37,8 @@ demand:
    (`/auth/login`) and the logout pages. The suite's HtmlUnit browser cannot
    run the app's ES module bundle, so it uses the pages' prerendered forms,
    which post natively to `/oauth/login` and `/oauth/logout/confirm`.
+   `oidcc-formpost-basic-certification-test-plan` (**Form Post OP**) then runs
+   the same tests with `response_mode=form_post` and the same `op.json`.
 5. Runs `oidcc-rp-initiated-logout-certification-test-plan` (**RP-Initiated
    Logout OP**) with `op.json`, and
    `oidcc-backchannel-rp-initiated-logout-certification-test-plan`
@@ -46,7 +48,13 @@ demand:
    linked client that has one when a session ends, and the RP-Initiated Logout
    tests fail on any request to a suite URL they do not serve
    (`UnexpectedHttpRequestReceived`).
-6. Fails on any unexpected failure, warning, or skip, and uploads the exported
+6. Runs `oidcc-test-plan` (the comprehensive plan, not part of certification)
+   with `client_auth_type=private_key_jwt` and `private-key-jwt-op.json`, whose
+   two clients register the public half of an RSA key that
+   [`client-jwk.mjs`](../.github/oidc-conformance/client-jwk.mjs) generates;
+   the suite signs client assertions with the private half. The certification
+   plans authenticate with client secrets only.
+7. Fails on any unexpected failure, warning, or skip, and uploads the exported
    plan results and server logs as the `oidc-conformance-results` artifact.
 
 Current results:
@@ -74,6 +82,15 @@ Current results:
   `post_logout_redirect_uri`, or an unregistered one.
 - Back-Channel Logout OP: no failures or warnings; the suite validates the
   logout token's signature and claims against the ID token.
+- Form Post OP: 36 modules, no failures; the same `REVIEW` tests, warnings,
+  and skips as Basic OP. The request-object test is skipped because Stargate
+  rejects the object with `request_not_supported`, posted in the
+  `response_mode` the object carries.
+- `private_key_jwt` (comprehensive plan): 38 modules, the Basic OP results
+  plus `oidcc-redirect-uri-query-added` (`REVIEW`: the error page for a
+  `redirect_uri` with an extra query) and `oidcc-server-rotate-keys`, an
+  expected failure: it needs the OP's signing keys rotated while it waits,
+  and Stargate rotates them with a restart.
 
 ## Run it locally
 
@@ -102,7 +119,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=stargate.local" \
   -addext "subjectAltName=DNS:stargate.local" -keyout key.pem -out cert.pem
 export TLS_ENABLED=true TLS_CERT="$PWD/cert.pem" TLS_KEY="$PWD/key.pem" PORT=5443 \
   JWT_ISSUER=https://stargate.local:5443 MFA_MODE=off \
-  AUTH_APP_DIR=<stargate>/.stargate/apps/auth BACKCHANNEL_LOGOUT_CA_FILE="$SUITE_TLS_DIR/ca.crt"
+  AUTH_APP_DIR=<stargate>/.stargate/apps/auth OAUTH_CLIENT_CA_FILE="$SUITE_TLS_DIR/ca.crt"
 <stargate>/target/debug/stargate admin bootstrap --email oidc-tester@example.com \
   --password 'Blue-Harbor-7319!' --name "Oidc Tester" --nickname tester
 <stargate>/target/debug/stargate
@@ -114,19 +131,28 @@ venv/bin/python conformance-suite/scripts/run-test-plan.py \
   oidcc-config-certification-test-plan <stargate>/.github/oidc-conformance/config-op.json
 
 API_URL=https://127.0.0.1:5443 <stargate>/.github/oidc-conformance/op-setup.sh \
-  https://stargate.local:5443 oidc-tester@example.com 'Blue-Harbor-7319!' op.json backchannel-op.json
-venv/bin/python conformance-suite/scripts/run-test-plan.py \
-  --expected-failures-file <stargate>/.github/oidc-conformance/basic-op-expected-failures.json \
-  --expected-skips-file <stargate>/.github/oidc-conformance/basic-op-expected-skips.json \
+  https://stargate.local:5443 oidc-tester@example.com 'Blue-Harbor-7319!' op.json \
+  --backchannel backchannel-op.json --private-key-jwt private-key-jwt-op.json
+expected=(--expected-failures-file <stargate>/.github/oidc-conformance/basic-op-expected-failures.json
+  --expected-skips-file <stargate>/.github/oidc-conformance/basic-op-expected-skips.json)
+venv/bin/python conformance-suite/scripts/run-test-plan.py "${expected[@]}" \
   "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]" \
+  op.json
+venv/bin/python conformance-suite/scripts/run-test-plan.py "${expected[@]}" \
+  "oidcc-formpost-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]" \
   op.json
 venv/bin/python conformance-suite/scripts/run-test-plan.py \
   "oidcc-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" op.json
 venv/bin/python conformance-suite/scripts/run-test-plan.py \
   "oidcc-backchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" backchannel-op.json
+venv/bin/python conformance-suite/scripts/run-test-plan.py "${expected[@]}" \
+  "oidcc-test-plan[client_auth_type=private_key_jwt][response_type=code][response_mode=default][client_registration=static_client]" \
+  private-key-jwt-op.json
 ```
 
-The expected-results files match the config by name (`*op.json`).
+`op-setup.sh` needs `jq`, `curl`, and (for `--private-key-jwt`) Node. The
+expected-results files serve every plan and match the config by name
+(`*op.json`).
 
 The suite UI is at `https://localhost.emobix.co.uk:8443` (self-signed
 certificate). Stop it with
@@ -136,7 +162,8 @@ certificate). Stop it with
 
 Local results cannot be submitted. To certify Basic OP, run the same plan on
 `www.certification.openid.net` against a publicly reachable deployment, upload
-screenshots for the four `REVIEW` tests, and submit the plan. The logout
+screenshots for the four `REVIEW` tests, and submit the plan. Form Post OP is
+the same with the Form Post plan. The logout
 profiles work the same way, with the eight RP-Initiated Logout screenshots;
 there the deployment must reach the hosted suite's `backchannel_logout` URL. Warnings do not
 block certification, but they are visible in the published results.

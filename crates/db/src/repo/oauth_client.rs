@@ -32,13 +32,15 @@ impl OAuthClientRepository {
                 post_logout_redirect_uris,
                 backchannel_logout_uri,
                 backchannel_logout_session_required,
+                jwks,
+                jwks_uri,
                 scopes,
                 audiences,
                 attrs,
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             RETURNING *
         ",
             tbl = OAUTH_CLIENT
@@ -55,6 +57,8 @@ impl OAuthClientRepository {
         .bind(&client.post_logout_redirect_uris)
         .bind(&client.backchannel_logout_uri)
         .bind(client.backchannel_logout_session_required)
+        .bind(&client.jwks)
+        .bind(&client.jwks_uri)
         .bind(&client.scopes)
         .bind(&client.audiences)
         .bind(&client.attrs)
@@ -201,10 +205,12 @@ impl OAuthClientRepository {
                 post_logout_redirect_uris = $8,
                 backchannel_logout_uri = $9,
                 backchannel_logout_session_required = $10,
-                scopes = $11,
-                audiences = $12,
-                attrs = $13,
-                updated_at = $14
+                jwks = $11,
+                jwks_uri = $12,
+                scopes = $13,
+                audiences = $14,
+                attrs = $15,
+                updated_at = $16
             WHERE client_id = $1
             RETURNING *
         ",
@@ -220,6 +226,8 @@ impl OAuthClientRepository {
         .bind(&client.post_logout_redirect_uris)
         .bind(&client.backchannel_logout_uri)
         .bind(client.backchannel_logout_session_required)
+        .bind(&client.jwks)
+        .bind(&client.jwks_uri)
         .bind(&client.scopes)
         .bind(&client.audiences)
         .bind(&client.attrs)

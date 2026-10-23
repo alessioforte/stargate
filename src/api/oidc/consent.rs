@@ -5,14 +5,15 @@
 //! user, and the browser goes to the hosted auth app's consent page. The page
 //! reads the request with `GET /oauth/interactions/{id}` and posts the
 //! decision to `POST /oauth/interactions/{id}/consent`. Both require the same
-//! user's session (cookie). Approval records the consent (audited) and
-//! returns the URL that resumes the request; denial ends it and returns the
-//! client's `redirect_uri` with `error=access_denied`.
+//! user's session (cookie). Approval records the consent (audited); either
+//! way the response is the URL that resumes the request, which then answers
+//! the client (with `error=access_denied` after a denial) in the request's
+//! response mode.
 //!
 //! The page needs JavaScript: unlike the login form, it has nothing to show
 //! without the request details.
 
-use super::interactions::{self, ConsentStage, PendingAuthorization};
+use super::interactions::{self, ConsentDecision, ConsentStage, PendingAuthorization};
 use crate::act::sessions::authenticated_session;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::http::request::RequestExt;
@@ -56,8 +57,8 @@ pub struct ConsentDecisionRequest {
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConsentDecisionResponse {
-    /// Where the browser goes next: the request resumes, or the client
-    /// receives `access_denied`.
+    /// Where the browser goes next: the request resumes and answers the
+    /// client (`access_denied` after a denial).
     pub redirect_to: String,
 }
 
@@ -133,19 +134,7 @@ pub async fn post_consent(
     let (pending, stage) = pending_consent(&interaction_id, user_id).await?;
 
     if !decision.approve {
-        // End the request: it cannot be resumed after a denial.
-        interactions::take(&interaction_id)
-            .await
-            .map_err(oauth_internal)?;
-        let redirect_uri = pending.query.redirect_uri().unwrap_or_default();
-        let redirect_to = super::authorize::error_redirect_location(
-            redirect_uri,
-            "access_denied",
-            "the user denied the request",
-            pending.query.state(),
-        )
-        .map_err(oauth_internal)?;
-        return Ok(Json(ConsentDecisionResponse { redirect_to }));
+        return decided(&interaction_id, user_id, ConsentDecision::Denied).await;
     }
 
     let client = interaction_client(&pending).await?;
@@ -176,7 +165,16 @@ pub async fn post_consent(
         .await
         .map_err(ErrorResponse::internal)?;
 
-    if !interactions::approve_consent(&interaction_id, user_id)
+    decided(&interaction_id, user_id, ConsentDecision::Approved).await
+}
+
+/// Record the decision and answer with the URL that resumes the request.
+async fn decided(
+    interaction_id: &str,
+    user_id: &str,
+    decision: ConsentDecision,
+) -> Result<Json<ConsentDecisionResponse>, ErrorResponse> {
+    if !interactions::decide_consent(interaction_id, user_id, decision)
         .await
         .map_err(oauth_internal)?
     {
@@ -186,7 +184,7 @@ pub async fn post_consent(
     let redirect_to = format!(
         "{}{}",
         super::well_known::public_endpoint_base_url().trim_end_matches('/'),
-        interactions::resume_path(&interaction_id)
+        interactions::resume_path(interaction_id)
     );
     Ok(Json(ConsentDecisionResponse { redirect_to }))
 }

@@ -8,7 +8,11 @@ import {
 } from "@mantine/core";
 import type { UseFormReturnType } from "@mantine/form";
 import { useTranslations } from "@/i18n";
-import type { OAuthGrantType, OAuthResponseType } from "@/services/types";
+import {
+  OAuthTokenEndpointAuthMethod,
+  type OAuthGrantType,
+  type OAuthResponseType,
+} from "@/services/types";
 import type { OAuthClientFormValues } from "./form";
 import {
   oauthGrantTypeTranslationKeys,
@@ -67,6 +71,28 @@ const OAuthClientFormFields: React.FC<Props> = ({
         }))}
         {...form.getInputProps("tokenEndpointAuthMethod")}
       />
+      {form.values.tokenEndpointAuthMethod ===
+        OAuthTokenEndpointAuthMethod.PrivateKeyJwt && (
+        <>
+          <Textarea
+            readOnly={disabled}
+            autosize
+            minRows={4}
+            variant="filled"
+            label={t("jwks")}
+            description={t("jwksDescription")}
+            styles={{ input: { fontFamily: "monospace" } }}
+            {...form.getInputProps("jwks")}
+          />
+          <TextInput
+            readOnly={disabled}
+            variant="filled"
+            label={t("jwksUri")}
+            description={t("jwksUriDescription")}
+            {...form.getInputProps("jwksUri")}
+          />
+        </>
+      )}
       <Checkbox.Group
         label={t("grantTypes")}
         value={form.values.grantTypes}

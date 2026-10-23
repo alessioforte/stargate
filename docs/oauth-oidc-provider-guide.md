@@ -132,7 +132,10 @@ OAuth clients are stored in `oauth_clients`. Client secrets are returned only on
 
 Important fields:
 
-- `token_endpoint_auth_method`: `client_secret_basic`, `client_secret_post`, or `none`
+- `token_endpoint_auth_method`: `client_secret_basic`, `client_secret_post`,
+  `private_key_jwt`, or `none` (see "Client Authentication")
+- `jwks` / `jwks_uri`: the public keys of a `private_key_jwt` client, inline or
+  at an HTTPS URL; exactly one, and only for that method
 - `grant_types`: `client_credentials`, `authorization_code`, `refresh_token`
 - `response_types`: `code`
 - `redirect_uris`: exact redirect URIs, no wildcards
@@ -227,6 +230,23 @@ Public SPA/native clients use:
 
 Public clients must use Authorization Code + PKCE. They cannot use `client_credentials`.
 
+A client that signs its own assertions registers its public keys instead of
+receiving a secret:
+
+```json
+{
+  "tokenEndpointAuthMethod": "private_key_jwt",
+  "jwksUri": "https://app.example.com/.well-known/jwks.json"
+}
+```
+
+or `"jwks": {"keys": [...]}` with the keys inline. Inline sets must hold public
+RSA or EC (P-256, P-384) keys only: private members (`d`, ...) and symmetric
+keys are rejected. `jwksUri` is an absolute HTTPS URL without a fragment
+(HTTP only on loopback hosts). Changing the method to `private_key_jwt` clears
+the client's secret; a `PATCH` that sets one of `jwks` / `jwksUri` clears the
+other.
+
 ## Rotate Client Secret
 
 ```bash
@@ -235,6 +255,51 @@ curl -X PUT "$STARGATE/admin/oauth/clients/web-app/rotate-secret" \
 ```
 
 The response includes the new secret once. Store it immediately in the client deployment secret store.
+
+## Client Authentication
+
+The token, introspection, and revocation endpoints accept one authentication
+method per request; a request that combines them (for example HTTP Basic and a
+`client_assertion`) fails with `invalid_request`. A client can only use the
+method it is registered with.
+
+- `client_secret_basic`: HTTP Basic with the client id and secret.
+- `client_secret_post`: `client_id` and `client_secret` form fields.
+- `none`: only `client_id` (public clients).
+- `private_key_jwt` (OpenID Connect Core §9, RFC 7523): the client signs a JWT
+  with one of its registered keys and sends it with
+  `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`
+  and `client_assertion=<JWT>` (`client_id` is optional and must match).
+
+```bash
+curl -X POST "$STARGATE/oauth/token" \
+  -H "content-type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&scope=orders:read" \
+  -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+  -d "client_assertion=$ASSERTION"
+```
+
+The assertion must:
+
+- be signed with `RS256`/`384`/`512`, `PS256`/`384`/`512`, `ES256`, or `ES384`
+  (discovery: `token_endpoint_auth_signing_alg_values_supported`); with a
+  `kid`, the registered key with that `kid` is used, else every key that fits
+  the algorithm is tried;
+- have `iss` and `sub` equal to the client id;
+- have an `aud` (string or array) containing the issuer, the token endpoint
+  URL, or the URL of the endpoint called (`/oauth/introspect`,
+  `/oauth/revoke`);
+- carry `exp` no more than an hour ahead (60 seconds of clock skew are
+  tolerated), and `nbf` when present must have passed;
+- carry a `jti`. Each `jti` authenticates once: Stargate remembers it until
+  the assertion expires, so a replay fails with `invalid_client`.
+
+Keys at `jwks_uri` are fetched with a 5-second timeout (no redirects, at most
+64 KiB) and cached for 5 minutes per URL. When no cached key verifies an
+assertion, Stargate refetches the document, at most once every 10 seconds per
+URL, so a client rotates by publishing the new key before signing with it.
+Clients behind a private CA can be trusted with `OAUTH_CLIENT_CA_FILE` (PEM
+bundle, added to the system roots), which also covers back-channel logout.
 
 ## Client Credentials
 
@@ -323,6 +388,21 @@ the request has its own `login_hint`).
 The session cookie is `SameSite=Lax`, so a user already signed in to Stargate
 is recognized when a relying party on another site redirects to
 `/oauth/authorize`.
+
+`response_mode` picks how the response reaches `redirect_uri`:
+
+- `query` (default): a `302` with `code` and `state` (or the error) in the
+  query.
+- `form_post` (OAuth 2.0 Form Post Response Mode): an HTML page whose form
+  posts the same parameters to `redirect_uri` as soon as it loads (a button
+  without JavaScript). The page is `Cache-Control: no-store` and sends no
+  referrer, and the code never appears in a URL.
+
+Any other mode (`fragment`, `jwt`, ...) fails with `invalid_request`, reported
+in the query. Errors, including a denied consent, use the requested mode. A
+request object is rejected (`request_not_supported`) in the `response_mode`
+and with the `state` it carries, read without verifying it; the
+`redirect_uri` is the verified one from the query.
 
 Errors that can be reported to a verified `redirect_uri` use the OAuth/OIDC
 codes: `invalid_request`, `unsupported_response_type`, `invalid_scope`,
@@ -538,7 +618,7 @@ OIDC ID-token claims include:
 
 ## Introspection
 
-Admin callers can use existing admin grants. OAuth clients can authenticate with `client_secret_basic` or `client_secret_post`.
+Admin callers can use existing admin grants. OAuth clients authenticate as at the token endpoint (`client_secret_basic`, `client_secret_post`, or `private_key_jwt`; see "Client Authentication").
 
 Own-token introspection:
 
@@ -649,7 +729,7 @@ retries (after 1 and 3 seconds) on network errors and `5xx`, none on `4xx`,
 redirects not followed. RP-Initiated Logout waits up to 3 seconds for delivery
 before redirecting the browser. Nothing is persisted, so notifications in
 flight during a restart are lost. Relying parties behind a private CA can be
-trusted with `BACKCHANNEL_LOGOUT_CA_FILE` (PEM bundle, added to the system
+trusted with `OAUTH_CLIENT_CA_FILE` (PEM bundle, added to the system
 roots).
 
 The Console logs out this way: it sends its ID token to `/oauth/logout` and
@@ -662,6 +742,8 @@ bootstrap` registers the callback URI without `/auth/callback`).
 - `oauth_client_secrets` history/overlap is not implemented; rotation replaces the active hash.
 - Without JavaScript, the hosted login page signs in with a password only; MFA and password changes need JavaScript. The consent page always needs JavaScript.
 - Request objects (`request`, `request_uri`) and the `claims` parameter are not supported.
+- `response_mode` is `query` or `form_post`: `fragment` (no implicit or hybrid flows) and JARM (`jwt`) are not supported.
+- Client authentication with `client_secret_jwt` or mutual TLS (`tls_client_auth`, `self_signed_tls_client_auth`) is not supported.
 - There is no UI yet for users to review/revoke consents (the `/account/consents` API exists) and no admin consent endpoints.
 - OAuth/OIDC error responses still use Stargate's generic error envelope for most non-redirect errors.
 - OAuth AS metadata does not advertise `scopes_supported`; there is no global OAuth scope registry.

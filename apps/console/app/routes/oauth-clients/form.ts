@@ -24,6 +24,9 @@ export interface OAuthClientFormValues {
   postLogoutRedirectUris: string[];
   backchannelLogoutUri: string;
   backchannelLogoutSessionRequired: boolean;
+  /** JWK Set as JSON text (`private_key_jwt`). */
+  jwks: string;
+  jwksUri: string;
   scopes: string[];
   audiences: string[];
   attrs: string;
@@ -40,6 +43,8 @@ export const emptyOAuthClientFormValues: OAuthClientFormValues = {
   postLogoutRedirectUris: [],
   backchannelLogoutUri: "",
   backchannelLogoutSessionRequired: false,
+  jwks: "",
+  jwksUri: "",
   scopes: [],
   audiences: [],
   attrs: "{}",
@@ -51,6 +56,21 @@ function cleanList(values: string[]) {
 
 function optionalString(value: string) {
   return value.trim() || null;
+}
+
+/** Client keys are sent only for `private_key_jwt` clients. */
+function clientKeys(values: OAuthClientFormValues) {
+  if (
+    values.tokenEndpointAuthMethod !==
+    OAuthTokenEndpointAuthMethod.PrivateKeyJwt
+  ) {
+    return { jwks: null, jwksUri: null };
+  }
+  const jwks = values.jwks.trim();
+  return {
+    jwks: jwks ? (JSON.parse(jwks) as JsonValue) : null,
+    jwksUri: optionalString(values.jwksUri),
+  };
 }
 
 export function oauthClientToFormValues(
@@ -70,6 +90,8 @@ export function oauthClientToFormValues(
     backchannelLogoutUri: oauthClient.backchannelLogoutUri ?? "",
     backchannelLogoutSessionRequired:
       oauthClient.backchannelLogoutSessionRequired,
+    jwks: oauthClient.jwks ? JSON.stringify(oauthClient.jwks, null, 2) : "",
+    jwksUri: oauthClient.jwksUri ?? "",
     scopes: oauthClient.scopes,
     audiences: oauthClient.audiences,
     attrs: JSON.stringify(oauthClient.attrs ?? {}, null, 2),
@@ -136,6 +158,23 @@ export function validateOAuthClientForm(t: Translate) {
       errors.attrs = t("invalidJson");
     }
 
+    if (
+      values.tokenEndpointAuthMethod ===
+      OAuthTokenEndpointAuthMethod.PrivateKeyJwt
+    ) {
+      const jwks = values.jwks.trim();
+      const jwksUri = values.jwksUri.trim();
+      if (Boolean(jwks) === Boolean(jwksUri)) {
+        errors.jwks = t("jwksOrJwksUriRequired");
+      } else if (jwks) {
+        try {
+          JSON.parse(jwks);
+        } catch {
+          errors.jwks = t("invalidJson");
+        }
+      }
+    }
+
     return errors;
   };
 }
@@ -154,6 +193,7 @@ export function toCreateOAuthClientRequest(
     postLogoutRedirectUris: cleanList(values.postLogoutRedirectUris),
     backchannelLogoutUri: optionalString(values.backchannelLogoutUri),
     backchannelLogoutSessionRequired: values.backchannelLogoutSessionRequired,
+    ...clientKeys(values),
     scopes: cleanList(values.scopes),
     audiences: cleanList(values.audiences),
     attrs: JSON.parse(values.attrs) ?? {},
@@ -174,6 +214,7 @@ export function toUpdateOAuthClientRequest(
     postLogoutRedirectUris: cleanList(values.postLogoutRedirectUris),
     backchannelLogoutUri: optionalString(values.backchannelLogoutUri),
     backchannelLogoutSessionRequired: values.backchannelLogoutSessionRequired,
+    ...clientKeys(values),
     scopes: cleanList(values.scopes),
     audiences: cleanList(values.audiences),
     attrs,

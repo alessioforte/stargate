@@ -1,12 +1,12 @@
 use super::authorization_codes::{self, AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
+use super::client_auth::{ClientAuthForm, authenticate_client, presented_client};
 use super::pkce;
 use super::refresh_tokens;
 use super::shared::{
-    AUTH_METHOD_NONE, ClientCredentials, GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS,
-    GRANT_REFRESH_TOKEN, OAuthResult, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID,
-    authenticate_oauth_client, extract_basic_client_credentials, oauth_bad_request,
+    GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, OAuthResult,
+    SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, extract_basic_client_credentials, oauth_bad_request,
     oauth_invalid_client, oauth_invalid_grant, oauth_unsupported_grant_type, parse_space_delimited,
-    resolve_audience, resolve_client_credentials_parts, resolve_scopes, scope_contains,
+    resolve_audience, resolve_scopes, scope_contains,
 };
 use crate::err::OAuthErrorResponse;
 use axum::Json;
@@ -22,6 +22,9 @@ pub struct TokenEndpointForm {
     grant_type: String,
     client_id: Option<String>,
     client_secret: Option<String>,
+    /// `private_key_jwt`: `urn:ietf:params:oauth:client-assertion-type:jwt-bearer`.
+    client_assertion_type: Option<String>,
+    client_assertion: Option<String>,
     scope: Option<String>,
     audience: Option<String>,
     code: Option<String>,
@@ -71,23 +74,38 @@ async fn token_response(req: Request) -> OAuthResult<TokenResponse> {
     let basic = extract_basic_client_credentials(&req)?;
     let form = extract_token_endpoint_form(req).await?;
 
-    let body = match form.grant_type.trim() {
+    let grant_type = form.grant_type.trim();
+    if ![
+        GRANT_CLIENT_CREDENTIALS,
+        GRANT_AUTHORIZATION_CODE,
+        GRANT_REFRESH_TOKEN,
+    ]
+    .contains(&grant_type)
+    {
+        return Err(oauth_unsupported_grant_type("unsupported grant_type"));
+    }
+
+    let presented = presented_client(
+        basic,
+        ClientAuthForm {
+            client_id: form.client_id.as_deref(),
+            client_secret: form.client_secret.as_deref(),
+            client_assertion_type: form.client_assertion_type.as_deref(),
+            client_assertion: form.client_assertion.as_deref(),
+        },
+    )?
+    .ok_or_else(|| oauth_invalid_client("client authentication is required"))?;
+    let client = authenticate_client(presented, "/oauth/token").await?;
+    let client = validate_client_grant(client, grant_type)?;
+
+    let body = match grant_type {
         GRANT_CLIENT_CREDENTIALS => {
-            let credentials = resolve_client_credentials(basic, &form)?;
-            let client = validate_client_credentials_client(&credentials).await?;
             let scopes = resolve_scopes(form.scope.as_deref(), &client.scopes)?;
             let audience = resolve_audience(form.audience.as_deref(), &client.audiences)?;
             issue_client_credentials_token(&client, &scopes, audience)?
         }
-        GRANT_AUTHORIZATION_CODE => {
-            let client = resolve_authorization_code_client(basic, &form).await?;
-            issue_authorization_code_grant(&client, &form).await?
-        }
-        GRANT_REFRESH_TOKEN => {
-            let client = resolve_refresh_token_client(basic, &form).await?;
-            issue_refresh_token_grant(&client, &form).await?
-        }
-        _ => return Err(oauth_unsupported_grant_type("unsupported grant_type")),
+        GRANT_AUTHORIZATION_CODE => issue_authorization_code_grant(&client, &form).await?,
+        _ => issue_refresh_token_grant(&client, &form).await?,
     };
 
     Ok(body)
@@ -103,35 +121,6 @@ async fn extract_token_endpoint_form(req: Request) -> OAuthResult<TokenEndpointF
     }
 
     Ok(form)
-}
-
-fn resolve_client_credentials(
-    basic: Option<ClientCredentials>,
-    form: &TokenEndpointForm,
-) -> OAuthResult<ClientCredentials> {
-    resolve_client_credentials_parts(
-        basic,
-        form.client_id.as_deref(),
-        form.client_secret.as_deref(),
-    )
-}
-
-async fn validate_client_credentials_client(
-    credentials: &ClientCredentials,
-) -> OAuthResult<db::ent::OAuthClient> {
-    let client = authenticate_oauth_client(credentials).await?;
-
-    if !client
-        .grant_types
-        .iter()
-        .any(|grant_type| grant_type == GRANT_CLIENT_CREDENTIALS)
-    {
-        return Err(oauth_bad_request(
-            "client_credentials grant is not allowed for this client",
-        ));
-    }
-
-    Ok(client)
 }
 
 fn issue_client_credentials_token(
@@ -175,81 +164,6 @@ fn validate_client_grant(
     }
 
     Ok(client)
-}
-
-async fn resolve_public_or_confidential_client(
-    basic: Option<ClientCredentials>,
-    form: &TokenEndpointForm,
-    grant_type: &str,
-) -> OAuthResult<db::ent::OAuthClient> {
-    if basic.is_some() && form.client_secret.is_some() {
-        return Err(oauth_bad_request(
-            "multiple client authentication methods are not allowed",
-        ));
-    }
-
-    if let Some(credentials) = basic {
-        if let Some(form_client_id) = form.client_id.as_deref().map(str::trim)
-            && !form_client_id.is_empty()
-            && form_client_id != credentials.client_id
-        {
-            return Err(oauth_invalid_client(
-                "client_id does not match authentication",
-            ));
-        }
-        let client = authenticate_oauth_client(&credentials).await?;
-        return validate_client_grant(client, grant_type);
-    }
-
-    if form.client_secret.is_some() {
-        let credentials = resolve_client_credentials_parts(
-            None,
-            form.client_id.as_deref(),
-            form.client_secret.as_deref(),
-        )?;
-        let client = authenticate_oauth_client(&credentials).await?;
-        return validate_client_grant(client, grant_type);
-    }
-
-    let Some(client_id) = form
-        .client_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|client_id| !client_id.is_empty())
-    else {
-        return Err(oauth_invalid_client("client authentication is required"));
-    };
-
-    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
-    else {
-        return Err(oauth_invalid_client("invalid client"));
-    };
-
-    if !client.enabled {
-        return Err(oauth_invalid_client("client is disabled"));
-    }
-
-    if client.token_endpoint_auth_method != AUTH_METHOD_NONE {
-        return Err(oauth_invalid_client("client authentication is required"));
-    }
-
-    validate_client_grant(client, grant_type)
-}
-
-async fn resolve_authorization_code_client(
-    basic: Option<ClientCredentials>,
-    form: &TokenEndpointForm,
-) -> OAuthResult<db::ent::OAuthClient> {
-    resolve_public_or_confidential_client(basic, form, GRANT_AUTHORIZATION_CODE).await
-}
-
-async fn resolve_refresh_token_client(
-    basic: Option<ClientCredentials>,
-    form: &TokenEndpointForm,
-) -> OAuthResult<db::ent::OAuthClient> {
-    resolve_public_or_confidential_client(basic, form, GRANT_REFRESH_TOKEN).await
 }
 
 fn user_claims_profile(user: &db::ent::User) -> oidc::claims::UserClaimsProfile {

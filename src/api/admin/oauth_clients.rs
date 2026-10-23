@@ -19,6 +19,7 @@ const MAX_LIMIT: i64 = 100;
 const AUTH_METHOD_NONE: &str = "none";
 const AUTH_METHOD_CLIENT_SECRET_BASIC: &str = "client_secret_basic";
 const AUTH_METHOD_CLIENT_SECRET_POST: &str = "client_secret_post";
+const AUTH_METHOD_PRIVATE_KEY_JWT: &str = "private_key_jwt";
 const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
 const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
 const GRANT_REFRESH_TOKEN: &str = "refresh_token";
@@ -39,6 +40,9 @@ pub struct OAuthClientSchema {
     pub post_logout_redirect_uris: Vec<String>,
     pub backchannel_logout_uri: Option<String>,
     pub backchannel_logout_session_required: bool,
+    /// Public JWK Set for `private_key_jwt`.
+    pub jwks: Option<Value>,
+    pub jwks_uri: Option<String>,
     pub scopes: Vec<String>,
     pub audiences: Vec<String>,
     pub attrs: Value,
@@ -62,6 +66,8 @@ impl From<OAuthClient> for OAuthClientSchema {
             post_logout_redirect_uris: client.post_logout_redirect_uris.0,
             backchannel_logout_uri: client.backchannel_logout_uri,
             backchannel_logout_session_required: client.backchannel_logout_session_required,
+            jwks: client.jwks.map(|jwks| jwks.0),
+            jwks_uri: client.jwks_uri,
             scopes: client.scopes.0,
             audiences: client.audiences.0,
             attrs: client.attrs,
@@ -129,6 +135,11 @@ pub struct CreateOAuthClientRequest {
     pub backchannel_logout_uri: Option<String>,
     #[serde(default)]
     pub backchannel_logout_session_required: Option<bool>,
+    /// `private_key_jwt`: the client's public JWK Set, or the URL serving it.
+    #[serde(default)]
+    pub jwks: Option<Value>,
+    #[serde(default)]
+    pub jwks_uri: Option<String>,
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
     #[serde(default)]
@@ -155,6 +166,10 @@ pub struct UpdateOAuthClientRequest {
     pub backchannel_logout_uri: Option<String>,
     #[serde(default)]
     pub backchannel_logout_session_required: bool,
+    #[serde(default)]
+    pub jwks: Option<Value>,
+    #[serde(default)]
+    pub jwks_uri: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
     #[serde(default)]
@@ -185,6 +200,11 @@ pub struct PatchOAuthClientRequest {
     pub backchannel_logout_uri: Option<String>,
     #[serde(default)]
     pub backchannel_logout_session_required: Option<bool>,
+    /// Setting one of `jwks` / `jwksUri` clears the other.
+    #[serde(default)]
+    pub jwks: Option<Value>,
+    #[serde(default)]
+    pub jwks_uri: Option<String>,
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
     #[serde(default)]
@@ -203,6 +223,8 @@ struct NormalizedClientInput {
     post_logout_redirect_uris: Vec<String>,
     backchannel_logout_uri: Option<String>,
     backchannel_logout_session_required: bool,
+    jwks: Option<Value>,
+    jwks_uri: Option<String>,
     scopes: Vec<String>,
     audiences: Vec<String>,
     attrs: Value,
@@ -281,9 +303,10 @@ fn validate_allowed_values(
 
 fn validate_auth_method(method: &str) -> Result<(), ErrorResponse> {
     match method {
-        AUTH_METHOD_NONE | AUTH_METHOD_CLIENT_SECRET_BASIC | AUTH_METHOD_CLIENT_SECRET_POST => {
-            Ok(())
-        }
+        AUTH_METHOD_NONE
+        | AUTH_METHOD_CLIENT_SECRET_BASIC
+        | AUTH_METHOD_CLIENT_SECRET_POST
+        | AUTH_METHOD_PRIVATE_KEY_JWT => Ok(()),
         _ => Err(
             ErrorResponse::new(ErrorCode::OAuthClientAuthMethodUnsupported)
                 .with_param("method", method),
@@ -317,24 +340,55 @@ fn validate_redirect_uris(redirect_uris: &[String]) -> Result<(), ErrorResponse>
     Ok(())
 }
 
-/// Back-Channel Logout 1.0 §2.2: an absolute URL without a fragment; HTTPS
-/// except on loopback hosts, as for redirect URIs.
-fn validate_backchannel_logout_uri(uri: Option<&str>) -> Result<(), ErrorResponse> {
-    let Some(uri) = uri else {
-        return Ok(());
-    };
-    let invalid = || {
-        ErrorResponse::new(ErrorCode::OAuthClientBackchannelLogoutUriInvalid)
-            .with_param("uri", uri.to_string())
-    };
+/// A client endpoint Stargate calls: an absolute URL without a fragment;
+/// HTTPS except on loopback hosts, as for redirect URIs.
+fn is_client_endpoint_url(uri: &str) -> bool {
     if uri.contains('#') || uri.chars().any(char::is_whitespace) {
-        return Err(invalid());
+        return false;
     }
-    let parsed = url::Url::parse(uri).map_err(|_| invalid())?;
-    match parsed.scheme() {
-        "https" => Ok(()),
-        "http" if is_loopback_redirect_host(parsed.host_str()) => Ok(()),
-        _ => Err(invalid()),
+    match url::Url::parse(uri) {
+        Ok(parsed) => match parsed.scheme() {
+            "https" => true,
+            "http" => is_loopback_redirect_host(parsed.host_str()),
+            _ => false,
+        },
+        Err(_) => false,
+    }
+}
+
+/// Back-Channel Logout 1.0 §2.2.
+fn validate_backchannel_logout_uri(uri: Option<&str>) -> Result<(), ErrorResponse> {
+    match uri {
+        Some(uri) if !is_client_endpoint_url(uri) => Err(ErrorResponse::new(
+            ErrorCode::OAuthClientBackchannelLogoutUriInvalid,
+        )
+        .with_param("uri", uri.to_string())),
+        _ => Ok(()),
+    }
+}
+
+/// `private_key_jwt` clients register exactly one of `jwks` (public keys
+/// only) or `jwks_uri`; other clients register neither.
+fn validate_client_keys(input: &NormalizedClientInput) -> Result<(), ErrorResponse> {
+    if input.token_endpoint_auth_method != AUTH_METHOD_PRIVATE_KEY_JWT {
+        if input.jwks.is_some() || input.jwks_uri.is_some() {
+            return Err(ErrorResponse::new(ErrorCode::OAuthClientJwksUnexpected));
+        }
+        return Ok(());
+    }
+    let invalid = |reason: String| {
+        ErrorResponse::new(ErrorCode::OAuthClientJwksInvalid).with_param("reason", reason)
+    };
+    match (&input.jwks, &input.jwks_uri) {
+        (Some(jwks), None) => jwt::validate_public_jwk_set(jwks)
+            .map(|_| ())
+            .map_err(invalid),
+        (None, Some(uri)) if is_client_endpoint_url(uri) => Ok(()),
+        (None, Some(_)) => Err(invalid(
+            "jwksUri must be an absolute HTTPS URL (HTTP only on loopback hosts) without a fragment"
+                .to_string(),
+        )),
+        _ => Err(ErrorResponse::new(ErrorCode::OAuthClientJwksRequired)),
     }
 }
 
@@ -357,6 +411,7 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
     validate_redirect_uris(&input.redirect_uris)?;
     validate_redirect_uris(&input.post_logout_redirect_uris)?;
     validate_backchannel_logout_uri(input.backchannel_logout_uri.as_deref())?;
+    validate_client_keys(input)?;
 
     if input.grant_types.is_empty() {
         return Err(ErrorResponse::new(ErrorCode::OAuthClientGrantTypesRequired));
@@ -420,8 +475,13 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
     Ok(())
 }
 
-fn is_confidential(method: &str) -> bool {
-    method != AUTH_METHOD_NONE
+/// Clients that authenticate with a shared secret (`private_key_jwt` and
+/// public clients have none).
+fn uses_client_secret(method: &str) -> bool {
+    matches!(
+        method,
+        AUTH_METHOD_CLIENT_SECRET_BASIC | AUTH_METHOD_CLIENT_SECRET_POST
+    )
 }
 
 fn normalize_create_payload(
@@ -449,6 +509,8 @@ fn normalize_create_payload(
         backchannel_logout_session_required: payload
             .backchannel_logout_session_required
             .unwrap_or(false),
+        jwks: payload.jwks,
+        jwks_uri: normalize_optional_string(payload.jwks_uri),
         scopes: normalize_list(payload.scopes.unwrap_or_default(), "scopes")?,
         audiences: normalize_list(payload.audiences.unwrap_or_default(), "audiences")?,
         attrs: payload.attrs.unwrap_or_else(|| serde_json::json!({})),
@@ -473,6 +535,8 @@ fn normalize_update_payload(
         )?,
         backchannel_logout_uri: normalize_optional_string(payload.backchannel_logout_uri),
         backchannel_logout_session_required: payload.backchannel_logout_session_required,
+        jwks: payload.jwks,
+        jwks_uri: normalize_optional_string(payload.jwks_uri),
         scopes: normalize_list(payload.scopes, "scopes")?,
         audiences: normalize_list(payload.audiences, "audiences")?,
         attrs: payload.attrs.unwrap_or_else(|| serde_json::json!({})),
@@ -521,6 +585,16 @@ fn normalize_patch_payload(
         backchannel_logout_session_required: payload
             .backchannel_logout_session_required
             .unwrap_or(existing.backchannel_logout_session_required),
+        jwks: match (&payload.jwks, &payload.jwks_uri) {
+            (Some(jwks), _) => Some(jwks.clone()),
+            (None, Some(_)) => None,
+            (None, None) => existing.jwks.as_ref().map(|jwks| jwks.0.clone()),
+        },
+        jwks_uri: match (&payload.jwks, &payload.jwks_uri) {
+            (_, Some(uri)) => normalize_optional_string(Some(uri.clone())),
+            (Some(_), None) => None,
+            (None, None) => existing.jwks_uri.clone(),
+        },
         scopes: match payload.scopes {
             Some(values) => normalize_list(values, "scopes")?,
             None => existing.scopes.0.clone(),
@@ -539,7 +613,9 @@ fn apply_input(
     existing: &mut OAuthClient,
     input: NormalizedClientInput,
 ) -> Result<(), ErrorResponse> {
-    if is_confidential(&input.token_endpoint_auth_method) && existing.client_secret_hash.is_none() {
+    if uses_client_secret(&input.token_endpoint_auth_method)
+        && existing.client_secret_hash.is_none()
+    {
         return Err(ErrorResponse::new(
             ErrorCode::OAuthClientTypeChangeForbidden,
         ));
@@ -554,11 +630,13 @@ fn apply_input(
     existing.post_logout_redirect_uris.0 = input.post_logout_redirect_uris;
     existing.backchannel_logout_uri = input.backchannel_logout_uri;
     existing.backchannel_logout_session_required = input.backchannel_logout_session_required;
+    existing.set_jwks(input.jwks);
+    existing.jwks_uri = input.jwks_uri;
     existing.scopes.0 = input.scopes;
     existing.audiences.0 = input.audiences;
     existing.attrs = input.attrs;
 
-    if existing.token_endpoint_auth_method == AUTH_METHOD_NONE {
+    if !uses_client_secret(&existing.token_endpoint_auth_method) {
         existing.client_secret_hash = None;
     }
 
@@ -678,7 +756,7 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     }
 
     let client_secret =
-        is_confidential(&input.token_endpoint_auth_method).then(pw::generate_api_key);
+        uses_client_secret(&input.token_endpoint_auth_method).then(pw::generate_api_key);
     let client_secret_hash = client_secret.as_deref().map(pw::hash_api_key);
     let mut client = OAuthClient::new(
         client_id,
@@ -696,6 +774,8 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     client.post_logout_redirect_uris.0 = input.post_logout_redirect_uris;
     client.backchannel_logout_uri = input.backchannel_logout_uri;
     client.backchannel_logout_session_required = input.backchannel_logout_session_required;
+    client.set_jwks(input.jwks);
+    client.jwks_uri = input.jwks_uri;
 
     let client = crate::db::create_oauth_client(client, ctx)
         .await
@@ -844,7 +924,7 @@ pub async fn rotate_oauth_client_secret(mut req: Request) -> Result<Response, Er
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
     let client = load_client(&client_id).await?;
-    if !is_confidential(&client.token_endpoint_auth_method) {
+    if !uses_client_secret(&client.token_endpoint_auth_method) {
         return Err(ErrorResponse::new(ErrorCode::OAuthClientSecretUnsupported));
     }
 
@@ -892,6 +972,70 @@ pub async fn delete_oauth_client(mut req: Request) -> Result<Response, ErrorResp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn create(payload: serde_json::Value) -> Result<NormalizedClientInput, ErrorCode> {
+        let mut base = serde_json::json!({
+            "name": "Service",
+            "grantTypes": ["client_credentials"],
+        });
+        base.as_object_mut()
+            .unwrap()
+            .extend(payload.as_object().unwrap().clone());
+        normalize_create_payload(serde_json::from_value(base).unwrap()).map_err(|error| error.code)
+    }
+
+    fn public_jwks() -> serde_json::Value {
+        serde_json::json!({"keys": [{
+            "kty": "EC", "crv": "P-256", "kid": "k1", "use": "sig",
+            "x": "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            "y": "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+        }]})
+    }
+
+    #[test]
+    fn private_key_jwt_clients_register_exactly_one_key_source() {
+        let method = serde_json::json!("private_key_jwt");
+        assert!(
+            create(serde_json::json!({"tokenEndpointAuthMethod": method, "jwks": public_jwks()}))
+                .is_ok()
+        );
+        assert!(
+            create(serde_json::json!({
+                "tokenEndpointAuthMethod": method, "jwksUri": "https://svc.example/jwks"
+            }))
+            .is_ok()
+        );
+        assert_eq!(
+            create(serde_json::json!({"tokenEndpointAuthMethod": method})).err(),
+            Some(ErrorCode::OAuthClientJwksRequired)
+        );
+        assert_eq!(
+            create(serde_json::json!({
+                "tokenEndpointAuthMethod": method, "jwks": public_jwks(),
+                "jwksUri": "https://svc.example/jwks"
+            }))
+            .err(),
+            Some(ErrorCode::OAuthClientJwksRequired)
+        );
+        assert_eq!(
+            create(serde_json::json!({
+                "tokenEndpointAuthMethod": method, "jwksUri": "http://svc.example/jwks"
+            }))
+            .err(),
+            Some(ErrorCode::OAuthClientJwksInvalid)
+        );
+        let mut private = public_jwks();
+        private["keys"][0]["d"] = serde_json::json!("jpsQnnGQmL-YBIffH1136cspYG6-0iY7X1fCE9-E9LI");
+        assert_eq!(
+            create(serde_json::json!({"tokenEndpointAuthMethod": method, "jwks": private})).err(),
+            Some(ErrorCode::OAuthClientJwksInvalid)
+        );
+        assert_eq!(
+            create(serde_json::json!({"jwks": public_jwks()})).err(),
+            Some(ErrorCode::OAuthClientJwksUnexpected)
+        );
+        assert!(!uses_client_secret(AUTH_METHOD_PRIVATE_KEY_JWT));
+    }
 
     #[test]
     fn redirect_uris_reject_public_http() {

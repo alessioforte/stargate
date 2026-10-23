@@ -49,9 +49,13 @@ interface Props {
   ) => Promise<void>;
 }
 
+/** Clients that authenticate with a shared secret, which can be rotated. */
 function clientIsConfidential(oauthClient: OAuthClient) {
   return (
-    oauthClient.tokenEndpointAuthMethod !== OAuthTokenEndpointAuthMethod.None
+    oauthClient.tokenEndpointAuthMethod ===
+      OAuthTokenEndpointAuthMethod.ClientSecretBasic ||
+    oauthClient.tokenEndpointAuthMethod ===
+      OAuthTokenEndpointAuthMethod.ClientSecretPost
   );
 }
 

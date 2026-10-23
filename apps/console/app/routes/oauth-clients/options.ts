@@ -21,6 +21,7 @@ export const oauthResponseTypeValues = [
 export const oauthTokenEndpointAuthMethodValues = [
   OAuthTokenEndpointAuthMethod.ClientSecretBasic,
   OAuthTokenEndpointAuthMethod.ClientSecretPost,
+  OAuthTokenEndpointAuthMethod.PrivateKeyJwt,
   OAuthTokenEndpointAuthMethod.None,
 ] satisfies OAuthTokenEndpointAuthMethodValue[];
 
@@ -48,6 +49,8 @@ export const oauthTokenEndpointAuthMethodTranslationKeys: Record<
     "oauthTokenEndpointAuthMethods.clientSecretBasic",
   [OAuthTokenEndpointAuthMethod.ClientSecretPost]:
     "oauthTokenEndpointAuthMethods.clientSecretPost",
+  [OAuthTokenEndpointAuthMethod.PrivateKeyJwt]:
+    "oauthTokenEndpointAuthMethods.privateKeyJwt",
   [OAuthTokenEndpointAuthMethod.None]: "oauthTokenEndpointAuthMethods.none",
 };
 

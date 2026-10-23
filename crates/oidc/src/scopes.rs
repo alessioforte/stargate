@@ -7,6 +7,7 @@ pub const GRANT_REFRESH_TOKEN: &str = "refresh_token";
 pub const AUTH_METHOD_CLIENT_SECRET_BASIC: &str = "client_secret_basic";
 pub const AUTH_METHOD_CLIENT_SECRET_POST: &str = "client_secret_post";
 pub const AUTH_METHOD_NONE: &str = "none";
+pub const AUTH_METHOD_PRIVATE_KEY_JWT: &str = "private_key_jwt";
 pub const RESPONSE_CODE: &str = "code";
 pub const SCOPE_OPENID: &str = "openid";
 pub const SCOPE_EMAIL: &str = "email";

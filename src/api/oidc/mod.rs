@@ -1,5 +1,6 @@
 mod authorization_codes;
 pub(crate) mod authorize;
+mod client_auth;
 pub(crate) mod consent;
 mod interactions;
 pub(crate) mod login;

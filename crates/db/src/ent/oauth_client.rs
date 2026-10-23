@@ -21,6 +21,10 @@ pub struct OAuthClient {
     pub backchannel_logout_uri: Option<String>,
     /// Logout tokens must carry `sid` (always true for Stargate's tokens).
     pub backchannel_logout_session_required: bool,
+    /// Public JWK Set for `private_key_jwt` client authentication.
+    pub jwks: Option<sqlx::types::Json<Value>>,
+    /// URL serving that JWK Set instead (exclusive with `jwks`).
+    pub jwks_uri: Option<String>,
     pub scopes: sqlx::types::Json<Vec<String>>,
     pub audiences: sqlx::types::Json<Vec<String>>,
     pub attrs: Value,
@@ -57,11 +61,18 @@ impl OAuthClient {
             post_logout_redirect_uris: sqlx::types::Json(Vec::new()),
             backchannel_logout_uri: None,
             backchannel_logout_session_required: false,
+            jwks: None,
+            jwks_uri: None,
             scopes: sqlx::types::Json(scopes),
             audiences: sqlx::types::Json(audiences),
             attrs,
             created_at: now,
             updated_at: now,
         }
+    }
+
+    /// Set (or clear) the public JWK Set of a `private_key_jwt` client.
+    pub fn set_jwks(&mut self, jwks: Option<Value>) {
+        self.jwks = jwks.map(sqlx::types::Json);
     }
 }

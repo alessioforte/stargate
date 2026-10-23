@@ -132,6 +132,9 @@ struct OAuthClientAuditSnapshot<'a> {
     post_logout_redirect_uris: &'a [String],
     backchannel_logout_uri: Option<&'a str>,
     backchannel_logout_session_required: bool,
+    /// Key ids only; the keys themselves are public but bulky.
+    jwks_key_ids: Vec<&'a str>,
+    jwks_uri: Option<&'a str>,
     scopes: &'a [String],
     audiences: &'a [String],
 }
@@ -148,6 +151,18 @@ impl<'a> From<&'a OAuthClient> for OAuthClientAuditSnapshot<'a> {
             post_logout_redirect_uris: client.post_logout_redirect_uris.as_slice(),
             backchannel_logout_uri: client.backchannel_logout_uri.as_deref(),
             backchannel_logout_session_required: client.backchannel_logout_session_required,
+            jwks_key_ids: client
+                .jwks
+                .as_ref()
+                .and_then(|jwks| jwks.get("keys"))
+                .and_then(|keys| keys.as_array())
+                .map(|keys| {
+                    keys.iter()
+                        .filter_map(|key| key.get("kid").and_then(|kid| kid.as_str()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            jwks_uri: client.jwks_uri.as_deref(),
             scopes: client.scopes.as_slice(),
             audiences: client.audiences.as_slice(),
         }
@@ -505,6 +520,12 @@ fn oauth_client_changed_fields(before: &OAuthClient, after: &OAuthClient) -> Vec
     }
     if before.backchannel_logout_session_required != after.backchannel_logout_session_required {
         fields.push("backchannel_logout_session_required");
+    }
+    if before.jwks != after.jwks {
+        fields.push("jwks");
+    }
+    if before.jwks_uri != after.jwks_uri {
+        fields.push("jwks_uri");
     }
     if before.scopes != after.scopes {
         fields.push("scopes");

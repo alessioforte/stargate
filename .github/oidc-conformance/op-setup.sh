@@ -2,14 +2,20 @@
 # Registers the conformance suite's static clients on a running Stargate and
 # writes the plan configurations (with the generated client secrets).
 #
-# Usage: op-setup.sh <issuer-url> <admin-username> <admin-password> <output.json> [<backchannel.json>]
+# Usage: op-setup.sh <issuer-url> <admin-username> <admin-password> <output.json>
+#                    [--backchannel <backchannel.json>] [--private-key-jwt <private-key-jwt.json>]
 #
-# <output.json> serves the Basic OP and RP-Initiated Logout OP plans. Its
-# clients register no backchannel_logout_uri: Stargate notifies every client
-# that has one when a session ends, and the RP-Initiated Logout tests fail on
-# any request to a suite URL they do not serve. <backchannel.json>, when given,
-# is the same configuration with a fourth client that registers the suite's
-# backchannel_logout URL, for the Back-Channel Logout OP plan.
+# <output.json> serves the Basic OP, Form Post OP, and RP-Initiated Logout OP
+# plans. Its clients register no backchannel_logout_uri: Stargate notifies
+# every client that has one when a session ends, and the RP-Initiated Logout
+# tests fail on any request to a suite URL they do not serve.
+#
+# --backchannel writes the same configuration with a client that registers the
+# suite's backchannel_logout URL, for the Back-Channel Logout OP plan.
+#
+# --private-key-jwt writes it with two private_key_jwt clients (RSA keys from
+# client-jwk.mjs, so Node is required), for the comprehensive plan run with
+# client_auth_type=private_key_jwt.
 #
 # <issuer-url> is Stargate as the suite sees it. Set API_URL when this script
 # reaches Stargate under another address (default: <issuer-url>). The admin
@@ -20,7 +26,16 @@ base_url="${1:?stargate url}"
 username="${2:?admin username}"
 password="${3:?admin password}"
 output="${4:?output path}"
-backchannel_output="${5:-}"
+shift 4
+backchannel_output=""
+private_key_jwt_output=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --backchannel) backchannel_output="${2:?backchannel output path}"; shift 2 ;;
+    --private-key-jwt) private_key_jwt_output="${2:?private_key_jwt output path}"; shift 2 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
 api_url="${API_URL:-$base_url}"
 
 # Must match the suite's alias in the generated config (callback path).
@@ -164,6 +179,7 @@ jq -n \
       "oidcc-max-age-1": {browser: authorize_flow(true)},
       "oidcc-ensure-registered-redirect-uri": {browser: error_page},
       "oidcc-ensure-request-object-with-redirect-uri": {browser: error_page},
+      "oidcc-redirect-uri-query-added": {browser: error_page},
       "oidcc-rp-initiated-logout-no-params": {browser: (authorize_flow(false) + [logout_signed_out(true)])},
       "oidcc-rp-initiated-logout-only-state": {browser: (authorize_flow(false) + [logout_signed_out(true)])},
       "oidcc-rp-initiated-logout-no-post-logout-redirect-uri": {browser: (authorize_flow(false) + [logout_signed_out(false)])},
@@ -182,4 +198,36 @@ if [[ -n "$backchannel_output" ]]; then
   client_backchannel="$(create_client "OpenID conformance suite (back-channel)" client_secret_basic true)"
   jq --argjson client "$client_backchannel" '.client = $client' "$output" >"$backchannel_output"
   echo "Registered back-channel conformance client $(jq -r .client_id <<<"$client_backchannel")"
+fi
+
+if [[ -n "$private_key_jwt_output" ]]; then
+  # Registers the public half of a fresh key; prints {client_id, jwks} with
+  # the private half, which the suite signs client assertions with.
+  create_private_key_jwt_client() {
+    local name="$1" private_jwk public_jwk client_id
+    private_jwk="$(node "$(dirname "$0")/client-jwk.mjs" "$(echo "$name" | tr -c 'a-zA-Z0-9' '-')")"
+    public_jwk="$(jq 'del(.d, .p, .q, .dp, .dq, .qi)' <<<"$private_jwk")"
+    client_id="$(
+      jq -n --arg name "$name" --arg suite_url "$suite_url" --argjson jwk "$public_jwk" '{
+          name: $name,
+          tokenEndpointAuthMethod: "private_key_jwt",
+          grantTypes: ["authorization_code", "refresh_token"],
+          responseTypes: ["code"],
+          redirectUris: [($suite_url + "/callback")],
+          scopes: ["openid", "email", "profile", "offline_access"],
+          jwks: {keys: [$jwk]},
+          attrs: {first_party: true, require_pkce: false}
+        }' |
+        curl -skf -X POST "${api_url}/admin/oauth/clients" \
+          -H "authorization: Bearer ${access_token}" \
+          -H 'content-type: application/json' --data-binary @- |
+        jq -r .clientId
+    )"
+    jq -n --arg client_id "$client_id" --argjson jwk "$private_jwk" '{client_id: $client_id, jwks: {keys: [$jwk]}}'
+  }
+  client_pk="$(create_private_key_jwt_client "OpenID conformance suite (private_key_jwt)")"
+  client2_pk="$(create_private_key_jwt_client "OpenID conformance suite (private_key_jwt 2)")"
+  jq --argjson client "$client_pk" --argjson client2 "$client2_pk" \
+    '.client = $client | .client2 = $client2 | del(.client_secret_post)' "$output" >"$private_key_jwt_output"
+  echo "Registered private_key_jwt conformance clients $(jq -r .client_id <<<"$client_pk"), $(jq -r .client_id <<<"$client2_pk")"
 fi

@@ -1,8 +1,7 @@
+use super::client_auth::{ClientAuthForm, authenticate_client, presented_client};
 use super::shared::{
-    AUTH_METHOD_NONE, ClientCredentials, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR,
-    OAUTH_INTROSPECT_SCOPE, OAUTH_REVOKE_SCOPE, OAuthResult, authenticate_oauth_client,
-    extract_basic_client_credentials, oauth_bad_request, oauth_invalid_client,
-    resolve_client_credentials_parts,
+    ClientCredentials, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE,
+    OAUTH_REVOKE_SCOPE, OAuthResult, extract_basic_client_credentials, oauth_bad_request,
 };
 use crate::err::OAuthErrorResponse;
 use crate::etc::request_context::{audit_request_from, take_trusted_audit_context_from};
@@ -19,6 +18,8 @@ pub struct TokenForm {
     token_type_hint: Option<String>,
     client_id: Option<String>,
     client_secret: Option<String>,
+    client_assertion_type: Option<String>,
+    client_assertion: Option<String>,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -99,7 +100,8 @@ pub async fn post_introspect(req: Request) -> OAuthResult<Json<IntrospectionResp
     );
     let form = extract_token_form(req).await?;
     let _ = form.token_type_hint.as_deref();
-    let caller = authorize_token_operation(has_admin_grant, &form, basic).await?;
+    let caller =
+        authorize_token_operation(has_admin_grant, &form, basic, "/oauth/introspect").await?;
     let body = introspect_token(&form.token).await?;
 
     let body = match caller {
@@ -146,7 +148,7 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
         .map(|context| context.actor().clone());
     let form = extract_token_form(req).await?;
     let _ = form.token_type_hint.as_deref();
-    let caller = authorize_token_operation(has_admin_grant, &form, basic).await?;
+    let caller = authorize_token_operation(has_admin_grant, &form, basic, "/oauth/revoke").await?;
 
     let visible = match &caller {
         TokenOperationCaller::Admin => true,
@@ -385,57 +387,24 @@ async fn authorize_token_operation(
     has_admin_grant: bool,
     form: &TokenForm,
     basic: Option<ClientCredentials>,
+    endpoint_path: &str,
 ) -> OAuthResult<TokenOperationCaller> {
     if has_admin_grant {
         return Ok(TokenOperationCaller::Admin);
     }
 
-    let client = resolve_token_operation_client(basic, form).await?;
+    let presented = presented_client(
+        basic,
+        ClientAuthForm {
+            client_id: form.client_id.as_deref(),
+            client_secret: form.client_secret.as_deref(),
+            client_assertion_type: form.client_assertion_type.as_deref(),
+            client_assertion: form.client_assertion.as_deref(),
+        },
+    )?
+    .ok_or_else(token_operation_missing_permission)?;
+    let client = authenticate_client(presented, endpoint_path).await?;
     Ok(TokenOperationCaller::Client(Box::new(client)))
-}
-
-async fn resolve_token_operation_client(
-    basic: Option<ClientCredentials>,
-    form: &TokenForm,
-) -> OAuthResult<db::ent::OAuthClient> {
-    if basic.is_none() && form.client_id.is_none() && form.client_secret.is_none() {
-        return Err(token_operation_missing_permission());
-    }
-
-    if basic.is_some() || form.client_secret.is_some() {
-        let credentials = resolve_client_credentials_parts(
-            basic,
-            form.client_id.as_deref(),
-            form.client_secret.as_deref(),
-        )?;
-        return authenticate_oauth_client(&credentials).await;
-    }
-
-    let Some(client_id) = form
-        .client_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|client_id| !client_id.is_empty())
-    else {
-        return Err(oauth_invalid_client("client authentication is required"));
-    };
-
-    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
-    else {
-        return Err(oauth_invalid_client("invalid client"));
-    };
-
-    if !client.enabled {
-        return Err(oauth_invalid_client("client is disabled"));
-    }
-
-    if client.token_endpoint_auth_method != AUTH_METHOD_NONE {
-        return Err(oauth_invalid_client("client authentication is required"));
-    }
-
-    Ok(client)
 }
 
 fn oauth_revoke_audit_context(

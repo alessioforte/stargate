@@ -119,6 +119,11 @@
   "backchannelLogoutUriDescription": "Riceve un logout token firmato quando termina una sessione che ha usato questo client.",
   "backchannelLogoutSessionRequired": "Richiedi sid nei logout token",
   "backchannelLogoutSessionRequiredDescription": "Stargate include sempre sid; questa opzione registra il requisito del client.",
+  "jwks": "Chiavi pubbliche (JWK Set)",
+  "jwksDescription": "Il JWK Set pubblico del client, che firma le proprie asserzioni con la chiave privata corrispondente. Lascia vuoto se usi un JWKS URI.",
+  "jwksUri": "JWKS URI",
+  "jwksUriDescription": "URL HTTPS che espone invece il JWK Set pubblico del client (scaricato e messo in cache da Stargate).",
+  "jwksOrJwksUriRequired": "Inserisci le chiavi pubbliche oppure un JWKS URI",
   "scopes": "Scope",
   "audiences": "Audience",
   "clientCredentialsRequiresConfidentialClient": "Client credentials richiede un client confidenziale",
@@ -138,7 +143,8 @@
   "oauthTokenEndpointAuthMethods": {
     "none": "None",
     "clientSecretBasic": "Client Secret Basic",
-    "clientSecretPost": "Client Secret Post"
+    "clientSecretPost": "Client Secret Post",
+    "privateKeyJwt": "Private Key JWT"
   },
   "givenName": "Nome",
   "familyName": "Cognome",

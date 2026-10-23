@@ -1,3 +1,4 @@
+pub mod client_endpoints;
 pub mod cors;
 pub mod headers;
 pub mod messages;

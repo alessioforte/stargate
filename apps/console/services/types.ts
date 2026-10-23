@@ -394,6 +394,7 @@ export const OAuthTokenEndpointAuthMethod = {
   None: "none",
   ClientSecretBasic: "client_secret_basic",
   ClientSecretPost: "client_secret_post",
+  PrivateKeyJwt: "private_key_jwt",
 } as const;
 
 export type OAuthTokenEndpointAuthMethod =
@@ -412,6 +413,9 @@ export interface OAuthClient {
   postLogoutRedirectUris: string[];
   backchannelLogoutUri?: string | null;
   backchannelLogoutSessionRequired: boolean;
+  /** `private_key_jwt`: the client's public JWK Set, or the URL serving it. */
+  jwks?: JsonValue | null;
+  jwksUri?: string | null;
   responseTypes: OAuthResponseType[];
   scopes: string[];
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;
@@ -429,6 +433,8 @@ export interface CreateOAuthClientRequest {
   postLogoutRedirectUris?: string[] | null;
   backchannelLogoutUri?: string | null;
   backchannelLogoutSessionRequired?: boolean | null;
+  jwks?: JsonValue | null;
+  jwksUri?: string | null;
   responseTypes?: OAuthResponseType[] | null;
   scopes?: string[] | null;
   tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod | null;
@@ -448,6 +454,8 @@ export interface UpdateOAuthClientRequest {
   postLogoutRedirectUris?: string[];
   backchannelLogoutUri?: string | null;
   backchannelLogoutSessionRequired?: boolean;
+  jwks?: JsonValue | null;
+  jwksUri?: string | null;
   responseTypes?: OAuthResponseType[];
   scopes?: string[];
   tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod;

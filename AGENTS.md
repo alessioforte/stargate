@@ -75,7 +75,8 @@ stargate/
 - `auth/`: access control, subjects, session JWT config, password helpers.
   `identity.rs` owns verified facts; `verification.rs` owns credential/backing-state checks.
 - `http/`: request extraction, trusted proxies, origins/CORS (`origin.rs` trusted-origin
-  middleware), security and retry headers, IAM limits (`rate_limit.rs`), message envelopes.
+  middleware), security and retry headers, IAM limits (`rate_limit.rs`), message envelopes,
+  the outgoing client for OAuth client endpoints (`client_endpoints.rs`).
 - `request_context/`: request metadata, ingress headers, lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
 - `observability/`: logging and the telemetry provider (`telemetry/metrics.rs`,
@@ -341,7 +342,7 @@ Back-Channel Logout 1.0):
   `logout_token` (`typ: logout+jwt`, ID token key, `sub`, `aud`, `sid`, `events`, 2 min)
   posted in-process, best effort (5s timeout, 2 retries on network errors/5xx, none on
   4xx, no redirects, not persisted). RP-Initiated Logout waits up to 3s before redirecting.
-  `BACKCHANNEL_LOGOUT_CA_FILE` adds trusted roots. Expiring sessions are not announced.
+  `OAUTH_CLIENT_CA_FILE` adds trusted roots. Expiring sessions are not announced.
 - The Console logs out through `/oauth/logout` with its ID token; `admin bootstrap`
   registers the Console root (callback URI without `/auth/callback`) as its
   `post_logout_redirect_uri`.
@@ -351,6 +352,10 @@ Authorization request handling:
   OAuth codes (`invalid_request`, `unsupported_response_type`, `unauthorized_client`,
   `invalid_scope`, `login_required`, `consent_required`, `interaction_required`,
   `request_not_supported`, `request_uri_not_supported`); before that, `400`.
+- `response_mode`: `query` (default) or `form_post` (auto-submitting HTML form,
+  `no-store`); errors and consent denial use it too, anything else is `invalid_request`
+  in the query. A rejected request object answers in the `response_mode` / `state` it
+  carries (`crates/oidc/src/request_object.rs`, read unverified).
 - Unregistered scopes are dropped; `openid` is required. `max_age=0` = `prompt=login`.
 - `id_token_hint` must verify (else `invalid_request`); a session of another user is
   `login_required` with `prompt=none` or after a resumed sign-in, else the login page
@@ -403,7 +408,8 @@ Provider state:
 - SQL: `oauth_clients`, `oauth_consents`.
 - Store: `oauth:authorization-code:{code_hash}` (pending/redeemed, TTL),
   `oauth:refresh-family:{family_id}` (CAS rotation), `oauth:authorize-interaction:{id}`,
-  `oauth:logout-request:{id}`, and JWT `jti` revocations until expiry.
+  `oauth:logout-request:{id}`, `oauth:client-assertion:{client_id}:{jti_hash}` (assertion
+  replay, until `exp`), and JWT `jti` revocations until expiry.
 
 Client notes:
 - Client secrets are returned only on create/rotate and stored as hashes.
@@ -411,6 +417,13 @@ Client notes:
   `redirect_uris`; `backchannel_logout_uri`, absolute HTTPS or loopback HTTP, no
   fragment; `backchannel_logout_session_required`, informational since `sid` is always sent).
 - Public clients use `token_endpoint_auth_method = none` and always need PKCE.
+- Client authentication (`src/api/oidc/client_auth.rs`, token/introspect/revoke): one
+  method per request, the registered one. `private_key_jwt` clients register exactly
+  one of `jwks` (public RSA/EC keys only) or `jwks_uri` (columns) and have no secret.
+  Assertions (`crates/oidc/src/client_assertion.rs`, `jwt::decode_with_jwk_set`):
+  asymmetric algs, `iss = sub = client_id`, `aud` the issuer, the token endpoint or the
+  called endpoint, `exp` <= 1h ahead, `jti` required and single-use. `jwks_uri` sets are
+  cached 5 min and refetched on an unknown key at most every 10s (`act/client_jwks.rs`).
 - Confidential clients require PKCE unless `attrs.require_pkce = false`; a code
   issued without a challenge rejects a `code_verifier` (downgrade protection).
 - First-party clients skip consent with `attrs.first_party` (the only accepted name;
@@ -423,13 +436,15 @@ Client notes:
 - The Console uses the reserved public client `stargate_console`, created by
   `admin bootstrap`.
 
-Conformance: Config OP, Basic OP, RP-Initiated Logout OP, and Back-Channel Logout OP
-plans run in `.github/workflows/oidc-conformance.yml` (builds `apps/auth` too).
-`op-setup.sh` writes `op.json` (Basic, RP-Initiated) and `backchannel-op.json`; only the
-latter's client registers a `backchannel_logout_uri`, since an unexpected back-channel
-post fails the RP-Initiated tests. The suite is served with a test-CA certificate
-that Stargate trusts for back-channel delivery. Expected warnings/skips are in
-`.github/oidc-conformance/`.
+Conformance: Config OP, Basic OP, Form Post OP, RP-Initiated Logout OP, and Back-Channel
+Logout OP plans, plus the comprehensive `oidcc-test-plan` with `private_key_jwt`, run in
+`.github/workflows/oidc-conformance.yml` (builds `apps/auth` too). `op-setup.sh` writes
+`op.json` (Basic, Form Post, RP-Initiated), `--backchannel` and `--private-key-jwt`
+configs (`client-jwk.mjs` keys); only the back-channel client registers a
+`backchannel_logout_uri`, since an unexpected back-channel post fails the RP-Initiated
+tests. The suite is served with a test-CA certificate that Stargate trusts
+(`OAUTH_CLIENT_CA_FILE`). Expected warnings/skips/failures (`oidcc-server-rotate-keys`
+needs a live key rotation) are in `.github/oidc-conformance/`.
 Docs: `docs/oauth-oidc-provider-guide.md`, `docs/oidc-conformance.md`.
 
 ## OTP, Passwordless Login, and MFA
@@ -552,7 +567,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
 | `OAUTH_BASE_URL` | issuer | Public base URL for provider endpoint links |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
-| `BACKCHANNEL_LOGOUT_CA_FILE` | - | PEM roots trusted (with the system ones) for back-channel logout endpoints |
+| `OAUTH_CLIENT_CA_FILE` | - | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`) |
 | `INTERNAL_CONTEXT_*` | see `.env.example` | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue |
 | `POSTGRES_ENDPOINT` / `_USERNAME` / `_PASSWORD` / `_DATABASE` | - | Postgres (cluster) |
 | `REDIS_URL` | - | Redis (cluster) |

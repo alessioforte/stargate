@@ -298,7 +298,18 @@ mod tests {
         );
         assert_eq!(
             json["token_endpoint_auth_methods_supported"],
-            serde_json::json!(["client_secret_basic", "client_secret_post", "none"])
+            serde_json::json!([
+                "client_secret_basic",
+                "client_secret_post",
+                "private_key_jwt",
+                "none"
+            ])
+        );
+        assert_eq!(
+            json["token_endpoint_auth_signing_alg_values_supported"],
+            serde_json::json!([
+                "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384"
+            ])
         );
         assert_eq!(
             json["code_challenge_methods_supported"],

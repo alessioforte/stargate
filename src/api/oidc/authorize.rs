@@ -12,7 +12,7 @@ use axum::extract::{Form, FromRequest, Query, Request};
 use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::{TimeZone, Utc};
-use http::header::{LOCATION, SET_COOKIE};
+use http::header::{CACHE_CONTROL, CONTENT_TYPE, LOCATION, PRAGMA, SET_COOKIE};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use store::Store;
@@ -41,6 +41,8 @@ pub struct AuthorizeQuery {
     id_token_hint: Option<String>,
     /// Requested assurance levels, most preferred first (voluntary).
     acr_values: Option<String>,
+    /// `query` (default) or `form_post`.
+    response_mode: Option<String>,
     request: Option<String>,
     request_uri: Option<String>,
     /// Resumes a request parked while the user signed in.
@@ -54,10 +56,6 @@ impl AuthorizeQuery {
 
     pub(crate) fn redirect_uri(&self) -> Option<&str> {
         self.redirect_uri.as_deref()
-    }
-
-    pub(crate) fn state(&self) -> Option<&str> {
-        self.state.as_deref()
     }
 }
 
@@ -154,9 +152,26 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
 
     let client = authorization_client(&query).await?;
     let redirect_uri = query.redirect_uri.as_deref().unwrap_or_default();
-    let state = query.state.as_deref();
+    // A request object is rejected below, in the response mode it asks for.
+    let request_object = query
+        .request
+        .as_deref()
+        .map(oidc::request_object::response_parameters)
+        .unwrap_or_default();
+    let state = request_object.state.as_deref().or(query.state.as_deref());
+    let response_mode = request_object
+        .response_mode
+        .as_deref()
+        .or(query.response_mode.as_deref());
+    let Some(mode) = ResponseMode::parse(response_mode) else {
+        return client_response(
+            ResponseMode::Query,
+            redirect_uri,
+            &error_params("invalid_request", "unsupported response_mode", state),
+        );
+    };
     let error_redirect = |error: &str, description: &str| {
-        oauth_error_redirect(redirect_uri, error, description, state)
+        client_response(mode, redirect_uri, &error_params(error, description, state))
     };
 
     if query.request.is_some() {
@@ -223,6 +238,13 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
         _ => return login_redirect(query, hinted_subject.as_deref()).await,
     };
 
+    // The user declined on the consent page.
+    if stage_for_user(&user)
+        .is_some_and(|stage| stage.decision == Some(interactions::ConsentDecision::Denied))
+    {
+        return error_redirect("access_denied", "the user denied the request");
+    }
+
     // Assurance level: `acr_values` asks for one (OIDC Core 3.1.2.1).
     let level = oidc::authentication::AssuranceLevel::of(&user.amr);
     let acr = match oidc::authentication::decide_acr(query.acr_values.as_deref(), level) {
@@ -248,7 +270,8 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
         acr: acr.to_string(),
     };
 
-    let approved = stage_for_user(&user).is_some_and(|stage| stage.approved);
+    let approved = stage_for_user(&user)
+        .is_some_and(|stage| stage.decision == Some(interactions::ConsentDecision::Approved));
     if !approved
         && !consent_satisfied(
             &client,
@@ -268,14 +291,16 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
                 user_id: user.user.id.clone(),
                 scopes: request.scopes.clone(),
                 audience: request.audience.clone(),
-                approved: false,
+                decision: None,
             },
         )
         .await;
     }
 
     let code = store_authorization_code(&client, &query, &user, &request, authentication).await?;
-    oauth_code_redirect(redirect_uri, &code, state)
+    let mut params = vec![("code", code.as_str())];
+    params.extend(state.map(|state| ("state", state)));
+    client_response(mode, redirect_uri, &params)
 }
 
 fn max_age_exceeded(user: &AuthorizedUser, max_age: Option<i64>) -> bool {
@@ -386,53 +411,96 @@ fn found_redirect(location: String) -> OAuthResult<Response> {
         .map_err(OAuthErrorResponse::internal)
 }
 
-fn oauth_code_redirect(
-    redirect_uri: &str,
-    code: &str,
-    state: Option<&str>,
-) -> OAuthResult<Response> {
-    let location = match state {
-        Some(state) => redirect_location(redirect_uri, &[("code", code), ("state", state)])?,
-        None => redirect_location(redirect_uri, &[("code", code)])?,
-    };
-    found_redirect(location)
+/// How the authorization response reaches the client: in the redirect's
+/// query (default for `code`), or posted by an auto-submitting form (OAuth 2.0
+/// Form Post Response Mode), which keeps the code out of URLs and logs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResponseMode {
+    Query,
+    FormPost,
 }
 
-fn oauth_error_redirect(
-    redirect_uri: &str,
-    error: &str,
-    description: &str,
-    state: Option<&str>,
-) -> OAuthResult<Response> {
-    found_redirect(error_redirect_location(
-        redirect_uri,
-        error,
-        description,
-        state,
-    )?)
-}
-
-/// `redirect_uri` with an OAuth error response (RFC 6749 §4.1.2.1).
-pub(super) fn error_redirect_location(
-    redirect_uri: &str,
-    error: &str,
-    description: &str,
-    state: Option<&str>,
-) -> OAuthResult<String> {
-    match state {
-        Some(state) => redirect_location(
-            redirect_uri,
-            &[
-                ("error", error),
-                ("error_description", description),
-                ("state", state),
-            ],
-        ),
-        None => redirect_location(
-            redirect_uri,
-            &[("error", error), ("error_description", description)],
-        ),
+impl ResponseMode {
+    /// `None` for an unsupported value (`fragment`, `jwt`, ...).
+    fn parse(value: Option<&str>) -> Option<Self> {
+        match value.map(str::trim).unwrap_or_default() {
+            "" | "query" => Some(ResponseMode::Query),
+            "form_post" => Some(ResponseMode::FormPost),
+            _ => None,
+        }
     }
+}
+
+/// Error response parameters (RFC 6749 §4.1.2.1).
+fn error_params<'a>(
+    error: &'a str,
+    description: &'a str,
+    state: Option<&'a str>,
+) -> Vec<(&'a str, &'a str)> {
+    let mut params = vec![("error", error), ("error_description", description)];
+    params.extend(state.map(|state| ("state", state)));
+    params
+}
+
+/// Deliver an authorization response to the client's verified `redirect_uri`.
+fn client_response(
+    mode: ResponseMode,
+    redirect_uri: &str,
+    params: &[(&str, &str)],
+) -> OAuthResult<Response> {
+    match mode {
+        ResponseMode::Query => found_redirect(redirect_location(redirect_uri, params)?),
+        ResponseMode::FormPost => form_post_response(redirect_uri, params),
+    }
+}
+
+/// An HTML page whose form posts `params` to `action` as soon as it loads;
+/// without JavaScript the user presses the button. Inline handlers need no
+/// Content-Security-Policy exception today; adding a CSP would need one.
+fn form_post_response(action: &str, params: &[(&str, &str)]) -> OAuthResult<Response> {
+    let inputs = params
+        .iter()
+        .map(|(name, value)| {
+            format!(
+                r#"<input type="hidden" name="{}" value="{}">"#,
+                html_escape(name),
+                html_escape(value)
+            )
+        })
+        .collect::<String>();
+    let body = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Continue</title></head>
+<body onload="document.forms[0].submit()">
+<form method="post" action="{action}">{inputs}<noscript><button type="submit">Continue</button></noscript></form>
+</body>
+</html>
+"#,
+        action = html_escape(action)
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(CACHE_CONTROL, "no-store")
+        .header(PRAGMA, "no-cache")
+        .body(Body::from(body))
+        .map_err(OAuthErrorResponse::internal)
+}
+
+fn html_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }
 
 fn exact_redirect_uri_allowed(client: &db::ent::OAuthClient, redirect_uri: &str) -> bool {
@@ -902,6 +970,42 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn response_modes() {
+        assert_eq!(ResponseMode::parse(None), Some(ResponseMode::Query));
+        assert_eq!(
+            ResponseMode::parse(Some("query")),
+            Some(ResponseMode::Query)
+        );
+        assert_eq!(
+            ResponseMode::parse(Some(" form_post ")),
+            Some(ResponseMode::FormPost)
+        );
+        assert_eq!(ResponseMode::parse(Some("fragment")), None);
+        assert_eq!(ResponseMode::parse(Some("jwt")), None);
+    }
+
+    #[tokio::test]
+    async fn form_post_escapes_the_action_and_values() {
+        let response = form_post_response(
+            "https://app.example.com/cb?a=1&b=\"2\"",
+            &[("code", "c<1>"), ("state", "s'&\"")],
+        )
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(body.contains(
+            r#"<form method="post" action="https://app.example.com/cb?a=1&amp;b=&quot;2&quot;">"#
+        ));
+        assert!(body.contains(r#"<input type="hidden" name="code" value="c&lt;1&gt;">"#));
+        assert!(body.contains(r#"<input type="hidden" name="state" value="s&#39;&amp;&quot;">"#));
     }
 
     #[test]

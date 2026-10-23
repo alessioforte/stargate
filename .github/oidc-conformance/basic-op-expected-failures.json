@@ -34,5 +34,14 @@
         "condition": "EnsureUserInfoContainsName",
         "expected-result": "warning",
         "comment": "The claims request parameter is not supported (claims_parameter_supported=false); userinfo only returns name with the profile scope."
+    },
+    {
+        "test-name": "oidcc-server-rotate-keys",
+        "variant": "*",
+        "configuration-filename": "*op.json",
+        "current-block": "",
+        "condition": "VerifyNewJwksHasNewSigningKey",
+        "expected-result": "failure",
+        "comment": "The test needs the OP's signing keys rotated while it runs; Stargate rotates them by adding a key and restarting (docs/oauth-oidc-provider-guide.md), which the unattended run cannot do."
     }
 ]

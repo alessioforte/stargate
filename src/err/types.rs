@@ -91,6 +91,9 @@ pub enum ErrorCode {
     OAuthClientRedirectUriInvalid,
     OAuthClientRedirectUriInsecure,
     OAuthClientBackchannelLogoutUriInvalid,
+    OAuthClientJwksRequired,
+    OAuthClientJwksInvalid,
+    OAuthClientJwksUnexpected,
     OAuthClientGrantTypesRequired,
     OAuthClientConfidentialRequired,
     OAuthClientCodeResponseTypeRequired,
@@ -228,6 +231,9 @@ impl ErrorCode {
         Self::OAuthClientRedirectUriInvalid,
         Self::OAuthClientRedirectUriInsecure,
         Self::OAuthClientBackchannelLogoutUriInvalid,
+        Self::OAuthClientJwksRequired,
+        Self::OAuthClientJwksInvalid,
+        Self::OAuthClientJwksUnexpected,
         Self::OAuthClientGrantTypesRequired,
         Self::OAuthClientConfidentialRequired,
         Self::OAuthClientCodeResponseTypeRequired,
@@ -369,6 +375,9 @@ impl ErrorCode {
             Self::OAuthClientBackchannelLogoutUriInvalid => {
                 "oauth_client.backchannel_logout_uri_invalid"
             }
+            Self::OAuthClientJwksRequired => "oauth_client.jwks_required",
+            Self::OAuthClientJwksInvalid => "oauth_client.jwks_invalid",
+            Self::OAuthClientJwksUnexpected => "oauth_client.jwks_unexpected",
             Self::OAuthClientGrantTypesRequired => "oauth_client.grant_types_required",
             Self::OAuthClientConfidentialRequired => "oauth_client.confidential_required",
             Self::OAuthClientCodeResponseTypeRequired => "oauth_client.code_response_type_required",
@@ -675,6 +684,21 @@ impl ErrorCode {
                 Status::BAD_REQUEST,
                 Validation,
                 "OAuth client back-channel logout URI must be an absolute HTTPS URL without a fragment",
+            ),
+            Self::OAuthClientJwksRequired => definition(
+                Status::BAD_REQUEST,
+                Validation,
+                "private_key_jwt OAuth clients need exactly one of jwks or jwksUri",
+            ),
+            Self::OAuthClientJwksInvalid => definition(
+                Status::BAD_REQUEST,
+                Validation,
+                "OAuth client public keys are invalid",
+            ),
+            Self::OAuthClientJwksUnexpected => definition(
+                Status::BAD_REQUEST,
+                Validation,
+                "jwks and jwksUri are only used by private_key_jwt OAuth clients",
             ),
             Self::OAuthClientGrantTypesRequired => definition(
                 Status::BAD_REQUEST,

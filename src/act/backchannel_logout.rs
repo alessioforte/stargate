@@ -7,44 +7,17 @@
 //! announced; relying parties rely on token expiry for those.
 
 use super::sessions::SessionRecord;
-use once_cell::sync::Lazy;
+use crate::etc::http::client_endpoints;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::task::{JoinHandle, JoinSet};
 
-/// PEM bundle trusted for logout endpoints in addition to the system roots,
-/// for relying parties behind a private CA.
-const CA_FILE_ENV: &str = "BACKCHANNEL_LOGOUT_CA_FILE";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// Delays before each retry; one initial attempt plus these.
 const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(3)];
 /// Concurrent deliveries across the process (mass revocations fan out).
 const MAX_CONCURRENT_DELIVERIES: usize = 16;
 
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    build_client().unwrap_or_else(|error| {
-        tracing::error!("back-channel logout client: {error}; using the default trust roots");
-        reqwest::Client::new()
-    })
-});
 static DELIVERY_PERMITS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_DELIVERIES);
-
-fn build_client() -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        // Logout endpoints answer directly; a redirect is not followed.
-        .redirect(reqwest::redirect::Policy::none());
-    if let Some(path) = std::env::var_os(CA_FILE_ENV).filter(|path| !path.is_empty()) {
-        let pem = std::fs::read(&path)
-            .map_err(|error| format!("{CA_FILE_ENV} {}: {error}", path.to_string_lossy()))?;
-        for certificate in reqwest::Certificate::from_pem_bundle(&pem)
-            .map_err(|error| format!("{CA_FILE_ENV}: {error}"))?
-        {
-            builder = builder.add_root_certificate(certificate);
-        }
-    }
-    builder.build().map_err(|error| error.to_string())
-}
 
 /// Logout notifications in flight for ended sessions.
 pub struct LogoutDelivery(Option<JoinHandle<()>>);
@@ -156,7 +129,7 @@ enum Outcome {
 }
 
 async fn post(uri: &str, token: &str) -> Outcome {
-    match CLIENT
+    match client_endpoints::client()
         .post(uri)
         .header(http::header::CACHE_CONTROL, "no-store")
         .form(&[("logout_token", token)])
@@ -167,18 +140,6 @@ async fn post(uri: &str, token: &str) -> Outcome {
         Ok(response) if response.status().is_success() => Outcome::Delivered,
         Ok(response) if response.status().is_client_error() => Outcome::Rejected(response.status()),
         Ok(response) => Outcome::Retry(format!("HTTP {}", response.status())),
-        Err(error) => Outcome::Retry(error_chain(&error)),
+        Err(error) => Outcome::Retry(client_endpoints::error_chain(&error)),
     }
-}
-
-/// reqwest's message omits the cause (TLS, DNS, connect); include it.
-fn error_chain(error: &dyn std::error::Error) -> String {
-    let mut message = error.to_string();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        message.push_str(": ");
-        message.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    message
 }

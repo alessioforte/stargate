@@ -1,6 +1,7 @@
 pub mod access_control_rules;
 pub mod backchannel_logout;
 mod change_password;
+pub mod client_jwks;
 pub mod email_throttle;
 mod email_verification;
 pub mod login_guard;

@@ -1,7 +1,8 @@
 use crate::scopes::{
     AUTH_METHOD_CLIENT_SECRET_BASIC, AUTH_METHOD_CLIENT_SECRET_POST, AUTH_METHOD_NONE,
-    GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, PKCE_METHOD_S256,
-    RESPONSE_CODE, SCOPE_EMAIL, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, SCOPE_PROFILE,
+    AUTH_METHOD_PRIVATE_KEY_JWT, GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS,
+    GRANT_REFRESH_TOKEN, PKCE_METHOD_S256, RESPONSE_CODE, SCOPE_EMAIL, SCOPE_OFFLINE_ACCESS,
+    SCOPE_OPENID, SCOPE_PROFILE,
 };
 use jwt::{AlgorithmParameters, EllipticCurve, PublicKeyUse};
 use serde::Serialize;
@@ -47,6 +48,10 @@ pub struct OAuthAuthorizationServerMetadata {
     grant_types_supported: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     token_endpoint_auth_methods_supported: Option<Vec<String>>,
+    /// Algorithms for `private_key_jwt` client assertions.
+    token_endpoint_auth_signing_alg_values_supported: Vec<String>,
+    introspection_endpoint_auth_methods_supported: Vec<String>,
+    revocation_endpoint_auth_methods_supported: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     code_challenge_methods_supported: Option<Vec<String>>,
 }
@@ -69,6 +74,8 @@ pub struct OpenIdConfiguration {
     claims_supported: Vec<String>,
     code_challenge_methods_supported: Vec<String>,
     token_endpoint_auth_methods_supported: Vec<String>,
+    /// Algorithms for `private_key_jwt` client assertions.
+    token_endpoint_auth_signing_alg_values_supported: Vec<String>,
     response_modes_supported: Vec<String>,
     claims_parameter_supported: bool,
     request_parameter_supported: bool,
@@ -199,13 +206,33 @@ pub fn authorization_server_metadata(
             GRANT_CLIENT_CREDENTIALS.to_string(),
             GRANT_REFRESH_TOKEN.to_string(),
         ],
-        token_endpoint_auth_methods_supported: Some(vec![
-            AUTH_METHOD_CLIENT_SECRET_BASIC.to_string(),
-            AUTH_METHOD_CLIENT_SECRET_POST.to_string(),
-            AUTH_METHOD_NONE.to_string(),
-        ]),
+        token_endpoint_auth_methods_supported: Some(token_endpoint_auth_methods()),
+        token_endpoint_auth_signing_alg_values_supported: client_assertion_algorithms(),
+        introspection_endpoint_auth_methods_supported: token_endpoint_auth_methods(),
+        revocation_endpoint_auth_methods_supported: token_endpoint_auth_methods(),
         code_challenge_methods_supported: Some(vec![PKCE_METHOD_S256.to_string()]),
     }
+}
+
+/// Client authentication methods of the token, introspection, and revocation
+/// endpoints (`none` only identifies a public client).
+fn token_endpoint_auth_methods() -> Vec<String> {
+    [
+        AUTH_METHOD_CLIENT_SECRET_BASIC,
+        AUTH_METHOD_CLIENT_SECRET_POST,
+        AUTH_METHOD_PRIVATE_KEY_JWT,
+        AUTH_METHOD_NONE,
+    ]
+    .map(str::to_string)
+    .to_vec()
+}
+
+fn client_assertion_algorithms() -> Vec<String> {
+    jwt::JWK_SET_ALGORITHMS
+        .iter()
+        .filter_map(|algorithm| jwt_algorithm_name(*algorithm))
+        .map(str::to_string)
+        .collect()
 }
 
 pub fn openid_configuration(
@@ -259,12 +286,9 @@ pub fn openid_configuration(
             "updated_at".to_string(),
         ],
         code_challenge_methods_supported: vec![PKCE_METHOD_S256.to_string()],
-        token_endpoint_auth_methods_supported: vec![
-            AUTH_METHOD_CLIENT_SECRET_BASIC.to_string(),
-            AUTH_METHOD_CLIENT_SECRET_POST.to_string(),
-            AUTH_METHOD_NONE.to_string(),
-        ],
-        response_modes_supported: vec!["query".to_string()],
+        token_endpoint_auth_methods_supported: token_endpoint_auth_methods(),
+        token_endpoint_auth_signing_alg_values_supported: client_assertion_algorithms(),
+        response_modes_supported: vec!["query".to_string(), "form_post".to_string()],
         claims_parameter_supported: false,
         request_parameter_supported: false,
         request_uri_parameter_supported: false,

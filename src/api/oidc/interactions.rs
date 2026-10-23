@@ -143,8 +143,16 @@ pub(crate) struct ConsentStage {
     /// Scopes and audience the client asked for, after validation.
     pub(crate) scopes: Vec<String>,
     pub(crate) audience: Option<String>,
-    /// Set once the user approves on the consent page.
-    pub(crate) approved: bool,
+    /// Set by the user's choice on the consent page.
+    pub(crate) decision: Option<ConsentDecision>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum ConsentDecision {
+    /// Resuming issues a code, even with `prompt=consent`.
+    Approved,
+    /// Resuming answers the client with `access_denied`.
+    Denied,
 }
 
 fn key(id: &str) -> String {
@@ -200,10 +208,14 @@ async fn save(id: &str, pending: &PendingAuthorization) -> OAuthResult<()> {
         .map_err(OAuthErrorResponse::internal)
 }
 
-/// Mark a request parked for consent as approved, so resuming it issues a
-/// code even with `prompt=consent`. Returns false when there is no such
+/// Record the user's decision on a request parked for consent; resuming it
+/// answers the client accordingly. Returns false when there is no such
 /// request for `user_id`.
-pub(crate) async fn approve_consent(id: &str, user_id: &str) -> OAuthResult<bool> {
+pub(crate) async fn decide_consent(
+    id: &str,
+    user_id: &str,
+    decision: ConsentDecision,
+) -> OAuthResult<bool> {
     let Some(mut pending) = get(id).await? else {
         return Ok(false);
     };
@@ -214,7 +226,7 @@ pub(crate) async fn approve_consent(id: &str, user_id: &str) -> OAuthResult<bool
     else {
         return Ok(false);
     };
-    stage.approved = true;
+    stage.decision = Some(decision);
     save(id, &pending).await?;
     Ok(true)
 }
@@ -294,18 +306,31 @@ mod tests {
             user_id: "user-1".to_string(),
             scopes: vec!["openid".to_string()],
             audience: None,
-            approved: false,
+            decision: None,
         };
         let id = park_for_consent(AuthorizeQuery::default(), stage)
             .await
             .unwrap();
+        let decision = || async { get(&id).await.unwrap().unwrap().consent.unwrap().decision };
 
-        assert!(!approve_consent(&id, "user-2").await.unwrap());
-        assert!(!get(&id).await.unwrap().unwrap().consent.unwrap().approved);
+        assert!(
+            !decide_consent(&id, "user-2", ConsentDecision::Approved)
+                .await
+                .unwrap()
+        );
+        assert_eq!(decision().await, None);
 
-        assert!(approve_consent(&id, "user-1").await.unwrap());
-        assert!(get(&id).await.unwrap().unwrap().consent.unwrap().approved);
-        assert!(!approve_consent("missing", "user-1").await.unwrap());
+        assert!(
+            decide_consent(&id, "user-1", ConsentDecision::Denied)
+                .await
+                .unwrap()
+        );
+        assert_eq!(decision().await, Some(ConsentDecision::Denied));
+        assert!(
+            !decide_consent("missing", "user-1", ConsentDecision::Approved)
+                .await
+                .unwrap()
+        );
     }
 
     #[test]
