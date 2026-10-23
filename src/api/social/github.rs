@@ -10,7 +10,7 @@ use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
 use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
 use http::header::SET_COOKIE;
-use idp::github::{get_github_oauth_token, get_github_user};
+use idp::github::{GitHubUser, get_github_oauth_token, get_github_user};
 use jwt::Claims;
 use serde::{Deserialize, Serialize};
 use store::Store;
@@ -33,7 +33,7 @@ pub struct AuthResponse {
     get,
     path = "/oauth/github",
     tags = ["OAuth"],
-    description = "Login with GitHub",
+    description = "Login with GitHub. The GitHub authorization must include the `user:email` scope: the account is matched or created by its primary verified email.",
     params(
         ("code" = String, Query, description = "Authorization code"),
         ("state" = String, Query, description = "OAuth state token"),
@@ -41,6 +41,7 @@ pub struct AuthResponse {
     responses(
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "The GitHub account has no verified primary email", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
     )
@@ -77,44 +78,33 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
         tracing::error!("GitHub user info error: {}", e);
         ErrorResponse::new(ErrorCode::SocialUserInfoFailed).with_param("provider", "GitHub")
     })?;
+    // Accounts are matched and created by email, so only an address GitHub
+    // has verified as the account's own will do.
+    let Some(email) = github_user.verified_email.clone() else {
+        return Err(
+            ErrorResponse::new(ErrorCode::SocialEmailUnverified).with_param("provider", "GitHub")
+        );
+    };
     let audit_context = TrustedAuditContext::application(
         TrustedAuditActor::external_identity(format!("github:{}", github_user.id)),
         audit_request,
     );
 
-    let mut user = crate::db::get_user_by_email(&github_user.email)
-        .await
-        .map_err(|e| {
-            tracing::error!("Database error during GitHub OAuth: {}", e);
-            ErrorResponse::new(ErrorCode::SystemInternal)
-        })?;
+    let mut user = crate::db::get_user_by_email(&email).await.map_err(|e| {
+        tracing::error!("Database error during GitHub OAuth: {}", e);
+        ErrorResponse::new(ErrorCode::SystemInternal)
+    })?;
 
     if user.is_none() {
-        let new_user = Profile::new(github_user.email.clone(), github_user.login.clone())
-            .given_name(Some(github_user.name.clone()))
-            .picture(Some(github_user.avatar_url.clone()));
-
-        let value = format!("github:{}", github_user.id);
-        user = Some(
-            crate::db::create_user(
-                new_user,
-                CredentialType::Oauth,
-                &value,
-                None,
-                audit_context.clone(),
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to create GitHub OAuth user: {}", e);
-                ErrorResponse::new(ErrorCode::SystemInternal)
-            })?,
-        );
+        user = Some(create_github_user(&github_user, &email, audit_context.clone()).await?);
     }
 
     let user = user.ok_or_else(|| ErrorResponse::new(ErrorCode::SystemInternal))?;
 
-    if user.picture.is_none() {
-        let updated = user.clone().picture(Some(github_user.avatar_url.clone()));
+    if user.picture.is_none()
+        && let Some(avatar_url) = github_user.avatar_url.clone()
+    {
+        let updated = user.clone().picture(Some(avatar_url));
         crate::db::update_user(updated, audit_context)
             .await
             .map_err(|e| {
@@ -198,4 +188,52 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
             .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
     );
     Ok(resp)
+}
+
+/// Times the account creation is retried when another sign-up takes the
+/// chosen nickname between the check and the insert.
+const CREATE_ATTEMPTS: usize = 3;
+
+/// The account for a first GitHub sign-in. Its nickname is the GitHub
+/// username, suffixed when another account already has it.
+async fn create_github_user(
+    github_user: &GitHubUser,
+    email: &str,
+    audit_context: TrustedAuditContext,
+) -> Result<db::ent::User, ErrorResponse> {
+    let credential = format!("github:{}", github_user.id);
+    let mut attempt = 1;
+    loop {
+        let nickname = crate::act::nicknames::available_nickname(&github_user.login, email).await?;
+        let profile = Profile::new(email.to_string(), nickname.clone())
+            .given_name(github_user.name.clone())
+            .picture(github_user.avatar_url.clone());
+        let error = match crate::db::create_user(
+            profile,
+            CredentialType::Oauth,
+            &credential,
+            None,
+            audit_context.clone(),
+        )
+        .await
+        {
+            Ok(user) => return Ok(user),
+            Err(error) => error,
+        };
+
+        // A concurrent sign-in of the same GitHub user created the account.
+        if let Some(user) = crate::db::get_user_by_email(email)
+            .await
+            .map_err(ErrorResponse::internal)?
+        {
+            return Ok(user);
+        }
+        if attempt < CREATE_ATTEMPTS && crate::act::nicknames::nickname_taken(&nickname).await? {
+            tracing::debug!(%nickname, "nickname taken during GitHub sign-up, retrying");
+            attempt += 1;
+            continue;
+        }
+        tracing::error!("Failed to create GitHub OAuth user: {}", error);
+        return Err(ErrorResponse::new(ErrorCode::SystemInternal));
+    }
 }

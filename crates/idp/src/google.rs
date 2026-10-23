@@ -1,24 +1,38 @@
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::env;
 use std::error::Error;
-use url::Url;
 
 #[derive(Deserialize)]
 pub struct OAuthResponse {
     pub access_token: String,
-    pub id_token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GoogleUserResult {
+/// The Google account behind an access token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoogleUser {
     pub id: String,
-    pub email: String,
-    pub verified_email: bool,
-    pub name: String,
-    pub given_name: String,
-    pub family_name: String,
-    pub picture: String,
+    /// Profile fields Google omits when the account has none (no family
+    /// name, ...) or the `profile` scope was not granted.
+    pub name: Option<String>,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
+    pub picture: Option<String>,
+    /// The account's email, when Google has verified it (scope `email`).
+    pub verified_email: Option<String>,
+}
+
+/// The `userinfo` v2 response.
+#[derive(Deserialize)]
+struct GoogleUserInfo {
+    id: String,
+    email: Option<String>,
+    #[serde(default)]
+    verified_email: bool,
+    name: Option<String>,
+    given_name: Option<String>,
+    family_name: Option<String>,
+    picture: Option<String>,
 }
 
 pub async fn get_google_oauth_token(
@@ -52,24 +66,32 @@ pub async fn get_google_oauth_token(
     }
 }
 
+/// The account behind `access_token`, from the `userinfo` endpoint.
 pub async fn get_google_user(
     access_token: &str,
-    id_token: &str,
-) -> Result<GoogleUserResult, Box<dyn Error + Send + Sync>> {
-    let mut url = Url::parse(&google_user_url()).unwrap();
-    url.query_pairs_mut().append_pair("alt", "json");
-    url.query_pairs_mut()
-        .append_pair("access_token", access_token);
+) -> Result<GoogleUser, Box<dyn Error + Send + Sync>> {
+    let response = Client::new()
+        .get(google_user_url())
+        .bearer_auth(access_token)
+        .send()
+        .await?;
 
-    let response = Client::new().get(url).bearer_auth(id_token).send().await?;
-
-    if response.status().is_success() {
-        Ok(response.json::<GoogleUserResult>().await?)
-    } else {
-        let res: serde_json::Value = response.json().await?;
-        tracing::error!("get_google_user: {}", res);
-        Err("An error occurred while trying to retrieve user information.".into())
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        tracing::error!(%status, "get_google_user: {body}");
+        return Err(format!("Google userinfo answered {status}").into());
     }
+    let info = response.json::<GoogleUserInfo>().await?;
+    let present = |value: Option<String>| value.filter(|value| !value.trim().is_empty());
+    Ok(GoogleUser {
+        id: info.id,
+        name: present(info.name),
+        given_name: present(info.given_name),
+        family_name: present(info.family_name),
+        picture: present(info.picture),
+        verified_email: present(info.email).filter(|_| info.verified_email),
+    })
 }
 
 fn google_token_url() -> String {
@@ -90,7 +112,7 @@ fn google_user_url() -> String {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{get_google_oauth_token, get_google_user};
+    use super::{GoogleUser, get_google_oauth_token, get_google_user};
     use crate::test_support::{ScopedEnv, env_lock, spawn_json_server};
 
     #[tokio::test]
@@ -98,7 +120,7 @@ mod tests {
         let _env_lock = env_lock();
         let (url, request_rx) = spawn_json_server(
             "/oauth2/v4/token",
-            r#"{"access_token":"google_access","id_token":"google_id"}"#,
+            r#"{"access_token":"google_access","expires_in":3599,"token_type":"Bearer"}"#,
         )
         .await
         .unwrap();
@@ -117,7 +139,6 @@ mod tests {
             .collect();
 
         assert_eq!(token.access_token, "google_access");
-        assert_eq!(token.id_token, "google_id");
         assert_eq!(request.method, "POST");
         assert_eq!(request.path, "/oauth2/v4/token");
         assert_eq!(
@@ -141,31 +162,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn google_user_uses_query_and_bearer_auth() {
+    async fn google_user_uses_bearer_auth_and_keeps_the_verified_email() {
         let _env_lock = env_lock();
         let (url, request_rx) = spawn_json_server(
             "/oauth2/v2/userinfo",
-            r#"{"id":"42","email":"ada@example.com","verified_email":true,"name":"Ada Lovelace","given_name":"Ada","family_name":"Lovelace","picture":"https://img"}"#,
+            r#"{"id":"42","email":"ada@example.com","verified_email":true,"name":"Ada","given_name":"Ada","picture":"https://img"}"#,
         )
         .await
         .unwrap();
         let _user_url = ScopedEnv::set("GOOGLE_OAUTH_USER_URL", &url);
 
-        let user = get_google_user("google_access", "google_id").await.unwrap();
+        let user = get_google_user("google_access").await.unwrap();
         let request = request_rx.await.unwrap();
-        let (path, query) = request.path.split_once('?').unwrap();
-        let query: HashMap<String, String> = url::form_urlencoded::parse(query.as_bytes())
-            .into_owned()
-            .collect();
 
-        assert_eq!(user.email, "ada@example.com");
-        assert_eq!(request.method, "GET");
-        assert_eq!(path, "/oauth2/v2/userinfo");
-        assert_eq!(query.get("alt"), Some(&"json".to_string()));
         assert_eq!(
-            query.get("access_token"),
-            Some(&"google_access".to_string())
+            user,
+            GoogleUser {
+                id: "42".to_string(),
+                name: Some("Ada".to_string()),
+                given_name: Some("Ada".to_string()),
+                family_name: None,
+                picture: Some("https://img".to_string()),
+                verified_email: Some("ada@example.com".to_string()),
+            }
         );
-        assert_eq!(request.header("authorization"), Some("Bearer google_id"));
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/oauth2/v2/userinfo");
+        assert_eq!(
+            request.header("authorization"),
+            Some("Bearer google_access")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unverified_google_email_is_not_used() {
+        let _env_lock = env_lock();
+        let (url, _request_rx) = spawn_json_server(
+            "/oauth2/v2/userinfo",
+            r#"{"id":"42","email":"ada@example.com","verified_email":false}"#,
+        )
+        .await
+        .unwrap();
+        let _user_url = ScopedEnv::set("GOOGLE_OAUTH_USER_URL", &url);
+
+        let user = get_google_user("google_access").await.unwrap();
+
+        assert_eq!(user.verified_email, None);
+        assert_eq!(user.name, None);
     }
 }

@@ -547,6 +547,14 @@ every insert/update):
   social login) use `get_user_by_email`; session flows (profile, refresh) use
   `sub_id`. API writes pre-check with `act::nicknames::ensure_nickname_available`
   (`400 user.nickname_invalid`, `409 user.nickname_already_exists`).
+- Social sign-in matches and creates accounts by an email the provider verified, else
+  `403 social.email_unverified`: GitHub's primary verified email from `/user/emails`
+  (scope `user:email`), Google's `userinfo` email with `verified_email` (scope `email`,
+  bearer access token). `crates/idp`: `GitHubUser` / `GoogleUser`.
+- A first GitHub sign-in takes the GitHub username as nickname, or the first free of
+  `<login>_2` ... `_9`, then `<login>_<random>`, then the email
+  (`act::nicknames::available_nickname`; GitHub usernames have no `_`). A nickname taken
+  between the check and the insert is retried (`src/api/social/github.rs`).
 Store keys derived from emails use the canonical form too.
 
 IDs are ULIDs stored as text. `outbox_events` holds the immutable JSON payload,

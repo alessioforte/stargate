@@ -11,7 +11,7 @@ use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
 use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
 use http::header::SET_COOKIE;
-use idp::google::{get_google_oauth_token, get_google_user};
+use idp::google::{GoogleUser, get_google_oauth_token, get_google_user};
 use jwt::Claims;
 use serde::{Deserialize, Serialize};
 use store::Store;
@@ -27,7 +27,7 @@ pub struct QueryCode {
     get,
     path = "/oauth/google",
     tags = ["OAuth"],
-    description = "Login with Google",
+    description = "Login with Google. The Google authorization must include the `email` scope: the account is matched or created by its verified email.",
     params(
         ("code" = String, Query, description = "Authorization code"),
         ("state" = String, Query, description = "OAuth state token"),
@@ -35,6 +35,7 @@ pub struct QueryCode {
     responses(
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "The Google account's email is not verified", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
     )
@@ -67,50 +68,37 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
         ErrorResponse::new(ErrorCode::SocialTokenExchangeFailed).with_param("provider", "Google")
     })?;
 
-    let google_user = get_google_user(&token.access_token, &token.id_token)
-        .await
-        .map_err(|e| {
-            tracing::error!("Google user info error: {}", e);
-            ErrorResponse::new(ErrorCode::SocialUserInfoFailed).with_param("provider", "Google")
-        })?;
+    let google_user = get_google_user(&token.access_token).await.map_err(|e| {
+        tracing::error!("Google user info error: {}", e);
+        ErrorResponse::new(ErrorCode::SocialUserInfoFailed).with_param("provider", "Google")
+    })?;
+    // Accounts are matched and created by email, so only an address Google
+    // has verified as the account's own will do.
+    let Some(email) = google_user.verified_email.clone() else {
+        return Err(
+            ErrorResponse::new(ErrorCode::SocialEmailUnverified).with_param("provider", "Google")
+        );
+    };
     let audit_context = TrustedAuditContext::application(
         TrustedAuditActor::external_identity(format!("google:{}", google_user.id)),
         audit_request,
     );
 
-    let mut user = crate::db::get_user_by_email(&google_user.email)
-        .await
-        .map_err(|e| {
-            tracing::error!("Database error during Google OAuth: {}", e);
-            ErrorResponse::new(ErrorCode::SystemInternal)
-        })?;
+    let mut user = crate::db::get_user_by_email(&email).await.map_err(|e| {
+        tracing::error!("Database error during Google OAuth: {}", e);
+        ErrorResponse::new(ErrorCode::SystemInternal)
+    })?;
 
     if user.is_none() {
-        let new_user = Profile::new(google_user.email.clone(), google_user.email.clone())
-            .given_name(Some(google_user.name.clone()))
-            .picture(Some(google_user.picture.clone()));
-
-        let value = format!("google:{}", google_user.id);
-        user = Some(
-            crate::db::create_user(
-                new_user,
-                CredentialType::Oauth,
-                &value,
-                None,
-                audit_context.clone(),
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to create Google OAuth user: {}", e);
-                ErrorResponse::new(ErrorCode::SystemInternal)
-            })?,
-        );
+        user = Some(create_google_user(&google_user, &email, audit_context.clone()).await?);
     }
 
     let user = user.ok_or_else(|| ErrorResponse::new(ErrorCode::SystemInternal))?;
 
-    if user.picture.is_none() {
-        let updated = user.clone().picture(Some(google_user.picture.clone()));
+    if user.picture.is_none()
+        && let Some(picture) = google_user.picture.clone()
+    {
+        let updated = user.clone().picture(Some(picture));
         crate::db::update_user(updated, audit_context)
             .await
             .map_err(|e| {
@@ -130,7 +118,7 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
         .sub_id(user.id.to_owned())
         .name(name)
         .email(user.email.to_owned())
-        .email_verified(google_user.verified_email)
+        .email_verified(true)
         .sid(sid.clone());
     claims.auth_time = Some(auth_time);
 
@@ -194,4 +182,44 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
             .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
     );
     Ok(resp)
+}
+
+/// The account for a first Google sign-in; its nickname is the email.
+async fn create_google_user(
+    google_user: &GoogleUser,
+    email: &str,
+    audit_context: TrustedAuditContext,
+) -> Result<db::ent::User, ErrorResponse> {
+    // Google's full name is the given name when it sends no name parts.
+    let (given_name, family_name) = match (&google_user.given_name, &google_user.family_name) {
+        (None, None) => (google_user.name.clone(), None),
+        (given_name, family_name) => (given_name.clone(), family_name.clone()),
+    };
+    let profile = Profile::new(email.to_string(), email.to_string())
+        .given_name(given_name)
+        .family_name(family_name)
+        .picture(google_user.picture.clone());
+    let credential = format!("google:{}", google_user.id);
+    match crate::db::create_user(
+        profile,
+        CredentialType::Oauth,
+        &credential,
+        None,
+        audit_context,
+    )
+    .await
+    {
+        Ok(user) => Ok(user),
+        Err(error) => {
+            // A concurrent sign-in of the same Google user created the account.
+            if let Some(user) = crate::db::get_user_by_email(email)
+                .await
+                .map_err(ErrorResponse::internal)?
+            {
+                return Ok(user);
+            }
+            tracing::error!("Failed to create Google OAuth user: {}", error);
+            Err(ErrorResponse::new(ErrorCode::SystemInternal))
+        }
+    }
 }

@@ -102,6 +102,7 @@
     "social.state_invalid": "Lo stato OAuth non è valido o è scaduto",
     "social.token_exchange_failed": "Lo scambio del token con il provider di identità non è riuscito",
     "social.user_info_failed": "Non è stato possibile ottenere le informazioni utente dal provider di identità",
+    "social.email_unverified": "L'account del provider di identità non ha un indirizzo email principale verificato",
     "social.state_generation_failed": "Non è stato possibile generare lo stato OAuth",
     "gateway.route_not_found": "Rotta del gateway non trovata",
     "gateway.policy_not_found": "La policy configurata del gateway non è stata trovata",
