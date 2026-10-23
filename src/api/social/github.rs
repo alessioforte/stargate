@@ -41,7 +41,7 @@ pub struct AuthResponse {
     responses(
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
-        (status = 403, description = "The GitHub account has no verified primary email", body = ErrorResponse),
+        (status = 403, description = "The GitHub account has no verified primary email, or no Stargate account uses it and `SIGNUP_MODE` does not create one (`social.account_not_provisioned`, `signup.domain_not_allowed`)", body = ErrorResponse),
         (status = 404, description = "GitHub sign-in is not configured on this server (`feature.disabled`)", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
@@ -97,6 +97,7 @@ pub async fn get_github(req: Request) -> Result<Response, ErrorResponse> {
     })?;
 
     if user.is_none() {
+        super::ensure_provisioning("GitHub", &email)?;
         user = Some(create_github_user(&github_user, &email, audit_context.clone()).await?);
     }
 

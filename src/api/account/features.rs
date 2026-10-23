@@ -9,7 +9,11 @@ use utoipa::ToSchema;
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FeaturesResponse {
-    /// Social sign-in providers with credentials: `google`, `github`.
+    /// Who may create accounts: `open` (anyone, `POST /signup`), `invite`
+    /// (admin invitations), or `closed` (administrators only).
+    pub signup_mode: &'static str,
+    /// Social sign-in providers with credentials: `google`, `github`. Outside
+    /// `open` mode they sign in existing accounts only.
     pub social_providers: Vec<&'static str>,
 }
 
@@ -28,6 +32,7 @@ pub async fn get_features() -> impl IntoResponse {
     (
         [(CACHE_CONTROL, "public, max-age=60")],
         Json(FeaturesResponse {
+            signup_mode: features.signup.as_str(),
             social_providers: features.social_providers(),
         }),
     )

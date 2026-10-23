@@ -12,7 +12,8 @@ use axum::extract::Query;
     responses(
         (status = 200, description = "OK", body = EmailVerificationResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
-        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 403, description = "The email domain is no longer allowed (`signup.domain_not_allowed`)", body = ErrorResponse),
+        (status = 404, description = "Not Found, or disabled by `SIGNUP_MODE` (`feature.disabled`)", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
@@ -43,6 +44,7 @@ pub async fn get_signup(
     {
         return Err(ErrorResponse::new(ErrorCode::SignupEmailMismatch));
     }
+    super::ensure_completable(&request)?;
 
     if act::get_signup_request(&sid)
         .await

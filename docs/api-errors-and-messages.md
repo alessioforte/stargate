@@ -148,8 +148,26 @@ not an account uses the address, and sends the email in the background, so
 neither the response nor its timing reveals the account. While a reset request
 is pending, a new request resends its link.
 
-`POST /signup` likewise answers `200 signup.requested` for any valid address:
+`POST /signup` (only with `SIGNUP_MODE=open`) likewise answers
+`200 signup.requested` for any valid address:
 a new address receives a verification link, a pending signup has its link
 resent, and an address that already has an account receives a sign-in reminder
 instead. `signup.user_already_exists` and `signup.request_already_exists` remain
 for admin invitations and for completing a signup with a verified token.
+
+## Disabled features and account creation
+
+Operators can switch some capabilities off (`SIGNUP_MODE`, `CONSOLE_ENABLED`,
+social providers without credentials). Their routes stay mounted and answer
+`404 feature.disabled`, with `params.feature` naming the capability, before
+the request body or query is read. `GET /account/features` tells clients what
+is on.
+
+| Code | HTTP status | Condition |
+| --- | --- | --- |
+| `feature.disabled` | 404 | `params.feature`: `signup` (`POST /signup`, or completing a self-registration, outside `SIGNUP_MODE=open`), `invitations` (admin invitations and `GET`/`PUT /signup` with `SIGNUP_MODE=closed`), `console`, `social` (`/oauth/state` with no provider), `social_google`, `social_github` |
+| `signup.domain_not_allowed` | 403 | The email's domain is not in `SIGNUP_ALLOWED_DOMAINS`, on `POST /signup`, its completion, or a first social sign-in; `params.domain` |
+| `social.account_not_provisioned` | 403 | A social sign-in for an email with no account, outside `SIGNUP_MODE=open`; `params.provider` |
+
+The domain check depends on the address only, so `POST /signup` still reveals
+nothing about existing accounts.

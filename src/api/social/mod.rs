@@ -4,6 +4,25 @@ pub(crate) mod state;
 
 pub use state::post_state;
 
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::etc::features::{SelfServiceRefusal, features};
+
+/// A first sign-in creates the account only as self-registration would
+/// (`SIGNUP_MODE=open`, an allowed email domain); otherwise the person needs
+/// an invitation or an account created by an administrator.
+fn ensure_provisioning(provider: &'static str, email: &str) -> Result<(), ErrorResponse> {
+    match features().self_service_signup(email) {
+        Ok(()) => Ok(()),
+        Err(SelfServiceRefusal::Disabled) => {
+            Err(ErrorResponse::new(ErrorCode::SocialAccountNotProvisioned)
+                .with_param("provider", provider))
+        }
+        Err(SelfServiceRefusal::DomainNotAllowed(domain)) => {
+            Err(ErrorResponse::new(ErrorCode::SignupDomainNotAllowed).with_param("domain", domain))
+        }
+    }
+}
+
 /// Each route answers `404 feature.disabled` while its provider has no
 /// credentials (`/oauth/state` while none has).
 pub fn router() -> axum::Router {

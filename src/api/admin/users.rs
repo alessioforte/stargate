@@ -2,7 +2,7 @@ use super::{
     authorization::{self, Permission},
     extract_json, extract_optional_json, extract_path, extract_query,
 };
-use crate::act::PendingSignupProfile;
+use crate::act::{PendingSignupProfile, SignupOrigin};
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::http::messages::{MessageCode, MessageResponse};
@@ -420,6 +420,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Invitations are disabled (`SIGNUP_MODE=closed`, `feature.disabled`)", body = ErrorResponse),
         (status = 409, description = "Conflict - user or invitation already exists", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
@@ -453,6 +454,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
     }
 
     let profile = PendingSignupProfile {
+        origin: SignupOrigin::Invitation,
         email: payload.email,
         given_name: payload.given_name,
         family_name: payload.family_name,

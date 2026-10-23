@@ -92,9 +92,10 @@ stargate/
 - `features.rs`: capabilities an operator can switch off, read and validated once at startup
   (invalid values stop it). A disabled capability keeps its routes mounted and answers
   `404 feature.disabled` (`require_feature` middleware): unmatched paths fall through to
-  the gateway. Today: `CONSOLE_ENABLED`, and each social provider (on when its client id
-  and secret are both set; one alone stops startup). `GET /account/features` (public)
-  lists the sign-in options for the hosted apps; `/admin/health` reports `features`.
+  the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
+  `CONSOLE_ENABLED`, and each social provider (on when its client id and secret are both
+  set; one alone stops startup). `GET /account/features` (public) lists the sign-in
+  options for the hosted apps; `/admin/health` reports `features`.
   Plan: `.reports/feature-toggles-plan.md`.
 
 ### Gateway Runtime (`src/api/gateway/`)
@@ -517,7 +518,20 @@ response time does not reveal the account either; delivery errors are only logge
 A pending request (`change_password_requests:{email}`, 1h) is reused and its link
 resent, bounded by the per-recipient throttle, so a failed delivery can be retried.
 
-Signup (`POST /signup`): always `200 signup.requested` for a valid address
+Account creation (`SIGNUP_MODE`, `src/etc/features.rs`; administrators can always use
+`POST /admin/users`):
+- `open`: self-registration (`POST /signup`) and accounts created by a first social
+  sign-in, limited to `SIGNUP_ALLOWED_DOMAINS` when set (exact domains; rejected with
+  other modes; `403 signup.domain_not_allowed`).
+- `invite` (default): admin invitations only; `POST /signup` is `404 feature.disabled`,
+  and social sign-in works for existing accounts only (`403 social.account_not_provisioned`).
+- `closed`: no invitations either; `/admin/users/invitations` and `GET`/`PUT /signup` are
+  `404 feature.disabled`.
+- Pending signups record their `origin` (`self_service` / `invitation`, `act::SignupOrigin`):
+  a self-registration completes only while the mode is still `open` and its domain allowed
+  (`api::signup::ensure_completable`), so a stricter mode applies to signups under way.
+
+Signup (`POST /signup`, `open` only): always `200 signup.requested` for a valid address
 (`400 request.invalid` otherwise). In the background a new address gets the
 verification link, a pending signup has its link resent (same `sid`), and an
 existing account gets a `SignupAccountExists` sign-in reminder, so neither the
@@ -554,6 +568,7 @@ every insert/update):
   social login) use `get_user_by_email`; session flows (profile, refresh) use
   `sub_id`. API writes pre-check with `act::nicknames::ensure_nickname_available`
   (`400 user.nickname_invalid`, `409 user.nickname_already_exists`).
+- Social sign-in creates accounts only with `SIGNUP_MODE=open` (see "Passwords").
 - Social sign-in matches and creates accounts by an email the provider verified, else
   `403 social.email_unverified`: GitHub's primary verified email from `/user/emails`
   (scope `user:email`), Google's `userinfo` email with `verified_email` (scope `email`,
@@ -603,6 +618,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH` | `.stargate/apps/auth` / `/auth` | Hosted auth app files and mount |
 | `AUTH_PUBLIC_BASE_URL` | - | Public auth app URL when hosted elsewhere |
 | `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount |
+| `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` | invite / - | Who may create accounts (`open`, `invite`, `closed`); domains for `open` |
 | `CONSOLE_ENABLED` | true | Serve the Console app (`false`: its path answers `404 feature.disabled`) |
 | `CONSOLE_OAUTH_CLIENT_ID` | stargate_console | Reserved Console OAuth client |
 | `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL` | derived | Console callback / origin |

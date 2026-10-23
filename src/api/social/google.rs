@@ -35,7 +35,7 @@ pub struct QueryCode {
     responses(
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
-        (status = 403, description = "The Google account's email is not verified", body = ErrorResponse),
+        (status = 403, description = "The Google account's email is not verified, or no Stargate account uses it and `SIGNUP_MODE` does not create one (`social.account_not_provisioned`, `signup.domain_not_allowed`)", body = ErrorResponse),
         (status = 404, description = "Google sign-in is not configured on this server (`feature.disabled`)", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
@@ -91,6 +91,7 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
     })?;
 
     if user.is_none() {
+        super::ensure_provisioning("Google", &email)?;
         user = Some(create_google_user(&google_user, &email, audit_context.clone()).await?);
     }
 

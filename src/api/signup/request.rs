@@ -1,7 +1,7 @@
 use super::SignupRequestBody;
 use crate::{
     act::{
-        self, PendingSignupProfile,
+        self, PendingSignupProfile, SignupOrigin,
         email_throttle::{EmailFlow, check_and_record_email_request},
     },
     err::{ErrorCode, ErrorResponse},
@@ -16,11 +16,13 @@ use smtp::{Smtp, Template};
     post,
     path = "/signup",
     tags = ["Signup"],
-    description = "Start a signup for an email address. The response is the same whether or not the address already has an account: a new address receives a verification link, an existing account receives a sign-in reminder, and a pending signup has its link resent.",
+    description = "Start a signup for an email address (`SIGNUP_MODE=open` only). The response is the same whether or not the address already has an account: a new address receives a verification link, an existing account receives a sign-in reminder, and a pending signup has its link resent.",
     request_body = SignupRequestBody,
     responses(
         (status = 200, description = "OK", body = MessageResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 403, description = "The email domain is not in `SIGNUP_ALLOWED_DOMAINS` (`signup.domain_not_allowed`)", body = ErrorResponse),
+        (status = 404, description = "Self-registration is disabled (`SIGNUP_MODE` is not `open`, `feature.disabled`)", body = ErrorResponse),
         (status = 429, description = "Too many emails requested for this address", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
@@ -32,6 +34,8 @@ pub async fn post_signup(
     if !smtp::is_valid_address(&email) {
         return Err(ErrorResponse::new(ErrorCode::RequestInvalid).with_param("field", "email"));
     }
+    // Depends on the domain only, never on an existing account.
+    super::ensure_self_service(&email)?;
     check_and_record_email_request(EmailFlow::Signup, &email).await?;
 
     let email_kind = if crate::db::get_user_by_email(&email)
@@ -49,7 +53,7 @@ pub async fn post_signup(
             .map_err(ErrorResponse::internal)?
         {
             Some(sid) => sid,
-            None => act::create_email_verification_request(&PendingSignupProfile::email_only(
+            None => act::create_email_verification_request(&PendingSignupProfile::self_service(
                 email.clone(),
             ))
             .await
@@ -68,6 +72,7 @@ pub async fn post_signup(
 /// the response, so the inviting admin learns about every failure.
 pub(crate) async fn send_invitation(profile: PendingSignupProfile) -> Result<(), ErrorResponse> {
     let profile = PendingSignupProfile {
+        origin: SignupOrigin::Invitation,
         email: canonical_email(&profile.email),
         ..profile
     };

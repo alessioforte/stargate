@@ -628,16 +628,18 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// The tests run with the default `SIGNUP_MODE=invite`: self-registration
+    /// is off before its body is read, while completing a signup stays on.
     #[tokio::test]
-    async fn signup_post_missing_body_rejected() {
+    async fn self_registration_is_disabled_by_default() {
         let req = Request::builder()
             .method(http::Method::POST)
             .uri("/signup")
             .header(CONTENT_TYPE, "application/json")
-            .body(Body::empty())
+            .body(Body::from(r#"{"email":"ada@example.com"}"#))
             .unwrap();
         let resp = send_req(req).await;
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(feature_disabled(resp).await, "signup");
     }
 
     async fn feature_disabled(resp: http::Response<Body>) -> String {
@@ -677,7 +679,10 @@ mod tests {
         );
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json, serde_json::json!({ "socialProviders": [] }));
+        assert_eq!(
+            json,
+            serde_json::json!({ "signupMode": "invite", "socialProviders": [] })
+        );
     }
 
     #[tokio::test]

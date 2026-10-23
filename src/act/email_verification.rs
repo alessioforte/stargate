@@ -1,5 +1,5 @@
 use crate::etc::store::use_store;
-use store::{Store, StoreError};
+use store::Store;
 
 use super::PendingSignupProfile;
 
@@ -32,14 +32,7 @@ pub async fn get_email_verification_request(
 ) -> Result<Option<PendingSignupProfile>, store::StoreError> {
     let store = use_store();
     let key = format!("{}:{}", KEY_PREFIX, sid);
-    match store.get::<PendingSignupProfile>(key.as_str()).await {
-        Ok(profile) => Ok(profile),
-        Err(StoreError::DeserializationFailed(_)) => store
-            .get::<String>(key.as_str())
-            .await
-            .map(|email| email.map(PendingSignupProfile::email_only)),
-        Err(error) => Err(error),
-    }
+    store.get::<PendingSignupProfile>(key.as_str()).await
 }
 
 pub async fn delete_email_verification_request(sid: &str) -> Result<(), store::StoreError> {

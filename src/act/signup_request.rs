@@ -2,13 +2,25 @@ use crate::etc::store::use_store;
 use db::ent::NewOrganizationMembership;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use store::{Store, StoreError};
+use store::Store;
 
 const KEY_PREFIX: &str = "signup_requests";
+
+/// How a pending signup started, which decides whether `SIGNUP_MODE` still
+/// lets it complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignupOrigin {
+    /// `POST /signup`: completes only while `SIGNUP_MODE=open`.
+    SelfService,
+    /// An admin invitation: completes unless `SIGNUP_MODE=closed`.
+    Invitation,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingSignupProfile {
+    pub origin: SignupOrigin,
     pub email: String,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
@@ -20,8 +32,10 @@ pub struct PendingSignupProfile {
 }
 
 impl PendingSignupProfile {
-    pub fn email_only(email: impl Into<String>) -> Self {
+    /// A self-registration: only the address is known.
+    pub fn self_service(email: impl Into<String>) -> Self {
         Self {
+            origin: SignupOrigin::SelfService,
             email: email.into(),
             given_name: None,
             family_name: None,
@@ -50,14 +64,7 @@ pub async fn get_signup_request(
 ) -> Result<Option<PendingSignupProfile>, store::StoreError> {
     let store = use_store();
     let key = format!("{}:{}", KEY_PREFIX, sid);
-    match store.get::<PendingSignupProfile>(key.as_str()).await {
-        Ok(profile) => Ok(profile),
-        Err(StoreError::DeserializationFailed(_)) => store
-            .get::<String>(key.as_str())
-            .await
-            .map(|email| email.map(PendingSignupProfile::email_only)),
-        Err(error) => Err(error),
-    }
+    store.get::<PendingSignupProfile>(key.as_str()).await
 }
 
 pub async fn delete_signup_request(sid: &str) -> Result<bool, store::StoreError> {
@@ -68,11 +75,12 @@ pub async fn delete_signup_request(sid: &str) -> Result<bool, store::StoreError>
 
 #[cfg(test)]
 mod tests {
-    use super::PendingSignupProfile;
+    use super::{PendingSignupProfile, SignupOrigin};
 
     #[test]
     fn pending_profile_roundtrips_server_owned_membership() {
         let profile: PendingSignupProfile = serde_json::from_value(serde_json::json!({
+            "origin": "invitation",
             "email": "member@example.com",
             "givenName": null,
             "familyName": null,
@@ -87,6 +95,7 @@ mod tests {
         }))
         .expect("deserialize pending membership");
 
+        assert_eq!(profile.origin, SignupOrigin::Invitation);
         let membership = profile.membership.expect("membership");
         assert_eq!(membership.organization_id, "01JZ0000000000000000000001");
         assert_eq!(membership.role, "admin");

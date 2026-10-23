@@ -18,7 +18,8 @@ use tracing::error;
     responses(
         (status = 200, description = "OK", body = MessageResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
-        (status = 404, description = "Not Found", body = ErrorResponse),
+        (status = 403, description = "The email domain is no longer allowed (`signup.domain_not_allowed`)", body = ErrorResponse),
+        (status = 404, description = "Not Found, or disabled by `SIGNUP_MODE` (`feature.disabled`)", body = ErrorResponse),
         (status = 409, description = "Conflict", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
@@ -56,6 +57,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
     {
         return Err(ErrorResponse::new(ErrorCode::SignupEmailMismatch));
     }
+    super::ensure_completable(&signup)?;
 
     if crate::db::get_user_by_email(&signup.email)
         .await

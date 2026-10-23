@@ -35,6 +35,8 @@ impl From<ComponentHealth> for ComponentStatus {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct FeatureStatus {
+    signup_mode: &'static str,
+    signup_allowed_domains: Vec<String>,
     console: bool,
     social_providers: Vec<&'static str>,
 }
@@ -108,6 +110,8 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
         database_backend: crate::etc::server::profile::COMPILED_DB_BACKEND,
         state_backend: crate::etc::server::profile::COMPILED_STATE_BACKEND,
         features: FeatureStatus {
+            signup_mode: features.signup.as_str(),
+            signup_allowed_domains: features.signup_allowed_domains.clone(),
             console: features.console,
             social_providers: features.social_providers(),
         },

@@ -15,6 +15,11 @@ use std::sync::OnceLock;
 /// A capability that can be off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Feature {
+    /// Self-registration, `POST /signup` (`SIGNUP_MODE=open`).
+    Signup,
+    /// Admin invitations and completing pending signups with the emailed
+    /// link (`SIGNUP_MODE` other than `closed`).
+    Invitations,
     /// Serving the Console app (`CONSOLE_ENABLED`).
     Console,
     /// Social sign-in with any provider (`/oauth/state`).
@@ -27,6 +32,8 @@ impl Feature {
     /// The name reported in `feature.disabled` errors.
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Signup => "signup",
+            Self::Invitations => "invitations",
             Self::Console => "console",
             Self::Social => "social",
             Self::SocialGoogle => "social_google",
@@ -35,8 +42,54 @@ impl Feature {
     }
 }
 
+/// Who may create accounts (`SIGNUP_MODE`). Administrators can always create
+/// them directly (`POST /admin/users`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SignupMode {
+    /// Anyone: `POST /signup`, and the first social sign-in creates the
+    /// account, for an allowed email domain.
+    Open,
+    /// Admin invitations only; social sign-in only for existing accounts.
+    #[default]
+    Invite,
+    /// Administrators create accounts; no invitations.
+    Closed,
+}
+
+impl SignupMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Invite => "invite",
+            Self::Closed => "closed",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "open" => Some(Self::Open),
+            "invite" => Some(Self::Invite),
+            "closed" => Some(Self::Closed),
+            _ => None,
+        }
+    }
+}
+
+/// Why someone cannot create their own account.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SelfServiceRefusal {
+    /// `SIGNUP_MODE` is not `open`.
+    Disabled,
+    /// The email's domain is not in `SIGNUP_ALLOWED_DOMAINS`.
+    DomainNotAllowed(String),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Features {
+    pub signup: SignupMode,
+    /// Email domains self-registration is limited to (`open` only); empty
+    /// allows every domain.
+    pub signup_allowed_domains: Vec<String>,
     pub console: bool,
     /// On when both the client id and secret are set.
     pub social_google: bool,
@@ -52,6 +105,10 @@ pub enum FeaturesError {
         set: &'static str,
         missing: &'static str,
     },
+    #[error(
+        "`SIGNUP_ALLOWED_DOMAINS` only applies with `SIGNUP_MODE=open` (it is `{mode}`): unset it or open signup"
+    )]
+    DomainsWithoutOpenSignup { mode: &'static str },
 }
 
 impl Features {
@@ -85,7 +142,30 @@ impl Features {
                 missing: id,
             }),
         };
+        let signup = match var("SIGNUP_MODE") {
+            None => SignupMode::default(),
+            Some(value) => SignupMode::parse(&value).ok_or_else(|| EnvError::Parse {
+                name: "SIGNUP_MODE".to_string(),
+                value,
+                message: "expected open, invite, or closed".to_string(),
+            })?,
+        };
+        let signup_allowed_domains = match var("SIGNUP_ALLOWED_DOMAINS") {
+            None => Vec::new(),
+            Some(value) => parse_domains(&value).map_err(|message| EnvError::Parse {
+                name: "SIGNUP_ALLOWED_DOMAINS".to_string(),
+                value,
+                message,
+            })?,
+        };
+        if !signup_allowed_domains.is_empty() && signup != SignupMode::Open {
+            return Err(FeaturesError::DomainsWithoutOpenSignup {
+                mode: signup.as_str(),
+            });
+        }
         Ok(Self {
+            signup,
+            signup_allowed_domains,
             console: flag("CONSOLE_ENABLED", true)?,
             social_google: provider("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET")?,
             social_github: provider("GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET")?,
@@ -94,10 +174,32 @@ impl Features {
 
     pub fn enabled(&self, feature: Feature) -> bool {
         match feature {
+            Feature::Signup => self.signup == SignupMode::Open,
+            Feature::Invitations => self.signup != SignupMode::Closed,
             Feature::Console => self.console,
             Feature::Social => self.social_google || self.social_github,
             Feature::SocialGoogle => self.social_google,
             Feature::SocialGithub => self.social_github,
+        }
+    }
+
+    /// Whether someone may create their own account for `email` (canonical):
+    /// `POST /signup` and the first social sign-in.
+    pub fn self_service_signup(&self, email: &str) -> Result<(), SelfServiceRefusal> {
+        if self.signup != SignupMode::Open {
+            return Err(SelfServiceRefusal::Disabled);
+        }
+        if self.signup_allowed_domains.is_empty() {
+            return Ok(());
+        }
+        let domain = email
+            .rsplit_once('@')
+            .map(|(_, domain)| domain.to_ascii_lowercase())
+            .unwrap_or_default();
+        if self.signup_allowed_domains.contains(&domain) {
+            Ok(())
+        } else {
+            Err(SelfServiceRefusal::DomainNotAllowed(domain))
         }
     }
 
@@ -116,13 +218,41 @@ impl Features {
 impl fmt::Display for Features {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let on_off = |enabled: bool| if enabled { "on" } else { "off" };
+        write!(f, "signup={}", self.signup.as_str())?;
+        if !self.signup_allowed_domains.is_empty() {
+            write!(f, " (domains: {})", self.signup_allowed_domains.join(", "))?;
+        }
         write!(
             f,
-            "console={} social=[{}]",
+            " console={} social=[{}]",
             on_off(self.console),
             self.social_providers().join(", ")
         )
     }
+}
+
+/// `SIGNUP_ALLOWED_DOMAINS`: comma-separated domains, matched exactly (no
+/// wildcards, no subdomains); a leading `@` is accepted.
+fn parse_domains(value: &str) -> Result<Vec<String>, String> {
+    let mut domains = Vec::new();
+    for entry in value.split(',') {
+        let domain = entry.trim().trim_start_matches('@').to_ascii_lowercase();
+        if domain.is_empty() {
+            continue;
+        }
+        if domain.contains(['@', '*']) || domain.chars().any(char::is_whitespace) {
+            return Err(format!(
+                "`{domain}` is not a domain (exact domains only, such as example.com)"
+            ));
+        }
+        if !domains.contains(&domain) {
+            domains.push(domain);
+        }
+    }
+    if domains.is_empty() {
+        return Err("no domain listed".to_string());
+    }
+    Ok(domains)
 }
 
 static FEATURES: OnceLock<Features> = OnceLock::new();
@@ -133,6 +263,12 @@ pub fn init() -> Result<&'static Features, FeaturesError> {
     let features = Features::from_env()?;
     let features = FEATURES.get_or_init(|| features);
     tracing::info!("Features: {features}");
+    if features.signup != SignupMode::Closed && std::env::var_os("SMTP_HOST").is_none() {
+        tracing::warn!(
+            "SIGNUP_MODE={} sends signup emails, but SMTP_HOST is unset (it falls back to 0.0.0.0:1025)",
+            features.signup.as_str()
+        );
+    }
     Ok(features)
 }
 
@@ -175,18 +311,88 @@ mod tests {
     }
 
     #[test]
-    fn defaults_serve_the_console_without_social_providers() {
+    fn defaults_invite_serve_the_console_without_social_providers() {
         let features = features_from(&[]).unwrap();
         assert_eq!(
             features,
             Features {
+                signup: SignupMode::Invite,
+                signup_allowed_domains: Vec::new(),
                 console: true,
                 social_google: false,
                 social_github: false,
             }
         );
+        assert!(!features.enabled(Feature::Signup));
+        assert!(features.enabled(Feature::Invitations));
         assert!(!features.enabled(Feature::Social));
-        assert_eq!(features.to_string(), "console=on social=[]");
+        assert_eq!(features.to_string(), "signup=invite console=on social=[]");
+    }
+
+    #[test]
+    fn signup_modes_gate_self_service_and_invitations() {
+        for (mode, signup, invitations) in [
+            ("open", true, true),
+            ("Invite", false, true),
+            ("closed", false, false),
+        ] {
+            let features = features_from(&[("SIGNUP_MODE", mode)]).unwrap();
+            assert_eq!(features.enabled(Feature::Signup), signup, "{mode}");
+            assert_eq!(
+                features.enabled(Feature::Invitations),
+                invitations,
+                "{mode}"
+            );
+            assert_eq!(
+                features.self_service_signup("ada@example.com").is_ok(),
+                signup,
+                "{mode}"
+            );
+        }
+        let error = features_from(&[("SIGNUP_MODE", "public")]).unwrap_err();
+        assert!(error.to_string().contains("SIGNUP_MODE"), "{error}");
+    }
+
+    #[test]
+    fn allowed_domains_limit_self_service_in_open_mode_only() {
+        let features = features_from(&[
+            ("SIGNUP_MODE", "open"),
+            (
+                "SIGNUP_ALLOWED_DOMAINS",
+                " Example.com, @corp.example ,, example.com",
+            ),
+        ])
+        .unwrap();
+        assert_eq!(
+            features.signup_allowed_domains,
+            ["example.com", "corp.example"]
+        );
+        assert_eq!(features.self_service_signup("ada@example.com"), Ok(()));
+        assert_eq!(features.self_service_signup("ada@corp.example"), Ok(()));
+        assert_eq!(
+            features.self_service_signup("ada@sub.example.com"),
+            Err(SelfServiceRefusal::DomainNotAllowed(
+                "sub.example.com".to_string()
+            ))
+        );
+        assert_eq!(
+            features.to_string(),
+            "signup=open (domains: example.com, corp.example) console=on social=[]"
+        );
+
+        assert!(matches!(
+            features_from(&[("SIGNUP_ALLOWED_DOMAINS", "example.com")]).unwrap_err(),
+            FeaturesError::DomainsWithoutOpenSignup { mode: "invite" }
+        ));
+        for invalid in ["*.example.com", "ada@example.com", "exa mple.com", " , "] {
+            let error =
+                features_from(&[("SIGNUP_MODE", "open"), ("SIGNUP_ALLOWED_DOMAINS", invalid)])
+                    .unwrap_err();
+            assert!(
+                error.to_string().contains("SIGNUP_ALLOWED_DOMAINS"),
+                "{invalid}: {error}"
+            );
+        }
     }
 
     #[test]

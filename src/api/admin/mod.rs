@@ -416,7 +416,10 @@ pub fn router() -> axum::Router {
         )
         .route(
             "/admin/users/invitations",
-            post(users::create_user_invitation),
+            post(users::create_user_invitation).layer(axum::middleware::from_fn_with_state(
+                crate::etc::features::Feature::Invitations,
+                crate::etc::features::require_feature,
+            )),
         )
         .route(
             "/admin/users/organizations/{org_id}",
