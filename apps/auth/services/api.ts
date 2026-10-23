@@ -4,6 +4,7 @@ import type {
   ApiMessageCatalog,
   ConsentDecisionResponse,
   ConsentPromptResponse,
+  FeaturesResponse,
   LoginRequest,
   LoginMFAResponse,
   LoginResponse,
@@ -73,6 +74,22 @@ export default class AuthService {
       method: "PUT",
       url: `${this.baseURL}/account/credentials`,
       data: { password, token },
+    });
+    return response;
+  }
+
+  async getFeatures() {
+    return this.http.request<FeaturesResponse>({
+      method: "GET",
+      url: `${this.baseURL}/account/features`,
+    });
+  }
+
+  async requestSignup(email: string) {
+    const response = await this.http.request<GeneralResponse>({
+      method: "POST",
+      url: `${this.baseURL}/signup`,
+      data: { email },
     });
     return response;
   }

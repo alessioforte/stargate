@@ -9,10 +9,17 @@ export default function AuthLayout() {
   const language = useStore((state) => state.language);
   const setLanguage = useStore((state) => state.setLanguage);
   const loadApiMessages = useStore((state) => state.loadApiMessages);
+  const loadFeatures = useStore((state) => state.loadFeatures);
 
   useEffect(() => {
     void loadApiMessages(language === "it" ? "it" : "en");
   }, [language, loadApiMessages]);
+
+  // Effects run after hydration, so prerendered pages render without the
+  // features first, as they were prerendered.
+  useEffect(() => {
+    void loadFeatures();
+  }, [loadFeatures]);
 
   return (
     <TranslationProvider language={language}>

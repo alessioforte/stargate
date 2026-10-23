@@ -43,6 +43,8 @@ interface Props {
   organizations: Organization[];
   onSave: (user: CreateUserRequest) => void;
   onInvite: (user: CreateUserInvitationRequest) => void;
+  /** False with `SIGNUP_MODE=closed`: only password creation is offered. */
+  invitationsEnabled: boolean;
 }
 
 type CreationMode = "password" | "invitation";
@@ -61,10 +63,16 @@ const emptyFormValues: FormValues = {
   attrs: "{}",
 };
 
-const CreateUser: React.FC<Props> = ({ organizations, onSave, onInvite }) => {
+const CreateUser: React.FC<Props> = ({
+  organizations,
+  onSave,
+  onInvite,
+  invitationsEnabled,
+}) => {
   const t = useTranslations();
   const [opened, { open, close }] = useDisclosure(false);
-  const [mode, setMode] = useState<CreationMode>("password");
+  const [selectedMode, setMode] = useState<CreationMode>("password");
+  const mode: CreationMode = invitationsEnabled ? selectedMode : "password";
 
   const form = useForm<FormValues>({
     initialValues: emptyFormValues,
@@ -149,15 +157,20 @@ const CreateUser: React.FC<Props> = ({ organizations, onSave, onInvite }) => {
 
             <Flex direction="column" justify="space-between">
               <Stack p="sm">
-                <SegmentedControl
-                  radius="md"
-                  value={mode}
-                  onChange={(value) => setMode(value as CreationMode)}
-                  data={[
-                    { label: t("createWithPassword"), value: "password" },
-                    { label: t("sendRegistrationEmail"), value: "invitation" },
-                  ]}
-                />
+                {invitationsEnabled && (
+                  <SegmentedControl
+                    radius="md"
+                    value={mode}
+                    onChange={(value) => setMode(value as CreationMode)}
+                    data={[
+                      { label: t("createWithPassword"), value: "password" },
+                      {
+                        label: t("sendRegistrationEmail"),
+                        value: "invitation",
+                      },
+                    ]}
+                  />
+                )}
                 <TextInput
                   variant="filled"
                   label={t("nickname")}

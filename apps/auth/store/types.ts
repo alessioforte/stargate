@@ -1,6 +1,7 @@
 import type {
   AccountOrganization,
   ConsentPromptResponse,
+  FeaturesResponse,
   LoginMFAResponse,
   LoginRequest,
   LoginResponse,
@@ -117,6 +118,8 @@ export type ConsentDecisionResult =
     };
 
 export interface State {
+  /** Null until loaded after hydration, so prerendered pages render without it. */
+  features: FeaturesResponse | null;
   accountOrganizations: AccountOrganization[] | null;
   message: AppMessage | null;
   loading: boolean;
@@ -140,6 +143,7 @@ export interface State {
 export interface Actions {
   setLanguage: (lang: "en" | "it") => void;
   loadApiMessages: (locale?: "en" | "it") => Promise<void>;
+  loadFeatures: () => Promise<void>;
   login: (credentials: LoginRequest) => Promise<AuthActionResult>;
   verifyMFAChallenge: (
     challengeId: string,
@@ -151,6 +155,7 @@ export interface Actions {
     code: string,
   ) => Promise<AuthActionResult>;
   forgotPassword: (email: string) => Promise<MessageActionResult>;
+  requestSignup: (email: string) => Promise<MessageActionResult>;
   changePassword: (
     password: string,
     token: string,

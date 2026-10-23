@@ -13,6 +13,8 @@ const DEFAULT_PAGE_SIZE = 20;
 
 const UsersPage = () => {
   const {
+    adminHealth,
+    getAdminHealth,
     users,
     organizations,
     superAdminUsers,
@@ -46,6 +48,15 @@ const UsersPage = () => {
   useEffect(() => {
     getSuperAdminUsers();
   }, [getSuperAdminUsers]);
+
+  // The signup mode decides whether invitations are offered. Until it is
+  // known (or without permission to read it) they are, and the server has
+  // the last word.
+  const healthIdle = adminHealth.isIdle();
+  useEffect(() => {
+    if (healthIdle) void getAdminHealth();
+  }, [healthIdle, getAdminHealth]);
+  const invitationsEnabled = adminHealth.data?.features.signupMode !== "closed";
 
   useEffect(() => {
     getOrganizations({ limit: 100 });
@@ -87,6 +98,7 @@ const UsersPage = () => {
           organizations={organizations?.data?.data ?? []}
           onSave={createUser}
           onInvite={inviteUser}
+          invitationsEnabled={invitationsEnabled}
         />
       </Group>
       <Table

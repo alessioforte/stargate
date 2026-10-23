@@ -1,10 +1,13 @@
 import { Badge, Group, Stack, Text } from "@mantine/core";
 
 function StatusRow({
+  color,
   detail,
   label,
   status,
 }: {
+  /** Badge color; by default teal when `status` is `healthy`, else red. */
+  color?: string;
   detail?: string;
   label: string;
   status: string;
@@ -21,7 +24,10 @@ function StatusRow({
           </Text>
         )}
       </Stack>
-      <Badge variant="light" color={status === "healthy" ? "teal" : "red"}>
+      <Badge
+        variant="light"
+        color={color ?? (status === "healthy" ? "teal" : "red")}
+      >
         {status}
       </Badge>
     </Group>

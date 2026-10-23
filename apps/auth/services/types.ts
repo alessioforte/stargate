@@ -67,6 +67,16 @@ export interface GeneralResponse {
   params?: ApiMessageParams;
 }
 
+/** Who may create accounts (`SIGNUP_MODE`). */
+export type SignupMode = "open" | "invite" | "closed";
+
+/** Sign-in options the server offers (`GET /account/features`). */
+export interface FeaturesResponse {
+  signupMode: SignupMode;
+  passwordlessLogin: boolean;
+  socialProviders: string[];
+}
+
 export interface SignupVerificationResponse {
   email: string;
   token: string;

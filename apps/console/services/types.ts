@@ -53,10 +53,23 @@ export interface StoreStats {
   totalKeys: number;
 }
 
+/** Who may create accounts (`SIGNUP_MODE`). */
+export type SignupMode = "open" | "invite" | "closed";
+
+/** Capabilities switched on for the server. */
+export interface AdminFeatures {
+  signupMode: SignupMode;
+  signupAllowedDomains: string[];
+  passwordlessLogin: boolean;
+  console: boolean;
+  socialProviders: string[];
+}
+
 export interface AdminHealth {
   checkedAt: string;
   database: ComponentStatus;
   databaseBackend: string;
+  features: AdminFeatures;
   name: string;
   redis?: ComponentStatus;
   runtimeProfile: string;

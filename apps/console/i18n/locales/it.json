@@ -171,6 +171,16 @@
   "database": "Database",
   "stateStore": "Archivio di stato",
   "storedKeys": "chiavi archiviate",
+  "signupMode": "Registrazione",
+  "signupModes": {
+    "open": "Aperta",
+    "invite": "Solo su invito",
+    "closed": "Chiusa"
+  },
+  "allowedDomains": "Domini: {{domains}}",
+  "passwordlessLogin": "Accesso senza password",
+  "socialLogin": "Accesso social",
+  "noneConfigured": "Nessuno configurato",
   "currentSession": "Sessione corrente",
   "activeSessions": "Sessioni attive",
   "activeUsers": "Utenti attivi",

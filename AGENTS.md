@@ -755,11 +755,15 @@ audit relay -> save in-memory store -> flush telemetry.
   service accounts, sessions, audit outbox, gateway config, access-control
   policies). Reference implementation of the layering below. Served at `/stargate`.
 - `auth`: hosted login / auth-flow UI (password login, passwordless email OTP,
-  login MFA, reset/change password, organization choice, OIDC consent and step-up,
-  logout confirmation and signed-out pages). Same stack and
-  layering. Served at `/auth`; its login, logout, and signed-out routes are
+  login MFA, reset/change password, signup request and completion, organization
+  choice, OIDC consent and step-up, logout confirmation and signed-out pages). Same
+  stack and layering. Served at `/auth`; its login, logout, and signed-out routes are
   prerendered and hydrated (see "Provider login"), other routes are client-rendered
-  from `index.html`.
+  from `index.html`. The layout loads `GET /account/features` after hydration (store
+  `features`, null before, so prerendered markup still matches): the login page shows
+  the passwordless link and, in `open` signup mode, a sign-up link; `/signup` without a
+  token is the request form (`signup-request.tsx`), or explains that accounts come from
+  an administrator.
 - `mail`: transactional email templates (`react-email`). A build-time template
   project, **not** a runtime SPA; it does not follow the layering below.
 
@@ -775,7 +779,9 @@ Commands (inside `apps/console` or `apps/auth`): `npm run dev`, `npm run build`,
 
 The console home uses `/admin/me` as its authentication probe so a dependency
 outage does not block the shell. It polls `/admin/health` separately and loads
-`/admin/overview` plus recent outbox events for the dashboard.
+`/admin/overview` plus recent outbox events for the dashboard. The health card also
+shows the server's `features` (signup mode, passwordless, social providers); the Users
+page reads them too and offers invitations unless the signup mode is `closed`.
 
 ### Layered Architecture
 

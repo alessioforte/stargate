@@ -171,6 +171,16 @@
   "database": "Database",
   "stateStore": "State store",
   "storedKeys": "stored keys",
+  "signupMode": "Sign-up",
+  "signupModes": {
+    "open": "Open",
+    "invite": "Invite only",
+    "closed": "Closed"
+  },
+  "allowedDomains": "Domains: {{domains}}",
+  "passwordlessLogin": "Passwordless login",
+  "socialLogin": "Social sign-in",
+  "noneConfigured": "None configured",
   "currentSession": "Current session",
   "activeSessions": "Active sessions",
   "activeUsers": "Active users",

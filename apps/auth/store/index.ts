@@ -8,7 +8,11 @@ import {
 } from "@/lib/auth-flow";
 import { getAuthAppConfig } from "@/lib/env";
 import services from "@/services";
-import type { LoginMFAResponse, LoginResponse } from "@/services/types";
+import type {
+  FeaturesResponse,
+  LoginMFAResponse,
+  LoginResponse,
+} from "@/services/types";
 import type {
   State,
   Actions,
@@ -23,7 +27,15 @@ import {
   resolveApiMessage,
 } from "@/i18n/api-messages";
 
+/** What a server offers when its features cannot be read: the defaults. */
+const DEFAULT_FEATURES: FeaturesResponse = {
+  signupMode: "invite",
+  passwordlessLogin: false,
+  socialProviders: [],
+};
+
 const initialState: State = {
+  features: null,
   accountOrganizations: null,
   message: null,
   loading: false,
@@ -97,6 +109,13 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     if (!response.error && response.data) {
       registerApiMessageCatalog(response.data);
     }
+  },
+  loadFeatures: async () => {
+    const response = await services.auth.getFeatures();
+    set({
+      features:
+        !response.error && response.data ? response.data : DEFAULT_FEATURES,
+    });
   },
   clearAuthError: () => set({ error: null, message: null }),
   login: async (credentials) => {
@@ -320,6 +339,47 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
         "errors",
         response,
         "Password reset request failed",
+      );
+      set({
+        loading: false,
+        error: message,
+        message: { type: "error", text: message },
+      });
+      return messageFailure(message);
+    }
+
+    const message = resolveApiMessage(
+      get().language,
+      "messages",
+      response.data,
+      response.data.message,
+    );
+    set({
+      loading: false,
+      error: null,
+      message: { type: "success", text: message },
+    });
+
+    return {
+      status: "success",
+      message,
+    };
+  },
+  requestSignup: async (email) => {
+    set({
+      loading: true,
+      message: null,
+      error: null,
+    });
+
+    const response = await services.auth.requestSignup(email);
+
+    if (response.error || !response.data) {
+      const message = resolveApiMessage(
+        get().language,
+        "errors",
+        response,
+        "Signup request failed",
       );
       set({
         loading: false,

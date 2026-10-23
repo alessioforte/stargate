@@ -17,6 +17,7 @@ import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
 import { useTranslations } from "@/i18n";
 import type { SignupVerificationResponse } from "@/services/types";
 import useStore from "@/store";
+import SignupRequest from "./signup-request";
 
 interface SignupValues {
   email: string;
@@ -65,7 +66,16 @@ function clearCachedSignup(sourceToken: string) {
   window.sessionStorage.removeItem(signupCacheKey(sourceToken));
 }
 
+/**
+ * `/signup` without a token starts a self-registration (when the server
+ * allows one); with the emailed token it completes the account.
+ */
 export default function SignupPage() {
+  const [searchParams] = useSearchParams();
+  return searchParams.get("token") ? <SignupCompletion /> : <SignupRequest />;
+}
+
+function SignupCompletion() {
   const t = useTranslations();
   const [searchParams] = useSearchParams();
 

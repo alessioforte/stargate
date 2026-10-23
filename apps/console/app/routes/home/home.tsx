@@ -68,6 +68,8 @@ export default function AdminHomePage() {
   const firstName = adminMe?.user?.name.split(/\s+/)[0] || t("admin");
   const stateStatus =
     health?.redis?.status ?? (health?.store ? "healthy" : "unknown");
+  const features = health?.features;
+  const signupModeColor = { open: "teal", invite: "blue", closed: "gray" };
   const stateLatency = health?.redis
     ? `${health.redis.latencyMs.toFixed(1)} ms`
     : health?.store
@@ -212,6 +214,41 @@ export default function AdminHomePage() {
                 status={stateStatus}
                 detail={stateLatency}
               />
+              {features && (
+                <>
+                  <Divider />
+                  <StatusRow
+                    label={t("signupMode")}
+                    status={t(`signupModes.${features.signupMode}`)}
+                    color={signupModeColor[features.signupMode]}
+                    detail={
+                      features.signupAllowedDomains.length > 0
+                        ? t("allowedDomains", {
+                            domains: features.signupAllowedDomains.join(", "),
+                          })
+                        : undefined
+                    }
+                  />
+                  <StatusRow
+                    label={t("passwordlessLogin")}
+                    status={
+                      features.passwordlessLogin ? t("enabled") : t("disabled")
+                    }
+                    color={features.passwordlessLogin ? "teal" : "gray"}
+                  />
+                  <StatusRow
+                    label={t("socialLogin")}
+                    status={
+                      features.socialProviders.length > 0
+                        ? features.socialProviders.join(", ")
+                        : t("noneConfigured")
+                    }
+                    color={
+                      features.socialProviders.length > 0 ? "teal" : "gray"
+                    }
+                  />
+                </>
+              )}
               <Divider />
               <Group justify="space-between">
                 <Text size="xs" c="dimmed">

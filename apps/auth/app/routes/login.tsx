@@ -9,6 +9,7 @@ import {
   Group,
   PasswordInput,
   Stack,
+  Text,
   TextInput,
   Title,
 } from "@mantine/core";
@@ -41,6 +42,7 @@ export default function Login() {
   const loading = useStore((state) => state.loading);
   const login = useStore((state) => state.login);
   const message = useStore((state) => state.message);
+  const features = useStore((state) => state.features);
   // This page is prerendered without a query string: read the URL only
   // once hydrated so the first render matches the static markup.
   const hydrated = useHydrated();
@@ -49,8 +51,9 @@ export default function Login() {
   const errorParam = hydrated ? searchParams.get("error") : null;
   const oauthError =
     errorParam && OAUTH_LOGIN_ERRORS.has(errorParam) ? errorParam : null;
-  // const passwordlessHref = hrefWithReturnTo("/login/passwordless", returnTo);
+  const passwordlessHref = hrefWithReturnTo("/login/passwordless", returnTo);
   const resetPasswordHref = hrefWithReturnTo("/reset-password", returnTo);
+  const signupHref = hrefWithReturnTo("/signup", returnTo);
 
   useEffect(() => {
     storeReturnTo(returnToParam);
@@ -157,13 +160,29 @@ export default function Login() {
             </Anchor>
           </Group>
 
-          {/*<Anchor component={Link} to={passwordlessHref} ta="center" size="sm">
-            {t("passwordlessLogin")}
-          </Anchor>*/}
+          {features?.passwordlessLogin && (
+            <Anchor
+              component={Link}
+              to={passwordlessHref}
+              ta="center"
+              size="sm"
+            >
+              {t("passwordlessLogin")}
+            </Anchor>
+          )}
 
           <Button fullWidth type="submit" loading={loading}>
             {t("signin")}
           </Button>
+
+          {features?.signupMode === "open" && (
+            <Text ta="center" size="sm">
+              {t("noAccount")}{" "}
+              <Anchor component={Link} to={signupHref}>
+                {t("signup")}
+              </Anchor>
+            </Text>
+          )}
         </Stack>
       </form>
     </Stack>
