@@ -14,11 +14,12 @@ use crate::act::otp::types::{
     path = "/account/login/otp/email",
     tags = ["Account"],
     summary = "Request Passwordless Email OTP",
-    description = "Start a passwordless login by sending an email one-time password. The response is generic even when the account does not exist.",
+    description = "Start a passwordless login by sending an email one-time password (`PASSWORDLESS_LOGIN_ENABLED=true` only). The response is generic even when the account does not exist.",
     request_body = PasswordlessEmailOtpRequestBody,
     responses(
         (status = 200, description = "OK", body = OtpChallengeResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
+        (status = 404, description = "Passwordless login is disabled (`PASSWORDLESS_LOGIN_ENABLED`, `feature.disabled`)", body = ErrorResponse),
         (status = 429, description = "Too Many Requests", body = ErrorResponse),
         (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
@@ -51,6 +52,7 @@ pub async fn post_login_email_otp(
         (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 404, description = "Passwordless login is disabled (`PASSWORDLESS_LOGIN_ENABLED`, `feature.disabled`)", body = ErrorResponse),
         (status = 429, description = "Too Many Requests", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )

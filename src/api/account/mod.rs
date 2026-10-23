@@ -41,7 +41,8 @@ pub struct UserCredentials {
 }
 
 pub fn router() -> axum::Router {
-    use axum::middleware::from_fn;
+    use crate::etc::features::{Feature, require_feature};
+    use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{delete, get, post, put};
 
     let sensitive = axum::Router::new()
@@ -50,7 +51,12 @@ pub fn router() -> axum::Router {
         .route("/account/logout/all", post(logout::post_logout_all))
         .route(
             "/account/login/otp/email",
-            post(otp::post_login_email_otp).put(otp::put_login_email_otp),
+            post(otp::post_login_email_otp)
+                .put(otp::put_login_email_otp)
+                .layer(from_fn_with_state(
+                    Feature::PasswordlessLogin,
+                    require_feature,
+                )),
         )
         .route(
             "/account/login/mfa/challenges/{challenge_id}",

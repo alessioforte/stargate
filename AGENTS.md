@@ -93,6 +93,7 @@ stargate/
   (invalid values stop it). A disabled capability keeps its routes mounted and answers
   `404 feature.disabled` (`require_feature` middleware): unmatched paths fall through to
   the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
+  `PASSWORDLESS_LOGIN_ENABLED` (see "OTP, Passwordless Login, and MFA"),
   `CONSOLE_ENABLED`, and each social provider (on when its client id and secret are both
   set; one alone stops startup). `GET /account/features` (public) lists the sign-in
   options for the hosted apps; `/admin/health` reports `features`.
@@ -467,6 +468,8 @@ Source layout:
 Account endpoints:
 - `POST /account/login/otp/email` - start passwordless email OTP (generic response for unknown users).
 - `PUT /account/login/otp/email` - verify and issue a session when MFA policy allows passwordless.
+  Both need `PASSWORDLESS_LOGIN_ENABLED=true` (default off: `404 feature.disabled`); turning
+  it on needs `EMAIL_OTP_PEPPER` and stops startup with `MFA_MODE=required`.
 - `PUT /account/login/mfa/challenges/{challenge_id}` - complete login MFA.
 - `GET /account/mfa/methods` - effective MFA policy/methods.
 - `POST /account/mfa/challenges` - authenticated challenge (email only).
@@ -619,6 +622,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUTH_PUBLIC_BASE_URL` | - | Public auth app URL when hosted elsewhere |
 | `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount |
 | `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` | invite / - | Who may create accounts (`open`, `invite`, `closed`); domains for `open` |
+| `PASSWORDLESS_LOGIN_ENABLED` | false | Passwordless email-code login (needs `EMAIL_OTP_PEPPER`; not with `MFA_MODE=required`) |
 | `CONSOLE_ENABLED` | true | Serve the Console app (`false`: its path answers `404 feature.disabled`) |
 | `CONSOLE_OAUTH_CLIENT_ID` | stargate_console | Reserved Console OAuth client |
 | `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL` | derived | Console callback / origin |

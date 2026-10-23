@@ -157,15 +157,16 @@ for admin invitations and for completing a signup with a verified token.
 
 ## Disabled features and account creation
 
-Operators can switch some capabilities off (`SIGNUP_MODE`, `CONSOLE_ENABLED`,
-social providers without credentials). Their routes stay mounted and answer
+Operators can switch some capabilities off (`SIGNUP_MODE`,
+`PASSWORDLESS_LOGIN_ENABLED`, `CONSOLE_ENABLED`, social providers without
+credentials). Their routes stay mounted and answer
 `404 feature.disabled`, with `params.feature` naming the capability, before
 the request body or query is read. `GET /account/features` tells clients what
 is on.
 
 | Code | HTTP status | Condition |
 | --- | --- | --- |
-| `feature.disabled` | 404 | `params.feature`: `signup` (`POST /signup`, or completing a self-registration, outside `SIGNUP_MODE=open`), `invitations` (admin invitations and `GET`/`PUT /signup` with `SIGNUP_MODE=closed`), `console`, `social` (`/oauth/state` with no provider), `social_google`, `social_github` |
+| `feature.disabled` | 404 | `params.feature`: `signup` (`POST /signup`, or completing a self-registration, outside `SIGNUP_MODE=open`), `invitations` (admin invitations and `GET`/`PUT /signup` with `SIGNUP_MODE=closed`), `passwordless_login` (`/account/login/otp/email`), `console`, `social` (`/oauth/state` with no provider), `social_google`, `social_github` |
 | `signup.domain_not_allowed` | 403 | The email's domain is not in `SIGNUP_ALLOWED_DOMAINS`, on `POST /signup`, its completion, or a first social sign-in; `params.domain` |
 | `social.account_not_provisioned` | 403 | A social sign-in for an email with no account, outside `SIGNUP_MODE=open`; `params.provider` |
 

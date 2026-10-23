@@ -20,6 +20,9 @@ pub enum Feature {
     /// Admin invitations and completing pending signups with the emailed
     /// link (`SIGNUP_MODE` other than `closed`).
     Invitations,
+    /// Signing in with an emailed code instead of a password,
+    /// `/account/login/otp/email` (`PASSWORDLESS_LOGIN_ENABLED`).
+    PasswordlessLogin,
     /// Serving the Console app (`CONSOLE_ENABLED`).
     Console,
     /// Social sign-in with any provider (`/oauth/state`).
@@ -34,6 +37,7 @@ impl Feature {
         match self {
             Self::Signup => "signup",
             Self::Invitations => "invitations",
+            Self::PasswordlessLogin => "passwordless_login",
             Self::Console => "console",
             Self::Social => "social",
             Self::SocialGoogle => "social_google",
@@ -90,6 +94,7 @@ pub struct Features {
     /// Email domains self-registration is limited to (`open` only); empty
     /// allows every domain.
     pub signup_allowed_domains: Vec<String>,
+    pub passwordless_login: bool,
     pub console: bool,
     /// On when both the client id and secret are set.
     pub social_google: bool,
@@ -109,6 +114,14 @@ pub enum FeaturesError {
         "`SIGNUP_ALLOWED_DOMAINS` only applies with `SIGNUP_MODE=open` (it is `{mode}`): unset it or open signup"
     )]
     DomainsWithoutOpenSignup { mode: &'static str },
+    #[error(
+        "`PASSWORDLESS_LOGIN_ENABLED=true` has no effect with `MFA_MODE=required`: an emailed code alone never signs anyone in"
+    )]
+    PasswordlessWithRequiredMfa,
+    #[error(
+        "`PASSWORDLESS_LOGIN_ENABLED=true` needs `EMAIL_OTP_PEPPER`, which secures the emailed codes"
+    )]
+    PasswordlessWithoutOtpPepper,
 }
 
 impl Features {
@@ -163,9 +176,21 @@ impl Features {
                 mode: signup.as_str(),
             });
         }
+        let passwordless_login = flag("PASSWORDLESS_LOGIN_ENABLED", false)?;
+        // `act::otp::policy` reads MFA_MODE; only `required` matters here.
+        if passwordless_login
+            && var("MFA_MODE").is_some_and(|mode| mode.eq_ignore_ascii_case("required"))
+        {
+            return Err(FeaturesError::PasswordlessWithRequiredMfa);
+        }
+        // Read by `act::otp::util::email_otp_pepper` when a code is issued.
+        if passwordless_login && var("EMAIL_OTP_PEPPER").is_none() {
+            return Err(FeaturesError::PasswordlessWithoutOtpPepper);
+        }
         Ok(Self {
             signup,
             signup_allowed_domains,
+            passwordless_login,
             console: flag("CONSOLE_ENABLED", true)?,
             social_google: provider("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET")?,
             social_github: provider("GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET")?,
@@ -176,6 +201,7 @@ impl Features {
         match feature {
             Feature::Signup => self.signup == SignupMode::Open,
             Feature::Invitations => self.signup != SignupMode::Closed,
+            Feature::PasswordlessLogin => self.passwordless_login,
             Feature::Console => self.console,
             Feature::Social => self.social_google || self.social_github,
             Feature::SocialGoogle => self.social_google,
@@ -224,7 +250,8 @@ impl fmt::Display for Features {
         }
         write!(
             f,
-            " console={} social=[{}]",
+            " passwordless={} console={} social=[{}]",
+            on_off(self.passwordless_login),
             on_off(self.console),
             self.social_providers().join(", ")
         )
@@ -318,6 +345,7 @@ mod tests {
             Features {
                 signup: SignupMode::Invite,
                 signup_allowed_domains: Vec::new(),
+                passwordless_login: false,
                 console: true,
                 social_google: false,
                 social_github: false,
@@ -325,8 +353,12 @@ mod tests {
         );
         assert!(!features.enabled(Feature::Signup));
         assert!(features.enabled(Feature::Invitations));
+        assert!(!features.enabled(Feature::PasswordlessLogin));
         assert!(!features.enabled(Feature::Social));
-        assert_eq!(features.to_string(), "signup=invite console=on social=[]");
+        assert_eq!(
+            features.to_string(),
+            "signup=invite passwordless=off console=on social=[]"
+        );
     }
 
     #[test]
@@ -377,7 +409,7 @@ mod tests {
         );
         assert_eq!(
             features.to_string(),
-            "signup=open (domains: example.com, corp.example) console=on social=[]"
+            "signup=open (domains: example.com, corp.example) passwordless=off console=on social=[]"
         );
 
         assert!(matches!(
@@ -411,6 +443,40 @@ mod tests {
 
         let error = features_from(&[("CONSOLE_ENABLED", "flase")]).unwrap_err();
         assert!(error.to_string().contains("CONSOLE_ENABLED"), "{error}");
+    }
+
+    #[test]
+    fn passwordless_login_is_off_by_default_and_needs_a_pepper_and_mfa_not_required() {
+        let pepper = ("EMAIL_OTP_PEPPER", "pepper");
+        for mfa_mode in ["off", "optional", ""] {
+            let features = features_from(&[
+                ("PASSWORDLESS_LOGIN_ENABLED", "true"),
+                ("MFA_MODE", mfa_mode),
+                pepper,
+            ])
+            .unwrap();
+            assert!(features.enabled(Feature::PasswordlessLogin), "{mfa_mode}");
+        }
+        assert!(matches!(
+            features_from(&[
+                ("PASSWORDLESS_LOGIN_ENABLED", "on"),
+                ("MFA_MODE", " Required "),
+                pepper,
+            ])
+            .unwrap_err(),
+            FeaturesError::PasswordlessWithRequiredMfa
+        ));
+        assert!(matches!(
+            features_from(&[
+                ("PASSWORDLESS_LOGIN_ENABLED", "true"),
+                ("EMAIL_OTP_PEPPER", " ")
+            ])
+            .unwrap_err(),
+            FeaturesError::PasswordlessWithoutOtpPepper
+        ));
+        // Off is fine whatever the MFA mode.
+        assert!(features_from(&[("MFA_MODE", "required")]).is_ok());
+        assert!(features_from(&[("PASSWORDLESS_LOGIN_ENABLED", "maybe")]).is_err());
     }
 
     #[test]

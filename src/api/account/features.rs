@@ -12,6 +12,9 @@ pub struct FeaturesResponse {
     /// Who may create accounts: `open` (anyone, `POST /signup`), `invite`
     /// (admin invitations), or `closed` (administrators only).
     pub signup_mode: &'static str,
+    /// Signing in with an emailed code instead of a password
+    /// (`/account/login/otp/email`).
+    pub passwordless_login: bool,
     /// Social sign-in providers with credentials: `google`, `github`. Outside
     /// `open` mode they sign in existing accounts only.
     pub social_providers: Vec<&'static str>,
@@ -33,6 +36,7 @@ pub async fn get_features() -> impl IntoResponse {
         [(CACHE_CONTROL, "public, max-age=60")],
         Json(FeaturesResponse {
             signup_mode: features.signup.as_str(),
+            passwordless_login: features.passwordless_login,
             social_providers: features.social_providers(),
         }),
     )

@@ -37,6 +37,7 @@ impl From<ComponentHealth> for ComponentStatus {
 struct FeatureStatus {
     signup_mode: &'static str,
     signup_allowed_domains: Vec<String>,
+    passwordless_login: bool,
     console: bool,
     social_providers: Vec<&'static str>,
 }
@@ -112,6 +113,7 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
         features: FeatureStatus {
             signup_mode: features.signup.as_str(),
             signup_allowed_domains: features.signup_allowed_domains.clone(),
+            passwordless_login: features.passwordless_login,
             console: features.console,
             social_providers: features.social_providers(),
         },

@@ -628,6 +628,22 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// Passwordless login is off by default: both steps answer before the
+    /// body is read, so no code is emailed.
+    #[tokio::test]
+    async fn passwordless_login_is_disabled_by_default() {
+        for method in [http::Method::POST, http::Method::PUT] {
+            let req = Request::builder()
+                .method(method)
+                .uri("/account/login/otp/email")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"email":"ada@example.com"}"#))
+                .unwrap();
+            let resp = send_req(req).await;
+            assert_eq!(feature_disabled(resp).await, "passwordless_login");
+        }
+    }
+
     /// The tests run with the default `SIGNUP_MODE=invite`: self-registration
     /// is off before its body is read, while completing a signup stays on.
     #[tokio::test]
@@ -681,7 +697,11 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({ "signupMode": "invite", "socialProviders": [] })
+            serde_json::json!({
+                "signupMode": "invite",
+                "passwordlessLogin": false,
+                "socialProviders": []
+            })
         );
     }
 
