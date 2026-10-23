@@ -31,6 +31,14 @@ impl From<ComponentHealth> for ComponentStatus {
     }
 }
 
+/// Capabilities switched on for this server (`src/etc/features.rs`).
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct FeatureStatus {
+    console: bool,
+    social_providers: Vec<&'static str>,
+}
+
 #[cfg(feature = "memory")]
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +58,7 @@ pub struct AdminHealth {
     runtime_profile: &'static str,
     database_backend: &'static str,
     state_backend: &'static str,
+    features: FeatureStatus,
     database: ComponentStatus,
     #[cfg(feature = "redis")]
     redis: ComponentStatus,
@@ -88,6 +97,7 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
     };
 
     let overall = if all_healthy { "healthy" } else { "unhealthy" };
+    let features = crate::etc::features::features();
 
     let body = AdminHealth {
         name: "stargate",
@@ -97,6 +107,10 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
         runtime_profile: crate::etc::server::profile::COMPILED_PROFILE,
         database_backend: crate::etc::server::profile::COMPILED_DB_BACKEND,
         state_backend: crate::etc::server::profile::COMPILED_STATE_BACKEND,
+        features: FeatureStatus {
+            console: features.console,
+            social_providers: features.social_providers(),
+        },
         database: dependencies.database.into(),
         #[cfg(feature = "redis")]
         redis: dependencies.redis.into(),

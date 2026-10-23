@@ -136,6 +136,7 @@
     "upstream.connection_failed": "Connessione al servizio upstream non riuscita",
     "internal_context.unavailable": "La firma del contesto interno non è disponibile",
     "i18n.locale_not_supported": "La lingua richiesta non è supportata",
+    "feature.disabled": "Questa funzionalità è disattivata su questo server",
     "system.internal": "Errore interno del server"
   },
   "messages": {

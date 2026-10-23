@@ -31,6 +31,17 @@ where
     }
 }
 
+/// A boolean setting read strictly: `true`/`false`, `1`/`0`, `yes`/`no`, or
+/// `on`/`off`, in any case. `None` for anything else, so a typo is an error
+/// rather than a silent `false` as with [`bool_or`].
+pub fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 pub fn bool_or(name: &str, default: bool) -> bool {
     match std::env::var(name) {
         Ok(value) => matches!(

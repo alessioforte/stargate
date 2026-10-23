@@ -176,6 +176,7 @@ pub enum ErrorCode {
     UpstreamConnectionFailed,
     InternalContextUnavailable,
     I18nLocaleNotSupported,
+    FeatureDisabled,
     SystemInternal,
 }
 
@@ -317,6 +318,7 @@ impl ErrorCode {
         Self::UpstreamConnectionFailed,
         Self::InternalContextUnavailable,
         Self::I18nLocaleNotSupported,
+        Self::FeatureDisabled,
         Self::SystemInternal,
     ];
 
@@ -466,6 +468,7 @@ impl ErrorCode {
             Self::UpstreamConnectionFailed => "upstream.connection_failed",
             Self::InternalContextUnavailable => "internal_context.unavailable",
             Self::I18nLocaleNotSupported => "i18n.locale_not_supported",
+            Self::FeatureDisabled => "feature.disabled",
             Self::SystemInternal => "system.internal",
         }
     }
@@ -1095,6 +1098,11 @@ impl ErrorCode {
             Self::I18nLocaleNotSupported => {
                 definition(Status::NOT_FOUND, NotFound, "Locale is not supported")
             }
+            Self::FeatureDisabled => definition(
+                Status::NOT_FOUND,
+                NotFound,
+                "This feature is disabled on this server",
+            ),
             Self::SystemInternal => definition(
                 Status::INTERNAL_SERVER_ERROR,
                 Internal,

@@ -84,11 +84,6 @@ def main() -> None:
                 ),
                 "STARGATE_BENCH_OUTPUT": str(result),
             })
-            archives = list((root / "target/debug/build").glob(
-                "utoipa-swagger-ui-*/out/v5.17.14.zip"
-            ))
-            if archives and "SWAGGER_UI_DOWNLOAD_URL" not in env:
-                env["SWAGGER_UI_DOWNLOAD_URL"] = archives[0].resolve().as_uri()
             subprocess.run([
                 "cargo", "test", "--locked", "--release", "--features", "cluster",
                 "cluster_backend_round_trips", "--", "--ignored", "--nocapture",

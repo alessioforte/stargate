@@ -75,6 +75,10 @@ pub async fn run() -> std::io::Result<()> {
     );
     info!("Graceful shutdown timeout: {}s", shutdown_timeout_secs);
 
+    etc::features::init().map_err(|error| {
+        tracing::error!("Invalid feature settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
     jwt::init();
     internal_context::init().map_err(std::io::Error::other)?;
     act::password_policy::init();

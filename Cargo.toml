@@ -70,7 +70,6 @@ futures-util = { version = "0.3.34" }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["cors", "compression-gzip", "fs", "trace", "normalize-path"] }
 utoipa-axum = { version = "0.2" }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
 db = { path = "crates/db" }
 chrono = "0.4.45"
 dotenvy = "0.15.7"

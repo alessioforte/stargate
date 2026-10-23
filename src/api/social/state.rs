@@ -13,6 +13,7 @@ pub struct StateResponse {
     tags = ["OAuth"],
     responses(
         (status = 200, description = "OK"),
+        (status = 404, description = "No social sign-in provider is configured (`feature.disabled`)", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]

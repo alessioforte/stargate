@@ -42,6 +42,7 @@ pub struct AuthResponse {
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "The GitHub account has no verified primary email", body = ErrorResponse),
+        (status = 404, description = "GitHub sign-in is not configured on this server (`feature.disabled`)", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
     )

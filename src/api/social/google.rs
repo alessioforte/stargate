@@ -36,6 +36,7 @@ pub struct QueryCode {
         (status = 200, description = "OK", body = AuthResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "The Google account's email is not verified", body = ErrorResponse),
+        (status = 404, description = "Google sign-in is not configured on this server (`feature.disabled`)", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
     )

@@ -1,4 +1,6 @@
+use crate::etc::features::{self, Feature, features};
 use axum::Router;
+use axum::routing::any;
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -9,10 +11,20 @@ pub fn router() -> Router {
     let base_path = std::env::var("CONSOLE_APP_BASE_PATH")
         .map(|value| normalize_base_path(&value))
         .unwrap_or_else(|_| DEFAULT_CONSOLE_APP_BASE_PATH.to_string());
+    if !features().console {
+        return disabled_router(&base_path);
+    }
     let app_dir = std::env::var_os("CONSOLE_APP_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_CONSOLE_APP_DIR));
     router_from(base_path, app_dir)
+}
+
+/// `CONSOLE_ENABLED=false`: the base path and everything under it answer
+/// `404 feature.disabled` instead of falling through to the gateway.
+fn disabled_router(base_path: &str) -> Router {
+    let disabled = any(|| async { features::disabled(Feature::Console) });
+    Router::new().nest_service(base_path, disabled)
 }
 
 fn router_from(base_path: String, app_dir: PathBuf) -> Router {
@@ -32,7 +44,7 @@ fn normalize_base_path(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_base_path, router_from};
+    use super::{disabled_router, normalize_base_path, router_from};
     use axum::body::Body;
     use http::{Request, StatusCode};
     use http_body_util::BodyExt;
@@ -84,6 +96,40 @@ mod tests {
         assert_eq!(&body[..], b"console.log('ok');");
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_disabled_console_answers_not_found_without_reaching_the_fallback() {
+        let app = disabled_router("/stargate").fallback(|| async { StatusCode::IM_A_TEAPOT });
+
+        for uri in [
+            "/stargate",
+            "/stargate/",
+            "/stargate/users",
+            "/stargate/assets/app.js",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(json["code"], "feature.disabled", "{uri}");
+            assert_eq!(json["params"]["feature"], "console", "{uri}");
+        }
+
+        let other = app
+            .oneshot(
+                Request::builder()
+                    .uri("/elsewhere")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(other.status(), StatusCode::IM_A_TEAPOT);
     }
 
     fn temp_console_app_dir() -> PathBuf {

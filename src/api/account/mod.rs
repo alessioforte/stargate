@@ -1,5 +1,6 @@
 pub mod consents;
 pub mod credentials;
+pub mod features;
 pub mod login;
 pub mod logout;
 pub mod organizations;
@@ -81,6 +82,7 @@ pub fn router() -> axum::Router {
 
     axum::Router::new()
         .merge(sensitive)
+        .route("/account/features", get(features::get_features))
         .route("/account/profile", get(profile::get_profile))
         .route("/account/consents", get(consents::get_consents))
         .route(

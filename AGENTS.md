@@ -67,7 +67,7 @@ stargate/
 - **DB**: sqlx (feature-gated `postgres` or `sqlite`)
 - **Auth**: JWT (jsonwebtoken), Argon2 passwords, RSA/HMAC signing
 - **Serialization**: serde_json, serde_yaml_bw, MessagePack
-- **OpenAPI**: utoipa + utoipa-axum + utoipa-swagger-ui
+- **OpenAPI**: utoipa + utoipa-axum
 - **Observability**: tracing + OpenTelemetry (OTLP traces, metrics, logs)
 
 ### Shared Support (`src/etc/`)
@@ -89,6 +89,13 @@ stargate/
 - `internal_context/`: signer runtime, `settings.rs`, `material.rs` key/JWKS validation,
   `signing.rs` bounded CPU workers.
 - `store/`: selected profile interface; `memory.rs` persistence, `redis.rs` init/readiness.
+- `features.rs`: capabilities an operator can switch off, read and validated once at startup
+  (invalid values stop it). A disabled capability keeps its routes mounted and answers
+  `404 feature.disabled` (`require_feature` middleware): unmatched paths fall through to
+  the gateway. Today: `CONSOLE_ENABLED`, and each social provider (on when its client id
+  and secret are both set; one alone stops startup). `GET /account/features` (public)
+  lists the sign-in options for the hosted apps; `/admin/health` reports `features`.
+  Plan: `.reports/feature-toggles-plan.md`.
 
 ### Gateway Runtime (`src/api/gateway/`)
 
@@ -596,6 +603,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH` | `.stargate/apps/auth` / `/auth` | Hosted auth app files and mount |
 | `AUTH_PUBLIC_BASE_URL` | - | Public auth app URL when hosted elsewhere |
 | `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount |
+| `CONSOLE_ENABLED` | true | Serve the Console app (`false`: its path answers `404 feature.disabled`) |
 | `CONSOLE_OAUTH_CLIENT_ID` | stargate_console | Reserved Console OAuth client |
 | `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL` | derived | Console callback / origin |
 | `EMAIL_OTP_PEPPER`, `EMAIL_OTP_LENGTH`, `EMAIL_OTP_TTL_SECS`, `EMAIL_OTP_MAX_ATTEMPTS` | -, 6, 300, 5 | Email OTP |
@@ -658,9 +666,10 @@ need no database. Docs: `docs/cli.md`.
 
 - `GET /livez` (process liveness), `GET /readyz` (initialized, not draining, SQL and
   cluster Redis up). See `docs/health-probes.md`.
-- `GET /docs` (Swagger UI), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
+- `GET /docs` (OpenAPI JSON), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
 - `/.well-known/*`: OAuth/OIDC metadata, JWKS, `stargate-context-jwks.json`
-- `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA
+- `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA,
+  `features` (public: available sign-in options)
 - `/oauth/*`: provider endpoints; `/oauth/state`, `/oauth/github`, `/oauth/google`: social login
 - `/signup/*`: registration + email verification
 - `/admin/*`: users (+ invitations), orgs, API/admin keys, OAuth clients, service accounts,

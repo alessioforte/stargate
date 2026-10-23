@@ -58,6 +58,7 @@ use utoipa::OpenApi;
         crate::api::account::organizations::get_account_organizations,
         crate::api::account::organizations::put_session_organization,
         crate::api::account::password_policy::get_password_policy,
+        crate::api::account::features::get_features,
         crate::api::account::profile::get_profile,
         crate::api::account::refresh_token::put_refresh_token,
         crate::api::account::credentials::forgot::post_credentials,
@@ -389,6 +390,7 @@ mod tests {
         assert!(json["paths"]["/account/profile"].is_object());
         assert!(json["paths"]["/account/refresh-token"].is_object());
         assert!(json["paths"]["/account/credentials"].is_object());
+        assert!(json["paths"]["/account/features"].is_object());
         assert!(json["paths"]["/admin/health"].is_object());
         assert!(json["paths"]["/admin/me"].is_object());
         assert!(json["paths"]["/admin/overview"].is_object());
@@ -638,16 +640,44 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
+    async fn feature_disabled(resp: http::Response<Body>) -> String {
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], "feature.disabled");
+        json["params"]["feature"].as_str().unwrap().to_string()
+    }
+
+    /// The tests run without social credentials: every social route is off,
+    /// even before its query or origin is checked.
     #[tokio::test]
-    async fn oauth_github_missing_query_rejected() {
-        let resp = send("/oauth/github").await;
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    async fn social_sign_in_without_credentials_is_disabled() {
+        let github = send("/oauth/github?code=c&state=s").await;
+        assert_eq!(feature_disabled(github).await, "social_github");
+        let google = send("/oauth/google").await;
+        assert_eq!(feature_disabled(google).await, "social_google");
+        let state = send_req(
+            Request::builder()
+                .method(http::Method::POST)
+                .uri("/oauth/state")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(feature_disabled(state).await, "social");
     }
 
     #[tokio::test]
-    async fn oauth_google_missing_query_rejected() {
-        let resp = send("/oauth/google").await;
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    async fn features_list_the_available_sign_in_options() {
+        let resp = send("/account/features").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CACHE_CONTROL).unwrap(),
+            "public, max-age=60"
+        );
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json, serde_json::json!({ "socialProviders": [] }));
     }
 
     #[tokio::test]

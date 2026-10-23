@@ -77,12 +77,6 @@ def main():
         env.pop("STARGATE_BENCH_SCENARIOS", None)
         if args.scenarios:
             env["STARGATE_BENCH_SCENARIOS"] = args.scenarios
-        # The pinned Swagger archive can be reused when the build has no network.
-        archives = list((root / "target/debug/build").glob(
-            "utoipa-swagger-ui-*/out/v5.17.14.zip"
-        ))
-        if archives and "SWAGGER_UI_DOWNLOAD_URL" not in env:
-            env["SWAGGER_UI_DOWNLOAD_URL"] = archives[0].resolve().as_uri()
         runs = []
         for index in range(args.runs):
             result = directory / f"run-{index}.json"
