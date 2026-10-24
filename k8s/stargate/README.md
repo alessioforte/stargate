@@ -267,6 +267,29 @@ and shutdown behavior. `SERVER_DRAIN_DELAY_SECS` defaults to 5 seconds;
 allow room in `terminationGracePeriodSeconds` for that delay, connection
 draining, and final persistence hooks. The chart defaults to 40 seconds.
 
+## Features
+
+Sign-up, passwordless login, social sign-in, and the Console are switched with
+environment variables ([Features](../../docs/features.md)). Put the switches in
+`runtimeConfig.data` and their secrets in the runtime Secret:
+
+```yaml
+runtimeConfig:
+  data:
+    SIGNUP_MODE: open                 # open, invite (default), or closed
+    SIGNUP_ALLOWED_DOMAINS: example.com
+    PASSWORDLESS_LOGIN_ENABLED: "true"
+    CONSOLE_ENABLED: "false"          # the admin API stays available
+    GITHUB_OAUTH_CLIENT_ID: Iv1.0123456789abcdef
+runtimeSecret:
+  existingSecret: stargate-runtime    # EMAIL_OTP_PEPPER, GITHUB_OAUTH_CLIENT_SECRET
+```
+
+An invalid or contradictory value stops the pod at startup with a message
+naming the variable: for example passwordless login without
+`EMAIL_OTP_PEPPER`, or a client id without its secret. The container exits
+and restarts (`CrashLoopBackOff`); `kubectl logs` shows the reason.
+
 ## Configuration ownership
 
 The chart manages these environment variables and rejects duplicates in
@@ -280,7 +303,7 @@ The chart manages these environment variables and rejects duplicates in
 
 It also rejects known confidential keys in `runtimeConfig.data`, including
 database passwords, authenticated Redis URLs, JWT secrets, OTP/password
-peppers, and SMTP passwords.
+peppers, SMTP passwords, and the Google/GitHub OAuth client secrets.
 
 Use:
 

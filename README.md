@@ -109,6 +109,9 @@ welcome.
 - Password login with Argon2id, configurable password policies (global and
   per organization), passwordless email OTP, and email MFA with admin step-up.
 - Social login with Google and GitHub.
+- Per-deployment switches for who may sign up (open, invite-only, or
+  administrators only), passwordless login, and the Console. See
+  [Features](docs/features.md).
 - Attribute-based access-control rules, editable from the Console.
 - Audit events written in the same transaction as each change; cluster
   deployments relay them to Redis Streams.
@@ -174,6 +177,7 @@ cargo build --release --features cluster
 | [Gateway config](docs/config-v1.md)                                     | Routers, services, middlewares, policies, limits, replay rules  |
 | [OAuth/OIDC provider](docs/oauth-oidc-provider-guide.md)                | Clients, flows, scopes, and claims                              |
 | [OIDC conformance](docs/oidc-conformance.md)                            | What the conformance suite checks in CI, and known gaps         |
+| [Features](docs/features.md)                                            | Sign-up modes, passwordless and social sign-in, the Console     |
 | [Multi-organization](docs/multi-org-guide.md)                           | Organizations, memberships, and org-scoped sessions and limits  |
 | [Password policies](docs/password-policies-guide.md)                    | Policy rules, per-org overrides, and hashing parameters         |
 | [Internal context](docs/internal-context-consumer-guide.md)             | Verifying the identity context forwarded to upstreams           |

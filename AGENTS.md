@@ -50,7 +50,7 @@ stargate/
 │   ├── console/       # Super-admin console, served at /stargate
 │   └── mail/          # Transactional email templates (react-email, build-time only)
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
-├── docs/              # Guides: config-v1, oauth-oidc-provider, oidc-conformance, multi-org,
+├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
 │                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
@@ -97,7 +97,7 @@ stargate/
   `CONSOLE_ENABLED`, and each social provider (on when its client id and secret are both
   set; one alone stops startup). `GET /account/features` (public) lists the sign-in
   options for the hosted apps; `/admin/health` reports `features`.
-  Plan: `.reports/feature-toggles-plan.md`.
+  Guide: `docs/features.md`; plan: `.reports/feature-toggles-plan.md`.
 
 ### Gateway Runtime (`src/api/gateway/`)
 
