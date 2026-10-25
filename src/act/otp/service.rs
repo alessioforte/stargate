@@ -40,7 +40,7 @@ pub(crate) async fn start_passwordless_email_otp(
     .await?;
 
     let now = current_unix_time()?;
-    let config = email_otp_config()?;
+    let config = email_otp_config();
     let pepper = email_otp_pepper()?;
     let fake_response = fake_challenge_response(now, &config)?;
     let Some(user) = crate::db::get_user_by_email(&email)
@@ -163,7 +163,7 @@ async fn start_email_login_mfa(
         user,
         DEFAULT_MFA_PURPOSE,
         now,
-        email_otp_config()?,
+        email_otp_config(),
         pepper.as_bytes(),
     )?;
     let challenge = StoredOtpChallenge {
@@ -271,7 +271,7 @@ async fn start_email_mfa_challenge(
     now: u64,
 ) -> Result<OtpChallengeResponse, ErrorResponse> {
     let pepper = email_otp_pepper()?;
-    let issued = issue_email_challenge(user, purpose, now, email_otp_config()?, pepper.as_bytes())?;
+    let issued = issue_email_challenge(user, purpose, now, email_otp_config(), pepper.as_bytes())?;
     let challenge = StoredOtpChallenge {
         user_id: user.id.clone(),
         method: OtpMethod::Email,

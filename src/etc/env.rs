@@ -52,10 +52,6 @@ pub fn bool_or(name: &str, default: bool) -> bool {
     }
 }
 
-pub fn string_or(name: &str, default: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| default.to_string())
-}
-
 pub fn optional_string(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }

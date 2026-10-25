@@ -1,7 +1,7 @@
 use crate::err::{ErrorCode, ErrorResponse};
 
+use super::settings::otp_settings;
 use super::{
-    DEFAULT_EMAIL_OTP_LENGTH, DEFAULT_EMAIL_OTP_MAX_ATTEMPTS, DEFAULT_EMAIL_OTP_TTL_SECS,
     MFA_CHALLENGE_KEY_PREFIX, MFA_PENDING_LOGIN_KEY_PREFIX, MFA_VERIFIED_KEY_PREFIX,
     PASSWORDLESS_EMAIL_KEY_PREFIX,
 };
@@ -38,37 +38,16 @@ pub(crate) fn validate_challenge_id(challenge_id: &str) -> Result<(), ErrorRespo
     Ok(())
 }
 
-pub(crate) fn email_otp_config() -> Result<::otp::MessageOtpConfig, ErrorResponse> {
-    ::otp::MessageOtpConfig::numeric(
-        otp_env("EMAIL_OTP_LENGTH", DEFAULT_EMAIL_OTP_LENGTH)?,
-        otp_env("EMAIL_OTP_TTL_SECS", DEFAULT_EMAIL_OTP_TTL_SECS)?,
-        otp_env("EMAIL_OTP_MAX_ATTEMPTS", DEFAULT_EMAIL_OTP_MAX_ATTEMPTS)?,
-    )
-    .map_err(email_otp_internal)
+pub(crate) fn email_otp_config() -> ::otp::MessageOtpConfig {
+    otp_settings().email_otp.clone()
 }
 
+/// Startup already refused configurations that make MFA mandatory without
+/// it; with optional MFA a missing pepper fails here.
 pub(crate) fn email_otp_pepper() -> Result<String, ErrorResponse> {
-    let value = std::env::var("EMAIL_OTP_PEPPER").map_err(|_| {
+    otp_settings().email_otp_pepper.clone().ok_or_else(|| {
         tracing::error!("EMAIL_OTP_PEPPER is not configured");
         ErrorResponse::new(ErrorCode::EmailOtpUnavailable)
-    })?;
-
-    if value.trim().is_empty() {
-        tracing::error!("EMAIL_OTP_PEPPER is empty");
-        return Err(ErrorResponse::new(ErrorCode::EmailOtpUnavailable));
-    }
-
-    Ok(value)
-}
-
-pub(crate) fn otp_env<T>(name: &str, default: T) -> Result<T, ErrorResponse>
-where
-    T: std::str::FromStr,
-    T::Err: std::fmt::Display,
-{
-    crate::etc::env::parse_or(name, default).map_err(|error| {
-        tracing::error!(%error, "invalid OTP environment variable");
-        ErrorResponse::new(ErrorCode::OtpUnavailable)
     })
 }
 

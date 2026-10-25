@@ -79,6 +79,10 @@ pub async fn run() -> std::io::Result<()> {
         tracing::error!("Invalid feature settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
+    act::otp::settings::init().map_err(|error| {
+        tracing::error!("Invalid MFA settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
     jwt::init();
     internal_context::init().map_err(std::io::Error::other)?;
     act::password_policy::init();

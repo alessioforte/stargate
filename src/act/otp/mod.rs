@@ -4,6 +4,7 @@ pub mod delivery;
 pub mod policy;
 pub mod rate;
 pub mod service;
+pub mod settings;
 pub mod types;
 pub mod util;
 

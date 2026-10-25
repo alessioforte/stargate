@@ -145,7 +145,7 @@ pub(crate) async fn store_mfa_verified_marker(
     purpose: &str,
     now: u64,
 ) -> Result<MfaVerificationMarker, ErrorResponse> {
-    let ttl = super::policy::mfa_step_up_ttl_secs()?;
+    let ttl = super::policy::mfa_step_up_ttl_secs();
     let marker = MfaVerificationMarker {
         user_id: auth.user.id.clone(),
         method,

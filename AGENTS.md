@@ -471,7 +471,11 @@ Source layout:
 - `crates/otp`: HOTP (RFC 4226), TOTP (RFC 6238), Base32, provisioning URIs,
   short-lived message OTP records for email/SMS.
 - `src/act/otp`: policy evaluation, challenge persistence, verification, delivery,
-  throttling, service flows. Workflow changes go here.
+  throttling, service flows. Workflow changes go here. `settings.rs` reads and validates
+  the `MFA_*` / `EMAIL_OTP_*` variables once at startup (`otp_settings()`; strict values,
+  `sms`/`totp` rejected); `EMAIL_OTP_PEPPER` is required when MFA is mandatory for someone
+  (`MFA_MODE=required`, `MFA_REQUIRED_FOR_SUPER_ADMIN=true` in optional mode,
+  `MFA_ADMIN_STEP_UP_REQUIRED=true`), else a startup warning if users can opt in.
 - `src/api/account/otp`: thin Axum/OpenAPI bindings.
 
 Account endpoints:
@@ -638,7 +642,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `EMAIL_OTP_PEPPER`, `EMAIL_OTP_LENGTH`, `EMAIL_OTP_TTL_SECS`, `EMAIL_OTP_MAX_ATTEMPTS` | -, 6, 300, 5 | Email OTP |
 | `MFA_MODE` | optional | `off`, `optional`, `required` |
 | `MFA_METHODS` / `MFA_DEFAULT_METHOD` / `MFA_EMAIL_ENABLED` | email / email / true | MFA methods |
-| `MFA_REQUIRED_FOR_SUPER_ADMIN` | true | MFA for super-admins in `optional` mode |
+| `MFA_REQUIRED_FOR_SUPER_ADMIN` | false | MFA for super-admins in `optional` mode |
 | `MFA_ADMIN_STEP_UP_REQUIRED` / `MFA_STEP_UP_TTL_SECS` | false / 300 | Admin step-up |
 | `PASSWORD_POLICY_*` | see `.env.example` | Global password policy |
 | `ARGON2_MEMORY_KIB` / `_ITERATIONS` / `_PARALLELISM` | 19456 / 2 / 1 | Argon2id cost |

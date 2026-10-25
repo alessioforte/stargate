@@ -1,12 +1,11 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use serde_json::Value;
 
-use super::DEFAULT_MFA_STEP_UP_TTL_SECS;
+use super::settings::otp_settings;
 use super::types::{MfaMode, MfaPolicy, OtpMethod};
-use super::util::otp_env;
 
 pub(crate) fn admin_step_up_required() -> bool {
-    crate::etc::env::bool_or("MFA_ADMIN_STEP_UP_REQUIRED", false)
+    otp_settings().admin_step_up_required
 }
 
 pub(crate) async fn ensure_passwordless_session_allowed(
@@ -21,8 +20,9 @@ pub(crate) async fn ensure_passwordless_session_allowed(
 }
 
 pub(crate) async fn mfa_policy_for_user(user: &db::ent::User) -> Result<MfaPolicy, ErrorResponse> {
-    let mode = mfa_mode()?;
-    let mut methods = configured_mfa_methods();
+    let settings = otp_settings();
+    let mode = settings.mfa_mode;
+    let mut methods = settings.mfa_methods.clone();
     let user_methods = user_mfa_methods(&user.attrs);
 
     if !user_methods.is_empty() {
@@ -34,7 +34,7 @@ pub(crate) async fn mfa_policy_for_user(user: &db::ent::User) -> Result<MfaPolic
         methods.clear();
     }
 
-    let super_admin_required = mfa_required_for_super_admin()
+    let super_admin_required = settings.mfa_required_for_super_admin
         && crate::fun::is_super_admin_user_id(&user.id)
             .await
             .map_err(ErrorResponse::internal)?;
@@ -47,7 +47,7 @@ pub(crate) async fn mfa_policy_for_user(user: &db::ent::User) -> Result<MfaPolic
 
     let preferred_method = user_preferred_mfa_method(&user.attrs)
         .filter(|method| methods.contains(method))
-        .or_else(|| default_mfa_method().filter(|method| methods.contains(method)))
+        .or_else(|| Some(settings.mfa_default_method).filter(|method| methods.contains(method)))
         .or_else(|| methods.first().copied());
 
     Ok(MfaPolicy {
@@ -73,57 +73,11 @@ pub(crate) fn ensure_method_allowed(
     Ok(())
 }
 
-pub(crate) fn mfa_step_up_ttl_secs() -> Result<u64, ErrorResponse> {
-    let ttl = otp_env("MFA_STEP_UP_TTL_SECS", DEFAULT_MFA_STEP_UP_TTL_SECS)?;
-    if ttl == 0 {
-        tracing::error!("MFA_STEP_UP_TTL_SECS must be greater than zero");
-        return Err(ErrorResponse::new(ErrorCode::MfaUnavailable));
-    }
-    Ok(ttl)
+pub(crate) fn mfa_step_up_ttl_secs() -> u64 {
+    otp_settings().step_up_ttl_secs
 }
 
-fn mfa_mode() -> Result<MfaMode, ErrorResponse> {
-    match crate::etc::env::string_or("MFA_MODE", "optional")
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "off" => Ok(MfaMode::Off),
-        "optional" => Ok(MfaMode::Optional),
-        "required" => Ok(MfaMode::Required),
-        other => {
-            tracing::error!(value = other, "invalid MFA_MODE");
-            Err(ErrorResponse::new(ErrorCode::MfaUnavailable))
-        }
-    }
-}
-
-fn configured_mfa_methods() -> Vec<OtpMethod> {
-    if !crate::etc::env::bool_or("MFA_EMAIL_ENABLED", true) {
-        return Vec::new();
-    }
-
-    let configured = crate::etc::env::string_or("MFA_METHODS", "email");
-    let mut methods = Vec::new();
-    for method in configured.split(',').filter_map(parse_method) {
-        if !methods.contains(&method) {
-            methods.push(method);
-        }
-    }
-    methods
-}
-
-fn default_mfa_method() -> Option<OtpMethod> {
-    crate::etc::env::optional_string("MFA_DEFAULT_METHOD")
-        .as_deref()
-        .and_then(parse_method)
-        .or(Some(OtpMethod::Email))
-}
-
-fn mfa_required_for_super_admin() -> bool {
-    crate::etc::env::bool_or("MFA_REQUIRED_FOR_SUPER_ADMIN", false)
-}
-
+/// A method named in user attrs; unknown names are ignored there.
 fn parse_method(value: &str) -> Option<OtpMethod> {
     match value.trim().to_ascii_lowercase().as_str() {
         "email" => Some(OtpMethod::Email),
