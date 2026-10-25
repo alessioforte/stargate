@@ -29,6 +29,9 @@ pub async fn bootstrap_instance(
         .inspect_err(|e| tracing::error!("Error bootstrapping Stargate: {:?}", e))
 }
 
+/// Not logged here: callers log the failures that are errors for them, and
+/// resolve some others (a concurrent sign-up that took the nickname or the
+/// email first) without failing.
 pub async fn create_user(
     profile: Profile,
     credential_type: CredentialType,
@@ -39,7 +42,6 @@ pub async fn create_user(
     service()
         .create_user(profile, credential_type, value, membership, ctx)
         .await
-        .inspect_err(|e| tracing::error!("Error creating user: {:?}", e))
 }
 
 /// Resolves a login identifier by its shape: an address matches emails only,
