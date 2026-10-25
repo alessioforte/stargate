@@ -67,7 +67,7 @@ stargate/
 - **DB**: sqlx (feature-gated `postgres` or `sqlite`)
 - **Auth**: JWT (jsonwebtoken), Argon2 passwords, RSA/HMAC signing
 - **Serialization**: serde_json, serde_yaml_bw, MessagePack
-- **OpenAPI**: utoipa + utoipa-axum
+- **OpenAPI**: utoipa
 - **Observability**: tracing + OpenTelemetry (OTLP traces, metrics, logs)
 
 ### Shared Support (`src/etc/`)
