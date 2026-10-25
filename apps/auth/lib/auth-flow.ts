@@ -1,4 +1,5 @@
 import type { LoginMFAResponse, OtpChallengeResponse } from "@/services/types";
+import { getAuthBasePath } from "@/lib/base-path";
 import { getAuthAppConfig } from "@/lib/env";
 
 const RETURN_TO_KEY = "stargate.auth.return_to";
@@ -64,6 +65,16 @@ export function safeReturnTo(value: string | null | undefined) {
   } catch {
     return null;
   }
+}
+
+/**
+ * `returnTo` for a server that redirects back here: in-app paths are relative
+ * to this app's base path, so they become absolute URLs on this origin.
+ */
+export function absoluteReturnTo(returnTo: string | null) {
+  if (!returnTo || /^https?:\/\//.test(returnTo)) return returnTo;
+  const base = getAuthBasePath();
+  return `${window.location.origin}${base === "/" ? "" : base}${returnTo}`;
 }
 
 export function getReturnTo(searchParams?: SearchParamsLike | null) {

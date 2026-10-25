@@ -38,6 +38,20 @@ struct GitHubEmail {
     verified: bool,
 }
 
+/// Where to send the browser to sign in with GitHub: the authorization page
+/// for this OAuth app, asking for `user:email` (the verified emails). GitHub
+/// redirects back to the callback URL registered for the app.
+pub fn github_authorize_url(state: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let client_id = env::var("GITHUB_OAUTH_CLIENT_ID")
+        .map_err(|_| "GitHub OAuth not configured: missing GITHUB_OAUTH_CLIENT_ID")?;
+    let mut url = url::Url::parse(&github_authorize_base_url())?;
+    url.query_pairs_mut()
+        .append_pair("client_id", &client_id)
+        .append_pair("scope", "user:email")
+        .append_pair("state", state);
+    Ok(url.into())
+}
+
 pub async fn get_github_oauth_token(
     authorization_code: &str,
 ) -> Result<GitHubOauthToken, Box<dyn Error + Send + Sync>> {
@@ -115,6 +129,11 @@ async fn github_get<T: DeserializeOwned>(
     }
 }
 
+fn github_authorize_base_url() -> String {
+    env::var("GITHUB_OAUTH_AUTHORIZE_URL")
+        .unwrap_or_else(|_| "https://github.com/login/oauth/authorize".to_string())
+}
+
 fn github_token_url() -> String {
     env::var("GITHUB_OAUTH_TOKEN_URL")
         .unwrap_or_else(|_| "https://github.com/login/oauth/access_token".to_string())
@@ -137,8 +156,25 @@ fn github_emails_url() -> String {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{GitHubUser, get_github_oauth_token, get_github_user};
+    use super::{GitHubUser, get_github_oauth_token, get_github_user, github_authorize_url};
     use crate::test_support::{ScopedEnv, env_lock, spawn_json_server};
+
+    #[test]
+    fn github_authorize_url_asks_for_the_verified_emails() {
+        let _env_lock = env_lock();
+        let _client_id = ScopedEnv::set("GITHUB_OAUTH_CLIENT_ID", "client-id");
+        let url = url::Url::parse(&github_authorize_url("st&te").unwrap()).unwrap();
+        let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+
+        assert_eq!(url.host_str(), Some("github.com"));
+        assert_eq!(url.path(), "/login/oauth/authorize");
+        assert_eq!(
+            query.get("client_id").map(String::as_str),
+            Some("client-id")
+        );
+        assert_eq!(query.get("scope").map(String::as_str), Some("user:email"));
+        assert_eq!(query.get("state").map(String::as_str), Some("st&te"));
+    }
 
     #[tokio::test]
     async fn github_oauth_token_posts_form_and_decodes_json() {

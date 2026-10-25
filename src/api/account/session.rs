@@ -9,14 +9,47 @@ use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
 use store::Store;
 
-/// Sign `user` in: a new session authenticated at `auth_time` with the
-/// methods `amr` (OIDC `amr` values, e.g. `pwd`).
+/// A signed-in session: the tokens for the response body and the session
+/// cookie that carries the access token.
+pub(crate) struct IssuedSession {
+    pub(crate) body: AuthResponse,
+    pub(crate) cookie: String,
+}
+
+impl IssuedSession {
+    /// The tokens as JSON, with the session cookie.
+    pub(crate) fn into_response(self) -> Result<Response, ErrorResponse> {
+        let mut resp = Json(self.body).into_response();
+        resp.headers_mut().insert(
+            SET_COOKIE,
+            self.cookie
+                .parse()
+                .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
+        );
+        Ok(resp)
+    }
+}
+
+/// Sign `user` in and answer with the tokens; see [`start_user_session`].
 pub(crate) async fn issue_user_session(
     user: db::ent::User,
     auth_time: usize,
     requested_org_id: Option<&str>,
     amr: Vec<String>,
 ) -> Result<Response, ErrorResponse> {
+    start_user_session(user, auth_time, requested_org_id, amr)
+        .await?
+        .into_response()
+}
+
+/// Sign `user` in: a new session authenticated at `auth_time` with the
+/// methods `amr` (OIDC `amr` values, e.g. `pwd`).
+pub(crate) async fn start_user_session(
+    user: db::ent::User,
+    auth_time: usize,
+    requested_org_id: Option<&str>,
+    amr: Vec<String>,
+) -> Result<IssuedSession, ErrorResponse> {
     let org = sessions::resolve_org_context(&user, requested_org_id).await?;
 
     let mut subject = etc::auth::subject::Subject::from(user.clone());
@@ -84,14 +117,5 @@ pub(crate) async fn issue_user_session(
         token_type: "Bearer".to_string(),
         org_id: subject.org_id.clone(),
     };
-
-    let mut resp = Json(body).into_response();
-
-    resp.headers_mut().insert(
-        SET_COOKIE,
-        cookie
-            .parse()
-            .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
-    );
-    Ok(resp)
+    Ok(IssuedSession { body, cookie })
 }

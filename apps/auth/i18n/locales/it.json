@@ -35,6 +35,8 @@
   "requestResetPasswordSuccessMessage": "Ti abbiamo inviato un'email con le istruzioni per reimpostare la password",
   "passwordChangedMessage": "La password è stata modificata con successo",
   "passwordlessLogin": "Accedi con codice email",
+  "or": "oppure",
+  "continueWith": "Continua con {{provider}}",
   "sendCode": "Invia codice",
   "verify": "Verifica",
   "verificationCode": "Codice di verifica",
@@ -91,7 +93,12 @@
     "too_many_attempts": "Troppi tentativi di accesso. Riprova più tardi.",
     "interaction_expired": "Questa richiesta di accesso è scaduta. Torna all'applicazione e riprova.",
     "javascript_required": "L'accesso a questo account richiede un passaggio aggiuntivo (codice di verifica o cambio password) che necessita di JavaScript. Abilita JavaScript e riprova.",
-    "server_error": "Si è verificato un errore. Riprova più tardi."
+    "server_error": "Si è verificato un errore. Riprova più tardi.",
+    "social_cancelled": "L'accesso è stato annullato.",
+    "social_email_unverified": "Il tuo account presso questo provider non ha un indirizzo email verificato. Verificalo presso il provider e riprova.",
+    "social_account_not_provisioned": "Nessun account usa questo indirizzo email. Chiedi a un amministratore di invitarti.",
+    "social_domain_not_allowed": "Non è possibile creare account per questo dominio email.",
+    "social_failed": "L'accesso con questo provider non è riuscito. Riprova."
   },
   "logoutTitle": "Vuoi uscire?",
   "logoutDescription": "Un'applicazione ha chiesto di farti uscire da Stargate. Uscirai da tutte le applicazioni che usano questo accesso.",

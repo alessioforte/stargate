@@ -37,6 +37,19 @@ pub fn login_url() -> String {
     link_from_base(&auth_app_public_base(), "login", None)
 }
 
+/// An auth-app page for a redirect answered by this server, with query
+/// `params`.
+pub fn auth_app_redirect(path: &str, params: &[(&str, &str)]) -> String {
+    let url = format!("{}/{path}", auth_app_href().trim_end_matches('/'));
+    if params.is_empty() {
+        return url;
+    }
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(params)
+        .finish();
+    format!("{url}?{query}")
+}
+
 fn normalize_base_path(path: &str) -> String {
     format!("/{}", path.trim().trim_matches('/'))
 }

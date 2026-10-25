@@ -45,7 +45,9 @@ use utoipa::OpenApi;
         crate::api::oidc::token_ops::post_introspect,
         crate::api::oidc::token_ops::post_revoke,
         crate::api::social::github::get_github,
+        crate::api::social::github::get_github_start,
         crate::api::social::google::get_google,
+        crate::api::social::google::get_google_start,
         crate::api::account::login::post_login,
         crate::api::account::logout::delete_logout,
         crate::api::account::logout::post_logout_all,
@@ -385,6 +387,8 @@ mod tests {
         assert!(json["paths"]["/oauth/revoke"].is_object());
         assert!(json["paths"]["/oauth/github"].is_object());
         assert!(json["paths"]["/oauth/google"].is_object());
+        assert!(json["paths"]["/oauth/github/start"].is_object());
+        assert!(json["paths"]["/oauth/google/start"].is_object());
         assert!(json["paths"]["/account/login"].is_object());
         assert!(json["paths"]["/account/logout"].is_object());
         assert!(json["paths"]["/account/profile"].is_object());
@@ -674,6 +678,10 @@ mod tests {
         assert_eq!(feature_disabled(github).await, "social_github");
         let google = send("/oauth/google").await;
         assert_eq!(feature_disabled(google).await, "social_google");
+        let github_start = send("/oauth/github/start?return_to=/auth/login").await;
+        assert_eq!(feature_disabled(github_start).await, "social_github");
+        let google_start = send("/oauth/google/start").await;
+        assert_eq!(feature_disabled(google_start).await, "social_google");
         let state = send_req(
             Request::builder()
                 .method(http::Method::POST)

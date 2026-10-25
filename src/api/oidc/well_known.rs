@@ -14,7 +14,7 @@ fn endpoint_base_url(issuer: &str) -> String {
 }
 
 /// Public base URL of the provider endpoints, as advertised in discovery.
-pub(super) fn public_endpoint_base_url() -> String {
+pub(crate) fn public_endpoint_base_url() -> String {
     endpoint_base_url(&jwt::issuer_from_env())
 }
 

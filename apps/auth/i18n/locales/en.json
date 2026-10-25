@@ -35,6 +35,8 @@
   "requestResetPasswordSuccessMessage": "We have sent you an email with a link to reset your password",
   "passwordChangedMessage": "Password changed successfully",
   "passwordlessLogin": "Sign in with email code",
+  "or": "or",
+  "continueWith": "Continue with {{provider}}",
   "sendCode": "Send Code",
   "verify": "Verify",
   "verificationCode": "Verification Code",
@@ -91,7 +93,12 @@
     "too_many_attempts": "Too many sign-in attempts. Please try again later.",
     "interaction_expired": "This sign-in request has expired. Return to the application and try again.",
     "javascript_required": "Signing in to this account needs an extra step (verification code or password change) that requires JavaScript. Enable JavaScript and try again.",
-    "server_error": "Something went wrong. Please try again later."
+    "server_error": "Something went wrong. Please try again later.",
+    "social_cancelled": "Sign-in was cancelled.",
+    "social_email_unverified": "Your account with this provider has no verified email address. Verify it with the provider and try again.",
+    "social_account_not_provisioned": "No account uses this email address. Ask an administrator to invite you.",
+    "social_domain_not_allowed": "Accounts cannot be created for this email domain.",
+    "social_failed": "Signing in with this provider did not work. Please try again."
   },
   "logoutTitle": "Sign out?",
   "logoutDescription": "An application asked to sign you out of Stargate. You will be signed out of every application that uses this sign-in.",

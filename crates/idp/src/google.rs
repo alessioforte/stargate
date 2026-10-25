@@ -35,11 +35,33 @@ struct GoogleUserInfo {
     picture: Option<String>,
 }
 
+/// Where to send the browser to sign in with Google: the consent page for
+/// this client, asking for `openid email profile` and returning to
+/// `GOOGLE_OAUTH_REDIRECT_URI`.
+pub fn google_authorize_url(state: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let client_id = env::var("GOOGLE_OAUTH_CLIENT_ID")
+        .map_err(|_| "Google OAuth not configured: missing GOOGLE_OAUTH_CLIENT_ID")?;
+    let mut url = url::Url::parse(&google_authorize_base_url())?;
+    url.query_pairs_mut()
+        .append_pair("client_id", &client_id)
+        .append_pair("redirect_uri", &google_redirect_uri())
+        .append_pair("response_type", "code")
+        .append_pair("scope", "openid email profile")
+        .append_pair("state", state);
+    Ok(url.into())
+}
+
+/// The callback registered with Google, sent with the authorization and the
+/// token exchange (they must match).
+fn google_redirect_uri() -> String {
+    env::var("GOOGLE_OAUTH_REDIRECT_URI")
+        .unwrap_or_else(|_| "http://localhost:5050/oauth/google".to_string())
+}
+
 pub async fn get_google_oauth_token(
     authorization_code: &str,
 ) -> Result<OAuthResponse, Box<dyn Error + Send + Sync>> {
-    let redirect_uri = env::var("GOOGLE_OAUTH_REDIRECT_URI")
-        .unwrap_or_else(|_| "http://localhost:5050/oauth/google".to_string());
+    let redirect_uri = google_redirect_uri();
     let client_secret = env::var("GOOGLE_OAUTH_CLIENT_SECRET")
         .map_err(|_| "Google OAuth not configured: missing GOOGLE_OAUTH_CLIENT_SECRET")?;
     let client_id = env::var("GOOGLE_OAUTH_CLIENT_ID")
@@ -94,6 +116,11 @@ pub async fn get_google_user(
     })
 }
 
+fn google_authorize_base_url() -> String {
+    env::var("GOOGLE_OAUTH_AUTHORIZE_URL")
+        .unwrap_or_else(|_| "https://accounts.google.com/o/oauth2/v2/auth".to_string())
+}
+
 fn google_token_url() -> String {
     env::var("GOOGLE_OAUTH_TOKEN_URL")
         .unwrap_or_else(|_| "https://www.googleapis.com/oauth2/v4/token".to_string())
@@ -112,8 +139,36 @@ fn google_user_url() -> String {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{GoogleUser, get_google_oauth_token, get_google_user};
+    use super::{GoogleUser, get_google_oauth_token, get_google_user, google_authorize_url};
     use crate::test_support::{ScopedEnv, env_lock, spawn_json_server};
+
+    #[test]
+    fn google_authorize_url_returns_to_the_registered_callback() {
+        let _env_lock = env_lock();
+        let _client_id = ScopedEnv::set("GOOGLE_OAUTH_CLIENT_ID", "google-client");
+        let _redirect_uri = ScopedEnv::set(
+            "GOOGLE_OAUTH_REDIRECT_URI",
+            "https://id.example.com/oauth/google",
+        );
+        let url = url::Url::parse(&google_authorize_url("s1").unwrap()).unwrap();
+        let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+
+        assert_eq!(url.host_str(), Some("accounts.google.com"));
+        assert_eq!(
+            query.get("client_id").map(String::as_str),
+            Some("google-client")
+        );
+        assert_eq!(
+            query.get("redirect_uri").map(String::as_str),
+            Some("https://id.example.com/oauth/google")
+        );
+        assert_eq!(query.get("response_type").map(String::as_str), Some("code"));
+        assert_eq!(
+            query.get("scope").map(String::as_str),
+            Some("openid email profile")
+        );
+        assert_eq!(query.get("state").map(String::as_str), Some("s1"));
+    }
 
     #[tokio::test]
     async fn google_oauth_token_posts_expected_form_data() {

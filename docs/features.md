@@ -95,14 +95,39 @@ code".
 ## Social sign-in
 
 A provider is on when both its client id and secret are set; one without the
-other stops startup. Without credentials its route answers `404` instead of
+other stops startup. Without credentials its routes answer `404` instead of
 an upstream error.
 
-- Request the `user:email` scope from GitHub and `email` (plus `profile` for
-  the name and picture) from Google: accounts are matched by an email the
-  provider verified, otherwise `403 social.email_unverified`.
+The hosted login page then shows "Continue with Google" / "Continue with
+GitHub". The button goes to `/oauth/{provider}/start?return_to=...`, which
+redirects to the provider; the provider returns to Stargate's callback, which
+signs the user in (session cookie) and continues to the organization picker
+and then `return_to`, as after a password sign-in. Inside an OpenID Connect
+authorization, the parked request resumes. A refused sign-in goes back to the
+login page with the reason.
+
+Register these callbacks with the providers:
+
+- GitHub OAuth app, "Authorization callback URL": `<public URL>/oauth/github`.
+- Google OAuth client, "Authorized redirect URI": `<public URL>/oauth/google`,
+  and the same value in `GOOGLE_OAUTH_REDIRECT_URI`.
+
+Details:
+
+- Stargate asks GitHub for `user:email` and Google for
+  `openid email profile`: accounts are matched by an email the provider
+  verified, otherwise `403 social.email_unverified`.
 - Whether a first sign-in creates the account follows `SIGNUP_MODE` (see
   above).
+- The sign-in is bound to the browser that started it by a short-lived
+  `social_state` cookie, so a callback URL from someone else's sign-in
+  cannot sign another browser in. `return_to` must be a path on this server
+  or a URL on an origin the deployment trusts with browsers: `JWT_ISSUER`,
+  `OAUTH_BASE_URL`, `AUTH_PUBLIC_BASE_URL`, `TRUSTED_ORIGINS`, `CORS_ORIGINS`,
+  or the origin the browser reached Stargate at. Others get `400` and a
+  warning in the log that names the value.
+- API clients can run the provider authorization themselves: take a `state`
+  from `POST /oauth/state`, and the callback answers the tokens as JSON.
 
 ## Console
 

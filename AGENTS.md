@@ -286,7 +286,14 @@ Admin-managed clients only (no dynamic registration).
 Source layout:
 - `crates/oidc`: pure provider logic (no Axum or DB driver dependency).
 - `src/api/oidc`: Axum bindings for provider endpoints and well-known metadata.
-- `src/api/social`: Google/GitHub consumer login callbacks and state endpoint.
+- `src/api/social`: Google/GitHub consumer login. Browsers start at
+  `/oauth/{provider}/start?return_to=` (state bound to an HttpOnly `social_state` cookie,
+  `Path=/oauth`), the callback `/oauth/{provider}` signs in (`start_user_session`, amr
+  `fed`) and redirects to the auth app's org picker then `return_to`, or to its login
+  page with `error=social_*`; `return_to` must be a path or a URL on the issuer /
+  `OAUTH_BASE_URL` / `AUTH_PUBLIC_BASE_URL` / `TRUSTED_ORIGINS` / `CORS_ORIGINS` origins or
+  the one the request reached (else `400`, logged). `POST /oauth/state` states (API
+  clients) get JSON tokens.
 - `src/api/admin/oauth_clients.rs`: client CRUD.
 
 Endpoints:
@@ -761,7 +768,8 @@ audit relay -> save in-memory store -> flush telemetry.
   prerendered and hydrated (see "Provider login"), other routes are client-rendered
   from `index.html`. The layout loads `GET /account/features` after hydration (store
   `features`, null before, so prerendered markup still matches): the login page shows
-  the passwordless link and, in `open` signup mode, a sign-up link; `/signup` without a
+  the passwordless link, "Continue with Google/GitHub" for the configured providers
+  (`lib/env.ts` `socialSignInUrl`), and, in `open` signup mode, a sign-up link; `/signup` without a
   token is the request form (`signup-request.tsx`), or explains that accounts come from
   an administrator.
 - `mail`: transactional email templates (`react-email`). A build-time template

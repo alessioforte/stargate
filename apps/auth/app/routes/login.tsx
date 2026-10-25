@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   Alert,
@@ -6,6 +6,7 @@ import {
   Center,
   Button,
   Checkbox,
+  Divider,
   Group,
   PasswordInput,
   Stack,
@@ -14,20 +15,40 @@ import {
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
-import { oauthLoginAction } from "@/lib/env";
+import { FaGithub } from "react-icons/fa";
+import { FcGoogle } from "react-icons/fc";
+import {
+  absoluteReturnTo,
+  getReturnTo,
+  hrefWithReturnTo,
+  storeReturnTo,
+} from "@/lib/auth-flow";
+import { oauthLoginAction, socialSignInUrl } from "@/lib/env";
 import { useHydrated } from "@/lib/hydration";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 
-/** Codes `/oauth/login` sends back in `?error=` after a no-JS form post. */
+/**
+ * Codes sent back in `?error=`: by `/oauth/login` after a no-JS form post,
+ * and by the social sign-in callbacks.
+ */
 const OAUTH_LOGIN_ERRORS = new Set([
   "invalid_credentials",
   "too_many_attempts",
   "interaction_expired",
   "javascript_required",
   "server_error",
+  "social_cancelled",
+  "social_email_unverified",
+  "social_account_not_provisioned",
+  "social_domain_not_allowed",
+  "social_failed",
 ]);
+
+const SOCIAL_PROVIDERS: Record<string, { name: string; icon: ReactNode }> = {
+  google: { name: "Google", icon: <FcGoogle size={18} /> },
+  github: { name: "GitHub", icon: <FaGithub size={18} /> },
+};
 
 interface LoginValues {
   username: string;
@@ -54,6 +75,9 @@ export default function Login() {
   const passwordlessHref = hrefWithReturnTo("/login/passwordless", returnTo);
   const resetPasswordHref = hrefWithReturnTo("/reset-password", returnTo);
   const signupHref = hrefWithReturnTo("/signup", returnTo);
+  const socialProviders = (features?.socialProviders ?? []).filter(
+    (provider) => provider in SOCIAL_PROVIDERS,
+  );
 
   useEffect(() => {
     storeReturnTo(returnToParam);
@@ -185,6 +209,23 @@ export default function Login() {
           )}
         </Stack>
       </form>
+      {socialProviders.length > 0 && (
+        <Stack gap="sm">
+          <Divider label={t("or")} labelPosition="center" />
+          {socialProviders.map((provider) => (
+            <Button
+              key={provider}
+              component="a"
+              href={socialSignInUrl(provider, absoluteReturnTo(returnTo))}
+              variant="default"
+              fullWidth
+              leftSection={SOCIAL_PROVIDERS[provider].icon}
+            >
+              {t("continueWith", { provider: SOCIAL_PROVIDERS[provider].name })}
+            </Button>
+          ))}
+        </Stack>
+      )}
     </Stack>
   );
 }

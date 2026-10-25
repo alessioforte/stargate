@@ -1,69 +1,62 @@
-use super::github::AuthResponse;
-use crate::act::oauth_state;
+use super::Provider;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc;
-use crate::etc::auth::jwt::jwt_config;
-use crate::etc::request_context::audit_request_from;
-use crate::fun::build_jwt_cookie;
-use crate::fun::format_name;
-use axum::Json;
-use axum::extract::{Query, Request};
-use axum::response::{IntoResponse, Response};
-use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
-use http::header::SET_COOKIE;
+use axum::extract::Request;
+use axum::response::Response;
+use db::ent::{
+    CredentialType, Profile, TrustedAuditActor, TrustedAuditContext, TrustedAuditRequest,
+};
 use idp::google::{GoogleUser, get_google_oauth_token, get_google_user};
-use jwt::Claims;
-use serde::{Deserialize, Serialize};
-use store::Store;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QueryCode {
-    pub code: String,
-    pub state: String,
+#[utoipa::path(
+    get,
+    path = "/oauth/google/start",
+    tags = ["OAuth"],
+    description = "Start signing in with Google in the browser: redirects to Google, which returns to `GOOGLE_OAUTH_REDIRECT_URI` (`/oauth/google`). After signing in the browser goes to the auth app's organization picker, then to `return_to`.",
+    params(
+        ("return_to" = Option<String>, Query, description = "Where to go once signed in: a path on this server, or a URL on the issuer's or the auth app's origin"),
+    ),
+    responses(
+        (status = 302, description = "Redirect to Google"),
+        (status = 400, description = "`return_to` is not allowed", body = ErrorResponse),
+        (status = 404, description = "Google sign-in is not configured on this server (`feature.disabled`)", body = ErrorResponse),
+    )
+)]
+pub async fn get_google_start(req: Request) -> Result<Response, ErrorResponse> {
+    let own_origin = super::request_origin(&req);
+    super::start(Provider::Google, req.uri().clone(), own_origin).await
 }
 
 #[utoipa::path(
     get,
     path = "/oauth/google",
     tags = ["OAuth"],
-    description = "Login with Google. The Google authorization must include the `email` scope: the account is matched or created by its verified email.",
+    description = "Google's callback. A sign-in started at `/oauth/google/start` redirects to the auth app (the organization picker, or the login page with `error`). A `state` from `POST /oauth/state` gets the tokens as JSON. The Google authorization must include the `email` scope: the account is matched or created by its verified email.",
     params(
-        ("code" = String, Query, description = "Authorization code"),
-        ("state" = String, Query, description = "OAuth state token"),
+        ("code" = Option<String>, Query, description = "Authorization code"),
+        ("state" = Option<String>, Query, description = "OAuth state token"),
+        ("error" = Option<String>, Query, description = "Set by Google when the user did not consent"),
     ),
     responses(
-        (status = 200, description = "OK", body = AuthResponse),
-        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 200, description = "OK (`POST /oauth/state` sign-ins)", body = crate::api::account::AuthResponse),
+        (status = 302, description = "Browser sign-ins: to the auth app"),
+        (status = 400, description = "Missing code or invalid state", body = ErrorResponse),
         (status = 403, description = "The Google account's email is not verified, or no Stargate account uses it and `SIGNUP_MODE` does not create one (`social.account_not_provisioned`, `signup.domain_not_allowed`)", body = ErrorResponse),
         (status = 404, description = "Google sign-in is not configured on this server (`feature.disabled`)", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
         (status = 502, description = "Bad Gateway", body = ErrorResponse),
     )
 )]
-pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
-    let audit_request = audit_request_from(req.extensions());
+pub async fn get_google(req: Request) -> Response {
+    super::callback(req, Provider::Google).await
+}
 
-    let Query(query): Query<QueryCode> = Query::try_from_uri(req.uri()).map_err(|error| {
-        ErrorResponse::new(ErrorCode::RequestInvalidQuery).with_message(error.body_text())
-    })?;
-
-    let code = &query.code;
-    let state = &query.state;
-
-    if code.is_empty() {
-        return Err(ErrorResponse::new(
-            ErrorCode::SocialAuthorizationCodeMissing,
-        ));
-    }
-
-    let valid_state = oauth_state::validate_oauth_state(state)
-        .await
-        .unwrap_or(false);
-    if !valid_state {
-        return Err(ErrorResponse::new(ErrorCode::SocialStateInvalid));
-    }
-
+/// The account behind a Google authorization `code`: the one using the
+/// Google account's verified email, created on a first sign-in when
+/// `SIGNUP_MODE` allows.
+pub(super) async fn sign_in(
+    code: &str,
+    audit_request: TrustedAuditRequest,
+) -> Result<db::ent::User, ErrorResponse> {
     let token = get_google_oauth_token(code).await.map_err(|e| {
         tracing::error!("Google OAuth token error: {}", e);
         ErrorResponse::new(ErrorCode::SocialTokenExchangeFailed).with_param("provider", "Google")
@@ -85,17 +78,16 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
         audit_request,
     );
 
-    let mut user = crate::db::get_user_by_email(&email).await.map_err(|e| {
+    let user = match crate::db::get_user_by_email(&email).await.map_err(|e| {
         tracing::error!("Database error during Google OAuth: {}", e);
         ErrorResponse::new(ErrorCode::SystemInternal)
-    })?;
-
-    if user.is_none() {
-        super::ensure_provisioning("Google", &email)?;
-        user = Some(create_google_user(&google_user, &email, audit_context.clone()).await?);
-    }
-
-    let user = user.ok_or_else(|| ErrorResponse::new(ErrorCode::SystemInternal))?;
+    })? {
+        Some(user) => user,
+        None => {
+            super::ensure_provisioning("Google", &email)?;
+            create_google_user(&google_user, &email, audit_context.clone()).await?
+        }
+    };
 
     if user.picture.is_none()
         && let Some(picture) = google_user.picture.clone()
@@ -108,82 +100,7 @@ pub async fn get_google(req: Request) -> Result<Response, ErrorResponse> {
                 ErrorResponse::new(ErrorCode::SystemInternal)
             })?;
     }
-
-    let given_name = user.given_name.clone().unwrap_or_default();
-    let family_name = user.family_name.clone().unwrap_or_default();
-    let name = format_name(&given_name, &family_name);
-
-    let sid = ulid::Ulid::generate().to_string();
-    let auth_time = chrono::Utc::now().timestamp() as usize;
-    let mut claims = Claims::default()
-        .subject(user.email.to_owned())
-        .sub_id(user.id.to_owned())
-        .name(name)
-        .email(user.email.to_owned())
-        .email_verified(true)
-        .sid(sid.clone());
-    claims.auth_time = Some(auth_time);
-
-    let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
-        .await
-        .map_err(ErrorResponse::internal)?;
-
-    if is_super_admin {
-        claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
-    }
-
-    let org = crate::act::sessions::resolve_org_context(&user, None).await?;
-    claims.org_id = org.as_ref().map(|org| org.org_id.clone());
-
-    let tokens = crate::fun::generate_tokens(claims).map_err(|e| {
-        tracing::error!("Token generation error: {}", e);
-        ErrorResponse::new(ErrorCode::SystemInternal)
-    })?;
-
-    let store = etc::store::use_store();
-    let mut subject = etc::auth::subject::Subject::from(user.clone());
-    subject.org_id = org.as_ref().map(|org| org.org_id.clone());
-    subject.org_role = org.as_ref().map(|org| org.role.clone());
-    let refresh_exp = jwt_config().refresh_exp;
-    let access_exp = jwt_config().access_exp;
-    let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
-    let cttl: i64 = access_exp.as_seconds_f64() as i64;
-
-    store.set(&sid, &subject, Some(sttl)).await.map_err(|e| {
-        tracing::error!("Failed to store OAuth session: {}", e);
-        ErrorResponse::new(ErrorCode::SystemInternal)
-    })?;
-    if let Err(error) = crate::act::sessions::register_session(
-        crate::act::sessions::NewSession {
-            user_id: &user.id,
-            sid: &sid,
-            org_id: subject.org_id.as_deref(),
-            authenticated_at_unix: auth_time as u64,
-            amr: vec![oidc::authentication::AMR_FEDERATED.to_string()],
-        },
-        &tokens.refresh_jti,
-        sttl,
-    )
-    .await
-    {
-        let _ = store.delete(&sid).await;
-        return Err(ErrorResponse::internal(error));
-    }
-
-    let cookie = build_jwt_cookie(&tokens.access_token, cttl);
-    let body = AuthResponse {
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-    };
-
-    let mut resp = Json(body).into_response();
-    resp.headers_mut().insert(
-        SET_COOKIE,
-        cookie
-            .parse()
-            .map_err(|_| ErrorResponse::internal("invalid cookie header"))?,
-    );
-    Ok(resp)
+    Ok(user)
 }
 
 /// The account for a first Google sign-in; its nickname is the email.

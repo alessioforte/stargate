@@ -31,6 +31,18 @@ export function oauthLogoutConfirmAction() {
   return `${cleanUrl(import.meta.env.VITE_API_URL) ?? ""}/oauth/logout/confirm`;
 }
 
+/**
+ * Starts signing in with a social provider (`google`, `github`). The server
+ * redirects to the provider and, once signed in, to the organization picker
+ * and then `returnTo` (an absolute URL, see `absoluteReturnTo`).
+ */
+export function socialSignInUrl(provider: string, returnTo: string | null) {
+  const start = `${getAuthAppConfig().apiUrl}/oauth/${encodeURIComponent(provider)}/start`;
+  return returnTo
+    ? `${start}?return_to=${encodeURIComponent(returnTo)}`
+    : start;
+}
+
 export function getAuthAppConfig(): AuthAppConfig {
   return {
     apiUrl: cleanUrl(import.meta.env.VITE_API_URL) ?? browserOrigin(),
