@@ -1,0 +1,47 @@
+[
+    {
+        "test-name": "oidcc-scope-profile",
+        "variant": "*",
+        "configuration-filename": "private-key-jwt-op.json",
+        "current-block": "",
+        "condition": "VerifyScopesReturnedInUserInfoClaims",
+        "expected-result": "warning",
+        "comment": "Stargate users have no website, gender, birthdate, zoneinfo, locale, middle_name or profile claims; the test user also has no picture or family_name."
+    },
+    {
+        "test-name": "oidcc-scope-email",
+        "variant": "*",
+        "configuration-filename": "private-key-jwt-op.json",
+        "current-block": "Verify authorization endpoint response",
+        "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+        "expected-result": "warning",
+        "comment": "Stargate includes scope-granted email claims in the ID token as well as userinfo, which relying parties rely on."
+    },
+    {
+        "test-name": "oidcc-alternate-happy-flow",
+        "variant": "*",
+        "configuration-filename": "private-key-jwt-op.json",
+        "current-block": "Verify authorization endpoint response",
+        "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+        "expected-result": "warning",
+        "comment": "Stargate includes scope-granted email claims in the ID token as well as userinfo, which relying parties rely on."
+    },
+    {
+        "test-name": "oidcc-claims-essential",
+        "variant": "*",
+        "configuration-filename": "private-key-jwt-op.json",
+        "current-block": "",
+        "condition": "EnsureUserInfoContainsName",
+        "expected-result": "warning",
+        "comment": "The claims request parameter is not supported (claims_parameter_supported=false); userinfo only returns name with the profile scope."
+    },
+    {
+        "test-name": "oidcc-server-rotate-keys",
+        "variant": "*",
+        "configuration-filename": "private-key-jwt-op.json",
+        "current-block": "",
+        "condition": "VerifyNewJwksHasNewSigningKey",
+        "expected-result": "failure",
+        "comment": "The test needs the OP's signing keys rotated while it runs; Stargate rotates them by adding a key and restarting (docs/oauth-oidc-provider-guide.md), which the unattended run cannot do."
+    }
+]

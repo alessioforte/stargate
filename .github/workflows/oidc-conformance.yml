@@ -228,12 +228,13 @@ jobs:
       # comprehensive plan (not part of certification) runs with clients that
       # authenticate with signed assertions at the token endpoint. It also
       # covers oidcc-server-rotate-keys, an expected failure here: it needs the
-      # signing keys rotated while it waits.
+      # signing keys rotated while it waits. The runner fails on expected
+      # results no module uses, so this plan has its own failures file.
       - name: Run private_key_jwt plan
         run: |
           "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/conformance-suite/scripts/run-test-plan.py" \
             --verbose --export-dir "$RUNNER_TEMP/results" \
-            --expected-failures-file .github/oidc-conformance/basic-op-expected-failures.json \
+            --expected-failures-file .github/oidc-conformance/private-key-jwt-expected-failures.json \
             --expected-skips-file .github/oidc-conformance/basic-op-expected-skips.json \
             "oidcc-test-plan[client_auth_type=private_key_jwt][response_type=code][response_mode=default][client_registration=static_client]" \
             "$RUNNER_TEMP/private-key-jwt-op.json"

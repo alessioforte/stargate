@@ -459,8 +459,10 @@ Logout OP plans, plus the comprehensive `oidcc-test-plan` with `private_key_jwt`
 configs (`client-jwk.mjs` keys); only the back-channel client registers a
 `backchannel_logout_uri`, since an unexpected back-channel post fails the RP-Initiated
 tests. The suite is served with a test-CA certificate that Stargate trusts
-(`OAUTH_CLIENT_CA_FILE`). Expected warnings/skips/failures (`oidcc-server-rotate-keys`
-needs a live key rotation) are in `.github/oidc-conformance/`.
+(`OAUTH_CLIENT_CA_FILE`). Expected warnings/skips/failures are in `.github/oidc-conformance/`;
+the runner fails on expected results no module produced, so the comprehensive plan has its
+own `private-key-jwt-expected-failures.json` (adds `oidcc-server-rotate-keys`, which needs a
+live key rotation).
 Docs: `docs/oauth-oidc-provider-guide.md`, `docs/oidc-conformance.md`.
 
 ## OTP, Passwordless Login, and MFA

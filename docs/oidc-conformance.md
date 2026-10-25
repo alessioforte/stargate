@@ -54,8 +54,9 @@ demand:
    [`client-jwk.mjs`](../.github/oidc-conformance/client-jwk.mjs) generates;
    the suite signs client assertions with the private half. The certification
    plans authenticate with client secrets only.
-7. Fails on any unexpected failure, warning, or skip, and uploads the exported
-   plan results and server logs as the `oidc-conformance-results` artifact.
+7. Fails on any unexpected failure, warning, or skip, and on any expected one
+   that no module produced, and uploads the exported plan results and server
+   logs as the `oidc-conformance-results` artifact.
 
 Current results:
 
@@ -90,7 +91,10 @@ Current results:
   plus `oidcc-redirect-uri-query-added` (`REVIEW`: the error page for a
   `redirect_uri` with an extra query) and `oidcc-server-rotate-keys`, an
   expected failure: it needs the OP's signing keys rotated while it waits,
-  and Stargate rotates them with a restart.
+  and Stargate rotates them with a restart. Because the runner also fails on
+  expected results that never happen, this plan has its own
+  [`private-key-jwt-expected-failures.json`](../.github/oidc-conformance/private-key-jwt-expected-failures.json)
+  (the Basic OP warnings plus this failure).
 
 ## Run it locally
 
@@ -145,14 +149,19 @@ venv/bin/python conformance-suite/scripts/run-test-plan.py \
   "oidcc-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" op.json
 venv/bin/python conformance-suite/scripts/run-test-plan.py \
   "oidcc-backchannel-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]" backchannel-op.json
-venv/bin/python conformance-suite/scripts/run-test-plan.py "${expected[@]}" \
+venv/bin/python conformance-suite/scripts/run-test-plan.py \
+  --expected-failures-file <stargate>/.github/oidc-conformance/private-key-jwt-expected-failures.json \
+  --expected-skips-file <stargate>/.github/oidc-conformance/basic-op-expected-skips.json \
   "oidcc-test-plan[client_auth_type=private_key_jwt][response_type=code][response_mode=default][client_registration=static_client]" \
   private-key-jwt-op.json
 ```
 
 `op-setup.sh` needs `jq`, `curl`, and (for `--private-key-jwt`) Node. The
-expected-results files serve every plan and match the config by name
-(`*op.json`).
+expected-results files match the config by name. The runner also fails when an
+expected result never happens, so each file lists only what its plans produce:
+`basic-op-expected-failures.json` for Basic and Form Post OP,
+`private-key-jwt-expected-failures.json` for the comprehensive plan, and
+`basic-op-expected-skips.json` for all three.
 
 The suite UI is at `https://localhost.emobix.co.uk:8443` (self-signed
 certificate). Stop it with
