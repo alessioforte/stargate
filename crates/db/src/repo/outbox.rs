@@ -771,6 +771,7 @@ mod postgres_tests {
     #[tokio::test]
     #[ignore = "requires a live PostgreSQL test database"]
     async fn audit_outbox_postgres_claims_in_order_and_marks_published() {
+        let _guard = crate::OUTBOX_CLAIM_LOCK.lock().await;
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(2)
             .connect(&database_url())

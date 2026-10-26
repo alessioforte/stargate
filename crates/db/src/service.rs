@@ -4320,11 +4320,16 @@ mod tests {
         let request_id = ulid::Ulid::generate().to_string();
         let context = admin_context(request_id.clone());
         let client_id = format!("audit-client-{}", ulid::Ulid::generate());
-        let oauth_hash = "POSTGRES_OAUTH_SECRET_HASH";
-        let rotated_hash = "POSTGRES_ROTATED_OAUTH_SECRET_HASH";
+        // Secret hashes are unique columns: fresh ones keep the test rerunnable
+        // on the same database.
+        let oauth_hash = format!("POSTGRES_OAUTH_SECRET_HASH_{}", ulid::Ulid::generate());
+        let rotated_hash = format!(
+            "POSTGRES_ROTATED_OAUTH_SECRET_HASH_{}",
+            ulid::Ulid::generate()
+        );
         let mut client = OAuthClient::new(
             client_id.clone(),
-            Some(oauth_hash.to_string()),
+            Some(oauth_hash.clone()),
             "Postgres Audit Client".to_string(),
             Some("POSTGRES_OAUTH_DESCRIPTION_SECRET".to_string()),
             "client_secret_basic".to_string(),
@@ -4346,7 +4351,7 @@ mod tests {
         svc.set_oauth_client_enabled(&client_id, false, context.clone())
             .await
             .expect("disable OAuth client");
-        svc.update_oauth_client_secret_hash(&client_id, Some(rotated_hash), context.clone())
+        svc.update_oauth_client_secret_hash(&client_id, Some(&rotated_hash), context.clone())
             .await
             .expect("rotate OAuth secret");
 
@@ -4458,8 +4463,8 @@ mod tests {
         }));
         let serialized = payloads.join("\n");
         for prohibited in [
-            oauth_hash,
-            rotated_hash,
+            oauth_hash.as_str(),
+            rotated_hash.as_str(),
             api_hash.as_str(),
             admin_hash.as_str(),
             "POSTGRES_OAUTH_DESCRIPTION_SECRET",
@@ -4509,16 +4514,11 @@ mod tests {
 
     // ── Relay claim / publish / mark cycle ───────────────────────────────────
 
-    /// Serializes the claim-based tests: cargo runs tests in parallel, and two
-    /// concurrent claimers would steal (and publish) each other's rows, making
-    /// presence assertions flaky. Insert-only tests don't need this.
-    static CLAIM_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
     /// A claimed row is absent from subsequent claims after `commit_published`.
     #[tokio::test]
     #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
     async fn relay_claim_publish_mark_cycle() {
-        let _guard = CLAIM_LOCK.lock().await;
+        let _guard = crate::OUTBOX_CLAIM_LOCK.lock().await;
         let svc = test_service().await;
 
         let req_id = ulid::Ulid::generate().to_string();
@@ -4561,7 +4561,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
     async fn concurrent_claims_are_disjoint() {
-        let _guard = CLAIM_LOCK.lock().await;
+        let _guard = crate::OUTBOX_CLAIM_LOCK.lock().await;
         let svc = test_service().await;
 
         // Insert 4 unpublished raw outbox rows.

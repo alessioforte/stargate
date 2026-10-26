@@ -34,3 +34,10 @@ pub mod service;
     all(feature = "postgres", not(feature = "sqlite")),
 ))]
 pub use db::{DbStore, InstanceBootstrapResult};
+
+/// Serializes the PostgreSQL tests that claim outbox rows, across every
+/// module of this crate: cargo runs tests in parallel, and each claim takes
+/// every pending row it can lock, so a concurrent claimer would steal (and
+/// publish) another test's rows. Insert-only tests don't need it.
+#[cfg(all(test, feature = "postgres"))]
+pub(crate) static OUTBOX_CLAIM_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
