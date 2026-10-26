@@ -83,7 +83,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `jwt_keyring.rs`), login guard, JWT revocation (`revocation.rs`).
 - `authz/`: ACE evaluation (`evaluation.rs`), rule management (`rules.rs`), the
   policies file (`storage.rs`), super-admin checks (`admin.rs`).
-- `sess/`: session registry (`registry.rs`), native token minting (`tokens.rs`).
+- `sess/`: sign-in (`issuance.rs`: `start_user_session` returns the tokens; `api`
+  adds the cookie and JSON), session registry (`registry.rs`), token minting (`tokens.rs`).
 - `user/`: signup requests, email verification, nicknames, display names (`profile.rs`).
 - `pwd/`: Argon2 wrappers (`hash.rs`), effective policy, expiry and history
   (`policy.rs`), reset requests (`reset.rs`).
@@ -258,8 +259,8 @@ Every function in `iam/sess/registry.rs` that ends sessions (`end_session` for a
 own logout, `revoke_session`, `revoke_all_sessions`, `revoke_org_sessions`) also
 notifies the linked clients through OIDC Back-Channel Logout (`iam/oidc/backchannel_logout.rs`).
 Each record also keeps how the user signed in (`amr`, RFC 8176), set by the sign-in
-path through `issue_user_session` / `NewSession`: `pwd`, `pwd otp mfa` (login MFA),
-`otp` (passwordless), `fed` (Google/GitHub). An email code verified in the session
+path through `start_user_session` (`iam/sess/issuance.rs`) / `NewSession`: `pwd`,
+`pwd otp mfa` (login MFA), `otp` (passwordless), `fed` (Google/GitHub). An email code verified in the session
 (`PUT /account/mfa/challenges/{id}`) calls `add_otp_factor` (`oidc::authentication::with_otp`);
 an org switch keeps the methods.
 

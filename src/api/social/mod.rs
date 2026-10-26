@@ -12,11 +12,12 @@ pub(crate) mod state;
 
 pub use state::post_state;
 
-use crate::api::account::session::{IssuedSession, start_user_session};
+use crate::api::account::session::{session_cookie, session_response};
 use crate::conf::features::{SelfServiceRefusal, features};
 use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::fed::state::{BrowserSignIn, OAuthState, create_oauth_state, take_oauth_state};
+use crate::iam::sess::issuance::{IssuedSession, start_user_session};
 use crate::web::request::RequestExt;
 use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
@@ -237,7 +238,7 @@ async fn browser_callback(
                 .unwrap_or_default();
             // Through the organization picker, as after a password sign-in.
             let location = crate::web::links::auth_app_redirect("select-organization", &params);
-            redirect(&location, &[session.cookie, state_cookie("", 0)])
+            redirect(&location, &[session_cookie(&session), state_cookie("", 0)])
         }
         Err(error) => {
             tracing::debug!(code = ?error.code, provider = provider.display_name(), "social sign-in refused");
@@ -253,9 +254,7 @@ async fn api_callback(
 ) -> Result<Response, ErrorResponse> {
     let code = nonempty(query.code.as_deref())
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SocialAuthorizationCodeMissing))?;
-    signed_in(provider, code, audit_request)
-        .await?
-        .into_response()
+    session_response(signed_in(provider, code, audit_request).await?)
 }
 
 async fn signed_in(
