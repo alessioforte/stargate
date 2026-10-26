@@ -175,6 +175,7 @@ cargo build --release --features cluster
 | Guide                                                                   | Covers                                                          |
 | ----------------------------------------------------------------------- | --------------------------------------------------------------- |
 | [Gateway config](docs/config-v1.md)                                     | Routers, services, middlewares, policies, limits, replay rules  |
+| [Gateway performance](docs/gateway-performance.md)                      | Opt-in benchmarks, recorded results, and budget sizing          |
 | [OAuth/OIDC provider](docs/oauth-oidc-provider-guide.md)                | Clients, flows, scopes, and claims                              |
 | [OIDC conformance](docs/oidc-conformance.md)                            | What the conformance suite checks in CI, and known gaps         |
 | [Features](docs/features.md)                                            | Sign-up modes, passwordless and social sign-in, the Console     |

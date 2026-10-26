@@ -54,7 +54,8 @@ stargate/
 │   └── mail/          # Transactional email templates (react-email, build-time only)
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
-│                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors
+│                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
+│                      #   gateway-performance (opt-in benchmarks and recorded results)
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
 ```
