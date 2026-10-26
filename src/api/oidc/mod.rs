@@ -4,7 +4,6 @@ pub(crate) mod consent;
 mod interactions;
 pub(crate) mod login;
 pub(crate) mod logout;
-mod shared;
 pub(crate) mod token;
 pub(crate) mod token_ops;
 pub(crate) mod userinfo;

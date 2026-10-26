@@ -779,7 +779,8 @@ JSON body plus `x-request-id` header:
 `message` is the English fallback; `params` are interpolation values; `type` is a
 broad category, not for application logic; `link` base is `DOCS_URL`. OAuth
 endpoints use the RFC 6749 `{ "error", "error_description" }` envelope
-(`OAuthErrorResponse`).
+(`OAuthErrorResponse`, `OAuthResult`, and the `oauth_*` constructors in
+`src/err/oauth.rs`).
 
 Statuses in use: 400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503, 504.
 

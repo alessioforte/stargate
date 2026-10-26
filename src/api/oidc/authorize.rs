@@ -1,10 +1,6 @@
 use super::interactions;
-use super::shared::{
-    AUTH_METHOD_NONE, AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN,
-    OAuthResult, PKCE_METHOD_S256, RESPONSE_CODE, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID,
-    oauth_bad_request, parse_space_delimited, resolve_audience, scope_contains,
-};
-use crate::err::OAuthErrorResponse;
+use crate::err::oauth::oauth_bad_request;
+use crate::err::{OAuthErrorResponse, OAuthResult};
 use crate::iam::oidc::codes::{self, AuthorizationCodeRecord};
 use crate::iam::oidc::request::AuthorizationRequest;
 use crate::web::request::RequestExt;
@@ -14,6 +10,11 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::{TimeZone, Utc};
 use http::header::{CACHE_CONTROL, CONTENT_TYPE, LOCATION, PRAGMA, SET_COOKIE};
+use oidc::scopes::{
+    AUTH_METHOD_NONE, AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN,
+    PKCE_METHOD_S256, RESPONSE_CODE, SCOPE_OFFLINE_ACCESS, SCOPE_OPENID,
+    contains as scope_contains, parse_space_delimited, resolve_audience,
+};
 use std::collections::HashSet;
 use store::Store;
 use url::Url;
@@ -784,8 +785,8 @@ async fn store_authorization_code(
 
 #[cfg(test)]
 mod tests {
-    use super::super::shared::{AUTH_METHOD_CLIENT_SECRET_BASIC, SCOPE_EMAIL, SCOPE_PROFILE};
     use super::*;
+    use oidc::scopes::{AUTH_METHOD_CLIENT_SECRET_BASIC, SCOPE_EMAIL, SCOPE_PROFILE};
 
     const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 

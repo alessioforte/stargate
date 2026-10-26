@@ -1,4 +1,4 @@
-use crate::err::OAuthErrorResponse;
+use crate::err::{OAuthErrorResponse, OAuthResult};
 use chrono::{DateTime, Utc};
 
 pub use oidc::refresh::RefreshTokenFamily;
@@ -14,7 +14,7 @@ pub async fn issue(
     nonce: Option<String>,
     authentication: oidc::authentication::Authentication,
     ttl_secs: u64,
-) -> Result<String, OAuthErrorResponse> {
+) -> OAuthResult<String> {
     oidc::refresh::issue(
         crate::data::store::use_store(),
         client_id,
@@ -34,14 +34,14 @@ pub async fn issue(
 pub async fn rotate(
     token: &str,
     client_id: &str,
-) -> Result<Option<(String, RefreshTokenFamily)>, OAuthErrorResponse> {
+) -> OAuthResult<Option<(String, RefreshTokenFamily)>> {
     oidc::refresh::rotate(crate::data::store::use_store(), token, client_id)
         .await
         .map_err(Into::into)
 }
 
 /// Drop a refresh-token family so none of its tokens rotate again.
-pub async fn revoke_family(family_id: &str) -> Result<(), OAuthErrorResponse> {
+pub async fn revoke_family(family_id: &str) -> OAuthResult<()> {
     use store::Store;
 
     crate::data::store::use_store()

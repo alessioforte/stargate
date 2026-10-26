@@ -1,11 +1,10 @@
-use super::client_auth::{ClientAuthForm, authenticate_client, presented_client};
-use super::shared::{
-    GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, OAuthResult,
-    SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, extract_basic_client_credentials, oauth_bad_request,
-    oauth_invalid_client, oauth_invalid_grant, oauth_unsupported_grant_type, parse_space_delimited,
-    resolve_audience, resolve_scopes, scope_contains,
+use super::client_auth::{
+    ClientAuthForm, authenticate_client, extract_basic_client_credentials, presented_client,
 };
-use crate::err::OAuthErrorResponse;
+use crate::err::oauth::{
+    oauth_bad_request, oauth_invalid_client, oauth_invalid_grant, oauth_unsupported_grant_type,
+};
+use crate::err::{OAuthErrorResponse, OAuthResult};
 use crate::iam::oidc::codes::{self, AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
 use crate::iam::oidc::refresh;
 use axum::Json;
@@ -14,6 +13,11 @@ use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use http::HeaderValue;
 use http::header::{CACHE_CONTROL, PRAGMA};
+use oidc::scopes::{
+    GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, SCOPE_OFFLINE_ACCESS,
+    SCOPE_OPENID, contains as scope_contains, parse_space_delimited, resolve_audience,
+    resolve_scopes,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]

@@ -19,8 +19,8 @@
 //! ignored.
 
 use super::authorize::{AuthorizedUser, current_authorized_user};
-use super::shared::{OAuthResult, oauth_bad_request};
-use crate::err::OAuthErrorResponse;
+use crate::err::oauth::oauth_bad_request;
+use crate::err::{OAuthErrorResponse, OAuthResult};
 use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Query, Request};

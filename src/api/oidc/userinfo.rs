@@ -1,8 +1,8 @@
-use super::shared::{SCOPE_EMAIL, SCOPE_OPENID, SCOPE_PROFILE, parse_space_delimited};
 use crate::err::{ErrorCode, ErrorResponse};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use http::header::AUTHORIZATION;
+use oidc::scopes::{SCOPE_EMAIL, SCOPE_OPENID, SCOPE_PROFILE, parse_space_delimited};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

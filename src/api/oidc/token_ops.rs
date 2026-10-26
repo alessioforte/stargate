@@ -1,13 +1,16 @@
-use super::client_auth::{ClientAuthForm, authenticate_client, presented_client};
-use super::shared::{
-    ClientCredentials, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE,
-    OAUTH_REVOKE_SCOPE, OAuthResult, extract_basic_client_credentials, oauth_bad_request,
+use super::client_auth::{
+    ClientAuthForm, ClientCredentials, authenticate_client, extract_basic_client_credentials,
+    presented_client,
 };
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
-use crate::err::OAuthErrorResponse;
+use crate::err::oauth::oauth_bad_request;
+use crate::err::{OAuthErrorResponse, OAuthResult};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
+use oidc::scopes::{
+    OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE, OAUTH_REVOKE_SCOPE,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use store::Store;
@@ -481,8 +484,8 @@ async fn revoke_api_key_token(
 
 #[cfg(test)]
 mod tests {
-    use super::super::shared::{AUTH_METHOD_CLIENT_SECRET_BASIC, GRANT_CLIENT_CREDENTIALS};
     use super::*;
+    use oidc::scopes::{AUTH_METHOD_CLIENT_SECRET_BASIC, GRANT_CLIENT_CREDENTIALS};
 
     fn test_client(client_id: &str) -> db::ent::OAuthClient {
         db::ent::OAuthClient::new(

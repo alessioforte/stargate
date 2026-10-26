@@ -10,7 +10,7 @@
 //! `api::oidc::interactions`.
 
 use super::request::AuthorizationRequest;
-use crate::err::OAuthErrorResponse;
+use crate::err::{OAuthErrorResponse, OAuthResult};
 use serde::{Deserialize, Serialize};
 use store::Store;
 
@@ -68,21 +68,21 @@ fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-pub async fn park(query: AuthorizationRequest) -> Result<String, OAuthErrorResponse> {
+pub async fn park(query: AuthorizationRequest) -> OAuthResult<String> {
     park_with(query, None, None).await
 }
 
 pub async fn park_for_consent(
     query: AuthorizationRequest,
     stage: ConsentStage,
-) -> Result<String, OAuthErrorResponse> {
+) -> OAuthResult<String> {
     park_with(query, Some(stage), None).await
 }
 
 pub async fn park_for_step_up(
     query: AuthorizationRequest,
     stage: StepUpStage,
-) -> Result<String, OAuthErrorResponse> {
+) -> OAuthResult<String> {
     park_with(query, None, Some(stage)).await
 }
 
@@ -90,7 +90,7 @@ async fn park_with(
     query: AuthorizationRequest,
     consent: Option<ConsentStage>,
     step_up: Option<StepUpStage>,
-) -> Result<String, OAuthErrorResponse> {
+) -> OAuthResult<String> {
     let id = format!("{}_{}", ulid::Ulid::generate(), pw::generate_api_key());
     let pending = PendingAuthorization {
         query,
@@ -102,7 +102,7 @@ async fn park_with(
     Ok(id)
 }
 
-async fn save(id: &str, pending: &PendingAuthorization) -> Result<(), OAuthErrorResponse> {
+async fn save(id: &str, pending: &PendingAuthorization) -> OAuthResult<()> {
     crate::data::store::use_store()
         .set(&key(id), pending, Some(INTERACTION_TTL_SECS))
         .await
@@ -116,7 +116,7 @@ pub async fn decide_consent(
     id: &str,
     user_id: &str,
     decision: ConsentDecision,
-) -> Result<bool, OAuthErrorResponse> {
+) -> OAuthResult<bool> {
     let Some(mut pending) = get(id).await? else {
         return Ok(false);
     };
@@ -132,7 +132,7 @@ pub async fn decide_consent(
     Ok(true)
 }
 
-pub async fn get(id: &str) -> Result<Option<PendingAuthorization>, OAuthErrorResponse> {
+pub async fn get(id: &str) -> OAuthResult<Option<PendingAuthorization>> {
     if !valid_id(id) {
         return Ok(None);
     }
@@ -143,7 +143,7 @@ pub async fn get(id: &str) -> Result<Option<PendingAuthorization>, OAuthErrorRes
 }
 
 /// Load and delete a parked request so it resumes at most once.
-pub async fn take(id: &str) -> Result<Option<PendingAuthorization>, OAuthErrorResponse> {
+pub async fn take(id: &str) -> OAuthResult<Option<PendingAuthorization>> {
     let Some(pending) = get(id).await? else {
         return Ok(None);
     };
