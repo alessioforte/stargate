@@ -1,10 +1,9 @@
 use super::ChangePasswordRequestBody;
-use crate::act;
+use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc;
-use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::etc::request_context::audit_request_from;
-use crate::fun::format_name;
+use crate::iam::user::profile::format_name;
+use crate::iam::{auth::jwt::jwt_config, pwd};
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use smtp::{Smtp, Template};
@@ -35,7 +34,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         })?;
 
     let token = body.token.clone();
-    let claims = etc::auth::jwt::jwt_config()
+    let claims = jwt_config()
         .validate_token(&token)
         .map_err(|_| ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid))?;
 
@@ -45,7 +44,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         .ok_or_else(|| ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid))?;
     let token_sid = claims.sid.clone().unwrap_or_default();
 
-    let stored_sid = act::get_change_password_request(&email)
+    let stored_sid = pwd::reset::get_change_password_request(&email)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -53,18 +52,18 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         return Err(ErrorResponse::new(ErrorCode::PasswordResetRequestInvalid));
     }
 
-    let user = crate::db::get_user_by_email(&email)
+    let user = crate::data::db::get_user_by_email(&email)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
 
-    act::password_policy::validate_for_user(&user, &body.password)
+    pwd::policy::validate_for_user(&user, &body.password)
         .await
         .map_err(|message| {
             ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
         })?;
 
-    let password = crate::etc::auth::password::hash_password(body.password.clone())
+    let password = pwd::hash::hash_password(body.password.clone())
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 
@@ -72,14 +71,14 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         db::ent::TrustedAuditActor::user(&user.id),
         audit_request,
     );
-    crate::db::change_password(&user.id, &password, audit_context)
+    crate::data::db::change_password(&user.id, &password, audit_context)
         .await
         .map_err(|e| {
             error!("Could not update password: {:?}", e);
             ErrorResponse::new(ErrorCode::PasswordUpdateFailed)
         })?;
 
-    let _ = act::delete_change_password_request(&email).await;
+    let _ = pwd::reset::delete_change_password_request(&email).await;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();

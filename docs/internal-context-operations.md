@@ -210,12 +210,12 @@ resources. The backend script uses only its disposable localhost Docker stores
 and checks actual Redis admission, rate/quota charging, and failure recovery.
 See [gateway-performance.md](gateway-performance.md) for scope and recorded results.
 
-The release tests live in `src/api/gateway/performance/`; Redis gateway
-correctness lives in `src/api/gateway/tests/cluster.rs`, and backend workloads
-live in `src/etc/performance.rs`. The runner selectors above are unchanged.
+The release tests live in `src/gate/performance/`; Redis gateway
+correctness lives in `src/gate/tests/cluster.rs`, and backend workloads
+live in `src/data/performance.rs`. The runner selectors above are unchanged.
 Signed dispatch and its tracing target belong to
-`stargate::api::gateway::upstream::internal_context`; attempt spans belong to
-`stargate::api::gateway::upstream::attempt`. Use the current namespaces for
+`stargate::gate::upstream::internal_context`; attempt spans belong to
+`stargate::gate::upstream::attempt`. Use the current namespaces for
 module-specific log filters. The span names and metric instruments remain
 stable through the gateway/shared-support refactor.
 

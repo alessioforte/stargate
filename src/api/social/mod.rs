@@ -12,12 +12,13 @@ pub(crate) mod state;
 
 pub use state::post_state;
 
-use crate::act::oauth_state::{self, BrowserSignIn, OAuthState};
-use crate::api::account::session::{IssuedSession, start_user_session};
+use crate::api::account::session::{session_cookie, session_response};
+use crate::conf::features::{SelfServiceRefusal, features};
+use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::features::{SelfServiceRefusal, features};
-use crate::etc::http::request::RequestExt;
-use crate::etc::request_context::audit_request_from;
+use crate::iam::fed::state::{BrowserSignIn, OAuthState, create_oauth_state, take_oauth_state};
+use crate::iam::sess::issuance::{IssuedSession, start_user_session};
+use crate::web::request::RequestExt;
 use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
 use db::ent::TrustedAuditRequest;
@@ -28,7 +29,7 @@ use serde::Deserialize;
 /// Binds a browser sign-in to the browser that started it, so a callback URL
 /// from someone else's sign-in cannot sign this browser in (login CSRF).
 const STATE_COOKIE: &str = "social_state";
-/// As long as the state itself (`act::oauth_state`).
+/// As long as the state itself (`iam::fed::state`).
 const STATE_COOKIE_MAX_AGE_SECS: u64 = 300;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,7 +103,7 @@ struct StartQuery {
 /// URLs cover it instead.
 fn request_origin(req: &Request) -> Option<String> {
     let host = req.headers().get(http::header::HOST)?.to_str().ok()?;
-    let scheme = if crate::etc::server::tls::enabled().unwrap_or(false) {
+    let scheme = if crate::srv::tls::enabled().unwrap_or(false) {
         "https"
     } else {
         "http"
@@ -142,12 +143,10 @@ async fn start(
             return_to,
         }),
     };
-    let state = oauth_state::create_oauth_state(&record)
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "failed to create OAuth state");
-            ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
-        })?;
+    let state = create_oauth_state(&record).await.map_err(|error| {
+        tracing::error!(%error, "failed to create OAuth state");
+        ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
+    })?;
     let location = provider.authorize_url(&state).map_err(|error| {
         tracing::error!(%error, provider = provider.display_name(), "cannot build the authorization URL");
         ErrorResponse::new(ErrorCode::SystemInternal)
@@ -180,12 +179,10 @@ async fn callback(req: Request, provider: Provider) -> Response {
         Err(_) => CallbackQuery::default(),
     };
     let record = match nonempty(query.state.as_deref()) {
-        Some(state) => oauth_state::take_oauth_state(state)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::error!(%error, "failed to read OAuth state");
-                None
-            }),
+        Some(state) => take_oauth_state(state).await.unwrap_or_else(|error| {
+            tracing::error!(%error, "failed to read OAuth state");
+            None
+        }),
         None => None,
     };
 
@@ -240,8 +237,8 @@ async fn browser_callback(
                 .map(|return_to| vec![("return_to", return_to)])
                 .unwrap_or_default();
             // Through the organization picker, as after a password sign-in.
-            let location = crate::fun::auth_app_redirect("select-organization", &params);
-            redirect(&location, &[session.cookie, state_cookie("", 0)])
+            let location = crate::web::links::auth_app_redirect("select-organization", &params);
+            redirect(&location, &[session_cookie(&session), state_cookie("", 0)])
         }
         Err(error) => {
             tracing::debug!(code = ?error.code, provider = provider.display_name(), "social sign-in refused");
@@ -257,9 +254,7 @@ async fn api_callback(
 ) -> Result<Response, ErrorResponse> {
     let code = nonempty(query.code.as_deref())
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SocialAuthorizationCodeMissing))?;
-    signed_in(provider, code, audit_request)
-        .await?
-        .into_response()
+    session_response(signed_in(provider, code, audit_request).await?)
 }
 
 async fn signed_in(
@@ -317,7 +312,7 @@ impl From<&ErrorResponse> for LoginError {
 fn login_failure(return_to: Option<&str>, error: LoginError) -> Response {
     let mut params = vec![("error", error.code())];
     params.extend(return_to.map(|return_to| ("return_to", return_to)));
-    let location = crate::fun::auth_app_redirect("login", &params);
+    let location = crate::web::links::auth_app_redirect("login", &params);
     redirect(&location, &[state_cookie("", 0)])
 }
 
@@ -340,7 +335,7 @@ fn redirect(location: &str, cookies: &[String]) -> Response {
 /// `SameSite=Lax`, so it comes back with the provider's top-level redirect
 /// to the callback. An empty value with `max_age` 0 clears it.
 fn state_cookie(value: &str, max_age_secs: u64) -> String {
-    let secure = if crate::etc::server::tls::enabled().unwrap_or(false) {
+    let secure = if crate::srv::tls::enabled().unwrap_or(false) {
         "; Secure"
     } else {
         ""
@@ -362,7 +357,7 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 fn safe_return_to(value: &str, own_origin: Option<String>) -> Option<String> {
     let mut bases = vec![
         jwt::issuer_from_env(),
-        crate::api::oidc::well_known::public_endpoint_base_url(),
+        crate::conf::public_base_url(),
         std::env::var("AUTH_PUBLIC_BASE_URL").unwrap_or_default(),
     ];
     for name in ["TRUSTED_ORIGINS", "CORS_ORIGINS"] {
@@ -404,13 +399,14 @@ fn return_to_within(value: &str, bases: &[String]) -> Option<String> {
 /// Each route answers `404 feature.disabled` while its provider has no
 /// credentials (`/oauth/state` while none has).
 pub fn router() -> axum::Router {
-    use crate::etc::features::{Feature, require_feature};
+    use crate::api::middleware::features::require_feature;
+    use crate::conf::features::Feature;
     use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{get, post};
 
     let state = axum::Router::new()
         .route("/oauth/state", post(post_state))
-        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware))
+        .layer(from_fn(crate::web::origin::trusted_origin_middleware))
         .layer(from_fn_with_state(Feature::Social, require_feature));
     let github = axum::Router::new()
         .route("/oauth/github", get(github::get_github))

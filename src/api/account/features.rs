@@ -31,7 +31,7 @@ pub struct FeaturesResponse {
     )
 )]
 pub async fn get_features() -> impl IntoResponse {
-    let features = crate::etc::features::features();
+    let features = crate::conf::features::features();
     (
         [(CACHE_CONTROL, "public, max-age=60")],
         Json(FeaturesResponse {

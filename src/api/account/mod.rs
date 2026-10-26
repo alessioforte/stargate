@@ -41,7 +41,8 @@ pub struct UserCredentials {
 }
 
 pub fn router() -> axum::Router {
-    use crate::etc::features::{Feature, require_feature};
+    use crate::api::middleware::features::require_feature;
+    use crate::conf::features::Feature;
     use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{delete, get, post, put};
 
@@ -84,7 +85,7 @@ pub fn router() -> axum::Router {
             "/account/consents/{client_id}",
             delete(consents::delete_consent),
         )
-        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware));
+        .layer(from_fn(crate::web::origin::trusted_origin_middleware));
 
     axum::Router::new()
         .merge(sensitive)

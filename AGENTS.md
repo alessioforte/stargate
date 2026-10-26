@@ -20,16 +20,19 @@ architecture changes.
 stargate/
 ├── src/               # Main binary
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
-│   ├── act/           # Stateful app flows: login guard, OTP/MFA, sessions, orgs, oauth state, signup,
-│   │                  #   email verify, change password, password policy, token revocation, ACE rules
-│   ├── api/           # Axum routers + handlers; gateway fallback service; auth/console app hosting
+│   ├── api/           # Axum routers + handlers; IAM middleware; apps/ auth + console hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
 │   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
-│   ├── db/            # DB pool init (feature-gated postgres/sqlite)
+│   ├── conf/          # Process-wide configuration: env readers, feature toggles, config dir
+│   ├── ctx/           # Request context, propagation drafts, audit/authz projections; sign/ signer
+│   ├── data/          # Persistence backends: db/ (SQL pool + repository service), store/
 │   ├── err/           # Error catalog (ErrorCode) -> JSON responses; OAuth error envelope
-│   ├── etc/           # Shared support: auth, http, request_context, observability, server, gate,
-│   │                  #   internal_context, store, env/input/limits/time helpers
-│   └── fun/           # Small helpers (token gen, cookies, base/auth-app URLs, shutdown signal, super-admin)
+│   ├── gate/          # Gateway runtime: snapshot lifecycle (snap/), request pipeline, transports
+│   ├── iam/           # Identity and access services: auth, authz (ACE), sessions, users,
+│   │                  #   passwords, OTP/MFA, federation state, OIDC client calls, bootstrap
+│   ├── obs/           # Logging and telemetry (traces, metrics, logs)
+│   ├── srv/           # Listeners, listener TLS, health, profile, banner, shutdown
+│   └── web/           # Shared HTTP support: request, proxies, CORS/origins, headers, cookies, links
 ├── crates/
 │   ├── ace/           # Access Control Engine (ABAC policy evaluation)
 │   ├── ctx/           # Signed internal-context (`stargate-context` header) contract, issuer, verifier
@@ -51,10 +54,29 @@ stargate/
 │   └── mail/          # Transactional email templates (react-email, build-time only)
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
-│                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors
+│                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
+│                      #   gateway-performance (opt-in benchmarks and recorded results)
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
 ```
+
+Module boundaries in `src/` (each top-level name is 3-4 characters):
+- `main.rs` composes the subsystems; `api` (HTTP) and `cli` invoke them.
+- A function lives with the subsystem whose rules it implements; there are no
+  catch-all modules (`utils`, `helpers`, `common`). Prefer private modules and a few
+  explicit `pub(crate) use` re-exports over glob re-exports.
+- `iam` imports neither `api` nor `gate`; the gateway uses `iam`. `web` is shared HTTP
+  plumbing and orchestrates no login, signup, or upstream request. `ctx` describes,
+  projects, and signs request facts; it decides no authorization. `data` depends on no
+  handler; audit events are written in the repository transaction and `aud` only
+  delivers them.
+- `conf` holds process-wide settings only; a subsystem's settings stay with it
+  (`gate/snap/config.rs`, `iam/otp/settings.rs`, `ctx/sign/settings.rs`, `iam/auth/jwt.rs`).
+- The local `gate` and `ctx` modules share their names with the `gate` and `ctx` crates
+  (as `data/db`, `data/store`, `iam/oidc`, `iam/otp` do one level down). Only the file
+  that declares the module sees the local one under the bare name (`main.rs`,
+  `data/mod.rs`, `iam/mod.rs`); elsewhere `gate::cfg` is the crate and the local module
+  is `crate::gate`.
 
 ## Key Architecture
 
@@ -70,38 +92,67 @@ stargate/
 - **OpenAPI**: utoipa
 - **Observability**: tracing + OpenTelemetry (OTLP traces, metrics, logs)
 
-### Shared Support (`src/etc/`)
+### Identity and Access (`src/iam/`)
 
-- `auth/`: access control, subjects, session JWT config, password helpers.
-  `identity.rs` owns verified facts; `verification.rs` owns credential/backing-state checks.
-- `http/`: request extraction, trusted proxies, origins/CORS (`origin.rs` trusted-origin
-  middleware), security and retry headers, IAM limits (`rate_limit.rs`), message envelopes,
-  the outgoing client for OAuth client endpoints (`client_endpoints.rs`).
-- `request_context/`: request metadata, ingress headers, lazy GeoIP; signed-context
+Application services for identity and access. `api` handlers and the gateway call
+them; `iam` imports neither `api` nor the local gateway runtime.
+
+- `auth/`: subjects, verified identity facts (`identity.rs`), credential/backing-state
+  checks (`verification.rs`), session JWT config and keyring (`jwt.rs`,
+  `jwt_keyring.rs`), login guard, JWT revocation (`revocation.rs`).
+- `authz/`: ACE evaluation (`evaluation.rs`), rule management (`rules.rs`), the
+  policies file (`storage.rs`), super-admin checks (`admin.rs`).
+- `sess/`: sign-in (`issuance.rs`: `start_user_session` returns the tokens; `api`
+  adds the cookie and JSON), session registry (`registry.rs`), token minting (`tokens.rs`).
+- `user/`: signup requests, email verification, nicknames, display names (`profile.rs`).
+- `pwd/`: Argon2 wrappers (`hash.rs`), effective policy, expiry and history
+  (`policy.rs`), reset requests (`reset.rs`).
+- `otp/`: OTP/MFA flows (see "OTP, Passwordless Login, and MFA").
+- `fed/`: social sign-in state (`state.rs`).
+- `oidc/`: provider state (codes, refresh families, parked interactions), the
+  authorization request, back-channel logout, client JWKS, the outgoing client for
+  OAuth client endpoints (`http_client.rs`).
+- `boot.rs`: first super-admin and Console client bootstrap. `email_throttle.rs`: see
+  "OTP, Passwordless Login, and MFA".
+
+### Shared Support (paths under `src/`)
+
+- `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
+  `CONFIG_PATH`), the public base URL (`public_base_url`: `OAUTH_BASE_URL`, else the
+  issuer; never the listening host), the hosted apps' base paths (`apps.rs`, read by the app routers,
+  links, and the Console's default callback), and feature toggles (`features.rs`, below).
+- `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
-- `observability/`: logging and the telemetry provider (`telemetry/metrics.rs`,
+  `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
+  validation, `signing.rs` bounded CPU workers.
+- `data/db/`: SQL pool init and the repository service wrappers (`svc.rs`).
+  `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs`
+  init/readiness.
+- `obs/`: logging and the telemetry provider (`telemetry/metrics.rs`,
   `telemetry/propagation.rs`).
-- `server/`: listeners, listener TLS, health lifecycle/probes (`health.rs`),
-  profile validation, startup banner.
-- `gate/`: gateway init, `config.rs` preparation/files, `runtime.rs` atomic snapshot
-  activation, `reload.rs` watchers, `resources.rs` process admission/memory permits/
-  tracked tasks, `transport/` prepared outgoing HTTP/TLS/mTLS clients.
-- `internal_context/`: signer runtime, `settings.rs`, `material.rs` key/JWKS validation,
-  `signing.rs` bounded CPU workers.
-- `store/`: selected profile interface; `memory.rs` persistence, `redis.rs` init/readiness.
-- `features.rs`: capabilities an operator can switch off, read and validated once at startup
-  (invalid values stop it). A disabled capability keeps its routes mounted and answers
-  `404 feature.disabled` (`require_feature` middleware): unmatched paths fall through to
-  the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
+- `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`), profile
+  validation, startup banner, shutdown signal and drain (`shutdown.rs`).
+- `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
+  trusted-origin middleware), security and retry headers, the session cookie
+  (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
+  (`limits.rs`), message envelopes.
+- `api/middleware/`: IAM limits (`rate_limit.rs`, see "API Overview") and the feature
+  gate (`features.rs`).
+- `conf/features.rs`: capabilities an operator can switch off, read and validated once at
+  startup (invalid values stop it). A disabled capability keeps its routes mounted and
+  answers `404 feature.disabled` (`require_feature` middleware and `disabled` answer in
+  `api/middleware/features.rs`): unmatched paths fall through to the gateway. Today:
+  `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
   `PASSWORDLESS_LOGIN_ENABLED` (see "OTP, Passwordless Login, and MFA"),
   `CONSOLE_ENABLED`, and each social provider (on when its client id and secret are both
   set; one alone stops startup). `GET /account/features` (public) lists the sign-in
   options for the hosted apps; `/admin/health` reports `features`.
   Guide: `docs/features.md`; plan: `.reports/feature-toggles-plan.md`.
 
-### Gateway Runtime (`src/api/gateway/`)
+### Gateway Runtime (`src/gate/`)
 
-Mounted as the Axum `fallback_service`. Request flow:
+`gate::init` builds the runtime; `gate::service` is mounted as the Axum
+`fallback_service`. Request flow:
 1. Pin the active `RuntimeSnapshot` (graph, balancers, limiter, prepared clients,
    version) and the independent `PolicySnapshot` (ACE engine + revision); acquire
    process admission (`503 gateway.overloaded` when exhausted).
@@ -120,12 +171,18 @@ Mounted as the Axum `fallback_service`. Request flow:
    `Idempotency-Key`), buffer only when needed, then execute HTTP, WebSocket, or
    direct response and apply response headers.
 
-Modules: `request.rs` (orchestration), `authentication.rs`, `middlewares.rs`,
-`routing/`, `policies/` (`ingress.rs`, `limits.rs`), `execution/` (`plan.rs`,
-`replay.rs`, `mirrors.rs`, `disposal.rs`), `upstream/` (`attempt.rs` attempt
-numbering + health feedback, `http.rs`, `headers.rs`, `internal_context.rs`
-per-attempt signing, `websocket/`), `response.rs`, `lifecycle/` (deadlines,
-cancellation, guarded bodies), `tests/`, `performance/` (opt-in workloads).
+Modules: `snap/` (snapshot lifecycle: `config.rs` preparation/files, `runtime.rs`
+atomic activation, `reload.rs` watchers, `body.rs` pinning during streaming),
+`resources.rs` (process admission, memory permits, tracked tasks), `transport/`
+(prepared outgoing HTTP/TLS/mTLS clients), `limits.rs` (ingress bucket key, limit
+selection/validation), `request.rs` (orchestration), `authentication.rs`,
+`middlewares.rs`, `routing/`, `policies/` (`ingress.rs`, `limits.rs`, `org_limits.rs`
+cached org overrides, invalidated through `gate::invalidate_org_limits`),
+`execution/` (`plan.rs`, `replay.rs`, `mirrors.rs`, `disposal.rs`), `upstream/`
+(`attempt.rs` attempt numbering + health feedback, `http.rs`, `headers.rs`,
+`internal_context.rs` per-attempt signing, `websocket/`), `response.rs`,
+`lifecycle/` (deadlines, cancellation, guarded bodies), `tests/`, `performance/`
+(opt-in workloads).
 
 ### Gateway Config v1
 
@@ -224,12 +281,12 @@ under `account:session-refresh:{sid}`. The store keeps a per-user index plus the
 `account:sessions:directory` hash (sid, org, times, linked OAuth client ids).
 Removing a session invalidates linked OAuth tokens for Stargate's own checks
 (admin, userinfo, introspection, OAuth refresh). Admin endpoints list/revoke sessions.
-Every function in `act/sessions.rs` that ends sessions (`end_session` for a user's
+Every function in `iam/sess/registry.rs` that ends sessions (`end_session` for a user's
 own logout, `revoke_session`, `revoke_all_sessions`, `revoke_org_sessions`) also
-notifies the linked clients through OIDC Back-Channel Logout (`act/backchannel_logout.rs`).
+notifies the linked clients through OIDC Back-Channel Logout (`iam/oidc/backchannel_logout.rs`).
 Each record also keeps how the user signed in (`amr`, RFC 8176), set by the sign-in
-path through `issue_user_session` / `NewSession`: `pwd`, `pwd otp mfa` (login MFA),
-`otp` (passwordless), `fed` (Google/GitHub). An email code verified in the session
+path through `start_user_session` (`iam/sess/issuance.rs`) / `NewSession`: `pwd`,
+`pwd otp mfa` (login MFA), `otp` (passwordless), `fed` (Google/GitHub). An email code verified in the session
 (`PUT /account/mfa/challenges/{id}`) calls `add_otp_factor` (`oidc::authentication::with_otp`);
 an org switch keeps the methods.
 
@@ -285,7 +342,11 @@ Admin-managed clients only (no dynamic registration).
 
 Source layout:
 - `crates/oidc`: pure provider logic (no Axum or DB driver dependency).
-- `src/api/oidc`: Axum bindings for provider endpoints and well-known metadata.
+- `src/iam/oidc`: provider state on the selected store (authorization codes + PKCE check
+  in `codes.rs`, refresh families in `refresh.rs`, parked requests and their consent/
+  step-up stages in `interactions.rs`), the authorization request (`request.rs`).
+- `src/api/oidc`: Axum bindings for provider endpoints and well-known metadata;
+  `interactions.rs` there is the browser side (interaction cookie, hosted page URLs).
 - `src/api/social`: Google/GitHub consumer login. Browsers start at
   `/oauth/{provider}/start?return_to=` (state bound to an HttpOnly `social_state` cookie,
   `Path=/oauth`), the callback `/oauth/{provider}` signs in (`start_user_session`, amr
@@ -317,8 +378,9 @@ Provider login (one login UI, the hosted auth app):
   newer than the parked request satisfies `prompt=login` / `max_age`.
 - The `apps/auth` build prerenders the login, logout, and signed-out routes
   (`scripts/prerender.mjs`, `app/entry-server.tsx`) into `<route>.html`, served by
-  `src/api/auth_app.rs` (same list) for `/auth/<route>`; `app/main.tsx` hydrates them. Keep the first render of hydrated
-  routes free of URL/storage reads (`lib/hydration.ts` `useHydrated`).
+  `src/api/apps/auth.rs` (same list) for `/auth/<route>`; `app/main.tsx` hydrates them.
+  Keep the first render of hydrated routes free of URL/storage reads
+  (`lib/hydration.ts` `useHydrated`).
 - Without JS the form posts natively to `POST /oauth/login` (`src/api/oidc/login.rs`):
   password-only, redirects only; MFA / expired password -> `error=javascript_required`.
   The OIDC conformance suite's HtmlUnit browser uses this path.
@@ -341,7 +403,7 @@ Consent (`src/api/oidc/consent.rs`, SPA `app/routes/consent.tsx`, JS only):
 - Writes take the user's `TrustedAuditContext` (actor `user`, application scope; the
   service rejects other users) and emit `oauth_consent.granted` / `.updated` / `.revoked`.
 
-Logout (`src/api/oidc/logout.rs`, RP-Initiated Logout 1.0; `act/backchannel_logout.rs`,
+Logout (`src/api/oidc/logout.rs`, RP-Initiated Logout 1.0; `iam/oidc/backchannel_logout.rs`,
 Back-Channel Logout 1.0):
 - `/oauth/logout` takes `id_token_hint` (may be expired), `client_id`,
   `post_logout_redirect_uri` (exact match against the client's
@@ -385,7 +447,7 @@ Authorization request handling:
   MFA unavailable (`email_mfa_available`) or a resumed email-code sign-in -> the actual level.
 - A replayed authorization code revokes the access token and refresh family it issued.
 
-Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
+Signing keys (`src/iam/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
 - `.stargate/jwks/keys/<kid>/{private.pem,public.pem,alg}`; `JWT_KID` is the active
   key (signs). Every other dir is verification-only: published in the JWKS (active
   first) and accepted for tokens with its `kid`. Verification picks the key by `kid`
@@ -439,7 +501,7 @@ Client notes:
   Assertions (`crates/oidc/src/client_assertion.rs`, `jwt::decode_with_jwk_set`):
   asymmetric algs, `iss = sub = client_id`, `aud` the issuer, the token endpoint or the
   called endpoint, `exp` <= 1h ahead, `jti` required and single-use. `jwks_uri` sets are
-  cached 5 min and refetched on an unknown key at most every 10s (`act/client_jwks.rs`).
+  cached 5 min and refetched on an unknown key at most every 10s (`iam/oidc/client_jwks.rs`).
 - Confidential clients require PKCE unless `attrs.require_pkce = false`; a code
   issued without a challenge rejects a `code_verifier` (downgrade protection).
 - First-party clients skip consent with `attrs.first_party` (the only accepted name;
@@ -470,7 +532,7 @@ Docs: `docs/oauth-oidc-provider-guide.md`, `docs/oidc-conformance.md`.
 Source layout:
 - `crates/otp`: HOTP (RFC 4226), TOTP (RFC 6238), Base32, provisioning URIs,
   short-lived message OTP records for email/SMS.
-- `src/act/otp`: policy evaluation, challenge persistence, verification, delivery,
+- `src/iam/otp`: policy evaluation, challenge persistence, verification, delivery,
   throttling, service flows. Workflow changes go here. `settings.rs` reads and validates
   the `MFA_*` / `EMAIL_OTP_*` variables once at startup (`otp_settings()`; strict values,
   `sms`/`totp` rejected); `EMAIL_OTP_PEPPER` is required when MFA is mandatory for someone
@@ -510,7 +572,7 @@ Delivery: `smtp::Smtp` on `spawn_blocking`; passwordless delivery is backgrounde
 against enumeration timing. Only email OTP is wired; TOTP/HOTP and SMS exist as
 primitives only.
 
-Per-recipient email throttle (`src/act/email_throttle.rs`): unauthenticated flows
+Per-recipient email throttle (`src/iam/email_throttle.rs`): unauthenticated flows
 that email an address from the request body (`POST /account/credentials`,
 `POST /signup`, `POST /account/login/otp/email`) charge
 `account:email:recipient:{flow}:{sha256(lowercased, trimmed address)}` before any
@@ -534,7 +596,7 @@ response time does not reveal the account either; delivery errors are only logge
 A pending request (`change_password_requests:{email}`, 1h) is reused and its link
 resent, bounded by the per-recipient throttle, so a failed delivery can be retried.
 
-Account creation (`SIGNUP_MODE`, `src/etc/features.rs`; administrators can always use
+Account creation (`SIGNUP_MODE`, `src/conf/features.rs`; administrators can always use
 `POST /admin/users`):
 - `open`: self-registration (`POST /signup`) and accounts created by a first social
   sign-in, limited to `SIGNUP_ALLOWED_DOMAINS` when set (exact domains; rejected with
@@ -543,9 +605,10 @@ Account creation (`SIGNUP_MODE`, `src/etc/features.rs`; administrators can alway
   and social sign-in works for existing accounts only (`403 social.account_not_provisioned`).
 - `closed`: no invitations either; `/admin/users/invitations` and `GET`/`PUT /signup` are
   `404 feature.disabled`.
-- Pending signups record their `origin` (`self_service` / `invitation`, `act::SignupOrigin`):
-  a self-registration completes only while the mode is still `open` and its domain allowed
-  (`api::signup::ensure_completable`), so a stricter mode applies to signups under way.
+- Pending signups record their `origin` (`self_service` / `invitation`,
+  `iam::user::signup::SignupOrigin`): a self-registration completes only while the mode is
+  still `open` and its domain allowed (`api::signup::ensure_completable`), so a stricter
+  mode applies to signups under way.
 
 Signup (`POST /signup`, `open` only): always `200 signup.requested` for a valid address
 (`400 request.invalid` otherwise). In the background a new address gets the
@@ -556,9 +619,9 @@ response nor its timing reveals the account. Admin invitations
 
 Emails: templates come from `apps/mail/emails/*.tsx` (`npm run export` writes
 `.stargate/transactional/*.html`). Action URLs are built by the server
-(`src/fun/auth_links.rs`: `signup_url`, `change_password_url`, `login_url`, based on
-`AUTH_PUBLIC_BASE_URL` or the local auth app) and rendered as `{{link}}`; `{{name}}`
-is the only other placeholder.
+(`src/web/links.rs`: `signup_url`, `change_password_url`, `login_url`, based on
+`AUTH_PUBLIC_BASE_URL`, else the public base URL plus the auth app base path) and
+rendered as `{{link}}`; `{{name}}` is the only other placeholder.
 
 ## Database Schema (migrations/)
 
@@ -582,8 +645,9 @@ every insert/update):
   data and never log in.
 - Flows keyed by an address (signup, invitations, forgot/reset, passwordless,
   social login) use `get_user_by_email`; session flows (profile, refresh) use
-  `sub_id`. API writes pre-check with `act::nicknames::ensure_nickname_available`
-  (`400 user.nickname_invalid`, `409 user.nickname_already_exists`).
+  `sub_id`. API writes pre-check with
+  `iam::user::nicknames::ensure_nickname_available` (`400 user.nickname_invalid`,
+  `409 user.nickname_already_exists`).
 - Social sign-in creates accounts only with `SIGNUP_MODE=open` (see "Passwords").
 - Social sign-in matches and creates accounts by an email the provider verified, else
   `403 social.email_unverified`: GitHub's primary verified email from `/user/emails`
@@ -591,8 +655,8 @@ every insert/update):
   bearer access token). `crates/idp`: `GitHubUser` / `GoogleUser`.
 - A first GitHub sign-in takes the GitHub username as nickname, or the first free of
   `<login>_2` ... `_9`, then `<login>_<random>`, then the email
-  (`act::nicknames::available_nickname`; GitHub usernames have no `_`). A nickname taken
-  between the check and the insert is retried (`src/api/social/github.rs`).
+  (`iam::user::nicknames::available_nickname`; GitHub usernames have no `_`). A nickname
+  taken between the check and the insert is retried (`src/api/social/github.rs`).
 Store keys derived from emails use the canonical form too.
 
 IDs are ULIDs stored as text. `outbox_events` holds the immutable JSON payload,
@@ -611,7 +675,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `JWT_KID` | `stargate-current` | Active signing key (`.stargate/jwks/keys/<kid>/`) |
 | `JWT_ID_TOKEN_KID` | - | Optional RS256 key that signs ID tokens (EC or HMAC active key) |
 | `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
-| `OAUTH_BASE_URL` | issuer | Public base URL for provider endpoint links |
+| `OAUTH_BASE_URL` | issuer | Public base URL (`conf::public_base_url`): provider endpoints, email links, OpenAPI `servers` |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
 | `OAUTH_CLIENT_CA_FILE` | - | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`) |
 | `INTERNAL_CONTEXT_*` | see `.env.example` | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue |
@@ -631,9 +695,9 @@ the same logical columns on PostgreSQL and SQLite.
 | `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
 | `SERVER_DRAIN_DELAY_SECS` | 5 | Readiness-off delay before listeners close |
 | `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | Connection drain deadline |
-| `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH` | `.stargate/apps/auth` / `/auth` | Hosted auth app files and mount |
+| `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH` | `.stargate/apps/auth` / `/auth` | Hosted auth app files and mount (empty or `/` = default) |
 | `AUTH_PUBLIC_BASE_URL` | - | Public auth app URL when hosted elsewhere |
-| `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount |
+| `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount (empty or `/` = default) |
 | `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` | invite / - | Who may create accounts (`open`, `invite`, `closed`); domains for `open` |
 | `PASSWORDLESS_LOGIN_ENABLED` | false | Passwordless email-code login (needs `EMAIL_OTP_PEPPER`; not with `MFA_MODE=required`) |
 | `CONSOLE_ENABLED` | true | Serve the Console app (`false`: its path answers `404 feature.disabled`) |
@@ -714,14 +778,14 @@ need no database. Docs: `docs/cli.md`.
 `api::server_router` applies the IAM ingress limit and merges probe routes outside
 it; `main.rs` adds security headers, tracing, CORS, compression, and normalize-path.
 
-IAM limits (`src/etc/http/rate_limit.rs`): every IAM route charges the client IP's
+IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's
 ingress allowance, the same `ingress:ip:{ip}` bucket as the gateway, before
 credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
 `/admin/*` principals then charge their own `default` bucket, keyed
 `lim:admin:user:{id}` / `lim:admin:key:{id}` in `extract_admin_authorization`
 (`429 iam.rate_limit_exceeded`, scope `subject`), so one admin key cannot throttle
 the console or other keys behind the same IP. Limiter failures: `503 iam.limiter_unavailable`.
-Login brute force is handled separately by `act/login_guard.rs` and OTP throttles.
+Login brute force is handled separately by `iam/auth/login_guard.rs` and OTP throttles.
 
 ## Error Response Format
 
@@ -741,7 +805,8 @@ JSON body plus `x-request-id` header:
 `message` is the English fallback; `params` are interpolation values; `type` is a
 broad category, not for application logic; `link` base is `DOCS_URL`. OAuth
 endpoints use the RFC 6749 `{ "error", "error_description" }` envelope
-(`OAuthErrorResponse`).
+(`OAuthErrorResponse`, `OAuthResult`, and the `oauth_*` constructors in
+`src/err/oauth.rs`).
 
 Statuses in use: 400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503, 504.
 
@@ -750,8 +815,8 @@ Statuses in use: 400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503
 `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-scope`, `x-quota-limit`,
 `x-quota-remaining`, `x-quota-scope`, `retry-after`. Scope is `subject`, `org`, `ip`,
 or `ingress`. `429` `retry-after` is whole seconds rounded up (missing duration
--> 60); `503` uses 10. Shared helpers (`ingress_key`, `limited_response`,
-`insert_limit_headers`) live in `src/etc/limits.rs`.
+-> 60); `503` uses 10. Shared helpers: `ingress_key` in `src/gate/limits.rs`,
+`limited_response` and `insert_limit_headers` in `src/web/limits.rs`.
 
 ## Graceful Shutdown
 
@@ -888,5 +953,5 @@ a new reusable primitive.
 - GeoIP (MaxMind GeoLite2-City) is available but not a v1 route matcher.
 - Metrics use bounded labels only (no URLs, credentials, request IDs); see
   `docs/config-v1.md` for gateway instruments.
-- Gateway performance workloads are opt-in (`src/api/gateway/performance/`,
+- Gateway performance workloads are opt-in (`src/gate/performance/`,
   `benches/scripts/`).

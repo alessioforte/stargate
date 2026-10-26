@@ -1,6 +1,6 @@
 use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
-use crate::etc::gate::Gate;
+use crate::gate::Gate;
 use axum::Json;
 use axum::extract::Request;
 use chrono::Utc;
@@ -106,15 +106,15 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
         .get::<Arc<Gate>>()
         .cloned()
         .ok_or_else(|| ErrorResponse::internal("gateway runtime is unavailable"))?;
-    let stats = crate::db::get_admin_overview_stats()
+    let stats = crate::data::db::get_admin_overview_stats()
         .await
         .map_err(ErrorResponse::internal)?;
-    let session_summary = crate::act::sessions::session_summary()
+    let session_summary = crate::iam::sess::registry::session_summary()
         .await
         .map_err(ErrorResponse::internal)?;
     let runtime = req
         .extensions()
-        .get::<Arc<crate::etc::gate::RuntimeSnapshot>>()
+        .get::<Arc<crate::gate::RuntimeSnapshot>>()
         .cloned()
         .unwrap_or_else(|| gate.snapshot());
     let graph = &runtime.core.graph;

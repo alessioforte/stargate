@@ -1,8 +1,8 @@
+use crate::data::store::use_store;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::auth::jwt::jwt_config;
-use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::etc::http::request::RequestExt;
-use crate::etc::store::use_store;
+use crate::iam::auth::jwt::jwt_config;
+use crate::web::messages::{MessageCode, MessageResponse};
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::Request;
 use store::Store;
@@ -29,13 +29,13 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let sid = claims.sid.clone().unwrap_or_default();
-    crate::act::token_revocation::revoke_claims(&claims)
+    crate::iam::auth::revocation::revoke_claims(&claims)
         .await
         .map_err(ErrorResponse::internal)?;
 
     match claims.sub_id.as_deref() {
         Some(user_id) => {
-            crate::act::sessions::end_session(user_id, &sid)
+            crate::iam::sess::registry::end_session(user_id, &sid)
                 .await
                 .map_err(ErrorResponse::internal)?;
         }
@@ -63,11 +63,11 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
     )
 )]
 pub async fn post_logout_all(req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
-    use crate::etc::http::request::RequestExt;
+    use crate::web::request::RequestExt;
 
-    let session = crate::act::sessions::authenticated_session(req.get_token()).await?;
+    let session = crate::iam::sess::registry::authenticated_session(req.get_token()).await?;
 
-    let revoked = crate::act::sessions::revoke_all_sessions(&session.user.id)
+    let revoked = crate::iam::sess::registry::revoke_all_sessions(&session.user.id)
         .await
         .map_err(ErrorResponse::internal)?;
     tracing::info!(user_id = %session.user.id, revoked, "user logged out everywhere");

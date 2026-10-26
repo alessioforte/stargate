@@ -2,15 +2,15 @@ use super::{
     authorization::{self, Permission},
     extract_json,
 };
-use crate::act::access_control_rules::{
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::gate::Gate;
+use crate::iam::authz::rules::{
     AccessControlRulesResponse, EvaluateAccessControlCapabilitiesRequest,
     EvaluateAccessControlCapabilitiesResponse, EvaluateAccessControlRequest,
     EvaluateAccessControlResponse, UpdateAccessControlRulesRequest,
     ValidateAccessControlRulesRequest, ValidateAccessControlRulesResponse, evaluate_capabilities,
     evaluate_rules, read_rules, update_rules, validate_rules,
 };
-use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::gate::Gate;
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -53,7 +53,7 @@ pub async fn update_access_control_rules(req: Request) -> Result<Response, Error
     let gate = gate_from_request(&req)?;
     let payload: UpdateAccessControlRulesRequest = extract_json(req).await?;
     let response = update_rules(payload)?;
-    crate::etc::gate::reload_policy_engine(gate.as_ref())?;
+    crate::gate::reload_policy_engine(gate.as_ref())?;
 
     Ok(Json(response).into_response())
 }

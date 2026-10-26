@@ -128,7 +128,7 @@ fn non_admin_entrypoints_keep_the_frozen_actor_and_scope_construction() {
         ),
         (
             "cli_bootstrap",
-            include_str!("../../../src/fun/super_admin.rs"),
+            include_str!("../../../src/iam/boot.rs"),
             "TrustedAuditBoundary::control_plane()",
         ),
         (

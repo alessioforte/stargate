@@ -22,8 +22,6 @@ services:
       - "127.0.0.1:5050:5050"
     environment:
       JWT_ISSUER: http://localhost:5050
-      # Docker sets HOSTNAME to the container ID; Stargate uses it in links.
-      HOSTNAME: localhost
       AUTH_PUBLIC_BASE_URL: http://localhost:5050/auth
       CONFIG_PATH: /app/.stargate/config
       POSTGRES_ENDPOINT: postgres:5432

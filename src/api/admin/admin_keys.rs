@@ -7,7 +7,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -128,13 +128,13 @@ pub async fn get_admin_keys(req: Request) -> Result<Response, ErrorResponse> {
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    let keys = crate::db::get_all_admin_keys(limit, offset)
+    let keys = crate::data::db::get_all_admin_keys(limit, offset)
         .await
         .map_err(ErrorResponse::internal)?
         .into_iter()
         .map(admin_key_schema)
         .collect();
-    let total = crate::db::count_admin_keys()
+    let total = crate::data::db::count_admin_keys()
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -165,7 +165,7 @@ pub async fn get_admin_key(mut req: Request) -> Result<Response, ErrorResponse> 
 
     let id: String = extract_path(&mut req).await?;
 
-    let key = crate::db::get_admin_key_by_id(&id)
+    let key = crate::data::db::get_admin_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -200,10 +200,14 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
     let secret = pw::generate_admin_key();
     let key_hash = pw::hash_api_key(&secret);
 
-    let admin_key =
-        crate::db::create_admin_key(&key_hash, payload.label.clone(), stored_permissions, ctx)
-            .await
-            .map_err(ErrorResponse::internal)?;
+    let admin_key = crate::data::db::create_admin_key(
+        &key_hash,
+        payload.label.clone(),
+        stored_permissions,
+        ctx,
+    )
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     let response = CreateAdminKeyResponse {
         id: admin_key.id,
@@ -243,7 +247,7 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
     let permissions =
         canonical_permission_strings(validate_admin_key_permissions(&payload.permissions)?);
 
-    let mut existing = crate::db::get_admin_key_by_id(&id)
+    let mut existing = crate::data::db::get_admin_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -256,7 +260,7 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
 
     existing.set_permissions(permissions);
 
-    let updated = crate::db::update_admin_key(existing, ctx)
+    let updated = crate::data::db::update_admin_key(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -282,7 +286,7 @@ pub async fn revoke_admin_key(mut req: Request) -> Result<Response, ErrorRespons
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
-    let key = crate::db::get_admin_key_by_id(&id)
+    let key = crate::data::db::get_admin_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -293,7 +297,7 @@ pub async fn revoke_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         return Err(ErrorResponse::new(ErrorCode::AdminKeyAlreadyRevoked));
     }
 
-    crate::db::revoke_admin_key(&id, ctx)
+    crate::data::db::revoke_admin_key(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -319,7 +323,7 @@ pub async fn delete_admin_key(mut req: Request) -> Result<Response, ErrorRespons
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
-    if crate::db::get_admin_key_by_id(&id)
+    if crate::data::db::get_admin_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -327,7 +331,7 @@ pub async fn delete_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         return Err(ErrorResponse::new(ErrorCode::AdminKeyNotFound).with_param("id", id));
     }
 
-    crate::db::delete_admin_key(&id, ctx)
+    crate::data::db::delete_admin_key(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 

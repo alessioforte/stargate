@@ -2,10 +2,10 @@ use super::{
     authorization::{self, Permission},
     extract_json, extract_optional_json, extract_path, extract_query,
 };
-use crate::act::{PendingSignupProfile, SignupOrigin};
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::iam::user::signup::{PendingSignupProfile, SignupOrigin};
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -125,7 +125,7 @@ async fn get_membership_organization(
     let Some(membership) = membership else {
         return Ok(None);
     };
-    crate::db::get_organization_by_id(&membership.organization_id)
+    crate::data::db::get_organization_by_id(&membership.organization_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -264,19 +264,19 @@ pub async fn get_users(req: Request) -> Result<Response, ErrorResponse> {
 
     let (users, total) = match &query.q {
         Some(q) if !q.trim().is_empty() => {
-            let users = crate::db::search_users(q, limit, offset)
+            let users = crate::data::db::search_users(q, limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_search_users(q)
+            let total = crate::data::db::count_search_users(q)
                 .await
                 .map_err(ErrorResponse::internal)?;
             (users, total)
         }
         _ => {
-            let users = crate::db::get_all_users(limit, offset)
+            let users = crate::data::db::get_all_users(limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_users()
+            let total = crate::data::db::count_users()
                 .await
                 .map_err(ErrorResponse::internal)?;
             (users, total)
@@ -306,7 +306,7 @@ pub async fn get_users(req: Request) -> Result<Response, ErrorResponse> {
 pub async fn get_super_admin_users(req: Request) -> Result<Response, ErrorResponse> {
     authorization::require(&req, Permission::SuperAdminsRead)?;
 
-    let users = crate::db::get_super_admin_users()
+    let users = crate::data::db::get_super_admin_users()
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -331,7 +331,7 @@ pub async fn get_user(mut req: Request) -> Result<Response, ErrorResponse> {
 
     let id: String = extract_path(&mut req).await?;
 
-    let user = crate::db::get_user_by_id(&id)
+    let user = crate::data::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
@@ -365,7 +365,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
     let organization = get_membership_organization(membership.as_ref()).await?;
 
-    if let Ok(Some(_)) = crate::db::get_user_by_email(&payload.email).await {
+    if let Ok(Some(_)) = crate::data::db::get_user_by_email(&payload.email).await {
         return Err(ErrorResponse::new(ErrorCode::UserEmailAlreadyExists)
             .with_param("email", payload.email.clone()));
     }
@@ -374,16 +374,16 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .nickname
         .clone()
         .unwrap_or_else(|| payload.email.clone());
-    crate::act::nicknames::ensure_nickname_available(&nickname, &payload.email, None).await?;
+    crate::iam::user::nicknames::ensure_nickname_available(&nickname, &payload.email, None).await?;
 
     let password_validation = match organization.as_ref() {
-        Some(organization) => crate::act::password_policy::validate_for_organization(
+        Some(organization) => crate::iam::pwd::policy::validate_for_organization(
             organization,
             &payload.password,
             Some(&nickname),
             Some(&payload.email),
         ),
-        None => crate::act::password_policy::validate_global(
+        None => crate::iam::pwd::policy::validate_global(
             &payload.password,
             Some(&nickname),
             Some(&payload.email),
@@ -393,7 +393,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
     })?;
 
-    let hashed = crate::etc::auth::password::hash_password(payload.password.clone())
+    let hashed = crate::iam::pwd::hash::hash_password(payload.password.clone())
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
     let profile = Profile::new(payload.email.clone(), nickname)
@@ -403,9 +403,10 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .phone_number(payload.phone_number.clone())
         .attrs(payload.attrs.clone());
 
-    let user = crate::db::create_user(profile, CredentialType::Password, &hashed, membership, ctx)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let user =
+        crate::data::db::create_user(profile, CredentialType::Password, &hashed, membership, ctx)
+            .await
+            .map_err(ErrorResponse::internal)?;
 
     Ok((StatusCode::CREATED, Json(user)).into_response())
 }
@@ -436,7 +437,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
     get_membership_organization(membership.as_ref()).await?;
 
-    if crate::db::get_user_by_email(&payload.email)
+    if crate::data::db::get_user_by_email(&payload.email)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -450,7 +451,8 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
         .as_deref()
         .filter(|value| !value.trim().is_empty())
     {
-        crate::act::nicknames::ensure_nickname_available(nickname, &payload.email, None).await?;
+        crate::iam::user::nicknames::ensure_nickname_available(nickname, &payload.email, None)
+            .await?;
     }
 
     let profile = PendingSignupProfile {
@@ -496,7 +498,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let id: String = extract_path(&mut req).await?;
     let payload: UpdateUserRequest = extract_json(req).await?;
 
-    let existing = crate::db::get_user_by_id(&id)
+    let existing = crate::data::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
@@ -504,7 +506,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     // An unchanged nickname that mirrored the old email follows the new one
     // in the repository; an explicit nickname is checked here.
     if let Some(nickname) = &payload.nickname {
-        crate::act::nicknames::ensure_nickname_available(
+        crate::iam::user::nicknames::ensure_nickname_available(
             nickname,
             &payload.email,
             Some(&existing.id),
@@ -526,7 +528,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     .attrs(existing.attrs.clone());
     updated.id = existing.id;
 
-    let user = crate::db::update_user(updated, ctx)
+    let user = crate::data::db::update_user(updated, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -556,7 +558,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let id: String = extract_path(&mut req).await?;
     let payload: PatchUserRequest = extract_json(req).await?;
 
-    let mut existing = crate::db::get_user_by_id(&id)
+    let mut existing = crate::data::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
@@ -571,7 +573,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
         existing.family_name = payload.family_name.clone();
     }
     if let Some(nickname) = &payload.nickname {
-        crate::act::nicknames::ensure_nickname_available(
+        crate::iam::user::nicknames::ensure_nickname_available(
             nickname,
             &existing.email,
             Some(&existing.id),
@@ -586,7 +588,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
         existing.phone_number = payload.phone_number.clone();
     }
 
-    let user = crate::db::update_user(existing, ctx)
+    let user = crate::data::db::update_user(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -617,14 +619,14 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
     let payload: UserAttrsRequest = extract_json(req).await?;
     super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
 
-    let mut existing = crate::db::get_user_by_id(&id)
+    let mut existing = crate::data::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     existing.attrs = payload.attrs.clone();
 
-    let user = crate::db::update_user(existing, ctx)
+    let user = crate::data::db::update_user(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -654,7 +656,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: UserAttrsRequest = extract_json(req).await?;
 
-    let mut existing = crate::db::get_user_by_id(&id)
+    let mut existing = crate::data::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
@@ -672,7 +674,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
 
     super::limit_attrs::validate(&runtime.core.limiter, &existing.attrs, false)?;
 
-    let user = crate::db::update_user(existing, ctx)
+    let user = crate::data::db::update_user(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -698,26 +700,26 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
-    let user = crate::db::get_user_by_id(&id)
+    let user = crate::data::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
-    let is_super = crate::db::is_super_admin_user_id(&user.id)
+    let is_super = crate::data::db::is_super_admin_user_id(&user.id)
         .await
         .map_err(ErrorResponse::internal)?;
     if is_super {
         return Err(ErrorResponse::new(ErrorCode::UserSuperAdminDeleteForbidden));
     }
 
-    let revoked_key_hashes = crate::db::delete_user(&id, ctx)
+    let revoked_key_hashes = crate::data::db::delete_user(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
     // Kill everything that could still authenticate as this user: cached
     // subjects of the just-revoked keys, and every live session.
-    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
-    if let Err(error) = crate::act::sessions::revoke_all_sessions(&id).await {
+    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
+    if let Err(error) = crate::iam::sess::registry::revoke_all_sessions(&id).await {
         tracing::error!(user_id = %id, "failed to revoke sessions after user delete: {error}");
     }
 
@@ -742,14 +744,14 @@ pub async fn get_user_organizations(mut req: Request) -> Result<Response, ErrorR
 
     let id: String = extract_path(&mut req).await?;
 
-    let exists = crate::db::get_user_by_id(&id)
+    let exists = crate::data::db::get_user_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?;
     if exists.is_none() {
         return Err(ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()));
     }
 
-    let orgs = crate::db::get_user_organizations(&id)
+    let orgs = crate::data::db::get_user_organizations(&id)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -781,7 +783,7 @@ pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorR
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    if crate::db::get_organization_by_id(&org_id)
+    if crate::data::db::get_organization_by_id(&org_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -791,10 +793,10 @@ pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorR
         );
     }
 
-    let users = crate::db::get_organization_users_paginated(&org_id, limit, offset)
+    let users = crate::data::db::get_organization_users_paginated(&org_id, limit, offset)
         .await
         .map_err(ErrorResponse::internal)?;
-    let total = crate::db::count_organization_users(&org_id)
+    let total = crate::data::db::count_organization_users(&org_id)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -833,14 +835,14 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
     let payload: Option<OrganizationMembershipRequest> = extract_optional_json(req).await?;
     let role = normalize_membership_role(payload.and_then(|p| p.role))?;
 
-    if crate::db::get_user_by_id(&user_id)
+    if crate::data::db::get_user_by_id(&user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
         return Err(ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", user_id.clone()));
     }
-    if crate::db::get_organization_by_id(&org_id)
+    if crate::data::db::get_organization_by_id(&org_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -850,7 +852,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
         );
     }
 
-    let membership_exists = crate::db::get_user_organization(&user_id, &org_id)
+    let membership_exists = crate::data::db::get_user_organization(&user_id, &org_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some();
@@ -867,7 +869,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
     };
     authorization.require(permission)?;
 
-    crate::db::add_user_to_organization(&user_id, &org_id, &role, mutation, ctx)
+    crate::data::db::add_user_to_organization(&user_id, &org_id, &role, mutation, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -896,14 +898,14 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
 
-    if crate::db::get_user_by_id(&user_id)
+    if crate::data::db::get_user_by_id(&user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
         return Err(ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", user_id.clone()));
     }
-    if crate::db::get_organization_by_id(&org_id)
+    if crate::data::db::get_organization_by_id(&org_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -913,15 +915,15 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
         );
     }
 
-    let revoked_key_hashes = crate::db::remove_user_from_organization(&user_id, &org_id, ctx)
+    let revoked_key_hashes = crate::data::db::remove_user_from_organization(&user_id, &org_id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
     // The membership is gone: org-bound keys were revoked in the same
     // transaction (purge their cached subjects), and sessions acting in
     // this org die now. Org-less and other-org sessions survive.
-    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
-    if let Err(error) = crate::act::sessions::revoke_org_sessions(&user_id, &org_id).await {
+    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
+    if let Err(error) = crate::iam::sess::registry::revoke_org_sessions(&user_id, &org_id).await {
         tracing::error!(
             user_id = %user_id,
             org_id = %org_id,

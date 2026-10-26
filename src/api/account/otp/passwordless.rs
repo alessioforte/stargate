@@ -1,11 +1,11 @@
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use axum::response::Response;
 
-use crate::act::otp::service::{complete_passwordless_email_otp, start_passwordless_email_otp};
-use crate::act::otp::types::{
+use crate::iam::otp::service::{complete_passwordless_email_otp, start_passwordless_email_otp};
+use crate::iam::otp::types::{
     OtpChallengeResponse, PasswordlessEmailOtpRequestBody, PasswordlessEmailOtpVerifyRequestBody,
 };
 

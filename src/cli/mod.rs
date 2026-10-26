@@ -1,7 +1,7 @@
 mod internal_context;
 mod jwt;
 
-use crate::db;
+use crate::data::db;
 use clap::{Args, Parser, Subcommand};
 use internal_context::InternalContextArgs;
 use jwt::JwtArgs;
@@ -110,7 +110,7 @@ async fn run_bootstrap(args: BootstrapArgs) -> io::Result<()> {
         .await
         .map_err(|error| io::Error::other(format!("database initialization failed: {error}")))?;
 
-    let super_admin_exists = crate::fun::super_admin_exists()
+    let super_admin_exists = crate::iam::boot::super_admin_exists()
         .await
         .map_err(io::Error::other)?;
     let credentials_supplied = args.email.is_some()
@@ -161,7 +161,7 @@ async fn run_bootstrap(args: BootstrapArgs) -> io::Result<()> {
         // Generated passwords are exempt: 40 chars of upper+lower+digits
         // is categorically stronger than the composition policy.
         if generated_password.is_none() {
-            crate::act::password_policy::validate_global(
+            crate::iam::pwd::policy::validate_global(
                 &password,
                 args.nickname.as_deref(),
                 Some(&email),
@@ -171,11 +171,12 @@ async fn run_bootstrap(args: BootstrapArgs) -> io::Result<()> {
         (Some(email), Some(password), generated_password)
     };
 
-    let client_id = crate::fun::resolve_console_oauth_client_id(args.oauth_client_id)
+    let client_id = crate::iam::boot::resolve_console_oauth_client_id(args.oauth_client_id)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let redirect_uri = crate::fun::resolve_console_oauth_redirect_uri(args.oauth_redirect_uri)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let result = crate::fun::bootstrap_instance(
+    let redirect_uri =
+        crate::iam::boot::resolve_console_oauth_redirect_uri(args.oauth_redirect_uri)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let result = crate::iam::boot::bootstrap_instance(
         email,
         password,
         args.name,

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -108,23 +108,23 @@ pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
 
     let (keys, total) = match &query.q {
         Some(q) if !q.trim().is_empty() => {
-            let keys = crate::db::search_api_keys(q, limit, offset)
+            let keys = crate::data::db::search_api_keys(q, limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_search_api_keys(q)
+            let total = crate::data::db::count_search_api_keys(q)
                 .await
                 .map_err(ErrorResponse::internal)?;
             (keys, total)
         }
         _ => {
             if let Some(user_id) = &query.user_id {
-                let keys = crate::db::get_api_keys_by_user_id(user_id)
+                let keys = crate::data::db::get_api_keys_by_user_id(user_id)
                     .await
                     .map_err(ErrorResponse::internal)?;
                 let total = keys.len() as i64;
                 (keys, total)
             } else if let Some(sa_id) = &query.service_account_id {
-                let keys = crate::db::get_api_keys_by_service_account_id(sa_id)
+                let keys = crate::data::db::get_api_keys_by_service_account_id(sa_id)
                     .await
                     .map_err(ErrorResponse::internal)?;
                 let total = keys.len() as i64;
@@ -132,19 +132,19 @@ pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
             } else if let Some(owner_type) = &query.owner_type {
                 match owner_type.as_str() {
                     "user" => {
-                        let keys = crate::db::get_all_user_api_keys(limit, offset)
+                        let keys = crate::data::db::get_all_user_api_keys(limit, offset)
                             .await
                             .map_err(ErrorResponse::internal)?;
-                        let total = crate::db::count_user_api_keys()
+                        let total = crate::data::db::count_user_api_keys()
                             .await
                             .map_err(ErrorResponse::internal)?;
                         (keys, total)
                     }
                     "service_account" => {
-                        let keys = crate::db::get_all_service_account_api_keys(limit, offset)
+                        let keys = crate::data::db::get_all_service_account_api_keys(limit, offset)
                             .await
                             .map_err(ErrorResponse::internal)?;
-                        let total = crate::db::count_service_account_api_keys()
+                        let total = crate::data::db::count_service_account_api_keys()
                             .await
                             .map_err(ErrorResponse::internal)?;
                         (keys, total)
@@ -154,10 +154,10 @@ pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
                     }
                 }
             } else {
-                let keys = crate::db::get_all_api_keys(limit, offset)
+                let keys = crate::data::db::get_all_api_keys(limit, offset)
                     .await
                     .map_err(ErrorResponse::internal)?;
-                let total = crate::db::count_api_keys()
+                let total = crate::data::db::count_api_keys()
                     .await
                     .map_err(ErrorResponse::internal)?;
                 (keys, total)
@@ -192,7 +192,7 @@ pub async fn get_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
 
     let id: String = extract_path(&mut req).await?;
 
-    let key = crate::db::get_api_key_by_id(&id)
+    let key = crate::data::db::get_api_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -234,7 +234,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     }
 
     if let (Some(user_id), Some(org_id)) = (&payload.user_id, &payload.org_id) {
-        let membership = crate::db::get_user_organization(user_id, org_id)
+        let membership = crate::data::db::get_user_organization(user_id, org_id)
             .await
             .map_err(ErrorResponse::internal)?;
         if membership.is_none() {
@@ -248,7 +248,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     let key_hash = pw::hash_api_key(&secret);
 
     let api_key = if let Some(user_id) = &payload.user_id {
-        crate::db::create_user_api_key(
+        crate::data::db::create_user_api_key(
             user_id,
             &key_hash,
             &payload.label,
@@ -259,7 +259,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?
     } else if let Some(sa_id) = &payload.service_account_id {
-        crate::db::create_service_account_api_key(
+        crate::data::db::create_service_account_api_key(
             sa_id,
             &key_hash,
             &payload.label,
@@ -304,18 +304,18 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
-    let Some(api_key) = crate::db::get_api_key_by_id(&id)
+    let Some(api_key) = crate::data::db::get_api_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
     else {
         return Err(ErrorResponse::new(ErrorCode::ApiKeyNotFound).with_param("id", id));
     };
 
-    crate::db::delete_api_key(&id, ctx)
+    crate::data::db::delete_api_key(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .delete(&api_key.key_hash)
         .await
         .map_err(ErrorResponse::internal)?;
@@ -342,7 +342,7 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
-    let api_key = crate::db::get_api_key_by_id(&id)
+    let api_key = crate::data::db::get_api_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -353,11 +353,11 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         return Err(ErrorResponse::new(ErrorCode::ApiKeyAlreadyRevoked));
     }
 
-    crate::db::revoke_api_key(&id, ctx)
+    crate::data::db::revoke_api_key(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .delete(&api_key.key_hash)
         .await
         .map_err(ErrorResponse::internal)?;
@@ -389,7 +389,7 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
     super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
 
-    let mut existing = crate::db::get_api_key_by_id(&id)
+    let mut existing = crate::data::db::get_api_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -398,7 +398,7 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
 
     existing.attrs = payload.attrs.clone();
 
-    let updated = crate::db::update_api_key(existing, ctx)
+    let updated = crate::data::db::update_api_key(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -428,7 +428,7 @@ pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResp
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
 
-    let mut existing = crate::db::get_api_key_by_id(&id)
+    let mut existing = crate::data::db::get_api_key_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -448,7 +448,7 @@ pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResp
 
     super::limit_attrs::validate(&runtime.core.limiter, &existing.attrs, false)?;
 
-    let updated = crate::db::update_api_key(existing, ctx)
+    let updated = crate::data::db::update_api_key(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 

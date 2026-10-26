@@ -1,5 +1,5 @@
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::MessageCode;
+use crate::web::messages::MessageCode;
 use axum::Json;
 use axum::extract::Path;
 use axum::response::{IntoResponse, Response};

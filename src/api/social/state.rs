@@ -18,13 +18,12 @@ pub struct StateResponse {
     )
 )]
 pub async fn post_state() -> Result<Json<StateResponse>, ErrorResponse> {
-    let state = crate::act::oauth_state::create_oauth_state(
-        &crate::act::oauth_state::OAuthState::default(),
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to create OAuth state: {}", e);
-        ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
-    })?;
+    let state =
+        crate::iam::fed::state::create_oauth_state(&crate::iam::fed::state::OAuthState::default())
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to create OAuth state: {}", e);
+                ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
+            })?;
     Ok(Json(StateResponse { state }))
 }

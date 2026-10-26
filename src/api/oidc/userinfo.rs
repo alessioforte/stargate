@@ -1,8 +1,8 @@
-use super::shared::{SCOPE_EMAIL, SCOPE_OPENID, SCOPE_PROFILE, parse_space_delimited};
 use crate::err::{ErrorCode, ErrorResponse};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use http::header::AUTHORIZATION;
+use oidc::scopes::{SCOPE_EMAIL, SCOPE_OPENID, SCOPE_PROFILE, parse_space_delimited};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -71,7 +71,7 @@ fn scope_set(scope: Option<&str>) -> Result<HashSet<String>, ErrorResponse> {
 }
 
 async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>), ErrorResponse> {
-    let claims = crate::etc::auth::jwt::jwt_config()
+    let claims = crate::iam::auth::jwt::jwt_config()
         .validate_oauth_access_token(token, None)
         .map_err(|_| bearer_unauthorized("invalid token"))?;
 
@@ -79,7 +79,7 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
         return Err(bearer_unauthorized("token does not represent a user"));
     }
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(ErrorResponse::internal)?
     {
@@ -89,7 +89,7 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
         let Some(user_id) = claims.sub_id.as_deref() else {
             return Err(bearer_unauthorized("invalid token"));
         };
-        if !crate::act::sessions::is_session_active(sid, user_id)
+        if !crate::iam::sess::registry::is_session_active(sid, user_id)
             .await
             .map_err(ErrorResponse::internal)?
         {
@@ -100,7 +100,7 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
     let Some(client_id) = claims.azp.as_deref() else {
         return Err(bearer_unauthorized("invalid token"));
     };
-    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
+    let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(ErrorResponse::internal)?
     else {
@@ -124,7 +124,10 @@ fn userinfo_from_user(user: &db::ent::User, scopes: &HashSet<String>) -> UserInf
     let name = if include_profile {
         let given_name = user.given_name.clone().unwrap_or_default();
         let family_name = user.family_name.clone().unwrap_or_default();
-        Some(crate::fun::format_name(&given_name, &family_name))
+        Some(crate::iam::user::profile::format_name(
+            &given_name,
+            &family_name,
+        ))
     } else {
         None
     };
@@ -176,7 +179,7 @@ async fn handle_userinfo(token: String) -> Result<Json<UserInfoResponse>, ErrorR
         return Err(bearer_unauthorized("invalid token"));
     }
 
-    let Some(user) = crate::db::get_user_by_id(user_id)
+    let Some(user) = crate::data::db::get_user_by_id(user_id)
         .await
         .map_err(ErrorResponse::internal)?
     else {

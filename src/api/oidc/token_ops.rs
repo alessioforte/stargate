@@ -1,13 +1,16 @@
-use super::client_auth::{ClientAuthForm, authenticate_client, presented_client};
-use super::shared::{
-    ClientCredentials, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE,
-    OAUTH_REVOKE_SCOPE, OAuthResult, extract_basic_client_credentials, oauth_bad_request,
+use super::client_auth::{
+    ClientAuthForm, ClientCredentials, authenticate_client, extract_basic_client_credentials,
+    presented_client,
 };
-use crate::err::OAuthErrorResponse;
-use crate::etc::request_context::{audit_request_from, take_trusted_audit_context_from};
+use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
+use crate::err::oauth::oauth_bad_request;
+use crate::err::{OAuthErrorResponse, OAuthResult};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
+use oidc::scopes::{
+    OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE, OAUTH_REVOKE_SCOPE,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use store::Store;
@@ -170,14 +173,14 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
 
     match validate_revocable_jwt(&form.token) {
         Ok(claims) => {
-            crate::act::token_revocation::revoke_claims(&claims)
+            crate::iam::auth::revocation::revoke_claims(&claims)
                 .await
                 .map_err(OAuthErrorResponse::internal)?;
             if claims.typ.as_deref() == Some("refresh")
                 && let (Some(user_id), Some(sid)) =
                     (claims.sub_id.as_deref(), claims.sid.as_deref())
             {
-                crate::act::sessions::end_session(user_id, sid)
+                crate::iam::sess::registry::end_session(user_id, sid)
                     .await
                     .map_err(OAuthErrorResponse::internal)?;
             }
@@ -235,7 +238,7 @@ fn scope_from_attrs(attrs: &JsonValue) -> Option<String> {
 
 async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     if let Some(sid) = claims.sid.as_deref() {
-        let active = crate::etc::store::use_store()
+        let active = crate::data::store::use_store()
             .exists(sid)
             .await
             .map_err(OAuthErrorResponse::internal)?;
@@ -247,7 +250,7 @@ async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     let Some(client_id) = claims.azp.as_deref() else {
         return Ok(claims.sid.is_some());
     };
-    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
+    let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -261,7 +264,7 @@ async fn introspect_jwt_claims(claims: jwt::Claims) -> OAuthResult<Introspection
         return Ok(IntrospectionResponse::inactive());
     }
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(OAuthErrorResponse::internal)?
         || !jwt_session_active(&claims).await?
@@ -293,7 +296,7 @@ async fn introspect_api_key(token: &str) -> OAuthResult<IntrospectionResponse> {
     }
 
     let hash = pw::hash_api_key(token);
-    let Some(key) = crate::db::get_api_key_by_hash(&hash)
+    let Some(key) = crate::data::db::get_api_key_by_hash(&hash)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -327,7 +330,7 @@ async fn introspect_token(token: &str) -> OAuthResult<IntrospectionResponse> {
 }
 
 fn validate_introspectable_jwt(token: &str) -> Result<jwt::Claims, jwt::JwtValidationError> {
-    let jwt = crate::etc::auth::jwt::jwt_config();
+    let jwt = crate::iam::auth::jwt::jwt_config();
     jwt.validate_oauth_access_token(token, None)
         .or_else(|_| jwt.validate_session_access_token(token))
         .or_else(|_| jwt.validate_session_refresh_token(token))
@@ -450,7 +453,7 @@ async fn revoke_api_key_token(
     }
 
     let hash = pw::hash_api_key(token);
-    let Some(auth) = crate::db::get_api_key_auth_by_hash(&hash)
+    let Some(auth) = crate::data::db::get_api_key_auth_by_hash(&hash)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -468,10 +471,10 @@ async fn revoke_api_key_token(
         auth.org_id.as_deref(),
     )?;
 
-    crate::db::revoke_api_key(&auth.api_key.id, context)
+    crate::data::db::revoke_api_key(&auth.api_key.id, context)
         .await
         .map_err(OAuthErrorResponse::internal)?;
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .delete(&hash)
         .await
         .map_err(OAuthErrorResponse::internal)?;
@@ -481,8 +484,8 @@ async fn revoke_api_key_token(
 
 #[cfg(test)]
 mod tests {
-    use super::super::shared::{AUTH_METHOD_CLIENT_SECRET_BASIC, GRANT_CLIENT_CREDENTIALS};
     use super::*;
+    use oidc::scopes::{AUTH_METHOD_CLIENT_SECRET_BASIC, GRANT_CLIENT_CREDENTIALS};
 
     fn test_client(client_id: &str) -> db::ent::OAuthClient {
         db::ent::OAuthClient::new(

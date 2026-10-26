@@ -1,9 +1,8 @@
-use crate::act;
-use crate::act::email_throttle::EmailFlow;
 use crate::err::ErrorResponse;
-use crate::etc;
-use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::fun::{change_password_url, format_name};
+use crate::iam::email_throttle::{EmailFlow, check_and_record_email_request};
+use crate::iam::{auth::jwt::jwt_config, pwd};
+use crate::web::messages::{MessageCode, MessageResponse};
+use crate::{iam::user::profile::format_name, web::links::change_password_url};
 use axum::Json;
 use db::ent::User;
 use serde::{Deserialize, Serialize};
@@ -31,24 +30,23 @@ pub struct ForgotPasswordRequestBody {
 pub async fn post_credentials(
     Json(body): Json<ForgotPasswordRequestBody>,
 ) -> Result<Json<MessageResponse>, ErrorResponse> {
-    act::email_throttle::check_and_record_email_request(EmailFlow::PasswordReset, &body.email)
-        .await?;
+    check_and_record_email_request(EmailFlow::PasswordReset, &body.email).await?;
 
     // Email only: a nickname or phone number would select a recipient outside
     // the per-recipient throttle's bucket.
-    let user = crate::db::get_user_by_email(&body.email)
+    let user = crate::data::db::get_user_by_email(&body.email)
         .await
         .map_err(ErrorResponse::internal)?;
 
     if let Some(user) = user {
         // Reuse the pending request so a lost or failed email can be resent;
         // the per-recipient throttle bounds the repeats.
-        let sid = match act::get_change_password_request(&user.email)
+        let sid = match pwd::reset::get_change_password_request(&user.email)
             .await
             .map_err(ErrorResponse::internal)?
         {
             Some(sid) => sid,
-            None => act::create_change_password_request(&user.email)
+            None => pwd::reset::create_change_password_request(&user.email)
                 .await
                 .map_err(ErrorResponse::internal)?,
         };
@@ -75,7 +73,7 @@ fn send_reset_email(user: &User, sid: String) -> anyhow::Result<()> {
         .sub_id(user.id.clone())
         .email(user.email.clone())
         .sid(sid);
-    let token = etc::auth::jwt::jwt_config().generate_token(&claim)?;
+    let token = jwt_config().generate_token(&claim)?;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();

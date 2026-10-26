@@ -4,7 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -84,19 +84,19 @@ pub async fn get_organizations(req: Request) -> Result<Response, ErrorResponse> 
 
     let (orgs, total) = match &query.q {
         Some(q) if !q.trim().is_empty() => {
-            let orgs = crate::db::search_organizations(q, limit, offset)
+            let orgs = crate::data::db::search_organizations(q, limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_search_organizations(q)
+            let total = crate::data::db::count_search_organizations(q)
                 .await
                 .map_err(ErrorResponse::internal)?;
             (orgs, total)
         }
         _ => {
-            let orgs = crate::db::get_all_organizations(limit, offset)
+            let orgs = crate::data::db::get_all_organizations(limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_organizations()
+            let total = crate::data::db::count_organizations()
                 .await
                 .map_err(ErrorResponse::internal)?;
             (orgs, total)
@@ -130,7 +130,7 @@ pub async fn get_organization(mut req: Request) -> Result<Response, ErrorRespons
 
     let id: String = extract_path(&mut req).await?;
 
-    let org = crate::db::get_organization_by_id(&id)
+    let org = crate::data::db::get_organization_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -167,7 +167,7 @@ pub async fn create_organization(mut req: Request) -> Result<Response, ErrorResp
         return Err(ErrorResponse::new(ErrorCode::OrganizationNameRequired));
     }
 
-    let org = crate::db::create_organization(
+    let org = crate::data::db::create_organization(
         &payload.name,
         payload.description.as_deref(),
         payload.attrs.as_ref(),
@@ -209,7 +209,7 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
         return Err(ErrorResponse::new(ErrorCode::OrganizationNameRequired));
     }
 
-    if crate::db::get_organization_by_id(&id)
+    if crate::data::db::get_organization_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -219,7 +219,7 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
         );
     }
 
-    let org = crate::db::update_organization(
+    let org = crate::data::db::update_organization(
         &id,
         &payload.name,
         payload.description.as_deref(),
@@ -231,7 +231,7 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
 
     // Attr changes (e.g. limit overrides) must reach the gateway on the
     // next request, not after the cache TTL.
-    crate::act::orgs::invalidate(&id).await;
+    crate::gate::invalidate_org_limits(&id).await;
 
     Ok(Json(org).into_response())
 }
@@ -255,7 +255,7 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
-    if crate::db::get_organization_by_id(&id)
+    if crate::data::db::get_organization_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -267,18 +267,20 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
 
     // Snapshot the member list first: after the delete the membership rows
     // are gone, and each member's sessions active in this org must die.
-    let members = crate::db::get_organization_users(&id)
+    let members = crate::data::db::get_organization_users(&id)
         .await
         .map_err(ErrorResponse::internal)?;
 
-    let revoked_key_hashes = crate::db::delete_organization(&id, ctx)
+    let revoked_key_hashes = crate::data::db::delete_organization(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
-    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
-    crate::act::orgs::invalidate(&id).await;
+    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::gate::invalidate_org_limits(&id).await;
 
     for member in &members {
-        if let Err(error) = crate::act::sessions::revoke_org_sessions(&member.user.id, &id).await {
+        if let Err(error) =
+            crate::iam::sess::registry::revoke_org_sessions(&member.user.id, &id).await
+        {
             tracing::error!(
                 user_id = %member.user.id,
                 org_id = %id,

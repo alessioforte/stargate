@@ -1,10 +1,10 @@
 use super::{AuthResponse, UserCredentials};
-use crate::act::login_guard;
 use crate::api::account::credentials::expired::maybe_password_expired_response;
 use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
 use crate::api::account::session::issue_user_session;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::request::RequestExt;
+use crate::iam::auth::login_guard;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use axum::response::Response;
@@ -72,7 +72,7 @@ pub(crate) async fn verify_login_password(
 ) -> Result<(db::ent::User, db::ent::Credential), ErrorResponse> {
     let login_identifier = username.trim();
 
-    let user = crate::db::get_user_by_login(login_identifier)
+    let user = crate::data::db::get_user_by_login(login_identifier)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -99,9 +99,9 @@ pub(crate) async fn verify_login_password(
         // Verify against a dummy hash so the unknown-user path takes about as
         // long as the valid-user path, preventing username enumeration via
         // response timing.
-        let _ = crate::etc::auth::password::verify_password(
+        let _ = crate::iam::pwd::hash::verify_password(
             password.to_string(),
-            crate::etc::auth::password::dummy_hash(),
+            crate::iam::pwd::hash::dummy_hash(),
         )
         .await;
         login_guard::record_failed_attempt(&throttle)
@@ -110,14 +110,14 @@ pub(crate) async fn verify_login_password(
         return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
     };
 
-    let user_credential = crate::db::get_credential(&user.id, CredentialType::Password)
+    let user_credential = crate::data::db::get_credential(&user.id, CredentialType::Password)
         .await
         .map_err(ErrorResponse::internal)?;
 
     let Some(user_credential) = user_credential else {
-        let _ = crate::etc::auth::password::verify_password(
+        let _ = crate::iam::pwd::hash::verify_password(
             password.to_string(),
-            crate::etc::auth::password::dummy_hash(),
+            crate::iam::pwd::hash::dummy_hash(),
         )
         .await;
         login_guard::record_failed_attempt(&throttle)
@@ -126,11 +126,9 @@ pub(crate) async fn verify_login_password(
         return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
     };
 
-    let password_check = crate::etc::auth::password::check_password(
-        password.to_string(),
-        user_credential.value.clone(),
-    )
-    .await;
+    let password_check =
+        crate::iam::pwd::hash::check_password(password.to_string(), user_credential.value.clone())
+            .await;
     if !password_check.valid {
         login_guard::record_failed_attempt(&throttle)
             .await
@@ -162,7 +160,7 @@ pub(crate) async fn verify_login_password(
 /// concurrent logins race-safe.
 fn spawn_credential_rehash(user_id: String, password: String, old_hash: String) {
     tokio::spawn(async move {
-        let Some(new_hash) = crate::etc::auth::password::hash_password(password).await else {
+        let Some(new_hash) = crate::iam::pwd::hash::hash_password(password).await else {
             tracing::warn!("credential rehash skipped: hashing failed");
             return;
         };
@@ -170,7 +168,9 @@ fn spawn_credential_rehash(user_id: String, password: String, old_hash: String) 
             db::ent::TrustedAuditBoundary::application(),
             db::ent::TrustedBackgroundActor::system(None),
         );
-        match crate::db::rehash_credential(&user_id, &old_hash, &new_hash, audit_context).await {
+        match crate::data::db::rehash_credential(&user_id, &old_hash, &new_hash, audit_context)
+            .await
+        {
             Ok(true) => tracing::info!("credential hash upgraded for user {user_id}"),
             Ok(false) => {
                 tracing::debug!("credential rehash skipped: hash changed concurrently")

@@ -1,13 +1,9 @@
-mod authorization_codes;
 pub(crate) mod authorize;
 mod client_auth;
 pub(crate) mod consent;
 mod interactions;
 pub(crate) mod login;
 pub(crate) mod logout;
-mod pkce;
-mod refresh_tokens;
-mod shared;
 pub(crate) mod token;
 pub(crate) mod token_ops;
 pub(crate) mod userinfo;
@@ -45,18 +41,17 @@ pub fn router() -> axum::Router {
         .route("/oauth/authorize", get(get_authorize).post(post_authorize))
         .route(
             "/oauth/login",
-            post(post_login).layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
+            post(post_login).layer(from_fn(crate::web::origin::trusted_origin_middleware)),
         )
         .route("/oauth/logout", get(get_logout).post(post_logout))
         .route(
             "/oauth/logout/confirm",
-            post(post_logout_confirm)
-                .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
+            post(post_logout_confirm).layer(from_fn(crate::web::origin::trusted_origin_middleware)),
         )
         .route("/oauth/interactions/{interaction_id}", get(get_interaction))
         .route(
             "/oauth/interactions/{interaction_id}/consent",
-            post(post_consent).layer(from_fn(crate::etc::http::origin::trusted_origin_middleware)),
+            post(post_consent).layer(from_fn(crate::web::origin::trusted_origin_middleware)),
         )
         .route("/oauth/token", post(post_token))
         .route("/oauth/userinfo", get(get_userinfo).post(post_userinfo))

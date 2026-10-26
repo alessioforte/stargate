@@ -78,10 +78,12 @@ pub(super) async fn sign_in(
         audit_request,
     );
 
-    let user = match crate::db::get_user_by_email(&email).await.map_err(|e| {
-        tracing::error!("Database error during Google OAuth: {}", e);
-        ErrorResponse::new(ErrorCode::SystemInternal)
-    })? {
+    let user = match crate::data::db::get_user_by_email(&email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error during Google OAuth: {}", e);
+            ErrorResponse::new(ErrorCode::SystemInternal)
+        })? {
         Some(user) => user,
         None => {
             super::ensure_provisioning("Google", &email)?;
@@ -93,7 +95,7 @@ pub(super) async fn sign_in(
         && let Some(picture) = google_user.picture.clone()
     {
         let updated = user.clone().picture(Some(picture));
-        crate::db::update_user(updated, audit_context)
+        crate::data::db::update_user(updated, audit_context)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to update Google OAuth user picture: {}", e);
@@ -119,7 +121,7 @@ async fn create_google_user(
         .family_name(family_name)
         .picture(google_user.picture.clone());
     let credential = format!("google:{}", google_user.id);
-    match crate::db::create_user(
+    match crate::data::db::create_user(
         profile,
         CredentialType::Oauth,
         &credential,
@@ -131,7 +133,7 @@ async fn create_google_user(
         Ok(user) => Ok(user),
         Err(error) => {
             // A concurrent sign-in of the same Google user created the account.
-            if let Some(user) = crate::db::get_user_by_email(email)
+            if let Some(user) = crate::data::db::get_user_by_email(email)
                 .await
                 .map_err(ErrorResponse::internal)?
             {

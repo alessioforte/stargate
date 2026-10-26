@@ -4,7 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -644,7 +644,7 @@ fn apply_input(
 }
 
 async fn load_client(client_id: &str) -> Result<OAuthClient, ErrorResponse> {
-    crate::db::get_oauth_client_by_client_id(client_id)
+    crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -673,19 +673,19 @@ pub async fn get_oauth_clients(req: Request) -> Result<Response, ErrorResponse> 
 
     let (clients, total) = match query.q.as_deref().map(str::trim) {
         Some(q) if !q.is_empty() => {
-            let clients = crate::db::search_oauth_clients(q, limit, offset)
+            let clients = crate::data::db::search_oauth_clients(q, limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_search_oauth_clients(q)
+            let total = crate::data::db::count_search_oauth_clients(q)
                 .await
                 .map_err(ErrorResponse::internal)?;
             (clients, total)
         }
         _ => {
-            let clients = crate::db::get_all_oauth_clients(limit, offset)
+            let clients = crate::data::db::get_all_oauth_clients(limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_oauth_clients()
+            let total = crate::data::db::count_oauth_clients()
                 .await
                 .map_err(ErrorResponse::internal)?;
             (clients, total)
@@ -746,7 +746,7 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     validate_client_id(&client_id)?;
     let input = normalize_create_payload(payload)?;
 
-    if crate::db::get_oauth_client_by_client_id(&client_id)
+    if crate::data::db::get_oauth_client_by_client_id(&client_id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -777,7 +777,7 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     client.set_jwks(input.jwks);
     client.jwks_uri = input.jwks_uri;
 
-    let client = crate::db::create_oauth_client(client, ctx)
+    let client = crate::data::db::create_oauth_client(client, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
     let response = CreateOAuthClientResponse {
@@ -814,7 +814,7 @@ pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     let mut existing = load_client(&client_id).await?;
     apply_input(&mut existing, input)?;
 
-    let updated = crate::db::update_oauth_client(existing, ctx)
+    let updated = crate::data::db::update_oauth_client(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -847,7 +847,7 @@ pub async fn patch_oauth_client(mut req: Request) -> Result<Response, ErrorRespo
     let input = normalize_patch_payload(&existing, payload)?;
     apply_input(&mut existing, input)?;
 
-    let updated = crate::db::update_oauth_client(existing, ctx)
+    let updated = crate::data::db::update_oauth_client(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -873,7 +873,7 @@ pub async fn disable_oauth_client(mut req: Request) -> Result<Response, ErrorRes
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
     let _ = load_client(&client_id).await?;
-    let updated = crate::db::set_oauth_client_enabled(&client_id, false, ctx)
+    let updated = crate::data::db::set_oauth_client_enabled(&client_id, false, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
     Ok(Json(OAuthClientSchema::from(updated)).into_response())
@@ -898,7 +898,7 @@ pub async fn enable_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
     let _ = load_client(&client_id).await?;
-    let updated = crate::db::set_oauth_client_enabled(&client_id, true, ctx)
+    let updated = crate::data::db::set_oauth_client_enabled(&client_id, true, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
     Ok(Json(OAuthClientSchema::from(updated)).into_response())
@@ -930,10 +930,13 @@ pub async fn rotate_oauth_client_secret(mut req: Request) -> Result<Response, Er
 
     let client_secret = pw::generate_api_key();
     let client_secret_hash = pw::hash_api_key(&client_secret);
-    let updated =
-        crate::db::update_oauth_client_secret_hash(&client_id, Some(&client_secret_hash), ctx)
-            .await
-            .map_err(ErrorResponse::internal)?;
+    let updated = crate::data::db::update_oauth_client_secret_hash(
+        &client_id,
+        Some(&client_secret_hash),
+        ctx,
+    )
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     Ok(Json(RotateOAuthClientSecretResponse {
         client: OAuthClientSchema::from(updated),
@@ -962,7 +965,7 @@ pub async fn delete_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     let client_id: String = extract_path(&mut req).await?;
     let _ = load_client(&client_id).await?;
 
-    crate::db::delete_oauth_client(&client_id, ctx)
+    crate::data::db::delete_oauth_client(&client_id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 

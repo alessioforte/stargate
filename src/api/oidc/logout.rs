@@ -3,7 +3,7 @@
 //! A relying party sends the browser to `/oauth/logout`, ideally with the
 //! `id_token_hint` it received. The provider ends the browser's login session
 //! (and through it the relying parties linked to it, see
-//! `act::backchannel_logout`) and returns to the client's registered
+//! `crate::iam::oidc::backchannel_logout`) and returns to the client's registered
 //! `post_logout_redirect_uri`, or shows the hosted auth app's signed-out page.
 //!
 //! The session ends at once only when the hint names the signed-in user's
@@ -19,9 +19,9 @@
 //! ignored.
 
 use super::authorize::{AuthorizedUser, current_authorized_user};
-use super::shared::{OAuthResult, oauth_bad_request};
-use crate::err::OAuthErrorResponse;
-use crate::etc::http::request::RequestExt;
+use crate::err::oauth::oauth_bad_request;
+use crate::err::{OAuthErrorResponse, OAuthResult};
+use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Query, Request};
 use axum::http::StatusCode;
@@ -145,7 +145,10 @@ pub async fn post_logout_confirm(req: Request) -> OAuthResult<Response> {
     };
 
     let mut response = if action.as_deref() == Some("cancel") {
-        let home = format!("{}/", crate::fun::auth_app_href().trim_end_matches('/'));
+        let home = format!(
+            "{}/",
+            crate::web::links::auth_app_href().trim_end_matches('/')
+        );
         see_other(pending.redirect.as_deref().unwrap_or(&home))?
     } else {
         if let Some(session) = current_authorized_user(token).await? {
@@ -191,7 +194,7 @@ fn nonempty(value: &Option<String>) -> Option<&str> {
 async fn validate(query: &LogoutQuery) -> OAuthResult<LogoutRequest> {
     let hint = match nonempty(&query.id_token_hint) {
         Some(token) => Some(
-            crate::etc::auth::jwt::jwt_config()
+            crate::iam::auth::jwt::jwt_config()
                 .validate_id_token_hint(token)
                 .map_err(|_| oauth_bad_request("id_token_hint is invalid"))?,
         ),
@@ -214,7 +217,7 @@ async fn validate(query: &LogoutQuery) -> OAuthResult<LogoutRequest> {
         let client_id = client_id.ok_or_else(|| {
             oauth_bad_request("post_logout_redirect_uri requires client_id or id_token_hint")
         })?;
-        let client = crate::db::get_oauth_client_by_client_id(client_id)
+        let client = crate::data::db::get_oauth_client_by_client_id(client_id)
             .await
             .map_err(OAuthErrorResponse::internal)?
             .filter(|client| client.enabled)
@@ -265,7 +268,7 @@ fn get_location(query: &LogoutQuery) -> OAuthResult<String> {
     let params = params.finish();
     let base = format!(
         "{}{LOGOUT_ENDPOINT_PATH}",
-        super::well_known::public_endpoint_base_url().trim_end_matches('/')
+        crate::conf::public_base_url().trim_end_matches('/')
     );
     Ok(if params.is_empty() {
         base
@@ -277,7 +280,7 @@ fn get_location(query: &LogoutQuery) -> OAuthResult<String> {
 /// End this browser's login session and give its relying parties a moment
 /// to receive their back-channel logout tokens.
 async fn end_browser_session(session: &AuthorizedUser) -> OAuthResult<()> {
-    crate::act::sessions::end_session(&session.user.id, &session.sid)
+    crate::iam::sess::registry::end_session(&session.user.id, &session.sid)
         .await
         .map_err(OAuthErrorResponse::internal)?
         .wait(BACKCHANNEL_WAIT)
@@ -290,7 +293,7 @@ async fn end_browser_session(session: &AuthorizedUser) -> OAuthResult<()> {
 fn signed_out(redirect: Option<String>) -> OAuthResult<Response> {
     let location = redirect.unwrap_or_else(signed_out_page_url);
     let mut response = see_other(&location)?;
-    append_cookie(&mut response, &crate::fun::build_jwt_cookie("", 0))?;
+    append_cookie(&mut response, &crate::web::cookies::build_jwt_cookie("", 0))?;
     Ok(response)
 }
 
@@ -313,7 +316,7 @@ fn logout_cookie(id: &str, max_age_secs: u64) -> String {
     let mut cookie = format!(
         "{LOGOUT_COOKIE}={id}; Path={LOGOUT_ENDPOINT_PATH}; HttpOnly; SameSite=Strict; Max-Age={max_age_secs}"
     );
-    if crate::etc::server::tls::enabled().unwrap_or(false) {
+    if crate::srv::tls::enabled().unwrap_or(false) {
         cookie.push_str("; Secure");
     }
     cookie
@@ -323,7 +326,7 @@ fn logout_cookie(id: &str, max_age_secs: u64) -> String {
 fn logout_page_url(error: Option<&str>) -> String {
     let page = format!(
         "{}/logout",
-        crate::fun::auth_app_href().trim_end_matches('/')
+        crate::web::links::auth_app_href().trim_end_matches('/')
     );
     match error {
         Some(error) => format!(
@@ -339,7 +342,7 @@ fn logout_page_url(error: Option<&str>) -> String {
 fn signed_out_page_url() -> String {
     format!(
         "{}/signed-out",
-        crate::fun::auth_app_href().trim_end_matches('/')
+        crate::web::links::auth_app_href().trim_end_matches('/')
     )
 }
 
@@ -349,7 +352,7 @@ fn key(id: &str) -> String {
 
 async fn park(pending: &PendingLogout) -> OAuthResult<String> {
     let id = format!("{}_{}", ulid::Ulid::generate(), pw::generate_api_key());
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .set(&key(&id), pending, Some(LOGOUT_REQUEST_TTL_SECS))
         .await
         .map_err(OAuthErrorResponse::internal)?;
@@ -366,7 +369,7 @@ async fn take(id: &str) -> OAuthResult<Option<PendingLogout>> {
     if !valid_id {
         return Ok(None);
     }
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     let Some(pending) = store
         .get::<PendingLogout>(&key(id))
         .await

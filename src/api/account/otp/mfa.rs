@@ -1,10 +1,10 @@
-use crate::act::otp::service::{complete_mfa_challenge, list_mfa_methods, start_mfa_challenge};
-use crate::act::otp::types::{
+use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::otp::service::{complete_mfa_challenge, list_mfa_methods, start_mfa_challenge};
+use crate::iam::otp::types::{
     MfaChallengeRequestBody, MfaChallengeVerifyRequestBody, MfaMethodsResponse,
     MfaVerificationResponse, OtpChallengeResponse,
 };
-use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Path, Request};
 

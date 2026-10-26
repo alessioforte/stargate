@@ -1,12 +1,11 @@
 pub mod account;
 pub mod admin;
-pub mod auth_app;
-pub mod console_app;
+pub mod apps;
 pub mod docs;
-pub mod gateway;
 pub mod health;
 pub mod i18n;
 pub mod internal_context;
+pub mod middleware;
 pub mod oidc;
 pub mod signup;
 pub mod social;
@@ -134,12 +133,12 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
-pub fn server_router(lifecycle: crate::etc::server::health::Lifecycle) -> axum::Router {
+pub fn server_router(lifecycle: crate::srv::health::Lifecycle) -> axum::Router {
     router()
         .layer(axum::middleware::from_fn(
-            crate::etc::http::rate_limit::ingress_limit_middleware,
+            crate::api::middleware::rate_limit::ingress_limit_middleware,
         ))
-        .fallback_service(tower::service_fn(gateway::service))
+        .fallback_service(tower::service_fn(crate::gate::service))
         .merge(health::router(lifecycle))
 }
 
@@ -158,8 +157,8 @@ pub fn router() -> axum::Router {
         .merge(oidc::router())
         .merge(social::router())
         .merge(account::router())
-        .merge(auth_app::router())
-        .merge(console_app::router())
+        .merge(apps::auth::router())
+        .merge(apps::console::router())
         .merge(admin::router())
 }
 

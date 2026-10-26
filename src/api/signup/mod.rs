@@ -2,9 +2,10 @@ pub mod complete;
 pub mod request;
 pub mod verification;
 
-use crate::act::{PendingSignupProfile, SignupOrigin};
+use crate::api::middleware::features::{disabled, require_feature};
+use crate::conf::features::{Feature, SelfServiceRefusal, features};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::features::{Feature, SelfServiceRefusal, disabled, features, require_feature};
+use crate::iam::user::signup::{PendingSignupProfile, SignupOrigin};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -76,7 +77,7 @@ pub fn router() -> axum::Router {
         post(request::post_signup).layer(from_fn_with_state(Feature::Signup, require_feature));
     axum::Router::new()
         .route("/signup", complete.merge(start))
-        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware))
+        .layer(from_fn(crate::web::origin::trusted_origin_middleware))
 }
 
 #[cfg(test)]

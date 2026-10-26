@@ -1,6 +1,9 @@
 use super::{EmailVerificationResponse, SignupVerificationParams};
-use crate::act;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::{
+    auth::jwt::jwt_config,
+    user::{email_verification, signup},
+};
 use axum::Json;
 use axum::extract::Query;
 
@@ -20,7 +23,7 @@ use axum::extract::Query;
 pub async fn get_signup(
     Query(query): Query<SignupVerificationParams>,
 ) -> Result<Json<EmailVerificationResponse>, ErrorResponse> {
-    let jwt_cfg = crate::etc::auth::jwt::jwt_config();
+    let jwt_cfg = jwt_config();
     let claim = jwt_cfg.validate_token(&query.token).map_err(|error| {
         ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
     })?;
@@ -34,7 +37,7 @@ pub async fn get_signup(
         .clone()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupTokenInvalid))?;
 
-    let request = act::get_email_verification_request(&sid)
+    let request = email_verification::get_email_verification_request(&sid)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupRequestNotFound))?;
@@ -46,12 +49,12 @@ pub async fn get_signup(
     }
     super::ensure_completable(&request)?;
 
-    if act::get_signup_request(&sid)
+    if signup::get_signup_request(&sid)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        act::create_signup_request(&sid, &request)
+        signup::create_signup_request(&sid, &request)
             .await
             .map_err(ErrorResponse::internal)?;
     }

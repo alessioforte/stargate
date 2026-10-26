@@ -78,10 +78,12 @@ pub(super) async fn sign_in(
         audit_request,
     );
 
-    let user = match crate::db::get_user_by_email(&email).await.map_err(|e| {
-        tracing::error!("Database error during GitHub OAuth: {}", e);
-        ErrorResponse::new(ErrorCode::SystemInternal)
-    })? {
+    let user = match crate::data::db::get_user_by_email(&email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error during GitHub OAuth: {}", e);
+            ErrorResponse::new(ErrorCode::SystemInternal)
+        })? {
         Some(user) => user,
         None => {
             super::ensure_provisioning("GitHub", &email)?;
@@ -93,7 +95,7 @@ pub(super) async fn sign_in(
         && let Some(avatar_url) = github_user.avatar_url.clone()
     {
         let updated = user.clone().picture(Some(avatar_url));
-        crate::db::update_user(updated, audit_context)
+        crate::data::db::update_user(updated, audit_context)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
@@ -117,11 +119,12 @@ async fn create_github_user(
     let credential = format!("github:{}", github_user.id);
     let mut attempt = 1;
     loop {
-        let nickname = crate::act::nicknames::available_nickname(&github_user.login, email).await?;
+        let nickname =
+            crate::iam::user::nicknames::available_nickname(&github_user.login, email).await?;
         let profile = Profile::new(email.to_string(), nickname.clone())
             .given_name(github_user.name.clone())
             .picture(github_user.avatar_url.clone());
-        let error = match crate::db::create_user(
+        let error = match crate::data::db::create_user(
             profile,
             CredentialType::Oauth,
             &credential,
@@ -135,13 +138,15 @@ async fn create_github_user(
         };
 
         // A concurrent sign-in of the same GitHub user created the account.
-        if let Some(user) = crate::db::get_user_by_email(email)
+        if let Some(user) = crate::data::db::get_user_by_email(email)
             .await
             .map_err(ErrorResponse::internal)?
         {
             return Ok(user);
         }
-        if attempt < CREATE_ATTEMPTS && crate::act::nicknames::nickname_taken(&nickname).await? {
+        if attempt < CREATE_ATTEMPTS
+            && crate::iam::user::nicknames::nickname_taken(&nickname).await?
+        {
             tracing::debug!(%nickname, "nickname taken during GitHub sign-up, retrying");
             attempt += 1;
             continue;

@@ -1,22 +1,11 @@
 use crate::err::ErrorResponse;
-use crate::etc::auth::jwt::jwt_config;
+use crate::iam::auth::jwt::jwt_config;
 use axum::Json;
 use axum::response::IntoResponse;
 use http::HeaderMap;
 use http::header::CACHE_CONTROL;
 use oidc::metadata::{Jwks, OAuthAuthorizationServerMetadata, OpenIdConfiguration};
 use std::env;
-
-fn endpoint_base_url(issuer: &str) -> String {
-    let configured_base_url = env::var("OAUTH_BASE_URL").ok();
-    let port = env::var("PORT").unwrap_or_else(|_| "5050".to_string());
-    oidc::metadata::endpoint_base_url(issuer, configured_base_url.as_deref(), &port)
-}
-
-/// Public base URL of the provider endpoints, as advertised in discovery.
-pub(crate) fn public_endpoint_base_url() -> String {
-    endpoint_base_url(&jwt::issuer_from_env())
-}
 
 fn jwks_cache_control() -> String {
     let max_age = env::var("JWKS_CACHE_MAX_AGE_SECS")
@@ -61,7 +50,7 @@ pub async fn get_jwks() -> Result<impl IntoResponse, ErrorResponse> {
 )]
 pub async fn get_oauth_metadata() -> Result<Json<OAuthAuthorizationServerMetadata>, ErrorResponse> {
     let issuer = jwt::issuer_from_env();
-    let base_url = endpoint_base_url(&issuer);
+    let base_url = crate::conf::public_base_url();
 
     Ok(Json(oidc::metadata::authorization_server_metadata(
         issuer, &base_url,
@@ -78,7 +67,7 @@ pub async fn get_oauth_metadata() -> Result<Json<OAuthAuthorizationServerMetadat
 )]
 pub async fn get_openid_configuration() -> Result<Json<OpenIdConfiguration>, ErrorResponse> {
     let issuer = jwt::issuer_from_env();
-    let base_url = endpoint_base_url(&issuer);
+    let base_url = crate::conf::public_base_url();
 
     Ok(Json(oidc::metadata::openid_configuration(
         issuer,

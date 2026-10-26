@@ -1,20 +1,23 @@
-use super::authorization_codes::{self, AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
-use super::client_auth::{ClientAuthForm, authenticate_client, presented_client};
-use super::pkce;
-use super::refresh_tokens;
-use super::shared::{
-    GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, OAuthResult,
-    SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, extract_basic_client_credentials, oauth_bad_request,
-    oauth_invalid_client, oauth_invalid_grant, oauth_unsupported_grant_type, parse_space_delimited,
-    resolve_audience, resolve_scopes, scope_contains,
+use super::client_auth::{
+    ClientAuthForm, authenticate_client, extract_basic_client_credentials, presented_client,
 };
-use crate::err::OAuthErrorResponse;
+use crate::err::oauth::{
+    oauth_bad_request, oauth_invalid_client, oauth_invalid_grant, oauth_unsupported_grant_type,
+};
+use crate::err::{OAuthErrorResponse, OAuthResult};
+use crate::iam::oidc::codes::{self, AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
+use crate::iam::oidc::refresh;
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use http::HeaderValue;
 use http::header::{CACHE_CONTROL, PRAGMA};
+use oidc::scopes::{
+    GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, SCOPE_OFFLINE_ACCESS,
+    SCOPE_OPENID, contains as scope_contains, parse_space_delimited, resolve_audience,
+    resolve_scopes,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -128,7 +131,7 @@ fn issue_client_credentials_token(
     scopes: &[String],
     audience: Option<String>,
 ) -> OAuthResult<TokenResponse> {
-    let jwt = crate::etc::auth::jwt::jwt_config();
+    let jwt = crate::iam::auth::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let claims =
         oidc::claims::client_credentials_access_claims(&client.client_id, scope.clone(), audience);
@@ -189,7 +192,7 @@ fn issue_user_token_response(
     authentication: &oidc::authentication::Authentication,
     refresh_token: Option<String>,
 ) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
-    let jwt = crate::etc::auth::jwt::jwt_config();
+    let jwt = crate::iam::auth::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let profile = user_claims_profile(user);
     let mut access_claims = oidc::claims::user_access_claims(
@@ -255,7 +258,7 @@ async fn issue_authorization_code_token(
     scopes: &[String],
 ) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
     if let Some(sid) = code.sid.as_deref()
-        && !crate::act::sessions::register_session_client(sid, &user.id, &client.client_id)
+        && !crate::iam::sess::registry::register_session_client(sid, &user.id, &client.client_id)
             .await
             .map_err(OAuthErrorResponse::internal)?
     {
@@ -269,7 +272,7 @@ async fn issue_authorization_code_token(
             ));
         }
         Some(
-            refresh_tokens::issue(
+            refresh::issue(
                 client.client_id.clone(),
                 user.id.clone(),
                 code.sid.clone(),
@@ -300,7 +303,7 @@ async fn issue_authorization_code_token(
 }
 
 fn refresh_token_ttl_secs() -> u64 {
-    crate::etc::auth::jwt::jwt_config()
+    crate::iam::auth::jwt::jwt_config()
         .refresh_exp
         .as_seconds_f64()
         .max(1.0) as u64
@@ -332,7 +335,7 @@ async fn issue_authorization_code_grant(
 
     let code_hash = pw::hash_api_key(code);
 
-    let record = match authorization_codes::get(&code_hash).await? {
+    let record = match codes::get(&code_hash).await? {
         CodeLookup::Pending(record) => *record,
         CodeLookup::Missing => return Err(oauth_invalid_grant("invalid authorization code")),
         CodeLookup::Redeemed(grant) => {
@@ -349,9 +352,9 @@ async fn issue_authorization_code_grant(
         return Err(oauth_invalid_grant("redirect_uri mismatch"));
     }
 
-    pkce::verify(&record, verifier)?;
+    codes::verify_pkce(&record, verifier)?;
 
-    let Some(user) = crate::db::get_user_by_id(&record.user_id)
+    let Some(user) = crate::data::db::get_user_by_id(&record.user_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -360,12 +363,12 @@ async fn issue_authorization_code_grant(
 
     let scopes = parse_space_delimited(Some(record.scope.as_str()), "scope")?;
 
-    if !authorization_codes::consume(&code_hash, &record).await? {
+    if !codes::consume(&code_hash, &record).await? {
         return Err(oauth_invalid_grant("invalid authorization code"));
     }
 
     let (response, grant) = issue_authorization_code_token(client, &record, &user, &scopes).await?;
-    if let Err(error) = authorization_codes::record_redemption(&code_hash, grant).await {
+    if let Err(error) = codes::record_redemption(&code_hash, grant).await {
         tracing::warn!(error = %error, "failed to record authorization code redemption");
     }
     Ok(response)
@@ -384,13 +387,13 @@ async fn revoke_replayed_code_grant(grant: Option<RedeemedGrant>) {
             exp,
             ..Default::default()
         };
-        if let Err(error) = crate::act::token_revocation::revoke_claims(&claims).await {
+        if let Err(error) = crate::iam::auth::revocation::revoke_claims(&claims).await {
             tracing::warn!(error = %error, "failed to revoke access token of replayed code");
         }
     }
 
     if let Some(family_id) = grant.refresh_family_id.as_deref()
-        && let Err(error) = refresh_tokens::revoke_family(family_id).await
+        && let Err(error) = refresh::revoke_family(family_id).await
     {
         tracing::warn!(error = %error, "failed to revoke refresh tokens of replayed code");
     }
@@ -402,7 +405,7 @@ async fn consent_still_covers(
     scopes: &[String],
     audience: Option<&str>,
 ) -> OAuthResult<bool> {
-    let consent = crate::db::get_active_oauth_consent(user_id, &client.client_id)
+    let consent = crate::data::db::get_active_oauth_consent(user_id, &client.client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?;
     Ok(consent.is_some_and(|consent| {
@@ -421,13 +424,11 @@ async fn issue_refresh_token_grant(
         .filter(|token| !token.is_empty())
         .ok_or_else(|| oauth_bad_request("refresh_token is required"))?;
 
-    let Some((new_refresh_token, family)) =
-        refresh_tokens::rotate(token, &client.client_id).await?
-    else {
+    let Some((new_refresh_token, family)) = refresh::rotate(token, &client.client_id).await? else {
         return Err(oauth_invalid_grant("invalid refresh token"));
     };
 
-    let Some(user) = crate::db::get_user_by_id(&family.user_id)
+    let Some(user) = crate::data::db::get_user_by_id(&family.user_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -441,14 +442,14 @@ async fn issue_refresh_token_grant(
             .await?
     {
         if let Some((family_id, _)) = oidc::refresh::parse_refresh_token(token)
-            && let Err(error) = refresh_tokens::revoke_family(family_id).await
+            && let Err(error) = refresh::revoke_family(family_id).await
         {
             tracing::warn!(error = %error, "failed to revoke refresh tokens after consent revocation");
         }
         return Err(oauth_invalid_grant("consent was revoked"));
     }
     if let Some(sid) = family.sid.as_deref()
-        && !crate::act::sessions::touch_session(sid, &family.user_id)
+        && !crate::iam::sess::registry::touch_session(sid, &family.user_id)
             .await
             .map_err(OAuthErrorResponse::internal)?
     {

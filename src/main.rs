@@ -1,21 +1,23 @@
-mod act;
 mod api;
 mod aud;
 mod cli;
-mod db;
+mod conf;
+mod ctx;
+mod data;
 mod err;
-mod etc;
-mod fun;
+mod gate;
+mod iam;
+mod obs;
+mod srv;
+mod web;
 
-use crate::etc::{
-    auth::jwt,
-    gate,
-    http::{cors, headers},
-    internal_context,
-    observability::logging,
-    request_context::geoip,
-    server::{self, banner, profile, tls},
-    store,
+use crate::{
+    ctx::geoip,
+    data::store,
+    iam::auth::jwt,
+    obs::logging,
+    srv::{banner, profile, shutdown, tls},
+    web::{cors, headers},
 };
 
 use axum::Extension;
@@ -47,14 +49,14 @@ pub async fn run() -> std::io::Result<()> {
             return cli::run_cli_command(command).await;
         }
         let guard = logging::init();
-        etc::auth::password::init();
+        iam::pwd::hash::init();
         let result = cli::run_cli_command(command).await;
         guard.shutdown();
         return result;
     }
 
     let guard = logging::init();
-    etc::auth::password::init();
+    iam::pwd::hash::init();
 
     let version = env!("CARGO_PKG_VERSION");
     let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
@@ -63,7 +65,7 @@ pub async fn run() -> std::io::Result<()> {
         .expect("Invalid listen address");
     let tls_enabled = tls::enabled()?;
     let runtime_profile = profile::validate_runtime_profile()?;
-    let shutdown_timeout_secs = fun::server_shutdown_timeout_secs();
+    let shutdown_timeout_secs = shutdown::server_shutdown_timeout_secs();
 
     info!("Version: {}", version);
     info!("Starting server on port {}", port);
@@ -75,20 +77,20 @@ pub async fn run() -> std::io::Result<()> {
     );
     info!("Graceful shutdown timeout: {}s", shutdown_timeout_secs);
 
-    etc::features::init().map_err(|error| {
+    conf::features::init().map_err(|error| {
         tracing::error!("Invalid feature settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
-    act::otp::settings::init().map_err(|error| {
+    iam::otp::settings::init().map_err(|error| {
         tracing::error!("Invalid MFA settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
     jwt::init();
-    internal_context::init().map_err(std::io::Error::other)?;
-    act::password_policy::init();
+    ctx::sign::init().map_err(std::io::Error::other)?;
+    iam::pwd::policy::init();
     geoip::init();
     store::init().await;
-    if let Err(e) = db::init().await {
+    if let Err(e) = data::db::init().await {
         tracing::error!("Database initialization failed: {}", e);
         std::process::exit(1);
     }
@@ -96,7 +98,7 @@ pub async fn run() -> std::io::Result<()> {
     aud::spawn()?;
 
     let gate = gate::init().map_err(std::io::Error::other)?;
-    let lifecycle = etc::server::health::Lifecycle::default();
+    let lifecycle = srv::health::Lifecycle::default();
 
     let app = api::server_router(lifecycle.clone())
         .layer(Extension(Arc::clone(&gate)))
@@ -106,15 +108,15 @@ pub async fn run() -> std::io::Result<()> {
         .layer(CompressionLayer::new())
         .layer(NormalizePathLayer::trim_trailing_slash());
 
-    let signal = fun::shutdown_signal()?;
+    let signal = shutdown::shutdown_signal()?;
 
     lifecycle.mark_ready();
     let gateway_resources = gate.resources.clone();
     let shutdown = async move {
-        fun::drain_on_shutdown(
+        shutdown::drain_on_shutdown(
             signal,
             lifecycle,
-            std::time::Duration::from_secs(fun::server_drain_delay_secs()),
+            std::time::Duration::from_secs(shutdown::server_drain_delay_secs()),
         )
         .await;
         gateway_resources.begin_shutdown();
@@ -123,9 +125,9 @@ pub async fn run() -> std::io::Result<()> {
     info!("Server listening on {}", addr);
 
     let result = if tls_enabled {
-        server::tls(app, addr, shutdown, shutdown_timeout_secs).await
+        srv::tls(app, addr, shutdown, shutdown_timeout_secs).await
     } else {
-        server::plain(app, addr, shutdown, shutdown_timeout_secs).await
+        srv::plain(app, addr, shutdown, shutdown_timeout_secs).await
     };
 
     info!("Server stopped, running shutdown hooks...");

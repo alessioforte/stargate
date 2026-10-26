@@ -87,7 +87,7 @@ pub async fn update_configurations(req: Request) -> Result<Response, ErrorRespon
 }
 
 fn save_configuration(config: Config, path: &str) -> Result<(), ErrorResponse> {
-    let prepared = crate::etc::gate::prepare_config(config).map_err(|error| {
+    let prepared = crate::gate::prepare_config(config).map_err(|error| {
         ErrorResponse::new(ErrorCode::ConfigurationInvalid).with_message(error.to_string())
     })?;
     prepared.config.raw.to_file(path);
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn unprepared_admin_transports_do_not_replace_the_saved_config() {
-        use crate::etc::gate::test_support::{SERVER_KEY, TlsFiles};
+        use crate::gate::test_support::{SERVER_KEY, TlsFiles};
 
         let files = TlsFiles::new();
         let path = files.path("config.yaml");

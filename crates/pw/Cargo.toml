@@ -10,8 +10,9 @@ license.workspace = true
 argon2 = "0.5.3"
 base64 = "0.23.1"
 # argon2 re-exports password-hash; the explicit dep enables `getrandom` so
-# `OsRng` for salt generation resolves even when pw is built standalone.
-password-hash = { version = "0.6.1", features = ["getrandom"] }
+# `OsRng` for salt generation resolves even when pw is built standalone. Keep
+# it on argon2's password-hash version, or the feature lands on another copy.
+password-hash = { version = "0.5.0", features = ["getrandom"] }
 hex = "0.4.3"
 rand = "0.10.2"
 regex = "1.13.1"

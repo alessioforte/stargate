@@ -1,5 +1,4 @@
 use crate::err::{ErrorCode, ErrorResponse, ErrorType};
-use crate::fun::get_base_url;
 use axum::Json;
 use serde::Serialize;
 use utoipa::{OpenApi, openapi::Server};
@@ -26,7 +25,7 @@ pub struct ErrorCatalogEntry {
 )]
 pub async fn get_api_doc() -> Result<Json<utoipa::openapi::OpenApi>, ErrorResponse> {
     let mut doc = super::ApiDoc::openapi();
-    doc.servers = Some(vec![Server::new(get_base_url())]);
+    doc.servers = Some(vec![Server::new(crate::conf::public_base_url())]);
     Ok(Json(doc))
 }
 

@@ -14,11 +14,11 @@
 //! `javascript_required`, since those steps live in the hosted app.
 
 use super::interactions::{self, INTERACTION_COOKIE, LoginPage};
-use crate::act::otp::service::login_mfa_required;
 use crate::api::account::login::verify_login_password;
 use crate::api::account::session::issue_user_session;
 use crate::err::ErrorResponse;
-use crate::etc::http::request::RequestExt;
+use crate::iam::otp::service::login_mfa_required;
+use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
@@ -104,13 +104,14 @@ async fn needs_hosted_step(user: &db::ent::User) -> Result<bool, ErrorResponse> 
     if login_mfa_required(user).await? {
         return Ok(true);
     }
-    let Some(credential) = crate::db::get_credential(&user.id, db::ent::CredentialType::Password)
-        .await
-        .map_err(ErrorResponse::internal)?
+    let Some(credential) =
+        crate::data::db::get_credential(&user.id, db::ent::CredentialType::Password)
+            .await
+            .map_err(ErrorResponse::internal)?
     else {
         return Ok(false);
     };
-    Ok(crate::act::password_policy::password_expired(&user.id, credential.updated_at).await)
+    Ok(crate::iam::pwd::policy::password_expired(&user.id, credential.updated_at).await)
 }
 
 fn login_error_code(error: &ErrorResponse) -> &'static str {

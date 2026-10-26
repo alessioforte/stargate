@@ -7,7 +7,7 @@
 //! `published_at` commit re-ships the byte-identical payload, so consumers must
 //! deduplicate on the `event_id` inside it.
 
-use crate::etc::observability::telemetry;
+use crate::obs::telemetry;
 use db::ent::OutboxEventRow;
 use db::service::Service;
 use once_cell::sync::OnceCell;
@@ -125,8 +125,8 @@ pub async fn shutdown() {
 }
 
 async fn run(shutdown: Arc<Notify>, config: RelayConfig) {
-    let svc = crate::db::service();
-    let store = crate::etc::store::use_store();
+    let svc = crate::data::db::service();
+    let store = crate::data::store::use_store();
 
     tracing::info!(
         stream = %config.stream,

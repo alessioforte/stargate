@@ -139,4 +139,18 @@ mod tests {
 
         assert!(resolve_audience(None, &allowed).is_err());
     }
+
+    #[test]
+    fn resolve_scopes_rejects_unregistered_scope() {
+        let allowed = vec!["read:users".to_string()];
+
+        assert!(resolve_scopes(Some("write:users"), &allowed).is_err());
+    }
+
+    #[test]
+    fn resolve_audience_rejects_unregistered_audience() {
+        let allowed = vec!["gateway".to_string()];
+
+        assert!(resolve_audience(Some("admin-api"), &allowed).is_err());
+    }
 }

@@ -1,8 +1,7 @@
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc;
-use crate::etc::auth::jwt::jwt_config;
-use crate::etc::auth::subject::Subject;
-use crate::etc::http::request::RequestExt;
+use crate::iam::auth::jwt::jwt_config;
+use crate::iam::auth::subject::Subject;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::Request;
 use serde::Serialize;
@@ -59,7 +58,7 @@ pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
         }
     };
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(ErrorResponse::internal)?
     {
@@ -67,7 +66,7 @@ pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
     }
 
     let sid = claims.sid.clone().unwrap_or_default();
-    let session = etc::store::use_store()
+    let session = crate::data::store::use_store()
         .get::<Subject>(&sid)
         .await
         .unwrap_or(None);
@@ -81,7 +80,7 @@ pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
         .sub_id
         .as_deref()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-    let user = crate::db::get_user_by_id(user_id)
+    let user = crate::data::db::get_user_by_id(user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;

@@ -1,5 +1,5 @@
-use crate::etc::auth::jwt::DEFAULT_KEY_ID;
-use crate::etc::auth::jwt_keyring::{self, JWKS_DIR};
+use crate::iam::auth::jwt::DEFAULT_KEY_ID;
+use crate::iam::auth::jwt_keyring::{self, JWKS_DIR};
 use clap::{Args, Subcommand};
 use jwt::Algorithm;
 use std::io;
