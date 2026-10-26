@@ -20,7 +20,7 @@ architecture changes.
 stargate/
 ├── src/               # Main binary
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
-│   ├── api/           # Axum routers + handlers; IAM middleware; auth/console app hosting
+│   ├── api/           # Axum routers + handlers; IAM middleware; apps/ auth + console hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
 │   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
 │   ├── conf/          # Process-wide configuration: env readers, feature toggles, config dir
@@ -354,8 +354,9 @@ Provider login (one login UI, the hosted auth app):
   newer than the parked request satisfies `prompt=login` / `max_age`.
 - The `apps/auth` build prerenders the login, logout, and signed-out routes
   (`scripts/prerender.mjs`, `app/entry-server.tsx`) into `<route>.html`, served by
-  `src/api/auth_app.rs` (same list) for `/auth/<route>`; `app/main.tsx` hydrates them. Keep the first render of hydrated
-  routes free of URL/storage reads (`lib/hydration.ts` `useHydrated`).
+  `src/api/apps/auth.rs` (same list) for `/auth/<route>`; `app/main.tsx` hydrates them.
+  Keep the first render of hydrated routes free of URL/storage reads
+  (`lib/hydration.ts` `useHydrated`).
 - Without JS the form posts natively to `POST /oauth/login` (`src/api/oidc/login.rs`):
   password-only, redirects only; MFA / expired password -> `error=javascript_required`.
   The OIDC conformance suite's HtmlUnit browser uses this path.

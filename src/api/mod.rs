@@ -1,7 +1,6 @@
 pub mod account;
 pub mod admin;
-pub mod auth_app;
-pub mod console_app;
+pub mod apps;
 pub mod docs;
 pub mod health;
 pub mod i18n;
@@ -158,8 +157,8 @@ pub fn router() -> axum::Router {
         .merge(oidc::router())
         .merge(social::router())
         .merge(account::router())
-        .merge(auth_app::router())
-        .merge(console_app::router())
+        .merge(apps::auth::router())
+        .merge(apps::console::router())
         .merge(admin::router())
 }
 

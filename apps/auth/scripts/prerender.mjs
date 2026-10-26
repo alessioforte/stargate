@@ -14,7 +14,7 @@ const appRoot = path.resolve(
 );
 const ssrOutDir = path.join(appRoot, "node_modules", ".prerender");
 const ROOT_PLACEHOLDER = '<div id="root"></div>';
-// Served by src/api/auth_app.rs; keep the two lists in sync.
+// Served by src/api/apps/auth.rs; keep the two lists in sync.
 const PRERENDERED_ROUTES = ["login", "logout", "signed-out"];
 
 const config = await resolveConfig({ root: appRoot }, "build", "production");
