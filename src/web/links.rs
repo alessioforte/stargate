@@ -1,16 +1,5 @@
 use crate::conf::apps::auth_app_base_path;
 
-pub fn get_base_url() -> String {
-    let protocol = if crate::srv::tls::enabled().unwrap_or(false) {
-        "https"
-    } else {
-        "http"
-    };
-    let hostname = std::env::var("HOSTNAME").unwrap_or("localhost".to_string());
-    let port = std::env::var("PORT").unwrap_or("5050".to_string());
-    format!("{}://{}:{}", protocol, hostname, port)
-}
-
 /// Base of the hosted auth app for redirects answered by this server:
 /// `AUTH_PUBLIC_BASE_URL` when set, otherwise the app's base path here.
 pub fn auth_app_href() -> String {
@@ -22,7 +11,7 @@ fn auth_app_public_base() -> String {
     std::env::var("AUTH_PUBLIC_BASE_URL").unwrap_or_else(|_| {
         format!(
             "{}{}",
-            get_base_url().trim_end_matches('/'),
+            crate::conf::public_base_url().trim_end_matches('/'),
             auth_app_base_path()
         )
     })

@@ -357,7 +357,7 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 fn safe_return_to(value: &str, own_origin: Option<String>) -> Option<String> {
     let mut bases = vec![
         jwt::issuer_from_env(),
-        crate::api::oidc::well_known::public_endpoint_base_url(),
+        crate::conf::public_base_url(),
         std::env::var("AUTH_PUBLIC_BASE_URL").unwrap_or_default(),
     ];
     for name in ["TRUSTED_ORIGINS", "CORS_ORIGINS"] {

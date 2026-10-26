@@ -268,7 +268,7 @@ fn get_location(query: &LogoutQuery) -> OAuthResult<String> {
     let params = params.finish();
     let base = format!(
         "{}{LOGOUT_ENDPOINT_PATH}",
-        super::well_known::public_endpoint_base_url().trim_end_matches('/')
+        crate::conf::public_base_url().trim_end_matches('/')
     );
     Ok(if params.is_empty() {
         base

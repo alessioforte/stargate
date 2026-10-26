@@ -184,7 +184,7 @@ async fn decided(
 
     let redirect_to = format!(
         "{}{}",
-        super::well_known::public_endpoint_base_url().trim_end_matches('/'),
+        crate::conf::public_base_url().trim_end_matches('/'),
         interactions::resume_path(interaction_id)
     );
     Ok(Json(ConsentDecisionResponse { redirect_to }))

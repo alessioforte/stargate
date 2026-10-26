@@ -156,7 +156,7 @@ async fn assertion_client(
 
     let claims = verified_claims(&client, assertion).await?;
     let issuer = jwt::issuer_from_env();
-    let base = super::well_known::public_endpoint_base_url();
+    let base = crate::conf::public_base_url();
     let base = base.trim_end_matches('/');
     let audiences = [
         issuer,

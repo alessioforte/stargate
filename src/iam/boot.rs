@@ -130,9 +130,8 @@ fn nonempty_env(key: &str) -> Option<String> {
 }
 
 fn default_console_oauth_redirect_uri() -> String {
-    let public_url = nonempty_env("CONSOLE_PUBLIC_URL")
-        .or_else(|| nonempty_env("OAUTH_BASE_URL"))
-        .unwrap_or_else(jwt::issuer_from_env);
+    let public_url =
+        nonempty_env("CONSOLE_PUBLIC_URL").unwrap_or_else(crate::conf::public_base_url);
     format!(
         "{}{}/auth/callback",
         public_url.trim_end_matches('/'),

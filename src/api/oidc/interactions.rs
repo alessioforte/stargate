@@ -53,7 +53,7 @@ pub(crate) struct LoginPage<'a> {
 pub(crate) fn login_page_url(page: LoginPage) -> String {
     login_page_url_from(
         &crate::web::links::auth_app_href(),
-        &super::well_known::public_endpoint_base_url(),
+        &crate::conf::public_base_url(),
         page,
     )
 }

@@ -117,7 +117,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 ### Shared Support (paths under `src/`)
 
 - `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
-  `CONFIG_PATH`), the hosted apps' base paths (`apps.rs`, read by the app routers,
+  `CONFIG_PATH`), the public base URL (`public_base_url`: `OAUTH_BASE_URL`, else the
+  issuer; never the listening host), the hosted apps' base paths (`apps.rs`, read by the app routers,
   links, and the Console's default callback), and feature toggles (`features.rs`, below).
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
@@ -618,8 +619,8 @@ response nor its timing reveals the account. Admin invitations
 Emails: templates come from `apps/mail/emails/*.tsx` (`npm run export` writes
 `.stargate/transactional/*.html`). Action URLs are built by the server
 (`src/web/links.rs`: `signup_url`, `change_password_url`, `login_url`, based on
-`AUTH_PUBLIC_BASE_URL` or the local auth app) and rendered as `{{link}}`; `{{name}}`
-is the only other placeholder.
+`AUTH_PUBLIC_BASE_URL`, else the public base URL plus the auth app base path) and
+rendered as `{{link}}`; `{{name}}` is the only other placeholder.
 
 ## Database Schema (migrations/)
 
@@ -673,7 +674,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `JWT_KID` | `stargate-current` | Active signing key (`.stargate/jwks/keys/<kid>/`) |
 | `JWT_ID_TOKEN_KID` | - | Optional RS256 key that signs ID tokens (EC or HMAC active key) |
 | `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
-| `OAUTH_BASE_URL` | issuer | Public base URL for provider endpoint links |
+| `OAUTH_BASE_URL` | issuer | Public base URL (`conf::public_base_url`): provider endpoints, email links, OpenAPI `servers` |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
 | `OAUTH_CLIENT_CA_FILE` | - | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`) |
 | `INTERNAL_CONTEXT_*` | see `.env.example` | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue |
