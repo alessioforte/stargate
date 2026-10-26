@@ -1,10 +1,10 @@
-use super::shared::OAuthResult;
+use crate::err::OAuthErrorResponse;
 use chrono::{DateTime, Utc};
 
-pub(super) use oidc::refresh::RefreshTokenFamily;
+pub use oidc::refresh::RefreshTokenFamily;
 
 #[allow(clippy::too_many_arguments)] // complete refresh-family context
-pub(super) async fn issue(
+pub async fn issue(
     client_id: String,
     user_id: String,
     sid: Option<String>,
@@ -14,7 +14,7 @@ pub(super) async fn issue(
     nonce: Option<String>,
     authentication: oidc::authentication::Authentication,
     ttl_secs: u64,
-) -> OAuthResult<String> {
+) -> Result<String, OAuthErrorResponse> {
     oidc::refresh::issue(
         crate::data::store::use_store(),
         client_id,
@@ -31,23 +31,23 @@ pub(super) async fn issue(
     .map_err(Into::into)
 }
 
-pub(super) async fn rotate(
+pub async fn rotate(
     token: &str,
     client_id: &str,
-) -> OAuthResult<Option<(String, RefreshTokenFamily)>> {
+) -> Result<Option<(String, RefreshTokenFamily)>, OAuthErrorResponse> {
     oidc::refresh::rotate(crate::data::store::use_store(), token, client_id)
         .await
         .map_err(Into::into)
 }
 
 /// Drop a refresh-token family so none of its tokens rotate again.
-pub(super) async fn revoke_family(family_id: &str) -> OAuthResult<()> {
+pub async fn revoke_family(family_id: &str) -> Result<(), OAuthErrorResponse> {
     use store::Store;
 
     crate::data::store::use_store()
         .delete(&oidc::refresh::family_key(family_id))
         .await
-        .map_err(crate::err::OAuthErrorResponse::internal)?;
+        .map_err(OAuthErrorResponse::internal)?;
     Ok(())
 }
 

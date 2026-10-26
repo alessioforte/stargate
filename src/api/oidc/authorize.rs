@@ -1,4 +1,3 @@
-use super::authorization_codes::{self, AuthorizationCodeRecord};
 use super::interactions;
 use super::shared::{
     AUTH_METHOD_NONE, AUTHORIZATION_CODE_TTL_SECS, GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN,
@@ -6,6 +5,8 @@ use super::shared::{
     oauth_bad_request, parse_space_delimited, resolve_audience, scope_contains,
 };
 use crate::err::OAuthErrorResponse;
+use crate::iam::oidc::codes::{self, AuthorizationCodeRecord};
+use crate::iam::oidc::request::AuthorizationRequest;
 use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Query, Request};
@@ -13,51 +14,9 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::{TimeZone, Utc};
 use http::header::{CACHE_CONTROL, CONTENT_TYPE, LOCATION, PRAGMA, SET_COOKIE};
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use store::Store;
 use url::Url;
-
-/// Authorization request parameters. Everything is optional so that a
-/// missing or malformed value can be reported to the client's redirect_uri
-/// (OIDC Core 3.1.2.6) instead of failing before the client is known.
-/// Unrecognized parameters (`display`, `ui_locales`, ...) are ignored as OIDC
-/// Core requires.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::IntoParams)]
-pub struct AuthorizeQuery {
-    response_type: Option<String>,
-    client_id: Option<String>,
-    redirect_uri: Option<String>,
-    scope: Option<String>,
-    state: Option<String>,
-    nonce: Option<String>,
-    code_challenge: Option<String>,
-    code_challenge_method: Option<String>,
-    audience: Option<String>,
-    prompt: Option<String>,
-    max_age: Option<String>,
-    pub(crate) login_hint: Option<String>,
-    /// A previously issued ID token naming the expected user (may be expired).
-    id_token_hint: Option<String>,
-    /// Requested assurance levels, most preferred first (voluntary).
-    acr_values: Option<String>,
-    /// `query` (default) or `form_post`.
-    response_mode: Option<String>,
-    request: Option<String>,
-    request_uri: Option<String>,
-    /// Resumes a request parked while the user signed in.
-    interaction: Option<String>,
-}
-
-impl AuthorizeQuery {
-    pub(crate) fn client_id(&self) -> Option<&str> {
-        self.client_id.as_deref()
-    }
-
-    pub(crate) fn redirect_uri(&self) -> Option<&str> {
-        self.redirect_uri.as_deref()
-    }
-}
 
 /// The browser's signed-in user, from the session cookie.
 pub(super) struct AuthorizedUser {
@@ -97,7 +56,7 @@ struct ValidatedAuthorizeRequest {
     get,
     path = "/oauth/authorize",
     tags = ["OAuth"],
-    params(AuthorizeQuery),
+    params(AuthorizationRequest),
     responses(
         (status = 302, description = "Redirects to the registered redirect_uri with an authorization code or OAuth error, or to the provider login page"),
         (status = 400, description = "Bad Request", body = OAuthErrorResponse),
@@ -106,7 +65,7 @@ struct ValidatedAuthorizeRequest {
 )]
 pub async fn get_authorize(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
-    let Query(query) = Query::<AuthorizeQuery>::try_from_uri(req.uri())
+    let Query(query) = Query::<AuthorizationRequest>::try_from_uri(req.uri())
         .map_err(|e| oauth_bad_request(e.body_text()))?;
     authorize(token, query).await
 }
@@ -124,13 +83,13 @@ pub async fn get_authorize(req: Request) -> OAuthResult<Response> {
 )]
 pub async fn post_authorize(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
-    let Form(query) = Form::<AuthorizeQuery>::from_request(req, &())
+    let Form(query) = Form::<AuthorizationRequest>::from_request(req, &())
         .await
         .map_err(|e| oauth_bad_request(e.body_text()))?;
     authorize(token, query).await
 }
 
-async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<Response> {
+async fn authorize(token: Option<String>, query: AuthorizationRequest) -> OAuthResult<Response> {
     // A resumed request replays the parked parameters; the rest of this
     // request's query is ignored.
     let (query, parked_at, consent_stage, step_up_stage) = match query.interaction.as_deref() {
@@ -315,7 +274,7 @@ fn max_age_exceeded(user: &AuthorizedUser, max_age: Option<i64>) -> bool {
 /// page, which resumes it after a successful sign-in. Without a `login_hint`,
 /// the user named by `id_token_hint` is prefilled.
 async fn login_redirect(
-    mut query: AuthorizeQuery,
+    mut query: AuthorizationRequest,
     hinted_subject: Option<&str>,
 ) -> OAuthResult<Response> {
     query.interaction = None;
@@ -366,7 +325,7 @@ async fn step_up_route(
 /// Park the request until the signed-in user verifies an email code, and send
 /// the browser to the hosted auth app's step-up page, which resumes it.
 async fn step_up_redirect(
-    mut query: AuthorizeQuery,
+    mut query: AuthorizationRequest,
     user: &AuthorizedUser,
 ) -> OAuthResult<Response> {
     query.interaction = None;
@@ -383,7 +342,7 @@ async fn step_up_redirect(
 /// Park the request for the signed-in user's consent and send the browser to
 /// the hosted auth app's consent page, which resumes it after the decision.
 async fn consent_redirect(
-    mut query: AuthorizeQuery,
+    mut query: AuthorizationRequest,
     stage: interactions::ConsentStage,
 ) -> OAuthResult<Response> {
     query.interaction = None;
@@ -513,7 +472,7 @@ fn oauth_error(error: &str, description: impl Into<String>) -> OAuthErrorRespons
     err
 }
 
-async fn authorization_client(query: &AuthorizeQuery) -> OAuthResult<db::ent::OAuthClient> {
+async fn authorization_client(query: &AuthorizationRequest) -> OAuthResult<db::ent::OAuthClient> {
     let client_id = query
         .client_id
         .as_deref()
@@ -645,7 +604,7 @@ pub(super) async fn current_authorized_user(
 
 fn validate_authorize_request(
     client: &db::ent::OAuthClient,
-    query: &AuthorizeQuery,
+    query: &AuthorizationRequest,
 ) -> OAuthResult<ValidatedAuthorizeRequest> {
     let response_type = query
         .response_type
@@ -732,7 +691,7 @@ fn validate_authorize_request(
 
 fn validate_code_challenge(
     client: &db::ent::OAuthClient,
-    query: &AuthorizeQuery,
+    query: &AuthorizationRequest,
 ) -> OAuthResult<Option<String>> {
     let challenge = query
         .code_challenge
@@ -792,7 +751,7 @@ async fn consent_satisfied(
 
 async fn store_authorization_code(
     client: &db::ent::OAuthClient,
-    query: &AuthorizeQuery,
+    query: &AuthorizationRequest,
     user: &AuthorizedUser,
     request: &ValidatedAuthorizeRequest,
     authentication: oidc::authentication::Authentication,
@@ -818,7 +777,7 @@ async fn store_authorization_code(
         authentication,
     };
 
-    authorization_codes::store(&code_hash, record, AUTHORIZATION_CODE_TTL_SECS as u64).await?;
+    codes::store(&code_hash, record, AUTHORIZATION_CODE_TTL_SECS as u64).await?;
 
     Ok(code)
 }
@@ -850,15 +809,15 @@ mod tests {
         )
     }
 
-    fn query(scope: &str) -> AuthorizeQuery {
-        AuthorizeQuery {
+    fn query(scope: &str) -> AuthorizationRequest {
+        AuthorizationRequest {
             response_type: Some(RESPONSE_CODE.to_string()),
             client_id: Some("client-1".to_string()),
             redirect_uri: Some("https://app.example.com/callback".to_string()),
             scope: Some(scope.to_string()),
             code_challenge: Some(CHALLENGE.to_string()),
             code_challenge_method: Some(PKCE_METHOD_S256.to_string()),
-            ..AuthorizeQuery::default()
+            ..AuthorizationRequest::default()
         }
     }
 

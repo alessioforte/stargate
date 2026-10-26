@@ -1,7 +1,4 @@
-use super::authorization_codes::{self, AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
 use super::client_auth::{ClientAuthForm, authenticate_client, presented_client};
-use super::pkce;
-use super::refresh_tokens;
 use super::shared::{
     GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS, GRANT_REFRESH_TOKEN, OAuthResult,
     SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, extract_basic_client_credentials, oauth_bad_request,
@@ -9,6 +6,8 @@ use super::shared::{
     resolve_audience, resolve_scopes, scope_contains,
 };
 use crate::err::OAuthErrorResponse;
+use crate::iam::oidc::codes::{self, AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
+use crate::iam::oidc::refresh;
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::response::{IntoResponse, Response};
@@ -269,7 +268,7 @@ async fn issue_authorization_code_token(
             ));
         }
         Some(
-            refresh_tokens::issue(
+            refresh::issue(
                 client.client_id.clone(),
                 user.id.clone(),
                 code.sid.clone(),
@@ -332,7 +331,7 @@ async fn issue_authorization_code_grant(
 
     let code_hash = pw::hash_api_key(code);
 
-    let record = match authorization_codes::get(&code_hash).await? {
+    let record = match codes::get(&code_hash).await? {
         CodeLookup::Pending(record) => *record,
         CodeLookup::Missing => return Err(oauth_invalid_grant("invalid authorization code")),
         CodeLookup::Redeemed(grant) => {
@@ -349,7 +348,7 @@ async fn issue_authorization_code_grant(
         return Err(oauth_invalid_grant("redirect_uri mismatch"));
     }
 
-    pkce::verify(&record, verifier)?;
+    codes::verify_pkce(&record, verifier)?;
 
     let Some(user) = crate::data::db::get_user_by_id(&record.user_id)
         .await
@@ -360,12 +359,12 @@ async fn issue_authorization_code_grant(
 
     let scopes = parse_space_delimited(Some(record.scope.as_str()), "scope")?;
 
-    if !authorization_codes::consume(&code_hash, &record).await? {
+    if !codes::consume(&code_hash, &record).await? {
         return Err(oauth_invalid_grant("invalid authorization code"));
     }
 
     let (response, grant) = issue_authorization_code_token(client, &record, &user, &scopes).await?;
-    if let Err(error) = authorization_codes::record_redemption(&code_hash, grant).await {
+    if let Err(error) = codes::record_redemption(&code_hash, grant).await {
         tracing::warn!(error = %error, "failed to record authorization code redemption");
     }
     Ok(response)
@@ -390,7 +389,7 @@ async fn revoke_replayed_code_grant(grant: Option<RedeemedGrant>) {
     }
 
     if let Some(family_id) = grant.refresh_family_id.as_deref()
-        && let Err(error) = refresh_tokens::revoke_family(family_id).await
+        && let Err(error) = refresh::revoke_family(family_id).await
     {
         tracing::warn!(error = %error, "failed to revoke refresh tokens of replayed code");
     }
@@ -421,9 +420,7 @@ async fn issue_refresh_token_grant(
         .filter(|token| !token.is_empty())
         .ok_or_else(|| oauth_bad_request("refresh_token is required"))?;
 
-    let Some((new_refresh_token, family)) =
-        refresh_tokens::rotate(token, &client.client_id).await?
-    else {
+    let Some((new_refresh_token, family)) = refresh::rotate(token, &client.client_id).await? else {
         return Err(oauth_invalid_grant("invalid refresh token"));
     };
 
@@ -441,7 +438,7 @@ async fn issue_refresh_token_grant(
             .await?
     {
         if let Some((family_id, _)) = oidc::refresh::parse_refresh_token(token)
-            && let Err(error) = refresh_tokens::revoke_family(family_id).await
+            && let Err(error) = refresh::revoke_family(family_id).await
         {
             tracing::warn!(error = %error, "failed to revoke refresh tokens after consent revocation");
         }

@@ -90,8 +90,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   (`policy.rs`), reset requests (`reset.rs`).
 - `otp/`: OTP/MFA flows (see "OTP, Passwordless Login, and MFA").
 - `fed/`: social sign-in state (`state.rs`).
-- `oidc/`: back-channel logout, client JWKS, the outgoing client for OAuth client
-  endpoints (`http_client.rs`).
+- `oidc/`: provider state (codes, refresh families, parked interactions), the
+  authorization request, back-channel logout, client JWKS, the outgoing client for
+  OAuth client endpoints (`http_client.rs`).
 - `boot.rs`: first super-admin and Console client bootstrap. `email_throttle.rs`: see
   "OTP, Passwordless Login, and MFA".
 
@@ -316,7 +317,11 @@ Admin-managed clients only (no dynamic registration).
 
 Source layout:
 - `crates/oidc`: pure provider logic (no Axum or DB driver dependency).
-- `src/api/oidc`: Axum bindings for provider endpoints and well-known metadata.
+- `src/iam/oidc`: provider state on the selected store (authorization codes + PKCE check
+  in `codes.rs`, refresh families in `refresh.rs`, parked requests and their consent/
+  step-up stages in `interactions.rs`), the authorization request (`request.rs`).
+- `src/api/oidc`: Axum bindings for provider endpoints and well-known metadata;
+  `interactions.rs` there is the browser side (interaction cookie, hosted page URLs).
 - `src/api/social`: Google/GitHub consumer login. Browsers start at
   `/oauth/{provider}/start?return_to=` (state bound to an HttpOnly `social_state` cookie,
   `Path=/oauth`), the callback `/oauth/{provider}` signs in (`start_user_session`, amr

@@ -1,36 +1,47 @@
-use super::shared::OAuthResult;
+use crate::err::OAuthErrorResponse;
 
-pub(super) use oidc::codes::{AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
+pub use oidc::codes::{AuthorizationCodeRecord, CodeLookup, RedeemedGrant};
 
-pub(super) async fn store(
+pub async fn store(
     code_hash: &str,
     record: AuthorizationCodeRecord,
     ttl_secs: u64,
-) -> OAuthResult<()> {
+) -> Result<(), OAuthErrorResponse> {
     oidc::codes::store(crate::data::store::use_store(), code_hash, record, ttl_secs)
         .await
         .map_err(Into::into)
 }
 
-pub(super) async fn get(code_hash: &str) -> OAuthResult<CodeLookup> {
+pub async fn get(code_hash: &str) -> Result<CodeLookup, OAuthErrorResponse> {
     oidc::codes::get(crate::data::store::use_store(), code_hash)
         .await
         .map_err(Into::into)
 }
 
-pub(super) async fn consume(
+pub async fn consume(
     code_hash: &str,
     record: &AuthorizationCodeRecord,
-) -> OAuthResult<bool> {
+) -> Result<bool, OAuthErrorResponse> {
     oidc::codes::consume(crate::data::store::use_store(), code_hash, record)
         .await
         .map_err(Into::into)
 }
 
-pub(super) async fn record_redemption(code_hash: &str, grant: RedeemedGrant) -> OAuthResult<()> {
+pub async fn record_redemption(
+    code_hash: &str,
+    grant: RedeemedGrant,
+) -> Result<(), OAuthErrorResponse> {
     oidc::codes::record_redemption(crate::data::store::use_store(), code_hash, grant)
         .await
         .map_err(Into::into)
+}
+
+/// Check the client's PKCE `code_verifier` against the code's challenge.
+pub fn verify_pkce(
+    code: &AuthorizationCodeRecord,
+    verifier: Option<&str>,
+) -> Result<(), OAuthErrorResponse> {
+    oidc::pkce::verify(code, verifier).map_err(Into::into)
 }
 
 #[cfg(all(test, feature = "memory"))]
