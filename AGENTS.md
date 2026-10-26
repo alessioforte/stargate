@@ -59,6 +59,24 @@ stargate/
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
 ```
 
+Module boundaries in `src/` (each top-level name is 3-4 characters):
+- `main.rs` composes the subsystems; `api` (HTTP) and `cli` invoke them.
+- A function lives with the subsystem whose rules it implements; there are no
+  catch-all modules (`utils`, `helpers`, `common`). Prefer private modules and a few
+  explicit `pub(crate) use` re-exports over glob re-exports.
+- `iam` imports neither `api` nor `gate`; the gateway uses `iam`. `web` is shared HTTP
+  plumbing and orchestrates no login, signup, or upstream request. `ctx` describes,
+  projects, and signs request facts; it decides no authorization. `data` depends on no
+  handler; audit events are written in the repository transaction and `aud` only
+  delivers them.
+- `conf` holds process-wide settings only; a subsystem's settings stay with it
+  (`gate/snap/config.rs`, `iam/otp/settings.rs`, `ctx/sign/settings.rs`, `iam/auth/jwt.rs`).
+- The local `gate` and `ctx` modules share their names with the `gate` and `ctx` crates
+  (as `data/db`, `data/store`, `iam/oidc`, `iam/otp` do one level down). Only the file
+  that declares the module sees the local one under the bare name (`main.rs`,
+  `data/mod.rs`, `iam/mod.rs`); elsewhere `gate::cfg` is the crate and the local module
+  is `crate::gate`.
+
 ## Key Architecture
 
 ### Stack
@@ -98,27 +116,30 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 
 ### Shared Support (paths under `src/`)
 
-- `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
-  trusted-origin middleware), security and retry headers, the session cookie
-  (`cookies.rs`), base and auth-app URLs (`links.rs`), message envelopes.
-- `api/middleware/`: IAM limits (`rate_limit.rs`, see "API Overview") and the feature
-  gate (`features.rs`).
+- `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
+  `CONFIG_PATH`), and feature toggles (`features.rs`, below).
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
+  `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
+  validation, `signing.rs` bounded CPU workers.
+- `data/db/`: SQL pool init and the repository service wrappers (`svc.rs`).
+  `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs`
+  init/readiness.
 - `obs/`: logging and the telemetry provider (`telemetry/metrics.rs`,
   `telemetry/propagation.rs`).
-- `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`),
-  profile validation, startup banner, shutdown signal and drain (`shutdown.rs`).
-- `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
-  validation, `signing.rs` bounded CPU workers.
-- `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs` init/readiness.
-- `data/db/`: SQL pool init and the repository service wrappers (`svc.rs`).
-- `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
-  `CONFIG_PATH`), and feature toggles.
+- `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`), profile
+  validation, startup banner, shutdown signal and drain (`shutdown.rs`).
+- `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
+  trusted-origin middleware), security and retry headers, the session cookie
+  (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
+  (`limits.rs`), message envelopes.
+- `api/middleware/`: IAM limits (`rate_limit.rs`, see "API Overview") and the feature
+  gate (`features.rs`).
 - `conf/features.rs`: capabilities an operator can switch off, read and validated once at
   startup (invalid values stop it). A disabled capability keeps its routes mounted and
   answers `404 feature.disabled` (`require_feature` middleware and `disabled` answer in
-  `api/middleware/features.rs`): unmatched paths fall through to the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
+  `api/middleware/features.rs`): unmatched paths fall through to the gateway. Today:
+  `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
   `PASSWORDLESS_LOGIN_ENABLED` (see "OTP, Passwordless Login, and MFA"),
   `CONSOLE_ENABLED`, and each social provider (on when its client id and secret are both
   set; one alone stops startup). `GET /account/features` (public) lists the sign-in
