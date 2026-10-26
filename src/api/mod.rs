@@ -3,11 +3,10 @@ pub mod admin;
 pub mod auth_app;
 pub mod console_app;
 pub mod docs;
-pub mod gateway;
 pub mod health;
 pub mod i18n;
 pub mod internal_context;
-mod middleware;
+pub mod middleware;
 pub mod oidc;
 pub mod signup;
 pub mod social;
@@ -140,7 +139,7 @@ pub fn server_router(lifecycle: crate::srv::health::Lifecycle) -> axum::Router {
         .layer(axum::middleware::from_fn(
             crate::api::middleware::rate_limit::ingress_limit_middleware,
         ))
-        .fallback_service(tower::service_fn(gateway::service))
+        .fallback_service(tower::service_fn(crate::gate::service))
         .merge(health::router(lifecycle))
 }
 

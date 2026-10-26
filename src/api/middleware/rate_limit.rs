@@ -7,9 +7,12 @@
 //! the budget of another principal behind the same address.
 
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::gate::{Gate, RuntimeSnapshot, retain_runtime};
-use crate::etc::limits::{ingress_key, insert_limit_headers, limited_response};
+use crate::gate::{Gate, RuntimeSnapshot, retain_runtime};
 use crate::web::request::RequestExt;
+use crate::{
+    gate::limits::ingress_key,
+    web::limits::{insert_limit_headers, limited_response},
+};
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -101,7 +104,7 @@ fn unavailable(scope: &'static str) -> ErrorResponse {
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::{charge_admin_principal, ingress_limit_middleware};
-    use crate::etc::gate::{RuntimeSnapshot, prepare_config, test_support};
+    use crate::gate::{RuntimeSnapshot, prepare_config, test_support};
     use axum::{Extension, Router, body::Body, middleware::from_fn, routing::get};
     use http::{Request, StatusCode};
     use http_body_util::BodyExt;
@@ -121,7 +124,7 @@ mod tests {
         .unwrap()
     }
 
-    fn app(gate: Arc<crate::etc::gate::Gate>) -> Router {
+    fn app(gate: Arc<crate::gate::Gate>) -> Router {
         Router::new()
             .route("/", get(|| async { "ok" }))
             .layer(from_fn(ingress_limit_middleware))
@@ -266,7 +269,7 @@ mod tests {
             .limiter
             .check(
                 "ingress",
-                &crate::etc::limits::ingress_key("127.0.0.1"),
+                &crate::gate::limits::ingress_key("127.0.0.1"),
                 None,
             )
             .await

@@ -64,10 +64,10 @@ async fn plain_shutdown_deadline_drops_stalled_response_and_preserves_connect_in
 
 #[tokio::test]
 async fn shutdown_cancels_incomplete_inbound_tls_handshake() {
-    let certs = rustls_pemfile::certs(&mut &crate::etc::gate::test_support::SERVER_CERT[..])
+    let certs = rustls_pemfile::certs(&mut &crate::gate::test_support::SERVER_CERT[..])
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let key = rustls_pemfile::private_key(&mut &crate::etc::gate::test_support::SERVER_KEY[..])
+    let key = rustls_pemfile::private_key(&mut &crate::gate::test_support::SERVER_KEY[..])
         .unwrap()
         .unwrap();
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(

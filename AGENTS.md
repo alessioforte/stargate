@@ -20,15 +20,14 @@ architecture changes.
 stargate/
 ├── src/               # Main binary
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
-│   ├── api/           # Axum routers + handlers; IAM middleware; gateway fallback service;
-│   │                  #   auth/console app hosting
+│   ├── api/           # Axum routers + handlers; IAM middleware; auth/console app hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
 │   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
 │   ├── conf/          # Process-wide configuration: env readers, feature toggles, config dir
 │   ├── ctx/           # Request context, propagation drafts, audit/authz projections; sign/ signer
 │   ├── data/          # Persistence backends: db/ (SQL pool + repository service), store/
 │   ├── err/           # Error catalog (ErrorCode) -> JSON responses; OAuth error envelope
-│   ├── etc/           # Gateway runtime support (gate/) and limit helpers
+│   ├── gate/          # Gateway runtime: snapshot lifecycle (snap/), request pipeline, transports
 │   ├── iam/           # Identity and access services: auth, authz (ACE), sessions, users,
 │   │                  #   passwords, OTP/MFA, federation state, OIDC client calls, bootstrap
 │   ├── obs/           # Logging and telemetry (traces, metrics, logs)
@@ -107,9 +106,6 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `telemetry/propagation.rs`).
 - `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`),
   profile validation, startup banner, shutdown signal and drain (`shutdown.rs`).
-- `etc/gate/`: gateway init, `config.rs` preparation/files, `runtime.rs` atomic snapshot
-  activation, `reload.rs` watchers, `resources.rs` process admission/memory permits/
-  tracked tasks, `transport/` prepared outgoing HTTP/TLS/mTLS clients.
 - `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
   validation, `signing.rs` bounded CPU workers.
 - `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs` init/readiness.
@@ -126,9 +122,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   options for the hosted apps; `/admin/health` reports `features`.
   Guide: `docs/features.md`; plan: `.reports/feature-toggles-plan.md`.
 
-### Gateway Runtime (`src/api/gateway/`)
+### Gateway Runtime (`src/gate/`)
 
-Mounted as the Axum `fallback_service`. Request flow:
+`gate::init` builds the runtime; `gate::service` is mounted as the Axum
+`fallback_service`. Request flow:
 1. Pin the active `RuntimeSnapshot` (graph, balancers, limiter, prepared clients,
    version) and the independent `PolicySnapshot` (ACE engine + revision); acquire
    process admission (`503 gateway.overloaded` when exhausted).
@@ -147,12 +144,18 @@ Mounted as the Axum `fallback_service`. Request flow:
    `Idempotency-Key`), buffer only when needed, then execute HTTP, WebSocket, or
    direct response and apply response headers.
 
-Modules: `request.rs` (orchestration), `authentication.rs`, `middlewares.rs`,
-`routing/`, `policies/` (`ingress.rs`, `limits.rs`), `execution/` (`plan.rs`,
-`replay.rs`, `mirrors.rs`, `disposal.rs`), `upstream/` (`attempt.rs` attempt
-numbering + health feedback, `http.rs`, `headers.rs`, `internal_context.rs`
-per-attempt signing, `websocket/`), `response.rs`, `lifecycle/` (deadlines,
-cancellation, guarded bodies), `tests/`, `performance/` (opt-in workloads).
+Modules: `snap/` (snapshot lifecycle: `config.rs` preparation/files, `runtime.rs`
+atomic activation, `reload.rs` watchers, `body.rs` pinning during streaming),
+`resources.rs` (process admission, memory permits, tracked tasks), `transport/`
+(prepared outgoing HTTP/TLS/mTLS clients), `limits.rs` (ingress bucket key, limit
+selection/validation), `request.rs` (orchestration), `authentication.rs`,
+`middlewares.rs`, `routing/`, `policies/` (`ingress.rs`, `limits.rs`, `org_limits.rs`
+cached org overrides, invalidated through `gate::invalidate_org_limits`),
+`execution/` (`plan.rs`, `replay.rs`, `mirrors.rs`, `disposal.rs`), `upstream/`
+(`attempt.rs` attempt numbering + health feedback, `http.rs`, `headers.rs`,
+`internal_context.rs` per-attempt signing, `websocket/`), `response.rs`,
+`lifecycle/` (deadlines, cancellation, guarded bodies), `tests/`, `performance/`
+(opt-in workloads).
 
 ### Gateway Config v1
 
@@ -779,8 +782,8 @@ Statuses in use: 400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503
 `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-scope`, `x-quota-limit`,
 `x-quota-remaining`, `x-quota-scope`, `retry-after`. Scope is `subject`, `org`, `ip`,
 or `ingress`. `429` `retry-after` is whole seconds rounded up (missing duration
--> 60); `503` uses 10. Shared helpers (`ingress_key`, `limited_response`,
-`insert_limit_headers`) live in `src/etc/limits.rs`.
+-> 60); `503` uses 10. Shared helpers: `ingress_key` in `src/gate/limits.rs`,
+`limited_response` and `insert_limit_headers` in `src/web/limits.rs`.
 
 ## Graceful Shutdown
 
@@ -917,5 +920,5 @@ a new reusable primitive.
 - GeoIP (MaxMind GeoLite2-City) is available but not a v1 route matcher.
 - Metrics use bounded labels only (no URLs, credentials, request IDs); see
   `docs/config-v1.md` for gateway instruments.
-- Gateway performance workloads are opt-in (`src/api/gateway/performance/`,
+- Gateway performance workloads are opt-in (`src/gate/performance/`,
   `benches/scripts/`).

@@ -1,6 +1,6 @@
 use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
-use crate::etc::gate::Gate;
+use crate::gate::Gate;
 use axum::Json;
 use axum::extract::Request;
 use chrono::Utc;
@@ -114,7 +114,7 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
         .map_err(ErrorResponse::internal)?;
     let runtime = req
         .extensions()
-        .get::<Arc<crate::etc::gate::RuntimeSnapshot>>()
+        .get::<Arc<crate::gate::RuntimeSnapshot>>()
         .cloned()
         .unwrap_or_else(|| gate.snapshot());
     let graph = &runtime.core.graph;

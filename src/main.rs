@@ -5,7 +5,7 @@ mod conf;
 mod ctx;
 mod data;
 mod err;
-mod etc;
+mod gate;
 mod iam;
 mod obs;
 mod srv;
@@ -14,7 +14,6 @@ mod web;
 use crate::{
     ctx::geoip,
     data::store,
-    etc::gate,
     iam::auth::jwt,
     obs::logging,
     srv::{banner, profile, shutdown, tls},

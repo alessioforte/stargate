@@ -1,6 +1,6 @@
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::gate::{Gate, RuntimeSnapshot},
+    gate::{Gate, RuntimeSnapshot},
 };
 use axum::extract::Request;
 use lim::{LimitKind, Limiter};
@@ -51,7 +51,7 @@ pub(super) fn validate(
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::*;
-    use crate::etc::gate::{prepare_config, test_support};
+    use crate::gate::{prepare_config, test_support};
     use gate::cfg::Config;
     use serde_json::json;
 
