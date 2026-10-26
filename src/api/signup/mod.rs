@@ -2,9 +2,9 @@ pub mod complete;
 pub mod request;
 pub mod verification;
 
-use crate::act::{PendingSignupProfile, SignupOrigin};
+use crate::conf::features::{Feature, SelfServiceRefusal, disabled, features, require_feature};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::features::{Feature, SelfServiceRefusal, disabled, features, require_feature};
+use crate::iam::user::signup::{PendingSignupProfile, SignupOrigin};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

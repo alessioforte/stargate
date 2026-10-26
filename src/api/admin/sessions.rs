@@ -93,7 +93,7 @@ fn normalized(value: Option<String>) -> Option<String> {
 fn user_name(user: &db::ent::User) -> String {
     match (user.given_name.as_deref(), user.family_name.as_deref()) {
         (None | Some(""), None | Some("")) => user.nickname.clone(),
-        (given_name, family_name) => crate::fun::format_name(
+        (given_name, family_name) => crate::iam::user::profile::format_name(
             given_name.unwrap_or_default(),
             family_name.unwrap_or_default(),
         ),
@@ -130,7 +130,7 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
         .and_then(|claims| claims.sid.as_deref())
         .map(str::to_string);
 
-    let mut sessions = crate::act::sessions::list_sessions()
+    let mut sessions = crate::iam::sess::registry::list_sessions()
         .await
         .map_err(ErrorResponse::internal)?;
     sessions.retain(|session| {
@@ -214,7 +214,7 @@ pub async fn delete_session(
         .and_then(AdminPrincipal::user_id)
         .map(str::to_string);
     let session_id: String = extract_path(&mut req).await?;
-    let session = crate::act::sessions::revoke_session(&session_id)
+    let session = crate::iam::sess::registry::revoke_session(&session_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -267,7 +267,7 @@ pub async fn delete_user_sessions(
             ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", user_id.clone())
         })?;
 
-    let revoked_sessions = crate::act::sessions::revoke_all_sessions(&user_id)
+    let revoked_sessions = crate::iam::sess::registry::revoke_all_sessions(&user_id)
         .await
         .map_err(ErrorResponse::internal)?;
     tracing::info!(

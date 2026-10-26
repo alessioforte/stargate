@@ -1,6 +1,6 @@
 use super::{AuthResponse, RefreshTokenRequestBody};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::auth::{jwt::jwt_config, subject::Subject};
+use crate::iam::auth::{jwt::jwt_config, subject::Subject};
 use crate::web::cookies::build_jwt_cookie;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
@@ -27,7 +27,7 @@ pub async fn put_refresh_token(
         .validate_session_refresh_token(&body.refresh_token)
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(ErrorResponse::internal)?
     {
@@ -76,14 +76,14 @@ pub async fn put_refresh_token(
                 .await
                 .map_err(ErrorResponse::internal)?
                 .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-            Some(crate::act::sessions::OrgContext::from(&membership))
+            Some(crate::iam::sess::registry::OrgContext::from(&membership))
         }
         None => None,
     };
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
-    let name = crate::fun::format_name(&given_name, &family_name);
+    let name = crate::iam::user::profile::format_name(&given_name, &family_name);
 
     let auth_time = claims
         .auth_time
@@ -98,14 +98,15 @@ pub async fn put_refresh_token(
     new_claims.auth_time = Some(auth_time);
     new_claims.org_id = org.as_ref().map(|org| org.org_id.clone());
 
-    let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
+    let is_super_admin = crate::iam::authz::admin::is_super_admin_user_id(&user.id)
         .await
         .map_err(ErrorResponse::internal)?;
     if is_super_admin {
-        new_claims = new_claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
+        new_claims = new_claims.role(crate::iam::authz::admin::SUPER_ADMIN_ROLE.to_string());
     }
 
-    let tokens = crate::fun::generate_tokens(new_claims).map_err(ErrorResponse::internal)?;
+    let tokens =
+        crate::iam::sess::tokens::generate_tokens(new_claims).map_err(ErrorResponse::internal)?;
 
     let refresh_exp = jwt_config().refresh_exp;
     let access_exp = jwt_config().access_exp;
@@ -115,10 +116,14 @@ pub async fn put_refresh_token(
     let mut subject = Subject::from(user.clone());
     subject.org_id = org.as_ref().map(|org| org.org_id.clone());
     subject.org_role = org.as_ref().map(|org| org.role.clone());
-    let rotated =
-        crate::act::sessions::rotate_refresh_token(&sid, presented_jti, &tokens.refresh_jti, sttl)
-            .await
-            .map_err(ErrorResponse::internal)?;
+    let rotated = crate::iam::sess::registry::rotate_refresh_token(
+        &sid,
+        presented_jti,
+        &tokens.refresh_jti,
+        sttl,
+    )
+    .await
+    .map_err(ErrorResponse::internal)?;
     if !rotated {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
@@ -126,7 +131,7 @@ pub async fn put_refresh_token(
     // Renew the registry entry first: a session revoked meanwhile is gone
     // and must not get its subject record back.
     let renewed =
-        crate::act::sessions::renew_session(&user.id, &sid, subject.org_id.as_deref(), sttl)
+        crate::iam::sess::registry::renew_session(&user.id, &sid, subject.org_id.as_deref(), sttl)
             .await
             .map_err(ErrorResponse::internal)?;
     if !renewed {

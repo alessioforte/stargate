@@ -1,10 +1,10 @@
-use crate::act::orgs::OrgLimitOverrides;
+use crate::api::gateway::policies::org_limits::OrgLimitOverrides;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::gate::RuntimeSnapshot;
 use crate::etc::limits::{
     attribute_name, configuration_error, insert_limit_headers, limited_response, validate_limit,
 };
-use crate::{etc::auth::subject::Subject, obs::telemetry};
+use crate::{iam::auth::subject::Subject, obs::telemetry};
 use ::http::HeaderMap;
 use gate::cfg::OnMissingOrg;
 use lim::{LimitKind, Limiter, RateLimitDecision};
@@ -68,7 +68,7 @@ pub async fn apply_limits(
     // org-scoped policies and the subject acts in an org.
     let org_overrides = match org_id {
         Some(org_id) if policies.org_rate.is_some() || policies.org_quota.is_some() => {
-            crate::act::orgs::limit_overrides(org_id).await?
+            crate::api::gateway::policies::org_limits::limit_overrides(org_id).await?
         }
         _ => Default::default(),
     };

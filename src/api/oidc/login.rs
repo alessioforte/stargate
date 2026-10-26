@@ -14,10 +14,10 @@
 //! `javascript_required`, since those steps live in the hosted app.
 
 use super::interactions::{self, INTERACTION_COOKIE, LoginPage};
-use crate::act::otp::service::login_mfa_required;
 use crate::api::account::login::verify_login_password;
 use crate::api::account::session::issue_user_session;
 use crate::err::ErrorResponse;
+use crate::iam::otp::service::login_mfa_required;
 use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Request};
@@ -111,7 +111,7 @@ async fn needs_hosted_step(user: &db::ent::User) -> Result<bool, ErrorResponse> 
     else {
         return Ok(false);
     };
-    Ok(crate::act::password_policy::password_expired(&user.id, credential.updated_at).await)
+    Ok(crate::iam::pwd::policy::password_expired(&user.id, credential.updated_at).await)
 }
 
 fn login_error_code(error: &ErrorResponse) -> &'static str {

@@ -1,5 +1,5 @@
 use super::RequestContext;
-use crate::etc::auth::{
+use crate::iam::auth::{
     identity::{AuthKind, VerifiedIdentity},
     subject::SubjectType,
 };

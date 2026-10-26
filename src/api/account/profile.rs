@@ -1,6 +1,6 @@
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::auth::jwt::jwt_config;
-use crate::etc::auth::subject::Subject;
+use crate::iam::auth::jwt::jwt_config;
+use crate::iam::auth::subject::Subject;
 use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::Request;
@@ -58,7 +58,7 @@ pub async fn get_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
         }
     };
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(ErrorResponse::internal)?
     {

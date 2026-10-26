@@ -3,7 +3,7 @@ pub(crate) mod mfa;
 pub(crate) mod passwordless;
 
 #[allow(unused_imports)]
-pub use crate::act::otp::{
+pub use crate::iam::otp::{
     LoginMfaRequiredResponse, MfaChallengeRequestBody, MfaChallengeVerifyRequestBody,
     MfaMethodsResponse, MfaMode, MfaVerificationResponse, OtpChallengeResponse, OtpMethod,
     PasswordlessEmailOtpRequestBody, PasswordlessEmailOtpVerifyRequestBody,
@@ -15,9 +15,9 @@ pub use passwordless::{post_login_email_otp, put_login_email_otp};
 
 #[cfg(test)]
 mod tests {
-    use crate::act::otp::DEFAULT_MFA_PURPOSE;
-    use crate::act::otp::types::OtpMethod;
-    use crate::act::otp::util::{escape_html, normalize_purpose, ttl_until, validate_challenge_id};
+    use crate::iam::otp::DEFAULT_MFA_PURPOSE;
+    use crate::iam::otp::types::OtpMethod;
+    use crate::iam::otp::util::{escape_html, normalize_purpose, ttl_until, validate_challenge_id};
 
     #[test]
     fn challenge_id_must_be_32_hex_chars() {

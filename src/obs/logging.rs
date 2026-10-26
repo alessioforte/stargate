@@ -1,6 +1,6 @@
 use crate::{
+    conf::env::bool_or,
     ctx::{RequestContext, sanitize_ingress_headers},
-    etc::env::bool_or,
     obs::telemetry,
     web::request::RequestExt,
 };

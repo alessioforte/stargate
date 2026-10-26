@@ -1,10 +1,14 @@
 use super::SignupRequestBody;
 use crate::{
-    act::{
-        self, PendingSignupProfile, SignupOrigin,
-        email_throttle::{EmailFlow, check_and_record_email_request},
-    },
     err::{ErrorCode, ErrorResponse},
+    iam::{
+        auth::jwt::jwt_config,
+        email_throttle::{EmailFlow, check_and_record_email_request},
+        user::{
+            email_verification,
+            signup::{PendingSignupProfile, SignupOrigin},
+        },
+    },
     web::{
         links::{login_url, signup_url},
         messages::{MessageCode, MessageResponse},
@@ -50,14 +54,14 @@ pub async fn post_signup(
         // Resend the pending signup's link rather than refusing: the
         // per-recipient throttle bounds repeats, and a lost email stays
         // recoverable.
-        let sid = match act::check_email_verification_request(&email)
+        let sid = match email_verification::check_email_verification_request(&email)
             .await
             .map_err(ErrorResponse::internal)?
         {
             Some(sid) => sid,
-            None => act::create_email_verification_request(&PendingSignupProfile::self_service(
-                email.clone(),
-            ))
+            None => email_verification::create_email_verification_request(
+                &PendingSignupProfile::self_service(email.clone()),
+            )
             .await
             .map_err(ErrorResponse::internal)?,
         };
@@ -86,14 +90,14 @@ pub(crate) async fn send_invitation(profile: PendingSignupProfile) -> Result<(),
         return Err(ErrorResponse::new(ErrorCode::SignupUserAlreadyExists));
     }
 
-    let pending = act::check_email_verification_request(&profile.email)
+    let pending = email_verification::check_email_verification_request(&profile.email)
         .await
         .map_err(ErrorResponse::internal)?;
     if pending.is_some() {
         return Err(ErrorResponse::new(ErrorCode::SignupRequestAlreadyExists));
     }
 
-    let sid = act::create_email_verification_request(&profile)
+    let sid = email_verification::create_email_verification_request(&profile)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -106,7 +110,7 @@ pub(crate) async fn send_invitation(profile: PendingSignupProfile) -> Result<(),
     .map_err(ErrorResponse::internal)
     .and_then(|result| result.map_err(ErrorResponse::internal));
     if let Err(error) = delivered {
-        let _ = act::delete_email_verification_request(&sid).await;
+        let _ = email_verification::delete_email_verification_request(&sid).await;
         return Err(error);
     }
 
@@ -135,7 +139,7 @@ fn send_signup_email(email: &str, kind: SignupEmail) -> anyhow::Result<()> {
                 .subject("signup_request".to_string())
                 .sid(sid)
                 .email(email.to_string());
-            let token = crate::etc::auth::jwt::jwt_config().generate_token(&claim)?;
+            let token = jwt_config().generate_token(&claim)?;
             (Template::SignupRequest, signup_url(&token))
         }
         SignupEmail::AccountExists => (Template::SignupAccountExists, login_url()),

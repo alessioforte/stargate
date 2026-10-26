@@ -231,7 +231,7 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
 
     // Attr changes (e.g. limit overrides) must reach the gateway on the
     // next request, not after the cache TTL.
-    crate::act::orgs::invalidate(&id).await;
+    crate::api::gateway::invalidate_org_limits(&id).await;
 
     Ok(Json(org).into_response())
 }
@@ -274,11 +274,13 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
     let revoked_key_hashes = crate::data::db::delete_organization(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
-    crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
-    crate::act::orgs::invalidate(&id).await;
+    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::api::gateway::invalidate_org_limits(&id).await;
 
     for member in &members {
-        if let Err(error) = crate::act::sessions::revoke_org_sessions(&member.user.id, &id).await {
+        if let Err(error) =
+            crate::iam::sess::registry::revoke_org_sessions(&member.user.id, &id).await
+        {
             tracing::error!(
                 user_id = %member.user.id,
                 org_id = %id,

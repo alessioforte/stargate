@@ -1,8 +1,8 @@
 use super::SignupCompleteRequestBody;
-use crate::act;
 use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::fun::format_name;
+use crate::iam::user::{email_verification, nicknames, profile::format_name, signup};
+use crate::iam::{auth::jwt::jwt_config, pwd};
 use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::{FromRequest, Request};
@@ -33,7 +33,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
             ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
         })?;
 
-    let jwt_cfg = crate::etc::auth::jwt::jwt_config();
+    let jwt_cfg = jwt_config();
     let claim = jwt_cfg.validate_token(&body.token).map_err(|error| {
         ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
     })?;
@@ -47,7 +47,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         .clone()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupTokenInvalid))?;
 
-    let signup = act::get_signup_request(&sid)
+    let signup = signup::get_signup_request(&sid)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupRequestNotFound))?;
@@ -73,7 +73,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         body.nickname.trim().to_string()
     };
 
-    act::nicknames::ensure_nickname_available(&nickname, &signup.email, None).await?;
+    nicknames::ensure_nickname_available(&nickname, &signup.email, None).await?;
 
     let organization = match signup.membership.as_ref() {
         Some(membership) => Some(
@@ -88,17 +88,13 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         None => None,
     };
     let password_validation = match organization.as_ref() {
-        Some(organization) => act::password_policy::validate_for_organization(
+        Some(organization) => pwd::policy::validate_for_organization(
             organization,
             &body.password,
             Some(&nickname),
             Some(&signup.email),
         ),
-        None => act::password_policy::validate_global(
-            &body.password,
-            Some(&nickname),
-            Some(&signup.email),
-        ),
+        None => pwd::policy::validate_global(&body.password, Some(&nickname), Some(&signup.email)),
     };
     password_validation.map_err(|message| {
         ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
@@ -111,7 +107,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         .picture(signup.picture)
         .attrs(signup.attrs);
 
-    let password = crate::etc::auth::password::hash_password(body.password.clone())
+    let password = pwd::hash::hash_password(body.password.clone())
         .await
         .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
 
@@ -127,8 +123,8 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
     .await
     .map_err(ErrorResponse::internal)?;
 
-    let _ = act::delete_signup_request(&sid).await;
-    let _ = act::delete_email_verification_request(&sid).await;
+    let _ = signup::delete_signup_request(&sid).await;
+    let _ = email_verification::delete_email_verification_request(&sid).await;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();

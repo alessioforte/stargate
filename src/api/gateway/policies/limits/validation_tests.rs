@@ -1,7 +1,7 @@
 use super::*;
-use crate::etc::{
-    auth::subject::SubjectType,
-    gate::{prepare_config, test_support},
+use crate::{
+    etc::gate::{prepare_config, test_support},
+    iam::auth::subject::SubjectType,
 };
 use gate::cfg::Config;
 use serde_json::{Value, json};
@@ -308,7 +308,7 @@ async fn malformed_selected_attributes_are_errors_and_diagnostics_are_bounded() 
 async fn removing_an_attribute_referenced_limit_fails_new_requests_but_preserves_the_in_flight_snapshot()
  {
     use crate::api::gateway::{IngressPause, authentication::TestAuthenticator};
-    use crate::etc::auth::identity::VerifiedIdentity;
+    use crate::iam::auth::identity::VerifiedIdentity;
     use axum::{body::Body, extract::ConnectInfo};
     use http::Request;
     use http_body_util::BodyExt;

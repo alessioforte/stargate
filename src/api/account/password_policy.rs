@@ -42,7 +42,7 @@ pub struct PasswordPolicyResponse {
     )
 )]
 pub async fn get_password_policy() -> Json<PasswordPolicyResponse> {
-    let set = &crate::act::password_policy::global().set;
+    let set = &crate::iam::pwd::policy::global().set;
     Json(PasswordPolicyResponse {
         min_length: set.min_length,
         max_length: set.max_length,

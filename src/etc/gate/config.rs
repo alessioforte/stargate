@@ -50,30 +50,13 @@ pub(super) fn prepare_runtime_config(
     Ok(PreparedConfig { config, transports })
 }
 
-fn get_config_dir() -> String {
-    env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string())
-}
-
 pub(super) fn get_config_path() -> std::io::Result<String> {
-    let dir = get_config_dir();
+    let dir = crate::conf::config_dir();
     if !Path::new(&dir).exists() {
         std::fs::create_dir_all(&dir)?;
     }
     let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
     Ok(format!("{}/{}", dir, filename))
-}
-
-pub fn get_policies_path() -> String {
-    let dir = get_config_dir();
-    if !Path::new(&dir).exists() {
-        std::fs::create_dir(&dir).expect("Unable to create config directory");
-    }
-    let filename = "policies";
-    let path = format!("{}/{}", dir, filename);
-    if !Path::new(&path).exists() {
-        std::fs::write(&path, "").expect("Unable to create policies file");
-    }
-    path
 }
 
 pub(super) fn load_config_from_path(path: &str) -> Result<PreparedConfig, GatewayPreparationError> {

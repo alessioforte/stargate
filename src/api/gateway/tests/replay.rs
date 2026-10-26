@@ -195,7 +195,7 @@ async fn verify_nested_failover_contexts(kind: ctx::DispatchKind) {
         ctx::{
             INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
         },
-        etc::auth::identity::VerifiedIdentity,
+        iam::auth::identity::VerifiedIdentity,
     };
     use ctx::{
         ContextSigner, ContextVerifier, ExpectedRequest, SignerConfig, StaticKeyResolver,

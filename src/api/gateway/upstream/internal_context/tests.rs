@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::gateway::execution::replay::ReplayRequest;
 use crate::ctx::sign::test_support::{PRIVATE_KEY, PUBLIC_KEY};
-use crate::{ctx::RequestContext, etc::auth::identity::VerifiedIdentity};
+use crate::{ctx::RequestContext, iam::auth::identity::VerifiedIdentity};
 use axum::body::Body;
 use chrono::Utc;
 use ctx::{

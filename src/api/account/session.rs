@@ -1,9 +1,8 @@
 use super::AuthResponse;
-use crate::act::sessions;
 use crate::err::ErrorResponse;
-use crate::etc;
-use crate::etc::auth::jwt::jwt_config;
-use crate::{fun::format_name, web::cookies::build_jwt_cookie};
+use crate::iam::auth::{jwt::jwt_config, subject::Subject};
+use crate::iam::sess::registry;
+use crate::{iam::user::profile::format_name, web::cookies::build_jwt_cookie};
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
@@ -50,9 +49,9 @@ pub(crate) async fn start_user_session(
     requested_org_id: Option<&str>,
     amr: Vec<String>,
 ) -> Result<IssuedSession, ErrorResponse> {
-    let org = sessions::resolve_org_context(&user, requested_org_id).await?;
+    let org = registry::resolve_org_context(&user, requested_org_id).await?;
 
-    let mut subject = etc::auth::subject::Subject::from(user.clone());
+    let mut subject = Subject::from(user.clone());
     subject.org_id = org.as_ref().map(|org| org.org_id.clone());
     subject.org_role = org.as_ref().map(|org| org.role.clone());
 
@@ -73,15 +72,16 @@ pub(crate) async fn start_user_session(
     claims.auth_time = Some(auth_time);
     claims.org_id = org.as_ref().map(|org| org.org_id.clone());
 
-    let is_super_admin = crate::fun::is_super_admin_user_id(&user.id)
+    let is_super_admin = crate::iam::authz::admin::is_super_admin_user_id(&user.id)
         .await
         .map_err(ErrorResponse::internal)?;
 
     if is_super_admin {
-        claims = claims.role(crate::fun::SUPER_ADMIN_ROLE.to_string());
+        claims = claims.role(crate::iam::authz::admin::SUPER_ADMIN_ROLE.to_string());
     }
 
-    let tokens = crate::fun::generate_tokens(claims).map_err(ErrorResponse::internal)?;
+    let tokens =
+        crate::iam::sess::tokens::generate_tokens(claims).map_err(ErrorResponse::internal)?;
 
     let store = crate::data::store::use_store();
     let refresh_exp = jwt_config().refresh_exp;
@@ -93,8 +93,8 @@ pub(crate) async fn start_user_session(
         .set(&sid, &subject, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
-    if let Err(error) = sessions::register_session(
-        sessions::NewSession {
+    if let Err(error) = registry::register_session(
+        registry::NewSession {
             user_id: &user.id,
             sid: &sid,
             org_id: subject.org_id.as_deref(),

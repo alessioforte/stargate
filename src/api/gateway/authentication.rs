@@ -1,4 +1,4 @@
-use crate::etc::auth::{identity::VerifiedIdentity, verification};
+use crate::iam::auth::{identity::VerifiedIdentity, verification};
 use axum::body::Body;
 use http::Request;
 

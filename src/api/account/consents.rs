@@ -4,8 +4,8 @@
 //! again, and stops its refresh tokens (the refresh grant checks consent).
 //! Access tokens already issued stay valid until they expire.
 
-use crate::act::sessions::authenticated_session;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::sess::registry::authenticated_session;
 use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{Path, Request};

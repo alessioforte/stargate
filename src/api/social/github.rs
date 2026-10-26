@@ -119,7 +119,8 @@ async fn create_github_user(
     let credential = format!("github:{}", github_user.id);
     let mut attempt = 1;
     loop {
-        let nickname = crate::act::nicknames::available_nickname(&github_user.login, email).await?;
+        let nickname =
+            crate::iam::user::nicknames::available_nickname(&github_user.login, email).await?;
         let profile = Profile::new(email.to_string(), nickname.clone())
             .given_name(github_user.name.clone())
             .picture(github_user.avatar_url.clone());
@@ -143,7 +144,9 @@ async fn create_github_user(
         {
             return Ok(user);
         }
-        if attempt < CREATE_ATTEMPTS && crate::act::nicknames::nickname_taken(&nickname).await? {
+        if attempt < CREATE_ATTEMPTS
+            && crate::iam::user::nicknames::nickname_taken(&nickname).await?
+        {
             tracing::debug!(%nickname, "nickname taken during GitHub sign-up, retrying");
             attempt += 1;
             continue;

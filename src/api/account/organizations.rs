@@ -1,5 +1,5 @@
-use crate::act::sessions::authenticated_session;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::sess::registry::authenticated_session;
 use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
@@ -104,7 +104,7 @@ pub async fn put_session_organization(req: Request) -> Result<Response, ErrorRes
     let auth_time = session
         .auth_time
         .unwrap_or_else(|| chrono::Utc::now().timestamp() as usize);
-    let amr = crate::act::sessions::get_active_session(&session.sid, &session.user.id)
+    let amr = crate::iam::sess::registry::get_active_session(&session.sid, &session.user.id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?

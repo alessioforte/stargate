@@ -1,12 +1,12 @@
-mod act;
 mod api;
 mod aud;
 mod cli;
+mod conf;
 mod ctx;
 mod data;
 mod err;
 mod etc;
-mod fun;
+mod iam;
 mod obs;
 mod srv;
 mod web;
@@ -14,7 +14,8 @@ mod web;
 use crate::{
     ctx::geoip,
     data::store,
-    etc::{auth::jwt, gate},
+    etc::gate,
+    iam::auth::jwt,
     obs::logging,
     srv::{banner, profile, shutdown, tls},
     web::{cors, headers},
@@ -49,14 +50,14 @@ pub async fn run() -> std::io::Result<()> {
             return cli::run_cli_command(command).await;
         }
         let guard = logging::init();
-        etc::auth::password::init();
+        iam::pwd::hash::init();
         let result = cli::run_cli_command(command).await;
         guard.shutdown();
         return result;
     }
 
     let guard = logging::init();
-    etc::auth::password::init();
+    iam::pwd::hash::init();
 
     let version = env!("CARGO_PKG_VERSION");
     let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
@@ -77,17 +78,17 @@ pub async fn run() -> std::io::Result<()> {
     );
     info!("Graceful shutdown timeout: {}s", shutdown_timeout_secs);
 
-    etc::features::init().map_err(|error| {
+    conf::features::init().map_err(|error| {
         tracing::error!("Invalid feature settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
-    act::otp::settings::init().map_err(|error| {
+    iam::otp::settings::init().map_err(|error| {
         tracing::error!("Invalid MFA settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
     jwt::init();
     ctx::sign::init().map_err(std::io::Error::other)?;
-    act::password_policy::init();
+    iam::pwd::policy::init();
     geoip::init();
     store::init().await;
     if let Err(e) = data::db::init().await {

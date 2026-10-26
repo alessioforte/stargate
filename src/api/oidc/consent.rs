@@ -14,8 +14,8 @@
 //! without the request details.
 
 use super::interactions::{self, ConsentDecision, ConsentStage, PendingAuthorization};
-use crate::act::sessions::authenticated_session;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::sess::registry::authenticated_session;
 use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Path, Request};

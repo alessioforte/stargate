@@ -31,7 +31,7 @@ impl From<ComponentHealth> for ComponentStatus {
     }
 }
 
-/// Capabilities switched on for this server (`src/etc/features.rs`).
+/// Capabilities switched on for this server (`src/conf/features.rs`).
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct FeatureStatus {
@@ -100,7 +100,7 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
     };
 
     let overall = if all_healthy { "healthy" } else { "unhealthy" };
-    let features = crate::etc::features::features();
+    let features = crate::conf::features::features();
 
     let body = AdminHealth {
         name: "stargate",

@@ -128,7 +128,7 @@ fn issue_client_credentials_token(
     scopes: &[String],
     audience: Option<String>,
 ) -> OAuthResult<TokenResponse> {
-    let jwt = crate::etc::auth::jwt::jwt_config();
+    let jwt = crate::iam::auth::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let claims =
         oidc::claims::client_credentials_access_claims(&client.client_id, scope.clone(), audience);
@@ -189,7 +189,7 @@ fn issue_user_token_response(
     authentication: &oidc::authentication::Authentication,
     refresh_token: Option<String>,
 ) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
-    let jwt = crate::etc::auth::jwt::jwt_config();
+    let jwt = crate::iam::auth::jwt::jwt_config();
     let scope = (!scopes.is_empty()).then(|| scopes.join(" "));
     let profile = user_claims_profile(user);
     let mut access_claims = oidc::claims::user_access_claims(
@@ -255,7 +255,7 @@ async fn issue_authorization_code_token(
     scopes: &[String],
 ) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
     if let Some(sid) = code.sid.as_deref()
-        && !crate::act::sessions::register_session_client(sid, &user.id, &client.client_id)
+        && !crate::iam::sess::registry::register_session_client(sid, &user.id, &client.client_id)
             .await
             .map_err(OAuthErrorResponse::internal)?
     {
@@ -300,7 +300,7 @@ async fn issue_authorization_code_token(
 }
 
 fn refresh_token_ttl_secs() -> u64 {
-    crate::etc::auth::jwt::jwt_config()
+    crate::iam::auth::jwt::jwt_config()
         .refresh_exp
         .as_seconds_f64()
         .max(1.0) as u64
@@ -384,7 +384,7 @@ async fn revoke_replayed_code_grant(grant: Option<RedeemedGrant>) {
             exp,
             ..Default::default()
         };
-        if let Err(error) = crate::act::token_revocation::revoke_claims(&claims).await {
+        if let Err(error) = crate::iam::auth::revocation::revoke_claims(&claims).await {
             tracing::warn!(error = %error, "failed to revoke access token of replayed code");
         }
     }
@@ -448,7 +448,7 @@ async fn issue_refresh_token_grant(
         return Err(oauth_invalid_grant("consent was revoked"));
     }
     if let Some(sid) = family.sid.as_deref()
-        && !crate::act::sessions::touch_session(sid, &family.user_id)
+        && !crate::iam::sess::registry::touch_session(sid, &family.user_id)
             .await
             .map_err(OAuthErrorResponse::internal)?
     {

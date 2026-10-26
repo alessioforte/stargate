@@ -3,7 +3,7 @@
 //! A relying party sends the browser to `/oauth/logout`, ideally with the
 //! `id_token_hint` it received. The provider ends the browser's login session
 //! (and through it the relying parties linked to it, see
-//! `act::backchannel_logout`) and returns to the client's registered
+//! `crate::iam::oidc::backchannel_logout`) and returns to the client's registered
 //! `post_logout_redirect_uri`, or shows the hosted auth app's signed-out page.
 //!
 //! The session ends at once only when the hint names the signed-in user's
@@ -194,7 +194,7 @@ fn nonempty(value: &Option<String>) -> Option<&str> {
 async fn validate(query: &LogoutQuery) -> OAuthResult<LogoutRequest> {
     let hint = match nonempty(&query.id_token_hint) {
         Some(token) => Some(
-            crate::etc::auth::jwt::jwt_config()
+            crate::iam::auth::jwt::jwt_config()
                 .validate_id_token_hint(token)
                 .map_err(|_| oauth_bad_request("id_token_hint is invalid"))?,
         ),
@@ -280,7 +280,7 @@ fn get_location(query: &LogoutQuery) -> OAuthResult<String> {
 /// End this browser's login session and give its relying parties a moment
 /// to receive their back-channel logout tokens.
 async fn end_browser_session(session: &AuthorizedUser) -> OAuthResult<()> {
-    crate::act::sessions::end_session(&session.user.id, &session.sid)
+    crate::iam::sess::registry::end_session(&session.user.id, &session.sid)
         .await
         .map_err(OAuthErrorResponse::internal)?
         .wait(BACKCHANNEL_WAIT)

@@ -20,18 +20,17 @@ architecture changes.
 stargate/
 ├── src/               # Main binary
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
-│   ├── act/           # Stateful app flows: login guard, OTP/MFA, sessions, orgs, oauth state, signup,
-│   │                  #   email verify, change password, password policy, token revocation, ACE rules
 │   ├── api/           # Axum routers + handlers; IAM middleware; gateway fallback service;
 │   │                  #   auth/console app hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
 │   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
+│   ├── conf/          # Process-wide configuration: env readers, feature toggles, config dir
 │   ├── ctx/           # Request context, propagation drafts, audit/authz projections; sign/ signer
 │   ├── data/          # Persistence backends: db/ (SQL pool + repository service), store/
 │   ├── err/           # Error catalog (ErrorCode) -> JSON responses; OAuth error envelope
-│   ├── etc/           # Shared support: auth, gate, features, OAuth client HTTP,
-│   │                  #   env/input/limits/time helpers
-│   ├── fun/           # Small helpers (token gen, display names, super-admin)
+│   ├── etc/           # Gateway runtime support (gate/) and limit helpers
+│   ├── iam/           # Identity and access services: auth, authz (ACE), sessions, users,
+│   │                  #   passwords, OTP/MFA, federation state, OIDC client calls, bootstrap
 │   ├── obs/           # Logging and telemetry (traces, metrics, logs)
 │   ├── srv/           # Listeners, listener TLS, health, profile, banner, shutdown
 │   └── web/           # Shared HTTP support: request, proxies, CORS/origins, headers, cookies, links
@@ -75,15 +74,33 @@ stargate/
 - **OpenAPI**: utoipa
 - **Observability**: tracing + OpenTelemetry (OTLP traces, metrics, logs)
 
+### Identity and Access (`src/iam/`)
+
+Application services for identity and access. `api` handlers and the gateway call
+them; `iam` imports neither `api` nor the local gateway runtime.
+
+- `auth/`: subjects, verified identity facts (`identity.rs`), credential/backing-state
+  checks (`verification.rs`), session JWT config and keyring (`jwt.rs`,
+  `jwt_keyring.rs`), login guard, JWT revocation (`revocation.rs`).
+- `authz/`: ACE evaluation (`evaluation.rs`), rule management (`rules.rs`), the
+  policies file (`storage.rs`), super-admin checks (`admin.rs`).
+- `sess/`: session registry (`registry.rs`), native token minting (`tokens.rs`).
+- `user/`: signup requests, email verification, nicknames, display names (`profile.rs`).
+- `pwd/`: Argon2 wrappers (`hash.rs`), effective policy, expiry and history
+  (`policy.rs`), reset requests (`reset.rs`).
+- `otp/`: OTP/MFA flows (see "OTP, Passwordless Login, and MFA").
+- `fed/`: social sign-in state (`state.rs`).
+- `oidc/`: back-channel logout, client JWKS, the outgoing client for OAuth client
+  endpoints (`http_client.rs`).
+- `boot.rs`: first super-admin and Console client bootstrap. `email_throttle.rs`: see
+  "OTP, Passwordless Login, and MFA".
+
 ### Shared Support (paths under `src/`)
 
-- `etc/auth/`: access control, subjects, session JWT config, password helpers.
-  `identity.rs` owns verified facts; `verification.rs` owns credential/backing-state checks.
 - `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
   trusted-origin middleware), security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), message envelopes.
 - `api/middleware/rate_limit.rs`: IAM limits (see "API Overview").
-- `etc/http/client_endpoints.rs`: the outgoing client for OAuth client endpoints.
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
 - `obs/`: logging and the telemetry provider (`telemetry/metrics.rs`,
@@ -97,7 +114,9 @@ stargate/
   validation, `signing.rs` bounded CPU workers.
 - `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs` init/readiness.
 - `data/db/`: SQL pool init and the repository service wrappers (`svc.rs`).
-- `etc/features.rs`: capabilities an operator can switch off, read and validated once at startup
+- `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
+  `CONFIG_PATH`), and feature toggles.
+- `conf/features.rs`: capabilities an operator can switch off, read and validated once at startup
   (invalid values stop it). A disabled capability keeps its routes mounted and answers
   `404 feature.disabled` (`require_feature` middleware): unmatched paths fall through to
   the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
@@ -232,9 +251,9 @@ under `account:session-refresh:{sid}`. The store keeps a per-user index plus the
 `account:sessions:directory` hash (sid, org, times, linked OAuth client ids).
 Removing a session invalidates linked OAuth tokens for Stargate's own checks
 (admin, userinfo, introspection, OAuth refresh). Admin endpoints list/revoke sessions.
-Every function in `act/sessions.rs` that ends sessions (`end_session` for a user's
+Every function in `iam/sess/registry.rs` that ends sessions (`end_session` for a user's
 own logout, `revoke_session`, `revoke_all_sessions`, `revoke_org_sessions`) also
-notifies the linked clients through OIDC Back-Channel Logout (`act/backchannel_logout.rs`).
+notifies the linked clients through OIDC Back-Channel Logout (`iam/oidc/backchannel_logout.rs`).
 Each record also keeps how the user signed in (`amr`, RFC 8176), set by the sign-in
 path through `issue_user_session` / `NewSession`: `pwd`, `pwd otp mfa` (login MFA),
 `otp` (passwordless), `fed` (Google/GitHub). An email code verified in the session
@@ -349,7 +368,7 @@ Consent (`src/api/oidc/consent.rs`, SPA `app/routes/consent.tsx`, JS only):
 - Writes take the user's `TrustedAuditContext` (actor `user`, application scope; the
   service rejects other users) and emit `oauth_consent.granted` / `.updated` / `.revoked`.
 
-Logout (`src/api/oidc/logout.rs`, RP-Initiated Logout 1.0; `act/backchannel_logout.rs`,
+Logout (`src/api/oidc/logout.rs`, RP-Initiated Logout 1.0; `iam/oidc/backchannel_logout.rs`,
 Back-Channel Logout 1.0):
 - `/oauth/logout` takes `id_token_hint` (may be expired), `client_id`,
   `post_logout_redirect_uri` (exact match against the client's
@@ -393,7 +412,7 @@ Authorization request handling:
   MFA unavailable (`email_mfa_available`) or a resumed email-code sign-in -> the actual level.
 - A replayed authorization code revokes the access token and refresh family it issued.
 
-Signing keys (`src/etc/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
+Signing keys (`src/iam/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
 - `.stargate/jwks/keys/<kid>/{private.pem,public.pem,alg}`; `JWT_KID` is the active
   key (signs). Every other dir is verification-only: published in the JWKS (active
   first) and accepted for tokens with its `kid`. Verification picks the key by `kid`
@@ -447,7 +466,7 @@ Client notes:
   Assertions (`crates/oidc/src/client_assertion.rs`, `jwt::decode_with_jwk_set`):
   asymmetric algs, `iss = sub = client_id`, `aud` the issuer, the token endpoint or the
   called endpoint, `exp` <= 1h ahead, `jti` required and single-use. `jwks_uri` sets are
-  cached 5 min and refetched on an unknown key at most every 10s (`act/client_jwks.rs`).
+  cached 5 min and refetched on an unknown key at most every 10s (`iam/oidc/client_jwks.rs`).
 - Confidential clients require PKCE unless `attrs.require_pkce = false`; a code
   issued without a challenge rejects a `code_verifier` (downgrade protection).
 - First-party clients skip consent with `attrs.first_party` (the only accepted name;
@@ -478,7 +497,7 @@ Docs: `docs/oauth-oidc-provider-guide.md`, `docs/oidc-conformance.md`.
 Source layout:
 - `crates/otp`: HOTP (RFC 4226), TOTP (RFC 6238), Base32, provisioning URIs,
   short-lived message OTP records for email/SMS.
-- `src/act/otp`: policy evaluation, challenge persistence, verification, delivery,
+- `src/iam/otp`: policy evaluation, challenge persistence, verification, delivery,
   throttling, service flows. Workflow changes go here. `settings.rs` reads and validates
   the `MFA_*` / `EMAIL_OTP_*` variables once at startup (`otp_settings()`; strict values,
   `sms`/`totp` rejected); `EMAIL_OTP_PEPPER` is required when MFA is mandatory for someone
@@ -518,7 +537,7 @@ Delivery: `smtp::Smtp` on `spawn_blocking`; passwordless delivery is backgrounde
 against enumeration timing. Only email OTP is wired; TOTP/HOTP and SMS exist as
 primitives only.
 
-Per-recipient email throttle (`src/act/email_throttle.rs`): unauthenticated flows
+Per-recipient email throttle (`src/iam/email_throttle.rs`): unauthenticated flows
 that email an address from the request body (`POST /account/credentials`,
 `POST /signup`, `POST /account/login/otp/email`) charge
 `account:email:recipient:{flow}:{sha256(lowercased, trimmed address)}` before any
@@ -542,7 +561,7 @@ response time does not reveal the account either; delivery errors are only logge
 A pending request (`change_password_requests:{email}`, 1h) is reused and its link
 resent, bounded by the per-recipient throttle, so a failed delivery can be retried.
 
-Account creation (`SIGNUP_MODE`, `src/etc/features.rs`; administrators can always use
+Account creation (`SIGNUP_MODE`, `src/conf/features.rs`; administrators can always use
 `POST /admin/users`):
 - `open`: self-registration (`POST /signup`) and accounts created by a first social
   sign-in, limited to `SIGNUP_ALLOWED_DOMAINS` when set (exact domains; rejected with
@@ -551,9 +570,10 @@ Account creation (`SIGNUP_MODE`, `src/etc/features.rs`; administrators can alway
   and social sign-in works for existing accounts only (`403 social.account_not_provisioned`).
 - `closed`: no invitations either; `/admin/users/invitations` and `GET`/`PUT /signup` are
   `404 feature.disabled`.
-- Pending signups record their `origin` (`self_service` / `invitation`, `act::SignupOrigin`):
-  a self-registration completes only while the mode is still `open` and its domain allowed
-  (`api::signup::ensure_completable`), so a stricter mode applies to signups under way.
+- Pending signups record their `origin` (`self_service` / `invitation`,
+  `iam::user::signup::SignupOrigin`): a self-registration completes only while the mode is
+  still `open` and its domain allowed (`api::signup::ensure_completable`), so a stricter
+  mode applies to signups under way.
 
 Signup (`POST /signup`, `open` only): always `200 signup.requested` for a valid address
 (`400 request.invalid` otherwise). In the background a new address gets the
@@ -590,8 +610,9 @@ every insert/update):
   data and never log in.
 - Flows keyed by an address (signup, invitations, forgot/reset, passwordless,
   social login) use `get_user_by_email`; session flows (profile, refresh) use
-  `sub_id`. API writes pre-check with `act::nicknames::ensure_nickname_available`
-  (`400 user.nickname_invalid`, `409 user.nickname_already_exists`).
+  `sub_id`. API writes pre-check with
+  `iam::user::nicknames::ensure_nickname_available` (`400 user.nickname_invalid`,
+  `409 user.nickname_already_exists`).
 - Social sign-in creates accounts only with `SIGNUP_MODE=open` (see "Passwords").
 - Social sign-in matches and creates accounts by an email the provider verified, else
   `403 social.email_unverified`: GitHub's primary verified email from `/user/emails`
@@ -599,8 +620,8 @@ every insert/update):
   bearer access token). `crates/idp`: `GitHubUser` / `GoogleUser`.
 - A first GitHub sign-in takes the GitHub username as nickname, or the first free of
   `<login>_2` ... `_9`, then `<login>_<random>`, then the email
-  (`act::nicknames::available_nickname`; GitHub usernames have no `_`). A nickname taken
-  between the check and the insert is retried (`src/api/social/github.rs`).
+  (`iam::user::nicknames::available_nickname`; GitHub usernames have no `_`). A nickname
+  taken between the check and the insert is retried (`src/api/social/github.rs`).
 Store keys derived from emails use the canonical form too.
 
 IDs are ULIDs stored as text. `outbox_events` holds the immutable JSON payload,
@@ -729,7 +750,7 @@ credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
 `lim:admin:user:{id}` / `lim:admin:key:{id}` in `extract_admin_authorization`
 (`429 iam.rate_limit_exceeded`, scope `subject`), so one admin key cannot throttle
 the console or other keys behind the same IP. Limiter failures: `503 iam.limiter_unavailable`.
-Login brute force is handled separately by `act/login_guard.rs` and OTP throttles.
+Login brute force is handled separately by `iam/auth/login_guard.rs` and OTP throttles.
 
 ## Error Response Format
 

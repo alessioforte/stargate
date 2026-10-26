@@ -5,9 +5,7 @@ mod reporting;
 mod routes;
 
 use crate::{
-    ctx::sign,
-    data::store::use_store,
-    etc::{auth::jwt as session_jwt, gate::prepare_config},
+    ctx::sign, data::store::use_store, etc::gate::prepare_config, iam::auth::jwt as session_jwt,
 };
 use fixtures::{Fixture, Scenario};
 use reporting::{Metrics, Sampler, latencies};
@@ -34,9 +32,9 @@ async fn gateway_release_workloads() {
     sign::init().unwrap();
     let metrics = Metrics::new();
     let session = ulid::Ulid::generate().to_string();
-    let subject = crate::etc::auth::subject::Subject::new(
+    let subject = crate::iam::auth::subject::Subject::new(
         session.clone(),
-        crate::etc::auth::subject::SubjectType::User,
+        crate::iam::auth::subject::SubjectType::User,
         None,
     );
     use_store()

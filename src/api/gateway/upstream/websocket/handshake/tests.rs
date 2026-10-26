@@ -4,7 +4,7 @@ use crate::{
     ctx::{
         INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
     },
-    etc::auth::identity::VerifiedIdentity,
+    iam::auth::identity::VerifiedIdentity,
 };
 use chrono::Utc;
 use ctx::{

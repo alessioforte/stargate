@@ -1,4 +1,4 @@
-use crate::etc::features::{self, Feature, features};
+use crate::conf::features::{self, Feature, features};
 use axum::Router;
 use axum::routing::any;
 use std::path::PathBuf;

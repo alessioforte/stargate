@@ -109,7 +109,7 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
     let stats = crate::data::db::get_admin_overview_stats()
         .await
         .map_err(ErrorResponse::internal)?;
-    let session_summary = crate::act::sessions::session_summary()
+    let session_summary = crate::iam::sess::registry::session_summary()
         .await
         .map_err(ErrorResponse::internal)?;
     let runtime = req

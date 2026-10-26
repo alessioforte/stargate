@@ -4,7 +4,7 @@ use crate::{
     ctx::{
         INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
     },
-    etc::auth::identity::VerifiedIdentity,
+    iam::auth::identity::VerifiedIdentity,
 };
 use axum::{Router, body::Body, extract::State, routing::any};
 use chrono::Utc;

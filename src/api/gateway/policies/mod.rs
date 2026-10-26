@@ -1,14 +1,15 @@
 pub(in crate::api::gateway) mod ingress;
 pub(in crate::api::gateway) mod limits;
+pub(in crate::api::gateway) mod org_limits;
 
 use self::limits::{OrgScopedLimit, SelectedLimitPolicies, apply_limits};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::gate::RuntimeSnapshot;
 use crate::{
     ctx::build_env_from,
-    etc::auth::{
-        access_control::access_control,
-        identity::{AuthKind, VerifiedIdentity},
+    iam::{
+        auth::identity::{AuthKind, VerifiedIdentity},
+        authz::evaluation::access_control,
     },
     obs::telemetry,
 };
@@ -168,7 +169,7 @@ fn auth_policy_allows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::etc::auth::{
+    use crate::iam::auth::{
         identity::VerifiedIdentity,
         subject::{Subject, SubjectType},
     };

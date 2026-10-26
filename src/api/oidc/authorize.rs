@@ -197,7 +197,7 @@ async fn authorize(token: Option<String>, query: AuthorizeQuery) -> OAuthResult<
         .map(str::trim)
         .filter(|hint| !hint.is_empty())
     {
-        Some(hint) => match crate::etc::auth::jwt::jwt_config().validate_id_token_hint(hint) {
+        Some(hint) => match crate::iam::auth::jwt::jwt_config().validate_id_token_hint(hint) {
             Ok(claims) => Some(claims.sub),
             Err(_) => return error_redirect("invalid_request", "id_token_hint is invalid"),
         },
@@ -348,7 +348,7 @@ async fn step_up_route(
     user: &AuthorizedUser,
     signed_in_for_request: bool,
 ) -> OAuthResult<StepUpRoute> {
-    let available = crate::act::otp::service::email_mfa_available(&user.user)
+    let available = crate::iam::otp::service::email_mfa_available(&user.user)
         .await
         .map_err(|error| OAuthErrorResponse::internal(error.message))?;
     Ok(if !available {
@@ -586,12 +586,12 @@ pub(super) async fn current_authorized_user(
         return Ok(None);
     };
 
-    let claims = match crate::etc::auth::jwt::jwt_config().validate_session_access_token(&token) {
+    let claims = match crate::iam::auth::jwt::jwt_config().validate_session_access_token(&token) {
         Ok(claims) => claims,
         _ => return Ok(None),
     };
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(OAuthErrorResponse::internal)?
     {
@@ -602,14 +602,14 @@ pub(super) async fn current_authorized_user(
         return Ok(None);
     };
     let Some(subject) = crate::data::store::use_store()
-        .get::<crate::etc::auth::subject::Subject>(sid)
+        .get::<crate::iam::auth::subject::Subject>(sid)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(None);
     };
 
-    if subject.sub_type != crate::etc::auth::subject::SubjectType::User {
+    if subject.sub_type != crate::iam::auth::subject::SubjectType::User {
         return Ok(None);
     }
 
@@ -624,7 +624,7 @@ pub(super) async fn current_authorized_user(
     let Some(auth_time) = claims.auth_time else {
         return Ok(None);
     };
-    let Some(session) = crate::act::sessions::get_active_session(sid, &user.id)
+    let Some(session) = crate::iam::sess::registry::get_active_session(sid, &user.id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {

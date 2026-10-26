@@ -1,7 +1,7 @@
 mod metrics;
 mod propagation;
 
-use crate::etc::env::bool_or;
+use crate::conf::env::bool_or;
 use opentelemetry::{KeyValue, global, propagation::TextMapCompositePropagator};
 use opentelemetry_sdk::{
     Resource,

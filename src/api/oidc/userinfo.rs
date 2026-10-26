@@ -71,7 +71,7 @@ fn scope_set(scope: Option<&str>) -> Result<HashSet<String>, ErrorResponse> {
 }
 
 async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>), ErrorResponse> {
-    let claims = crate::etc::auth::jwt::jwt_config()
+    let claims = crate::iam::auth::jwt::jwt_config()
         .validate_oauth_access_token(token, None)
         .map_err(|_| bearer_unauthorized("invalid token"))?;
 
@@ -79,7 +79,7 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
         return Err(bearer_unauthorized("token does not represent a user"));
     }
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(ErrorResponse::internal)?
     {
@@ -89,7 +89,7 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
         let Some(user_id) = claims.sub_id.as_deref() else {
             return Err(bearer_unauthorized("invalid token"));
         };
-        if !crate::act::sessions::is_session_active(sid, user_id)
+        if !crate::iam::sess::registry::is_session_active(sid, user_id)
             .await
             .map_err(ErrorResponse::internal)?
         {
@@ -124,7 +124,10 @@ fn userinfo_from_user(user: &db::ent::User, scopes: &HashSet<String>) -> UserInf
     let name = if include_profile {
         let given_name = user.given_name.clone().unwrap_or_default();
         let family_name = user.family_name.clone().unwrap_or_default();
-        Some(crate::fun::format_name(&given_name, &family_name))
+        Some(crate::iam::user::profile::format_name(
+            &given_name,
+            &family_name,
+        ))
     } else {
         None
     };

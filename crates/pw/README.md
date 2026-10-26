@@ -7,7 +7,7 @@ API-key generation/hashing helpers.
 
 The crate is deliberately application-agnostic: no Axum, no database, no
 env-var parsing. Stargate wires it up in `src/etc/pw.rs` (hashing config) and
-`src/act/password_policy.rs` (policy resolution and enforcement). For the
+`src/iam/pwd/policy.rs` (policy resolution and enforcement). For the
 operator-facing view — env vars, per-organization overrides, login flows —
 see [`docs/password-policies-guide.md`](../../docs/password-policies-guide.md).
 

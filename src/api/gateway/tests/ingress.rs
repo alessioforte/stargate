@@ -1,10 +1,10 @@
 use crate::api::gateway::authentication::TestAuthenticator;
-use crate::etc::{
-    auth::{
+use crate::{
+    etc::gate::{Gate, prepare_config, test_support},
+    iam::auth::{
         identity::VerifiedIdentity,
         subject::{Subject, SubjectType},
     },
-    gate::{Gate, prepare_config, test_support},
 };
 use axum::{body::Body, extract::ConnectInfo, response::Response};
 use gate::cfg::Config;

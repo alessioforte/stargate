@@ -12,8 +12,8 @@ use super::shared::{
     AUTH_METHOD_NONE, ClientCredentials, OAuthResult, authenticate_oauth_client, oauth_bad_request,
     oauth_invalid_client, resolve_client_credentials_parts,
 };
-use crate::act::client_jwks::{self, Freshness};
 use crate::err::OAuthErrorResponse;
+use crate::iam::oidc::client_jwks::{self, Freshness};
 use oidc::client_assertion::{CLIENT_ASSERTION_TYPE_JWT_BEARER, ClientAssertionClaims};
 use oidc::scopes::AUTH_METHOD_PRIVATE_KEY_JWT;
 use store::Store;

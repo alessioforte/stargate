@@ -16,8 +16,8 @@ pub mod users;
 
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::auth::jwt::jwt_config;
-use crate::etc::auth::subject::Subject;
+use crate::iam::auth::jwt::jwt_config;
+use crate::iam::auth::subject::Subject;
 use crate::{api::middleware::rate_limit, web::request::RequestExt};
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
@@ -79,7 +79,7 @@ pub struct AdminAuthenticationState {
 }
 
 async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
-    if !crate::act::otp::admin_step_up_required() {
+    if !crate::iam::otp::admin_step_up_required() {
         return true;
     }
 
@@ -87,10 +87,10 @@ async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
         return false;
     }
 
-    match crate::act::otp::has_valid_mfa_verification(
+    match crate::iam::otp::has_valid_mfa_verification(
         sid,
         user_id,
-        crate::act::otp::ADMIN_STEP_UP_PURPOSE,
+        crate::iam::otp::ADMIN_STEP_UP_PURPOSE,
     )
     .await
     {
@@ -150,13 +150,13 @@ async fn resolve_authorization(
     if let Some(token) = token {
         let jwt = jwt_config();
         if let Ok(claims) = jwt.validate_session_access_token(&token) {
-            match crate::act::token_revocation::is_revoked(&claims).await {
+            match crate::iam::auth::revocation::is_revoked(&claims).await {
                 Ok(false) => {
                     let sid = claims.sid.clone().unwrap_or_default();
                     let store = crate::data::store::use_store();
                     let session = store.get::<Subject>(&sid).await.unwrap_or(None);
                     if let Some(subject) = session.as_ref()
-                        && subject.sub_type == crate::etc::auth::subject::SubjectType::User
+                        && subject.sub_type == crate::iam::auth::subject::SubjectType::User
                         && claims.sub_id.as_deref() == Some(subject.id.as_str())
                     {
                         authenticated = true;
@@ -180,13 +180,14 @@ async fn resolve_authorization(
                 }
             }
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None) {
-            match crate::act::token_revocation::is_revoked(&claims).await {
+            match crate::iam::auth::revocation::is_revoked(&claims).await {
                 Ok(false) => {
                     let client_id = claims.azp.as_deref().unwrap_or_default();
                     let user_id = claims.sub_id.as_deref();
                     let active_session = match (claims.sid.as_deref(), user_id) {
                         (Some(sid), Some(user_id)) => {
-                            match crate::act::sessions::get_active_session(sid, user_id).await {
+                            match crate::iam::sess::registry::get_active_session(sid, user_id).await
+                            {
                                 Ok(session) => session,
                                 Err(err) => {
                                     tracing::error!(
@@ -417,8 +418,8 @@ pub fn router() -> axum::Router {
         .route(
             "/admin/users/invitations",
             post(users::create_user_invitation).layer(axum::middleware::from_fn_with_state(
-                crate::etc::features::Feature::Invitations,
-                crate::etc::features::require_feature,
+                crate::conf::features::Feature::Invitations,
+                crate::conf::features::require_feature,
             )),
         )
         .route(

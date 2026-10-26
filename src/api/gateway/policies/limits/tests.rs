@@ -1,5 +1,5 @@
 use super::*;
-use crate::etc::auth::subject::{Subject, SubjectType};
+use crate::iam::auth::subject::{Subject, SubjectType};
 use serde_json::json;
 
 fn subject(attrs: serde_json::Value) -> Subject {

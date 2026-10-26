@@ -98,7 +98,7 @@ pub async fn get_admin_me(req: Request) -> Result<Json<AdminMe>, ErrorResponse> 
                 })?;
             let name = match (user.given_name.as_deref(), user.family_name.as_deref()) {
                 (None | Some(""), None | Some("")) => user.nickname.clone(),
-                (given_name, family_name) => crate::fun::format_name(
+                (given_name, family_name) => crate::iam::user::profile::format_name(
                     given_name.unwrap_or_default(),
                     family_name.unwrap_or_default(),
                 ),

@@ -1,11 +1,11 @@
 //! Correctness checks against an explicitly supplied disposable Redis instance.
 use crate::api::gateway::authentication::TestAuthenticator;
-use crate::etc::{
-    auth::{
+use crate::{
+    etc::gate::{Gate, prepare_config},
+    iam::auth::{
         identity::VerifiedIdentity,
         subject::{Subject, SubjectType},
     },
-    gate::{Gate, prepare_config},
 };
 use axum::{body::Body, extract::ConnectInfo, response::Response};
 use gate::cfg::Config;

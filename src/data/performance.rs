@@ -15,9 +15,9 @@ async fn cluster_backend_round_trips() {
     let state = Arc::new(store::RedisStore::new(&redis_url).await.unwrap());
     let database = db::service::init(&database_url).await.unwrap();
     let key = format!("benchmark:{}", ulid::Ulid::generate());
-    let subject = crate::etc::auth::subject::Subject::new(
+    let subject = crate::iam::auth::subject::Subject::new(
         key.clone(),
-        crate::etc::auth::subject::SubjectType::User,
+        crate::iam::auth::subject::SubjectType::User,
         Some(json!({"payload":"x".repeat(1024)})),
     );
     state.set(&key, &subject, Some(60)).await.unwrap();
@@ -41,7 +41,7 @@ async fn cluster_backend_round_trips() {
             match operation {
                 "redis_session_get_1k" => assert!(
                     state
-                        .get::<crate::etc::auth::subject::Subject>(&key)
+                        .get::<crate::iam::auth::subject::Subject>(&key)
                         .await
                         .unwrap()
                         .is_some()

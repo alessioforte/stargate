@@ -41,7 +41,7 @@ pub struct UserCredentials {
 }
 
 pub fn router() -> axum::Router {
-    use crate::etc::features::{Feature, require_feature};
+    use crate::conf::features::{Feature, require_feature};
     use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{delete, get, post, put};
 

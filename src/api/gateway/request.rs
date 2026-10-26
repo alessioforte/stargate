@@ -16,10 +16,8 @@ use super::{
 use crate::{
     ctx::{PropagationDraft, RequestContext, request_id_from, sign::InternalContextRuntime},
     err::{ErrorCode, ErrorResponse},
-    etc::{
-        auth::identity::{self, VerifiedIdentity},
-        gate::Gate,
-    },
+    etc::gate::Gate,
+    iam::auth::identity::{self, VerifiedIdentity},
     obs::telemetry,
     web::request::RequestExt,
 };

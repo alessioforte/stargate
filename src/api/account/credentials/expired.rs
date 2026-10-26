@@ -5,9 +5,8 @@ use db::ent::{Credential, CredentialType, User};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::act;
 use crate::err::ErrorResponse;
-use crate::etc;
+use crate::iam::{auth::jwt::jwt_config, pwd};
 
 /// Returned by password login instead of session tokens when the password is
 /// correct (and MFA, if required, verified) but older than the effective
@@ -46,15 +45,15 @@ pub(crate) async fn maybe_password_expired_response(
         }
     };
 
-    if !act::password_policy::password_expired(&user.id, changed_at).await {
+    if !pwd::policy::password_expired(&user.id, changed_at).await {
         return Ok(None);
     }
 
     // Reuse a pending change-password request when one exists (e.g. from the
     // forgot flow) so the emailed link stays valid; otherwise create one.
-    let sid = match act::get_change_password_request(&user.email).await {
+    let sid = match pwd::reset::get_change_password_request(&user.email).await {
         Ok(Some(sid)) => sid,
-        _ => act::create_change_password_request(&user.email)
+        _ => pwd::reset::create_change_password_request(&user.email)
             .await
             .map_err(ErrorResponse::internal)?,
     };
@@ -63,7 +62,7 @@ pub(crate) async fn maybe_password_expired_response(
         .sub_id(user.id.clone())
         .email(user.email.clone())
         .sid(sid);
-    let reset_token = etc::auth::jwt::jwt_config()
+    let reset_token = jwt_config()
         .generate_token(&claim)
         .map_err(ErrorResponse::internal)?;
 
@@ -71,7 +70,7 @@ pub(crate) async fn maybe_password_expired_response(
         password_expired: true,
         message: "Password has expired and must be changed".to_string(),
         reset_token,
-        expires_in_secs: act::CHANGE_PASSWORD_REQUEST_TTL_SECS,
+        expires_in_secs: pwd::reset::CHANGE_PASSWORD_REQUEST_TTL_SECS,
     };
     let mut response = Json(body).into_response();
     *response.status_mut() = StatusCode::ACCEPTED;

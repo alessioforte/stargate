@@ -12,11 +12,11 @@ pub(crate) mod state;
 
 pub use state::post_state;
 
-use crate::act::oauth_state::{self, BrowserSignIn, OAuthState};
 use crate::api::account::session::{IssuedSession, start_user_session};
+use crate::conf::features::{SelfServiceRefusal, features};
 use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::features::{SelfServiceRefusal, features};
+use crate::iam::fed::state::{BrowserSignIn, OAuthState, create_oauth_state, take_oauth_state};
 use crate::web::request::RequestExt;
 use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
@@ -28,7 +28,7 @@ use serde::Deserialize;
 /// Binds a browser sign-in to the browser that started it, so a callback URL
 /// from someone else's sign-in cannot sign this browser in (login CSRF).
 const STATE_COOKIE: &str = "social_state";
-/// As long as the state itself (`act::oauth_state`).
+/// As long as the state itself (`iam::fed::state`).
 const STATE_COOKIE_MAX_AGE_SECS: u64 = 300;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,12 +142,10 @@ async fn start(
             return_to,
         }),
     };
-    let state = oauth_state::create_oauth_state(&record)
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "failed to create OAuth state");
-            ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
-        })?;
+    let state = create_oauth_state(&record).await.map_err(|error| {
+        tracing::error!(%error, "failed to create OAuth state");
+        ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
+    })?;
     let location = provider.authorize_url(&state).map_err(|error| {
         tracing::error!(%error, provider = provider.display_name(), "cannot build the authorization URL");
         ErrorResponse::new(ErrorCode::SystemInternal)
@@ -180,12 +178,10 @@ async fn callback(req: Request, provider: Provider) -> Response {
         Err(_) => CallbackQuery::default(),
     };
     let record = match nonempty(query.state.as_deref()) {
-        Some(state) => oauth_state::take_oauth_state(state)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::error!(%error, "failed to read OAuth state");
-                None
-            }),
+        Some(state) => take_oauth_state(state).await.unwrap_or_else(|error| {
+            tracing::error!(%error, "failed to read OAuth state");
+            None
+        }),
         None => None,
     };
 
@@ -404,7 +400,7 @@ fn return_to_within(value: &str, bases: &[String]) -> Option<String> {
 /// Each route answers `404 feature.disabled` while its provider has no
 /// credentials (`/oauth/state` while none has).
 pub fn router() -> axum::Router {
-    use crate::etc::features::{Feature, require_feature};
+    use crate::conf::features::{Feature, require_feature};
     use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{get, post};
 

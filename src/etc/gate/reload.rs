@@ -1,7 +1,5 @@
-use super::{
-    Gate, GatewayPreparationError,
-    config::{get_policies_path, load_config_from_path},
-};
+use super::{Gate, GatewayPreparationError, config::load_config_from_path};
+use crate::iam::authz::storage::get_policies_path;
 use crate::obs::telemetry;
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use std::{path::Path, sync::Arc, thread};
@@ -164,7 +162,7 @@ fn reload_policy_engine_from_path(
     gate: &Gate,
     policies_path: &str,
 ) -> Result<bool, crate::err::ErrorResponse> {
-    let policies = crate::act::access_control_rules::load_policy_snapshot(policies_path)?;
+    let policies = crate::iam::authz::rules::load_policy_snapshot(policies_path)?;
     if gate.policy_snapshot.load().revision == policies.revision {
         return Ok(false);
     }

@@ -170,14 +170,14 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
 
     match validate_revocable_jwt(&form.token) {
         Ok(claims) => {
-            crate::act::token_revocation::revoke_claims(&claims)
+            crate::iam::auth::revocation::revoke_claims(&claims)
                 .await
                 .map_err(OAuthErrorResponse::internal)?;
             if claims.typ.as_deref() == Some("refresh")
                 && let (Some(user_id), Some(sid)) =
                     (claims.sub_id.as_deref(), claims.sid.as_deref())
             {
-                crate::act::sessions::end_session(user_id, sid)
+                crate::iam::sess::registry::end_session(user_id, sid)
                     .await
                     .map_err(OAuthErrorResponse::internal)?;
             }
@@ -261,7 +261,7 @@ async fn introspect_jwt_claims(claims: jwt::Claims) -> OAuthResult<Introspection
         return Ok(IntrospectionResponse::inactive());
     }
 
-    if crate::act::token_revocation::is_revoked(&claims)
+    if crate::iam::auth::revocation::is_revoked(&claims)
         .await
         .map_err(OAuthErrorResponse::internal)?
         || !jwt_session_active(&claims).await?
@@ -327,7 +327,7 @@ async fn introspect_token(token: &str) -> OAuthResult<IntrospectionResponse> {
 }
 
 fn validate_introspectable_jwt(token: &str) -> Result<jwt::Claims, jwt::JwtValidationError> {
-    let jwt = crate::etc::auth::jwt::jwt_config();
+    let jwt = crate::iam::auth::jwt::jwt_config();
     jwt.validate_oauth_access_token(token, None)
         .or_else(|_| jwt.validate_session_access_token(token))
         .or_else(|_| jwt.validate_session_refresh_token(token))

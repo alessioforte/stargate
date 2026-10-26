@@ -1,6 +1,6 @@
-use crate::act::otp::service::{complete_login_mfa, maybe_start_login_mfa as start_login_mfa};
-use crate::act::otp::types::MfaChallengeVerifyRequestBody;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::otp::service::{complete_login_mfa, maybe_start_login_mfa as start_login_mfa};
+use crate::iam::otp::types::MfaChallengeVerifyRequestBody;
 use axum::Json;
 use axum::extract::{FromRequest, Path, Request};
 use axum::http::StatusCode;

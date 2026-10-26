@@ -1,5 +1,5 @@
 use super::*;
-use crate::etc::auth::{
+use crate::iam::auth::{
     identity::VerifiedIdentity,
     subject::{Subject, SubjectType},
 };
