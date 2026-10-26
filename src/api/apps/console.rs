@@ -1,17 +1,15 @@
 use crate::api::middleware::features::disabled;
+use crate::conf::apps::console_app_base_path;
 use crate::conf::features::{Feature, features};
 use axum::Router;
 use axum::routing::any;
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
-const DEFAULT_CONSOLE_APP_BASE_PATH: &str = "/stargate";
 const DEFAULT_CONSOLE_APP_DIR: &str = ".stargate/apps/console";
 
 pub fn router() -> Router {
-    let base_path = std::env::var("CONSOLE_APP_BASE_PATH")
-        .map(|value| normalize_base_path(&value))
-        .unwrap_or_else(|_| DEFAULT_CONSOLE_APP_BASE_PATH.to_string());
+    let base_path = console_app_base_path();
     if !features().console {
         return disabled_router(&base_path);
     }
@@ -35,30 +33,15 @@ fn router_from(base_path: String, app_dir: PathBuf) -> Router {
     Router::new().nest_service(&base_path, service)
 }
 
-fn normalize_base_path(value: &str) -> String {
-    let trimmed = value.trim().trim_matches('/');
-    if trimmed.is_empty() {
-        return DEFAULT_CONSOLE_APP_BASE_PATH.to_string();
-    }
-    format!("/{trimmed}")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{disabled_router, normalize_base_path, router_from};
+    use super::{disabled_router, router_from};
     use axum::body::Body;
     use http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::ServiceExt;
-
-    #[test]
-    fn normalizes_console_app_base_path() {
-        assert_eq!(normalize_base_path("stargate"), "/stargate");
-        assert_eq!(normalize_base_path("/stargate/"), "/stargate");
-        assert_eq!(normalize_base_path("  console/admin  "), "/console/admin");
-    }
 
     #[tokio::test]
     async fn serves_console_spa_under_base_path() {

@@ -7,7 +7,6 @@ use tracing::info;
 use url::Url;
 
 pub const DEFAULT_CONSOLE_OAUTH_CLIENT_ID: &str = "stargate_console";
-const DEFAULT_CONSOLE_APP_BASE_PATH: &str = "/stargate";
 
 pub async fn super_admin_exists() -> Result<bool> {
     crate::data::db::super_admin_exists().await
@@ -134,23 +133,11 @@ fn default_console_oauth_redirect_uri() -> String {
     let public_url = nonempty_env("CONSOLE_PUBLIC_URL")
         .or_else(|| nonempty_env("OAUTH_BASE_URL"))
         .unwrap_or_else(jwt::issuer_from_env);
-    let base_path = nonempty_env("CONSOLE_APP_BASE_PATH")
-        .map(|value| normalize_base_path(&value))
-        .unwrap_or_else(|| DEFAULT_CONSOLE_APP_BASE_PATH.to_string());
     format!(
         "{}{}/auth/callback",
         public_url.trim_end_matches('/'),
-        base_path
+        crate::conf::apps::console_app_base_path()
     )
-}
-
-fn normalize_base_path(value: &str) -> String {
-    let path = value.trim().trim_matches('/');
-    if path.is_empty() {
-        DEFAULT_CONSOLE_APP_BASE_PATH.to_string()
-    } else {
-        format!("/{path}")
-    }
 }
 
 fn validate_console_oauth_redirect_uri(redirect_uri: &str) -> Result<()> {

@@ -1,4 +1,4 @@
-const DEFAULT_AUTH_APP_BASE_PATH: &str = "/auth";
+use crate::conf::apps::auth_app_base_path;
 
 pub fn get_base_url() -> String {
     let protocol = if crate::srv::tls::enabled().unwrap_or(false) {
@@ -9,12 +9,6 @@ pub fn get_base_url() -> String {
     let hostname = std::env::var("HOSTNAME").unwrap_or("localhost".to_string());
     let port = std::env::var("PORT").unwrap_or("5050".to_string());
     format!("{}://{}:{}", protocol, hostname, port)
-}
-
-fn auth_app_base_path() -> String {
-    let path = std::env::var("AUTH_APP_BASE_PATH")
-        .unwrap_or_else(|_| DEFAULT_AUTH_APP_BASE_PATH.to_string());
-    normalize_base_path(&path)
 }
 
 /// Base of the hosted auth app for redirects answered by this server:
@@ -59,10 +53,6 @@ pub fn auth_app_redirect(path: &str, params: &[(&str, &str)]) -> String {
     format!("{url}?{query}")
 }
 
-fn normalize_base_path(path: &str) -> String {
-    format!("/{}", path.trim().trim_matches('/'))
-}
-
 fn link_from_base(base_url: &str, path: &str, token: Option<&str>) -> String {
     let url = format!("{}/{path}", base_url.trim_end_matches('/'));
     let Some(token) = token else {
@@ -76,13 +66,7 @@ fn link_from_base(base_url: &str, path: &str, token: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{link_from_base, normalize_base_path};
-
-    #[test]
-    fn normalizes_auth_app_base_paths() {
-        assert_eq!(normalize_base_path("auth"), "/auth");
-        assert_eq!(normalize_base_path("/auth/"), "/auth");
-    }
+    use super::link_from_base;
 
     #[test]
     fn builds_auth_app_links_with_encoded_tokens() {

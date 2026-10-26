@@ -117,7 +117,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 ### Shared Support (paths under `src/`)
 
 - `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
-  `CONFIG_PATH`), and feature toggles (`features.rs`, below).
+  `CONFIG_PATH`), the hosted apps' base paths (`apps.rs`, read by the app routers,
+  links, and the Console's default callback), and feature toggles (`features.rs`, below).
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
   `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
@@ -692,9 +693,9 @@ the same logical columns on PostgreSQL and SQLite.
 | `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
 | `SERVER_DRAIN_DELAY_SECS` | 5 | Readiness-off delay before listeners close |
 | `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | Connection drain deadline |
-| `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH` | `.stargate/apps/auth` / `/auth` | Hosted auth app files and mount |
+| `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH` | `.stargate/apps/auth` / `/auth` | Hosted auth app files and mount (empty or `/` = default) |
 | `AUTH_PUBLIC_BASE_URL` | - | Public auth app URL when hosted elsewhere |
-| `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount |
+| `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount (empty or `/` = default) |
 | `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` | invite / - | Who may create accounts (`open`, `invite`, `closed`); domains for `open` |
 | `PASSWORDLESS_LOGIN_ENABLED` | false | Passwordless email-code login (needs `EMAIL_OTP_PEPPER`; not with `MFA_MODE=required`) |
 | `CONSOLE_ENABLED` | true | Serve the Console app (`false`: its path answers `404 feature.disabled`) |
