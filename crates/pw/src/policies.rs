@@ -1,7 +1,4 @@
 //! Password policies: a serde-configurable rule set with typed violations.
-//!
-//! Roadmap for stateful policies (history, expiry) and hashing hardening:
-//! `docs/pw-improvement-plan.md`.
 
 use serde::{Deserialize, Serialize};
 

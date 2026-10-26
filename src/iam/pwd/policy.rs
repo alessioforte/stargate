@@ -6,7 +6,7 @@
 //! global policy for their members via `attrs.password_policy` (validated;
 //! invalid overrides are logged and ignored). Every path that accepts a new
 //! password validates through this module: signup, password reset, admin
-//! user creation, and the CLI. Roadmap: `docs/pw-improvement-plan.md`.
+//! user creation, and the CLI. Operator guide: `docs/password-policies-guide.md`.
 
 use std::sync::LazyLock;
 
