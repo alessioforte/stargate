@@ -101,7 +101,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 - `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
   trusted-origin middleware), security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), message envelopes.
-- `api/middleware/rate_limit.rs`: IAM limits (see "API Overview").
+- `api/middleware/`: IAM limits (`rate_limit.rs`, see "API Overview") and the feature
+  gate (`features.rs`).
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
 - `obs/`: logging and the telemetry provider (`telemetry/metrics.rs`,
@@ -114,10 +115,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 - `data/db/`: SQL pool init and the repository service wrappers (`svc.rs`).
 - `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
   `CONFIG_PATH`), and feature toggles.
-- `conf/features.rs`: capabilities an operator can switch off, read and validated once at startup
-  (invalid values stop it). A disabled capability keeps its routes mounted and answers
-  `404 feature.disabled` (`require_feature` middleware): unmatched paths fall through to
-  the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
+- `conf/features.rs`: capabilities an operator can switch off, read and validated once at
+  startup (invalid values stop it). A disabled capability keeps its routes mounted and
+  answers `404 feature.disabled` (`require_feature` middleware and `disabled` answer in
+  `api/middleware/features.rs`): unmatched paths fall through to the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
   `PASSWORDLESS_LOGIN_ENABLED` (see "OTP, Passwordless Login, and MFA"),
   `CONSOLE_ENABLED`, and each social provider (on when its client id and secret are both
   set; one alone stops startup). `GET /account/features` (public) lists the sign-in

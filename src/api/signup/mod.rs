@@ -2,7 +2,8 @@ pub mod complete;
 pub mod request;
 pub mod verification;
 
-use crate::conf::features::{Feature, SelfServiceRefusal, disabled, features, require_feature};
+use crate::api::middleware::features::{disabled, require_feature};
+use crate::conf::features::{Feature, SelfServiceRefusal, features};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::user::signup::{PendingSignupProfile, SignupOrigin};
 use serde::{Deserialize, Serialize};

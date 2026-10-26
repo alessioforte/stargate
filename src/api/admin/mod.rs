@@ -419,7 +419,7 @@ pub fn router() -> axum::Router {
             "/admin/users/invitations",
             post(users::create_user_invitation).layer(axum::middleware::from_fn_with_state(
                 crate::conf::features::Feature::Invitations,
-                crate::conf::features::require_feature,
+                crate::api::middleware::features::require_feature,
             )),
         )
         .route(

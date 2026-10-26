@@ -1,4 +1,5 @@
-use crate::conf::features::{self, Feature, features};
+use crate::api::middleware::features::disabled;
+use crate::conf::features::{Feature, features};
 use axum::Router;
 use axum::routing::any;
 use std::path::PathBuf;
@@ -23,8 +24,8 @@ pub fn router() -> Router {
 /// `CONSOLE_ENABLED=false`: the base path and everything under it answer
 /// `404 feature.disabled` instead of falling through to the gateway.
 fn disabled_router(base_path: &str) -> Router {
-    let disabled = any(|| async { features::disabled(Feature::Console) });
-    Router::new().nest_service(base_path, disabled)
+    let answer = any(|| async { disabled(Feature::Console) });
+    Router::new().nest_service(base_path, answer)
 }
 
 fn router_from(base_path: String, app_dir: PathBuf) -> Router {

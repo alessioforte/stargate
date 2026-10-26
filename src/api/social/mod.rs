@@ -399,7 +399,8 @@ fn return_to_within(value: &str, bases: &[String]) -> Option<String> {
 /// Each route answers `404 feature.disabled` while its provider has no
 /// credentials (`/oauth/state` while none has).
 pub fn router() -> axum::Router {
-    use crate::conf::features::{Feature, require_feature};
+    use crate::api::middleware::features::require_feature;
+    use crate::conf::features::Feature;
     use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{get, post};
 
