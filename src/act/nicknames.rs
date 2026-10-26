@@ -19,7 +19,7 @@ pub(crate) async fn ensure_nickname_available(
     if !nickname_is_valid(nickname, email) {
         return Err(ErrorResponse::new(ErrorCode::UserNicknameInvalid));
     }
-    let taken = crate::db::get_user_by_nickname(nickname)
+    let taken = crate::data::db::get_user_by_nickname(nickname)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some_and(|user| Some(user.id.as_str()) != owner_id);
@@ -51,7 +51,7 @@ pub(crate) async fn available_nickname(
 }
 
 pub(crate) async fn nickname_taken(nickname: &str) -> Result<bool, ErrorResponse> {
-    Ok(crate::db::get_user_by_nickname(nickname)
+    Ok(crate::data::db::get_user_by_nickname(nickname)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some())

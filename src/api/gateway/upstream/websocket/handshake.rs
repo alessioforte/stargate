@@ -5,7 +5,8 @@ use crate::api::gateway::{
 };
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::{gate::PreparedTransport, observability::telemetry},
+    etc::gate::PreparedTransport,
+    obs::telemetry,
 };
 use axum::body::Body;
 use base64::Engine as _;

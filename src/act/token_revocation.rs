@@ -17,11 +17,11 @@ pub async fn is_revoked(claims: &jwt::Claims) -> Result<bool, StoreError> {
     let Some(jti) = claims.jti.as_deref() else {
         return Ok(false);
     };
-    crate::etc::store::use_store().exists(&key(jti)).await
+    crate::data::store::use_store().exists(&key(jti)).await
 }
 
 pub async fn revoke_claims(claims: &jwt::Claims) -> Result<(), StoreError> {
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     let mut jti_revoked = false;
 
     if let Some(jti) = claims.jti.as_deref()

@@ -7,13 +7,13 @@ pub(super) async fn store(
     record: AuthorizationCodeRecord,
     ttl_secs: u64,
 ) -> OAuthResult<()> {
-    oidc::codes::store(crate::etc::store::use_store(), code_hash, record, ttl_secs)
+    oidc::codes::store(crate::data::store::use_store(), code_hash, record, ttl_secs)
         .await
         .map_err(Into::into)
 }
 
 pub(super) async fn get(code_hash: &str) -> OAuthResult<CodeLookup> {
-    oidc::codes::get(crate::etc::store::use_store(), code_hash)
+    oidc::codes::get(crate::data::store::use_store(), code_hash)
         .await
         .map_err(Into::into)
 }
@@ -22,13 +22,13 @@ pub(super) async fn consume(
     code_hash: &str,
     record: &AuthorizationCodeRecord,
 ) -> OAuthResult<bool> {
-    oidc::codes::consume(crate::etc::store::use_store(), code_hash, record)
+    oidc::codes::consume(crate::data::store::use_store(), code_hash, record)
         .await
         .map_err(Into::into)
 }
 
 pub(super) async fn record_redemption(code_hash: &str, grant: RedeemedGrant) -> OAuthResult<()> {
-    oidc::codes::record_redemption(crate::etc::store::use_store(), code_hash, grant)
+    oidc::codes::record_redemption(crate::data::store::use_store(), code_hash, grant)
         .await
         .map_err(Into::into)
 }

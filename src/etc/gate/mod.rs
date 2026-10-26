@@ -18,7 +18,7 @@ pub use runtime::{Gate, RuntimeSnapshot};
 pub(crate) use transport::DeadlineConnector;
 pub use transport::{HyperClient, PreparedTransport, connection_timed_out};
 
-use crate::etc::store::use_store;
+use crate::data::store::use_store;
 use config::{get_config_path, load_config_from_path};
 use reload::{watch_config_file, watch_policies_file};
 use std::sync::Arc;

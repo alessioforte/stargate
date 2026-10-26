@@ -36,7 +36,7 @@ pub(crate) fn interaction_cookie(id: &str, max_age_secs: u64) -> String {
     let mut cookie = format!(
         "{INTERACTION_COOKIE}={id}; Path={LOGIN_ENDPOINT_PATH}; HttpOnly; SameSite=Strict; Max-Age={max_age_secs}"
     );
-    if crate::etc::server::tls::enabled().unwrap_or(false) {
+    if crate::srv::tls::enabled().unwrap_or(false) {
         cookie.push_str("; Secure");
     }
     cookie
@@ -62,7 +62,7 @@ pub(crate) struct LoginPage<'a> {
 /// the app treats relative values as its own routes.
 pub(crate) fn login_page_url(page: LoginPage) -> String {
     login_page_url_from(
-        &crate::fun::auth_app_href(),
+        &crate::web::links::auth_app_href(),
         &super::well_known::public_endpoint_base_url(),
         page,
     )
@@ -101,7 +101,7 @@ pub(crate) fn step_up_page_url(id: &str) -> String {
         .finish();
     format!(
         "{}/step-up?{query}",
-        crate::fun::auth_app_href().trim_end_matches('/')
+        crate::web::links::auth_app_href().trim_end_matches('/')
     )
 }
 
@@ -112,7 +112,7 @@ pub(crate) fn consent_page_url(id: &str) -> String {
         .finish();
     format!(
         "{}/consent?{query}",
-        crate::fun::auth_app_href().trim_end_matches('/')
+        crate::web::links::auth_app_href().trim_end_matches('/')
     )
 }
 
@@ -202,7 +202,7 @@ async fn park_with(
 }
 
 async fn save(id: &str, pending: &PendingAuthorization) -> OAuthResult<()> {
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .set(&key(id), pending, Some(INTERACTION_TTL_SECS))
         .await
         .map_err(OAuthErrorResponse::internal)
@@ -235,7 +235,7 @@ pub(crate) async fn get(id: &str) -> OAuthResult<Option<PendingAuthorization>> {
     if !valid_id(id) {
         return Ok(None);
     }
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .get(&key(id))
         .await
         .map_err(OAuthErrorResponse::internal)
@@ -246,7 +246,7 @@ pub(crate) async fn take(id: &str) -> OAuthResult<Option<PendingAuthorization>> 
     let Some(pending) = get(id).await? else {
         return Ok(None);
     };
-    let deleted = crate::etc::store::use_store()
+    let deleted = crate::data::store::use_store()
         .delete(&key(id))
         .await
         .map_err(OAuthErrorResponse::internal)?;

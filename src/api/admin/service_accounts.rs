@@ -4,7 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::{MessageCode, MessageResponse};
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -83,19 +83,19 @@ pub async fn get_service_accounts(req: Request) -> Result<Response, ErrorRespons
 
     let (accounts, total) = match &query.q {
         Some(q) if !q.trim().is_empty() => {
-            let accounts = crate::db::search_service_accounts(q, limit, offset)
+            let accounts = crate::data::db::search_service_accounts(q, limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_search_service_accounts(q)
+            let total = crate::data::db::count_search_service_accounts(q)
                 .await
                 .map_err(ErrorResponse::internal)?;
             (accounts, total)
         }
         _ => {
-            let accounts = crate::db::get_all_service_accounts(limit, offset)
+            let accounts = crate::data::db::get_all_service_accounts(limit, offset)
                 .await
                 .map_err(ErrorResponse::internal)?;
-            let total = crate::db::count_service_accounts()
+            let total = crate::data::db::count_service_accounts()
                 .await
                 .map_err(ErrorResponse::internal)?;
             (accounts, total)
@@ -129,7 +129,7 @@ pub async fn get_service_account(mut req: Request) -> Result<Response, ErrorResp
 
     let id: String = extract_path(&mut req).await?;
 
-    let account = crate::db::get_service_account_by_id(&id)
+    let account = crate::data::db::get_service_account_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {
@@ -162,7 +162,7 @@ pub async fn create_service_account(mut req: Request) -> Result<Response, ErrorR
         return Err(ErrorResponse::new(ErrorCode::ServiceAccountNameRequired));
     }
 
-    let account = crate::db::create_service_account(
+    let account = crate::data::db::create_service_account(
         &payload.name,
         payload.description.as_deref(),
         payload.org_id.as_deref(),
@@ -200,7 +200,7 @@ pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorR
         return Err(ErrorResponse::new(ErrorCode::ServiceAccountNameRequired));
     }
 
-    if crate::db::get_service_account_by_id(&id)
+    if crate::data::db::get_service_account_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -210,10 +210,14 @@ pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorR
         );
     }
 
-    let account =
-        crate::db::update_service_account(&id, &payload.name, payload.description.as_deref(), ctx)
-            .await
-            .map_err(ErrorResponse::internal)?;
+    let account = crate::data::db::update_service_account(
+        &id,
+        &payload.name,
+        payload.description.as_deref(),
+        ctx,
+    )
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     Ok(Json(account).into_response())
 }
@@ -237,7 +241,7 @@ pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorR
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
 
-    if crate::db::get_service_account_by_id(&id)
+    if crate::data::db::get_service_account_by_id(&id)
         .await
         .map_err(ErrorResponse::internal)?
         .is_none()
@@ -247,7 +251,7 @@ pub async fn delete_service_account(mut req: Request) -> Result<Response, ErrorR
         );
     }
 
-    let revoked_key_hashes = crate::db::delete_service_account(&id, ctx)
+    let revoked_key_hashes = crate::data::db::delete_service_account(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
     crate::etc::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;

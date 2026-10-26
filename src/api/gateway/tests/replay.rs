@@ -191,10 +191,11 @@ async fn eligible_failover_mints_a_fresh_context_for_each_target_and_attempt() {
 }
 
 async fn verify_nested_failover_contexts(kind: ctx::DispatchKind) {
-    use crate::etc::{
-        auth::identity::VerifiedIdentity,
-        internal_context::InternalContextRuntime,
-        request_context::{INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext},
+    use crate::{
+        ctx::{
+            INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
+        },
+        etc::auth::identity::VerifiedIdentity,
     };
     use ctx::{
         ContextSigner, ContextVerifier, ExpectedRequest, SignerConfig, StaticKeyResolver,
@@ -213,7 +214,7 @@ async fn verify_nested_failover_contexts(kind: ctx::DispatchKind) {
     );
     let signer = ContextSigner::from_rsa_pem(
         SignerConfig::new(ISSUER, KEY_ID, 30).unwrap(),
-        crate::etc::internal_context::test_support::PRIVATE_KEY,
+        crate::ctx::sign::test_support::PRIVATE_KEY,
     )
     .unwrap();
     let request_context =
@@ -291,11 +292,9 @@ async fn verify_nested_failover_contexts(kind: ctx::DispatchKind) {
         let token = records[0].headers[&INTERNAL_CONTEXT_HEADER]
             .to_str()
             .unwrap();
-        let resolver = StaticKeyResolver::from_rsa_pem(
-            KEY_ID,
-            crate::etc::internal_context::test_support::PUBLIC_KEY,
-        )
-        .unwrap();
+        let resolver =
+            StaticKeyResolver::from_rsa_pem(KEY_ID, crate::ctx::sign::test_support::PUBLIC_KEY)
+                .unwrap();
         let verifier = ContextVerifier::new(
             VerifierConfig::new(ISSUER, audience, 5).unwrap(),
             Arc::new(resolver),

@@ -131,7 +131,7 @@ pub async fn validate_for_user(user: &User, password: &str) -> Result<(), String
 async fn recently_used(user_id: &str, password: &str, depth: usize) -> bool {
     let mut hashes: Vec<String> = Vec::with_capacity(depth);
 
-    match crate::db::get_credential(user_id, CredentialType::Password).await {
+    match crate::data::db::get_credential(user_id, CredentialType::Password).await {
         Ok(Some(current)) => hashes.push(current.value),
         Ok(None) => {}
         Err(error) => {
@@ -139,7 +139,7 @@ async fn recently_used(user_id: &str, password: &str, depth: usize) -> bool {
         }
     }
     if depth > 1 {
-        match crate::db::get_credential_history(user_id, (depth - 1) as i64).await {
+        match crate::data::db::get_credential_history(user_id, (depth - 1) as i64).await {
             Ok(entries) => hashes.extend(entries.into_iter().map(|entry| entry.value)),
             Err(error) => {
                 tracing::warn!("could not load password history, checking current only: {error}");
@@ -194,7 +194,7 @@ fn to_result(violations: Vec<PolicyViolation>) -> Result<(), String> {
 }
 
 async fn org_policies_for_user(user_id: &str) -> Vec<PasswordPolicySet> {
-    let organizations = match crate::db::get_user_organizations(user_id).await {
+    let organizations = match crate::data::db::get_user_organizations(user_id).await {
         Ok(organizations) => organizations,
         Err(error) => {
             // Fail towards the global policy: the password is still fully

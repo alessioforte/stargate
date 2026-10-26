@@ -1,10 +1,7 @@
 use super::{AuthResponse, RefreshTokenRequestBody};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::{
-    self,
-    auth::{jwt::jwt_config, subject::Subject},
-};
-use crate::fun::build_jwt_cookie;
+use crate::etc::auth::{jwt::jwt_config, subject::Subject};
+use crate::web::cookies::build_jwt_cookie;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
@@ -46,7 +43,7 @@ pub async fn put_refresh_token(
         .as_deref()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
-    let store = etc::store::use_store();
+    let store = crate::data::store::use_store();
     let session = store
         .get::<Subject>(&sid)
         .await
@@ -65,7 +62,7 @@ pub async fn put_refresh_token(
         .sub_id
         .as_deref()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-    let user = crate::db::get_user_by_id(user_id)
+    let user = crate::data::db::get_user_by_id(user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
@@ -75,7 +72,7 @@ pub async fn put_refresh_token(
     // re-read so role changes propagate on rotation.
     let org = match old_subject.org_id.as_deref() {
         Some(org_id) => {
-            let membership = crate::db::get_user_organization(&user.id, org_id)
+            let membership = crate::data::db::get_user_organization(&user.id, org_id)
                 .await
                 .map_err(ErrorResponse::internal)?
                 .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;

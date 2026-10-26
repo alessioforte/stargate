@@ -43,7 +43,7 @@ pub(crate) async fn start_passwordless_email_otp(
     let config = email_otp_config();
     let pepper = email_otp_pepper()?;
     let fake_response = fake_challenge_response(now, &config)?;
-    let Some(user) = crate::db::get_user_by_email(&email)
+    let Some(user) = crate::data::db::get_user_by_email(&email)
         .await
         .map_err(ErrorResponse::internal)?
     else {
@@ -65,7 +65,7 @@ pub(crate) async fn start_passwordless_email_otp(
     };
     let response = challenge_response(&challenge);
     let key = passwordless_email_key(&response.challenge_id);
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     store
         .set(
             &key,
@@ -97,7 +97,7 @@ pub(crate) async fn complete_passwordless_email_otp(
         VerifiedChallenge::Rejected(result) => return Err(verification_error(result)),
     };
 
-    let user = crate::db::get_user_by_id(&challenge.user_id)
+    let user = crate::data::db::get_user_by_id(&challenge.user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(invalid_or_expired_code)?;
@@ -183,7 +183,7 @@ async fn start_email_login_mfa(
         expires_at_unix: response.expires_at_unix,
     };
     let key = pending_login_key(&response.challenge_id);
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     store
         .set(
             &key,
@@ -224,7 +224,7 @@ pub(crate) async fn complete_login_mfa(
         VerifiedPendingLogin::Rejected(result) => return Err(verification_error(result)),
     };
 
-    let user = crate::db::get_user_by_id(&pending.user_id)
+    let user = crate::data::db::get_user_by_id(&pending.user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(invalid_or_expired_code)?;
@@ -280,7 +280,7 @@ async fn start_email_mfa_challenge(
     };
     let response = challenge_response(&challenge);
     let key = mfa_challenge_key(&user.id, &response.challenge_id);
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     store
         .set(
             &key,

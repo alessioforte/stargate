@@ -14,15 +14,14 @@ use super::{
     routing::router_matches,
 };
 use crate::{
+    ctx::{PropagationDraft, RequestContext, request_id_from, sign::InternalContextRuntime},
     err::{ErrorCode, ErrorResponse},
     etc::{
         auth::identity::{self, VerifiedIdentity},
         gate::Gate,
-        http::request::RequestExt,
-        internal_context::InternalContextRuntime,
-        observability::telemetry,
-        request_context::{self, PropagationDraft},
     },
+    obs::telemetry,
+    web::request::RequestExt,
 };
 use ::http::{HeaderMap, HeaderName, HeaderValue, Method, Request};
 use axum::{body::Body, response::Response};
@@ -165,7 +164,7 @@ async fn handle_request(
         preserve_host: false,
         response_headers: ResponseHeaderMutations::default(),
         propagation_draft: None,
-        internal_context_runtime: crate::etc::internal_context::runtime().cloned(),
+        internal_context_runtime: crate::ctx::sign::runtime().cloned(),
     };
 
     {
@@ -178,7 +177,7 @@ async fn handle_request(
         apply_middlewares(graph, router, &mut req, &mut state)?;
     }
 
-    let request_id = request_context::request_id_from(req.extensions());
+    let request_id = request_id_from(req.extensions());
 
     let mut response_headers = HeaderMap::new();
     response_headers.insert(
@@ -251,7 +250,7 @@ fn capture_propagation_draft(
     router: &RouterNode,
     policies: &PolicySnapshot,
 ) -> Option<Arc<PropagationDraft>> {
-    let Some(request_context) = req.extensions().get::<request_context::RequestContext>() else {
+    let Some(request_context) = req.extensions().get::<RequestContext>() else {
         telemetry::record_propagation_draft("rejected", "request_context");
         tracing::warn!(reason = "request_context", "Propagation draft rejected");
         return None;

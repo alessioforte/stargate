@@ -1,8 +1,8 @@
-use crate::etc::{
-    env::bool_or,
-    http::request::RequestExt,
-    observability::telemetry,
-    request_context::{self, RequestContext},
+use crate::{
+    ctx::{RequestContext, sanitize_ingress_headers},
+    etc::env::bool_or,
+    obs::telemetry,
+    web::request::RequestExt,
 };
 use chrono::Utc;
 use std::time::Instant;
@@ -161,7 +161,7 @@ pub async fn trace_middleware(
     let path = req.uri().path().to_string();
     let query = sanitize_query(req.uri().query().unwrap_or(""));
     let user_agent = req.get_user_agent();
-    request_context::sanitize_ingress_headers(req.headers_mut(), &request_id)
+    sanitize_ingress_headers(req.headers_mut(), &request_id)
         .expect("generated request id must be a valid header value");
     let peer_ip = req
         .extensions()

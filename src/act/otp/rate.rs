@@ -11,7 +11,7 @@ pub(crate) async fn check_and_record_otp_request(
     client_ip: &str,
     subject: &str,
 ) -> Result<(), ErrorResponse> {
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     let source_key = format!("{OTP_REQUEST_KEY_PREFIX}:ip:{client_ip}");
     let subject_key = format!("{OTP_REQUEST_KEY_PREFIX}:subject:{subject}:ip:{client_ip}");
     let ttl = Some(OTP_REQUEST_LOCKOUT_SECS);

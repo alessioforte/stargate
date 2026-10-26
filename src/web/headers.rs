@@ -15,7 +15,7 @@ pub async fn security_headers_middleware(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use http::header;
-    let tls_enabled = crate::etc::server::tls::enabled().unwrap_or(false);
+    let tls_enabled = crate::srv::tls::enabled().unwrap_or(false);
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(

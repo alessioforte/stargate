@@ -1,6 +1,7 @@
 pub mod banner;
 pub mod health;
 pub mod profile;
+pub mod shutdown;
 pub mod tls;
 
 use axum::extract::connect_info::ConnectInfo;

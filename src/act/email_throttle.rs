@@ -46,7 +46,7 @@ pub async fn check_and_record_email_request(
     flow: EmailFlow,
     email: &str,
 ) -> Result<(), ErrorResponse> {
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     let key = recipient_key(flow, email);
     let max = flow.max_requests();
 
@@ -136,7 +136,7 @@ mod store_tests {
         let response = error.into_response();
         assert_eq!(response.status(), http::StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(response.headers()["retry-after"], "3600");
-        let counted = crate::etc::store::use_store()
+        let counted = crate::data::store::use_store()
             .get_i64(&recipient_key(EmailFlow::PasswordReset, &email))
             .await
             .unwrap();

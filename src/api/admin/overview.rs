@@ -106,7 +106,7 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
         .get::<Arc<Gate>>()
         .cloned()
         .ok_or_else(|| ErrorResponse::internal("gateway runtime is unavailable"))?;
-    let stats = crate::db::get_admin_overview_stats()
+    let stats = crate::data::db::get_admin_overview_stats()
         .await
         .map_err(ErrorResponse::internal)?;
     let session_summary = crate::act::sessions::session_summary()

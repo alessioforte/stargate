@@ -351,7 +351,7 @@ async fn issue_authorization_code_grant(
 
     pkce::verify(&record, verifier)?;
 
-    let Some(user) = crate::db::get_user_by_id(&record.user_id)
+    let Some(user) = crate::data::db::get_user_by_id(&record.user_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -402,7 +402,7 @@ async fn consent_still_covers(
     scopes: &[String],
     audience: Option<&str>,
 ) -> OAuthResult<bool> {
-    let consent = crate::db::get_active_oauth_consent(user_id, &client.client_id)
+    let consent = crate::data::db::get_active_oauth_consent(user_id, &client.client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?;
     Ok(consent.is_some_and(|consent| {
@@ -427,7 +427,7 @@ async fn issue_refresh_token_grant(
         return Err(oauth_invalid_grant("invalid refresh token"));
     };
 
-    let Some(user) = crate::db::get_user_by_id(&family.user_id)
+    let Some(user) = crate::data::db::get_user_by_id(&family.user_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {

@@ -158,7 +158,7 @@ async fn unsupported_transport_and_invalid_client_handshakes_fail_before_connect
                 req.headers_mut().clear();
                 req.extensions_mut()
                     .insert(hyper::ext::Protocol::from_static("websocket"));
-                use crate::etc::http::request::RequestExt;
+                use crate::web::request::RequestExt;
                 assert_eq!(req.get_protocol(), "ws");
             }
             _ => unreachable!(),

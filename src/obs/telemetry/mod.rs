@@ -144,17 +144,11 @@ fn resource() -> Resource {
         .with_service_name(service_name)
         .with_attributes([
             KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-            KeyValue::new(
-                "deployment.profile",
-                crate::etc::server::profile::COMPILED_PROFILE,
-            ),
-            KeyValue::new(
-                "db.system",
-                crate::etc::server::profile::COMPILED_DB_BACKEND,
-            ),
+            KeyValue::new("deployment.profile", crate::srv::profile::COMPILED_PROFILE),
+            KeyValue::new("db.system", crate::srv::profile::COMPILED_DB_BACKEND),
             KeyValue::new(
                 "stargate.state_backend",
-                crate::etc::server::profile::COMPILED_STATE_BACKEND,
+                crate::srv::profile::COMPILED_STATE_BACKEND,
             ),
         ])
         .build()

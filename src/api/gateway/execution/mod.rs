@@ -18,7 +18,9 @@ use super::{
 };
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::{gate::RuntimeSnapshot, http::request::RequestExt, observability::telemetry},
+    etc::gate::RuntimeSnapshot,
+    obs::telemetry,
+    web::request::RequestExt,
 };
 use axum::{body::Body, response::Response};
 use ctx::DispatchKind;

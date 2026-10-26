@@ -15,10 +15,10 @@
 //! linked to them (OIDC Back-Channel Logout, see `backchannel_logout`).
 
 use super::backchannel_logout::{self, LogoutDelivery};
+use crate::data::store::use_store;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::auth::jwt::jwt_config;
 use crate::etc::auth::subject::{Subject, SubjectType};
-use crate::etc::store::use_store;
 use db::ent::OrgMembership;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -454,7 +454,7 @@ pub async fn authenticated_session(
         return Err(invalid());
     }
 
-    let user = crate::db::get_user_by_id(&subject.id)
+    let user = crate::data::db::get_user_by_id(&subject.id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(invalid)?;
@@ -496,7 +496,7 @@ pub async fn resolve_org_context(
     user: &db::ent::User,
     requested_org_id: Option<&str>,
 ) -> Result<Option<OrgContext>, ErrorResponse> {
-    let memberships = crate::db::get_user_organizations(&user.id)
+    let memberships = crate::data::db::get_user_organizations(&user.id)
         .await
         .map_err(ErrorResponse::internal)?;
     let default_org = user

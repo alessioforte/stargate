@@ -1,8 +1,5 @@
 use super::Execution;
-use crate::{
-    err::ErrorCode,
-    etc::{gate::resources::Admission, observability::telemetry},
-};
+use crate::{err::ErrorCode, etc::gate::resources::Admission, obs::telemetry};
 use axum::body::Body;
 use hyper::body::{Body as _, Bytes, Frame, SizeHint};
 use std::{

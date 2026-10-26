@@ -152,7 +152,7 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
     let selected = sessions.into_iter().skip(offset).take(limit);
     let mut data = Vec::new();
     for session in selected {
-        let user = crate::db::get_user_by_id(&session.user_id)
+        let user = crate::data::db::get_user_by_id(&session.user_id)
             .await
             .map_err(ErrorResponse::internal)?;
         let user = match user {
@@ -260,7 +260,7 @@ pub async fn delete_user_sessions(
         .and_then(AdminPrincipal::user_id)
         .map(str::to_string);
     let user_id: String = extract_path(&mut req).await?;
-    crate::db::get_user_by_id(&user_id)
+    crate::data::db::get_user_by_id(&user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {

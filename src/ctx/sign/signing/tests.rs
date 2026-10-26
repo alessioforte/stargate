@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Notify;
 
 fn request() -> IssueRequest {
-    crate::etc::internal_context::test_support::anonymous_issue_request()
+    crate::ctx::sign::test_support::anonymous_issue_request()
 }
 
 fn blocked_worker() -> (

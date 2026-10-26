@@ -16,7 +16,7 @@ pub(super) async fn issue(
     ttl_secs: u64,
 ) -> OAuthResult<String> {
     oidc::refresh::issue(
-        crate::etc::store::use_store(),
+        crate::data::store::use_store(),
         client_id,
         user_id,
         sid,
@@ -35,7 +35,7 @@ pub(super) async fn rotate(
     token: &str,
     client_id: &str,
 ) -> OAuthResult<Option<(String, RefreshTokenFamily)>> {
-    oidc::refresh::rotate(crate::etc::store::use_store(), token, client_id)
+    oidc::refresh::rotate(crate::data::store::use_store(), token, client_id)
         .await
         .map_err(Into::into)
 }
@@ -44,7 +44,7 @@ pub(super) async fn rotate(
 pub(super) async fn revoke_family(family_id: &str) -> OAuthResult<()> {
     use store::Store;
 
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .delete(&oidc::refresh::family_key(family_id))
         .await
         .map_err(crate::err::OAuthErrorResponse::internal)?;

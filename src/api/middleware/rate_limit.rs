@@ -8,8 +8,8 @@
 
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::gate::{Gate, RuntimeSnapshot, retain_runtime};
-use crate::etc::http::request::RequestExt;
 use crate::etc::limits::{ingress_key, insert_limit_headers, limited_response};
+use crate::web::request::RequestExt;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};

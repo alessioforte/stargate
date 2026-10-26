@@ -5,8 +5,10 @@ use crate::{
         email_throttle::{EmailFlow, check_and_record_email_request},
     },
     err::{ErrorCode, ErrorResponse},
-    etc::http::messages::{MessageCode, MessageResponse},
-    fun::{login_url, signup_url},
+    web::{
+        links::{login_url, signup_url},
+        messages::{MessageCode, MessageResponse},
+    },
 };
 use axum::Json;
 use db::ent::canonical_email;
@@ -38,7 +40,7 @@ pub async fn post_signup(
     super::ensure_self_service(&email)?;
     check_and_record_email_request(EmailFlow::Signup, &email).await?;
 
-    let email_kind = if crate::db::get_user_by_email(&email)
+    let email_kind = if crate::data::db::get_user_by_email(&email)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -76,7 +78,7 @@ pub(crate) async fn send_invitation(profile: PendingSignupProfile) -> Result<(),
         email: canonical_email(&profile.email),
         ..profile
     };
-    if crate::db::get_user_by_email(&profile.email)
+    if crate::data::db::get_user_by_email(&profile.email)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()

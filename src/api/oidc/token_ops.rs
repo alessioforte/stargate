@@ -3,8 +3,8 @@ use super::shared::{
     ClientCredentials, OAUTH_CAN_INTROSPECT_ATTR, OAUTH_CAN_REVOKE_ATTR, OAUTH_INTROSPECT_SCOPE,
     OAUTH_REVOKE_SCOPE, OAuthResult, extract_basic_client_credentials, oauth_bad_request,
 };
+use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::OAuthErrorResponse;
-use crate::etc::request_context::{audit_request_from, take_trusted_audit_context_from};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
@@ -235,7 +235,7 @@ fn scope_from_attrs(attrs: &JsonValue) -> Option<String> {
 
 async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     if let Some(sid) = claims.sid.as_deref() {
-        let active = crate::etc::store::use_store()
+        let active = crate::data::store::use_store()
             .exists(sid)
             .await
             .map_err(OAuthErrorResponse::internal)?;
@@ -247,7 +247,7 @@ async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     let Some(client_id) = claims.azp.as_deref() else {
         return Ok(claims.sid.is_some());
     };
-    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
+    let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -293,7 +293,7 @@ async fn introspect_api_key(token: &str) -> OAuthResult<IntrospectionResponse> {
     }
 
     let hash = pw::hash_api_key(token);
-    let Some(key) = crate::db::get_api_key_by_hash(&hash)
+    let Some(key) = crate::data::db::get_api_key_by_hash(&hash)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -450,7 +450,7 @@ async fn revoke_api_key_token(
     }
 
     let hash = pw::hash_api_key(token);
-    let Some(auth) = crate::db::get_api_key_auth_by_hash(&hash)
+    let Some(auth) = crate::data::db::get_api_key_auth_by_hash(&hash)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -468,10 +468,10 @@ async fn revoke_api_key_token(
         auth.org_id.as_deref(),
     )?;
 
-    crate::db::revoke_api_key(&auth.api_key.id, context)
+    crate::data::db::revoke_api_key(&auth.api_key.id, context)
         .await
         .map_err(OAuthErrorResponse::internal)?;
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .delete(&hash)
         .await
         .map_err(OAuthErrorResponse::internal)?;

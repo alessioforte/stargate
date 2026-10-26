@@ -1,6 +1,6 @@
-use crate::etc::{
-    gate::{Gate, test_support},
-    observability::logging::trace_middleware,
+use crate::{
+    etc::gate::{Gate, test_support},
+    obs::logging::trace_middleware,
 };
 use axum::{
     Extension, Router, body::Body, middleware::from_fn, response::Response, routing::get,

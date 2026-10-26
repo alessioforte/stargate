@@ -1,6 +1,6 @@
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::observability::telemetry,
+    obs::telemetry,
 };
 use gate::cfg::ProcessBudgets;
 use std::sync::{Arc, Mutex};

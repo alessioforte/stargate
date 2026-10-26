@@ -93,9 +93,9 @@ impl DependencyHealth {
 /// Shared by readiness probes and authenticated operator diagnostics.
 pub async fn check_dependencies() -> DependencyHealth {
     DependencyHealth::check(
-        crate::db::ping(),
+        crate::data::db::ping(),
         #[cfg(feature = "redis")]
-        crate::etc::store::ping(),
+        crate::data::store::ping(),
     )
     .await
 }

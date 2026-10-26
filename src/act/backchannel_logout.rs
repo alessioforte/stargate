@@ -69,7 +69,7 @@ struct Target {
 }
 
 async fn deliver(target: Target) {
-    let client = match crate::db::get_oauth_client_by_client_id(&target.client_id).await {
+    let client = match crate::data::db::get_oauth_client_by_client_id(&target.client_id).await {
         Ok(Some(client)) => client,
         Ok(None) => return,
         Err(error) => {

@@ -1,13 +1,6 @@
-mod adapters;
-pub mod geoip;
-mod propagation;
-
-pub use adapters::{
-    audit_request_from, build_env_from, request_id_from, take_trusted_audit_context_from,
-};
+use super::geoip;
 use chrono::{DateTime, Utc};
 use http::header::{HeaderName, HeaderValue};
-pub use propagation::PropagationDraft;
 use std::{
     net::IpAddr,
     sync::{Arc, OnceLock},
@@ -19,10 +12,10 @@ pub const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id"
 #[derive(Clone)]
 pub struct RequestContext {
     request_id: Box<str>,
-    started_at: DateTime<Utc>,
-    client_ip: Option<IpAddr>,
-    user_agent: Option<Box<str>>,
-    trace_id: Option<Box<str>>,
+    pub(super) started_at: DateTime<Utc>,
+    pub(super) client_ip: Option<IpAddr>,
+    pub(super) user_agent: Option<Box<str>>,
+    pub(super) trace_id: Option<Box<str>>,
     geo: OnceLock<Arc<geoip::GeoInfo>>,
 }
 
@@ -60,7 +53,7 @@ impl RequestContext {
         self.trace_id.as_deref()
     }
 
-    fn geo(&self) -> &Arc<geoip::GeoInfo> {
+    pub(super) fn geo(&self) -> &Arc<geoip::GeoInfo> {
         self.geo.get_or_init(|| {
             self.client_ip
                 .and_then(geoip::lookup)

@@ -1,4 +1,4 @@
-use crate::etc::request_context::{INTERNAL_CONTEXT_HEADER, REQUEST_ID_HEADER};
+use crate::ctx::{INTERNAL_CONTEXT_HEADER, REQUEST_ID_HEADER};
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::graph::HeaderValueNode;
 use http::header::{AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION};

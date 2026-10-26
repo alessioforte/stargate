@@ -1,6 +1,6 @@
 use crate::api::gateway::upstream::headers::{append_header, insert_header};
+use crate::ctx::INTERNAL_CONTEXT_HEADER;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::request_context::INTERNAL_CONTEXT_HEADER;
 use ::http::HeaderMap;
 use ::http::{StatusCode, header::CONTENT_TYPE};
 use axum::{body::Body, response::Response};

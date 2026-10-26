@@ -1,7 +1,7 @@
 pub(in crate::api::gateway) mod path;
 
 use self::path::path_matches;
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use ::http::Request;
 use axum::body::Body;
 use gate::graph::{

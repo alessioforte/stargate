@@ -1,9 +1,9 @@
 use super::SignupCompleteRequestBody;
 use crate::act;
+use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::etc::request_context::audit_request_from;
 use crate::fun::format_name;
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
@@ -59,7 +59,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
     }
     super::ensure_completable(&signup)?;
 
-    if crate::db::get_user_by_email(&signup.email)
+    if crate::data::db::get_user_by_email(&signup.email)
         .await
         .map_err(ErrorResponse::internal)?
         .is_some()
@@ -77,7 +77,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
 
     let organization = match signup.membership.as_ref() {
         Some(membership) => Some(
-            crate::db::get_organization_by_id(&membership.organization_id)
+            crate::data::db::get_organization_by_id(&membership.organization_id)
                 .await
                 .map_err(ErrorResponse::internal)?
                 .ok_or_else(|| {
@@ -117,7 +117,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
 
     let audit_context =
         TrustedAuditContext::application(TrustedAuditActor::anonymous(), audit_request);
-    let user = crate::db::create_user(
+    let user = crate::data::db::create_user(
         profile,
         CredentialType::Password,
         &password,

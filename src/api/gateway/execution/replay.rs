@@ -1,5 +1,5 @@
+use crate::ctx::INTERNAL_CONTEXT_HEADER;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::request_context::INTERNAL_CONTEXT_HEADER;
 use ::http::{HeaderMap, Method, Request, Version, header::CONTENT_LENGTH};
 use axum::body::Body;
 use http_body_util::BodyExt;

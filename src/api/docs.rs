@@ -1,5 +1,5 @@
 use crate::err::{ErrorCode, ErrorResponse, ErrorType};
-use crate::fun::get_base_url;
+use crate::web::links::get_base_url;
 use axum::Json;
 use serde::Serialize;
 use utoipa::{OpenApi, openapi::Server};

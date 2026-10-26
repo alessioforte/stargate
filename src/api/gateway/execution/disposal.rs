@@ -1,5 +1,5 @@
 use crate::api::gateway::lifecycle::Execution;
-use crate::{err::ErrorCode, etc::observability::telemetry};
+use crate::{err::ErrorCode, obs::telemetry};
 use axum::{body::Body, response::Response};
 use http_body_util::BodyExt;
 use std::time::Duration;

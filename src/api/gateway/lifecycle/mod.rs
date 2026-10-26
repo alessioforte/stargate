@@ -2,7 +2,7 @@ pub(in crate::api::gateway) mod body;
 
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::observability::telemetry,
+    obs::telemetry,
 };
 use std::{
     future::Future,

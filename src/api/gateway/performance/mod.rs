@@ -4,8 +4,10 @@ mod fixtures;
 mod reporting;
 mod routes;
 
-use crate::etc::{
-    auth::jwt as session_jwt, gate::prepare_config, internal_context, store::use_store,
+use crate::{
+    ctx::sign,
+    data::store::use_store,
+    etc::{auth::jwt as session_jwt, gate::prepare_config},
 };
 use fixtures::{Fixture, Scenario};
 use reporting::{Metrics, Sampler, latencies};
@@ -29,7 +31,7 @@ async fn gateway_release_workloads() {
     }
     assert_eq!(std::env::var("JWT_ALGORITHM").unwrap(), "HS256");
     session_jwt::init();
-    internal_context::init().unwrap();
+    sign::init().unwrap();
     let metrics = Metrics::new();
     let session = ulid::Ulid::generate().to_string();
     let subject = crate::etc::auth::subject::Subject::new(

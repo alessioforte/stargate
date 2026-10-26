@@ -11,11 +11,11 @@ pub const DEFAULT_CONSOLE_OAUTH_CLIENT_ID: &str = "stargate_console";
 const DEFAULT_CONSOLE_APP_BASE_PATH: &str = "/stargate";
 
 pub async fn super_admin_exists() -> Result<bool> {
-    crate::db::super_admin_exists().await
+    crate::data::db::super_admin_exists().await
 }
 
 pub async fn is_super_admin_user_id(user_id: &str) -> Result<bool> {
-    crate::db::is_super_admin_user_id(user_id).await
+    crate::data::db::is_super_admin_user_id(user_id).await
 }
 
 pub fn resolve_console_oauth_client_id(explicit: Option<String>) -> Result<String> {
@@ -100,7 +100,7 @@ pub async fn bootstrap_instance(
         }),
     );
     client.post_logout_redirect_uris.0 = post_logout_redirect_uri.into_iter().collect();
-    let result = crate::db::bootstrap_instance(
+    let result = crate::data::db::bootstrap_instance(
         profile,
         password_hash.as_deref(),
         client,

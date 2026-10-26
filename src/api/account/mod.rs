@@ -84,7 +84,7 @@ pub fn router() -> axum::Router {
             "/account/consents/{client_id}",
             delete(consents::delete_consent),
         )
-        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware));
+        .layer(from_fn(crate::web::origin::trusted_origin_middleware));
 
     axum::Router::new()
         .merge(sensitive)

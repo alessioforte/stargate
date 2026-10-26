@@ -14,11 +14,11 @@ pub mod service_accounts;
 pub mod sessions;
 pub mod users;
 
+use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::auth::jwt::jwt_config;
 use crate::etc::auth::subject::Subject;
-use crate::etc::http::{rate_limit, request::RequestExt};
-use crate::etc::request_context::{audit_request_from, take_trusted_audit_context_from};
+use crate::{api::middleware::rate_limit, web::request::RequestExt};
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
@@ -103,7 +103,7 @@ async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
 }
 
 async fn grant_super_admin_if_allowed(user_id: &str, sid: Option<&str>) -> bool {
-    match crate::db::is_super_admin_user_id(user_id).await {
+    match crate::data::db::is_super_admin_user_id(user_id).await {
         Ok(true) => super_admin_step_up_satisfied(sid.unwrap_or_default(), user_id).await,
         Ok(false) => false,
         Err(err) => {
@@ -114,7 +114,7 @@ async fn grant_super_admin_if_allowed(user_id: &str, sid: Option<&str>) -> bool 
 }
 
 async fn oauth_client_is_trusted_admin_client(client_id: &str) -> bool {
-    let client = match crate::db::get_oauth_client_by_client_id(client_id).await {
+    let client = match crate::data::db::get_oauth_client_by_client_id(client_id).await {
         Ok(Some(client)) => client,
         Ok(None) => return false,
         Err(err) => {
@@ -153,7 +153,7 @@ async fn resolve_authorization(
             match crate::act::token_revocation::is_revoked(&claims).await {
                 Ok(false) => {
                     let sid = claims.sid.clone().unwrap_or_default();
-                    let store = crate::etc::store::use_store();
+                    let store = crate::data::store::use_store();
                     let session = store.get::<Subject>(&sid).await.unwrap_or(None);
                     if let Some(subject) = session.as_ref()
                         && subject.sub_type == crate::etc::auth::subject::SubjectType::User
@@ -230,7 +230,7 @@ async fn resolve_authorization(
         && let Some(raw_key) = raw_key
     {
         let hash = pw::hash_api_key(&raw_key);
-        if let Ok(Some(key)) = crate::db::get_admin_key_by_hash(&hash).await
+        if let Ok(Some(key)) = crate::data::db::get_admin_key_by_hash(&hash).await
             && !key.revoked
         {
             authenticated = true;
@@ -565,7 +565,7 @@ mod tests {
         TrustedAuditRequest,
     };
 
-    use crate::etc::request_context::RequestContext;
+    use crate::ctx::RequestContext;
 
     use super::{
         AdminAuthenticationKind, AdminPrincipal, AuditRouteBoundary, install_audit_context,

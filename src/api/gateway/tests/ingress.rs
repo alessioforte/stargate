@@ -504,7 +504,7 @@ async fn probes_are_exempt_and_iam_shares_the_client_ingress_allowance() {
     let gate = Arc::new(test_support::gate(config(3)));
     let calls = Arc::new(AuthenticationCalls::default());
     let auth = calls.boundary(VerifiedIdentity::anonymous());
-    let app = crate::api::server_router(crate::etc::server::health::Lifecycle::default());
+    let app = crate::api::server_router(crate::srv::health::Lifecycle::default());
     let peer = "203.0.113.9:1000";
     assert_eq!(
         app.clone()

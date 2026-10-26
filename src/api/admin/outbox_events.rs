@@ -123,10 +123,10 @@ pub async fn get_outbox_events(req: Request) -> Result<Response, ErrorResponse> 
     let offset = query.offset.unwrap_or(0).max(0);
     let filter = query.into_filter();
 
-    let rows = crate::db::query_outbox_events(&filter, limit, offset)
+    let rows = crate::data::db::query_outbox_events(&filter, limit, offset)
         .await
         .map_err(ErrorResponse::internal)?;
-    let total = crate::db::count_outbox_events(&filter)
+    let total = crate::data::db::count_outbox_events(&filter)
         .await
         .map_err(ErrorResponse::internal)?;
     let data = rows
@@ -163,7 +163,7 @@ pub async fn get_outbox_event(mut req: Request) -> Result<Response, ErrorRespons
     authorization::require(&req, Permission::AuditRead)?;
 
     let event_id: String = extract_path(&mut req).await?;
-    let row = crate::db::get_outbox_event_by_id(&event_id)
+    let row = crate::data::db::get_outbox_event_by_id(&event_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| {

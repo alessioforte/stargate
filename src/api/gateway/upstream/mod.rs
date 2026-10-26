@@ -10,7 +10,7 @@ use crate::api::gateway::{
     execution::replay::ReplayRequest, request::RequestState, response::build_direct_response,
 };
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::{gate::RuntimeSnapshot, http::request::RequestExt};
+use crate::{etc::gate::RuntimeSnapshot, web::request::RequestExt};
 use ::http::Request;
 use axum::{body::Body, response::Response};
 use internal_context::InternalDispatch;

@@ -1,5 +1,5 @@
 use super::transport::{self, PreparedTransports, TransportPreparationError};
-use crate::etc::internal_context;
+use crate::ctx::sign;
 use gate::cfg::{Config, RuntimeConfig};
 use std::{env, path::Path};
 
@@ -8,7 +8,7 @@ pub(crate) enum GatewayPreparationError {
     #[error(transparent)]
     Config(#[from] gate::cfg::ConfigLoadError),
     #[error(transparent)]
-    InternalContext(#[from] internal_context::InternalContextError),
+    InternalContext(#[from] sign::InternalContextError),
     #[error(transparent)]
     Transport(#[from] TransportPreparationError),
     #[error(transparent)]
@@ -45,7 +45,7 @@ pub(crate) fn prepare_config(raw: Config) -> Result<PreparedConfig, GatewayPrepa
 pub(super) fn prepare_runtime_config(
     config: RuntimeConfig,
 ) -> Result<PreparedConfig, GatewayPreparationError> {
-    internal_context::preflight_config(&config)?;
+    sign::preflight_config(&config)?;
     let transports = transport::prepare(&config)?;
     Ok(PreparedConfig { config, transports })
 }

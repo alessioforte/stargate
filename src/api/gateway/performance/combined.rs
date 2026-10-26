@@ -3,12 +3,12 @@ use crate::api::gateway::performance::{
     reporting::{Metrics, Sampler, latencies},
     seconds,
 };
-use crate::etc::{
-    gate::{
+use crate::{
+    ctx::sign,
+    etc::gate::{
         reload_gateway_config_from_path,
         test_support::{CLIENT_KEY, TlsFiles},
     },
-    internal_context,
 };
 use serde_json::{Value, json};
 use std::{
@@ -60,7 +60,7 @@ async fn gateway_combined_verification() {
     if cfg!(debug_assertions) {
         panic!("run this verification with --release");
     }
-    internal_context::init().unwrap();
+    sign::init().unwrap();
     let metrics = Metrics::new();
     let fixture = Fixture::new(Scenario::SlowMirror).await;
     let resources = fixture.gate.resources.clone();

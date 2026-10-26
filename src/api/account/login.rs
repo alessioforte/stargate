@@ -4,7 +4,7 @@ use crate::api::account::credentials::expired::maybe_password_expired_response;
 use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
 use crate::api::account::session::issue_user_session;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use axum::response::Response;
@@ -72,7 +72,7 @@ pub(crate) async fn verify_login_password(
 ) -> Result<(db::ent::User, db::ent::Credential), ErrorResponse> {
     let login_identifier = username.trim();
 
-    let user = crate::db::get_user_by_login(login_identifier)
+    let user = crate::data::db::get_user_by_login(login_identifier)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -110,7 +110,7 @@ pub(crate) async fn verify_login_password(
         return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
     };
 
-    let user_credential = crate::db::get_credential(&user.id, CredentialType::Password)
+    let user_credential = crate::data::db::get_credential(&user.id, CredentialType::Password)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -170,7 +170,9 @@ fn spawn_credential_rehash(user_id: String, password: String, old_hash: String) 
             db::ent::TrustedAuditBoundary::application(),
             db::ent::TrustedBackgroundActor::system(None),
         );
-        match crate::db::rehash_credential(&user_id, &old_hash, &new_hash, audit_context).await {
+        match crate::data::db::rehash_credential(&user_id, &old_hash, &new_hash, audit_context)
+            .await
+        {
             Ok(true) => tracing::info!("credential hash upgraded for user {user_id}"),
             Ok(false) => {
                 tracing::debug!("credential rehash skipped: hash changed concurrently")

@@ -1,10 +1,10 @@
 use super::ChangePasswordRequestBody;
 use crate::act;
+use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc;
-use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::etc::request_context::audit_request_from;
 use crate::fun::format_name;
+use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use smtp::{Smtp, Template};
@@ -53,7 +53,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         return Err(ErrorResponse::new(ErrorCode::PasswordResetRequestInvalid));
     }
 
-    let user = crate::db::get_user_by_email(&email)
+    let user = crate::data::db::get_user_by_email(&email)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
@@ -72,7 +72,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         db::ent::TrustedAuditActor::user(&user.id),
         audit_request,
     );
-    crate::db::change_password(&user.id, &password, audit_context)
+    crate::data::db::change_password(&user.id, &password, audit_context)
         .await
         .map_err(|e| {
             error!("Could not update password: {:?}", e);

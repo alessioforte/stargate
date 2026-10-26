@@ -13,7 +13,7 @@ pub(crate) async fn verify_pending_login(
     pepper: &[u8],
     now: u64,
 ) -> Result<VerifiedPendingLogin, ErrorResponse> {
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
 
     for _ in 0..3 {
         let Some(current) = store
@@ -79,7 +79,7 @@ pub(crate) async fn verify_stored_challenge(
     pepper: &[u8],
     now: u64,
 ) -> Result<VerifiedChallenge, ErrorResponse> {
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
 
     for _ in 0..3 {
         let Some(current) = store
@@ -154,7 +154,7 @@ pub(crate) async fn store_mfa_verified_marker(
         expires_at_unix: now.saturating_add(ttl),
     };
     let key = mfa_verified_key(&auth.sid, purpose);
-    crate::etc::store::use_store()
+    crate::data::store::use_store()
         .set(&key, &marker, Some(ttl))
         .await
         .map_err(ErrorResponse::internal)?;
@@ -168,7 +168,7 @@ pub(crate) async fn has_valid_mfa_verification(
 ) -> Result<bool, ErrorResponse> {
     let now = current_unix_time()?;
     let key = mfa_verified_key(sid, purpose);
-    let store = crate::etc::store::use_store();
+    let store = crate::data::store::use_store();
     let Some(marker) = store
         .get::<MfaVerificationMarker>(&key)
         .await

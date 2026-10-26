@@ -212,7 +212,7 @@ See [gateway-performance.md](gateway-performance.md) for scope and recorded resu
 
 The release tests live in `src/api/gateway/performance/`; Redis gateway
 correctness lives in `src/api/gateway/tests/cluster.rs`, and backend workloads
-live in `src/etc/performance.rs`. The runner selectors above are unchanged.
+live in `src/data/performance.rs`. The runner selectors above are unchanged.
 Signed dispatch and its tracing target belong to
 `stargate::api::gateway::upstream::internal_context`; attempt spans belong to
 `stargate::api::gateway::upstream::attempt`. Use the current namespaces for

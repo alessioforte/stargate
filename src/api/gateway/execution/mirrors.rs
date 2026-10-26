@@ -9,10 +9,8 @@ use crate::api::gateway::{
 };
 use crate::{
     err::ErrorCode,
-    etc::{
-        gate::{RuntimeSnapshot, resources::ResourcePermit},
-        observability::telemetry,
-    },
+    etc::gate::{RuntimeSnapshot, resources::ResourcePermit},
+    obs::telemetry,
 };
 use ctx::DispatchKind;
 use std::sync::Arc;

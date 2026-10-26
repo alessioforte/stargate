@@ -64,8 +64,8 @@ pub(super) fn extract_basic_client_credentials(
         return Err(oauth_invalid_client("invalid basic client authentication"));
     };
 
-    let client_id = crate::etc::http::request::percent_decode(client_id);
-    let client_secret = crate::etc::http::request::percent_decode(client_secret);
+    let client_id = crate::web::request::percent_decode(client_id);
+    let client_secret = crate::web::request::percent_decode(client_secret);
     if client_id.trim().is_empty() || client_secret.is_empty() {
         return Err(oauth_invalid_client("invalid basic client authentication"));
     }
@@ -118,7 +118,7 @@ pub(super) fn resolve_client_credentials_parts(
 pub(super) async fn authenticate_oauth_client(
     credentials: &ClientCredentials,
 ) -> OAuthResult<db::ent::OAuthClient> {
-    let Some(client) = crate::db::get_oauth_client_by_client_id(&credentials.client_id)
+    let Some(client) = crate::data::db::get_oauth_client_by_client_id(&credentials.client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {

@@ -114,7 +114,7 @@ pub(super) async fn authenticate_client(
 }
 
 async fn enabled_client(client_id: &str) -> OAuthResult<db::ent::OAuthClient> {
-    let client = crate::db::get_oauth_client_by_client_id(client_id)
+    let client = crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
         .ok_or_else(|| oauth_invalid_client("invalid client"))?;
@@ -170,7 +170,7 @@ async fn assertion_client(
         pw::hash_api_key(&accepted.jti)
     );
     let ttl = (accepted.exp - now + REPLAY_LEEWAY_SECS).max(1) as u64;
-    if !crate::etc::store::use_store()
+    if !crate::data::store::use_store()
         .set_if_absent(&replay_key, &true, Some(ttl))
         .await
         .map_err(OAuthErrorResponse::internal)?

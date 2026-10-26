@@ -76,7 +76,7 @@ pub fn router() -> axum::Router {
         post(request::post_signup).layer(from_fn_with_state(Feature::Signup, require_feature));
     axum::Router::new()
         .route("/signup", complete.merge(start))
-        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware))
+        .layer(from_fn(crate::web::origin::trusted_origin_middleware))
 }
 
 #[cfg(test)]

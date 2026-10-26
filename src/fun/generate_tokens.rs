@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn generated_refresh_token_preserves_session_context() {
-        crate::etc::server::tls::install_crypto_provider();
+        crate::srv::tls::install_crypto_provider();
         let mut claims = jwt::Claims::default()
             .subject("alice@example.com".to_string())
             .sub_id("user-1".to_string())

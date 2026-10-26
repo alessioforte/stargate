@@ -4,7 +4,7 @@ use crate::api::gateway::{
     upstream::{headers::strip_hop_by_hop_headers, internal_context::InternalDispatch},
 };
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::observability::telemetry;
+use crate::obs::telemetry;
 use axum::{body::Body, response::Response};
 use http::header::HOST;
 

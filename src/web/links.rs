@@ -1,6 +1,15 @@
-use crate::fun::get_base_url;
-
 const DEFAULT_AUTH_APP_BASE_PATH: &str = "/auth";
+
+pub fn get_base_url() -> String {
+    let protocol = if crate::srv::tls::enabled().unwrap_or(false) {
+        "https"
+    } else {
+        "http"
+    };
+    let hostname = std::env::var("HOSTNAME").unwrap_or("localhost".to_string());
+    let port = std::env::var("PORT").unwrap_or("5050".to_string());
+    format!("{}://{}:{}", protocol, hostname, port)
+}
 
 fn auth_app_base_path() -> String {
     let path = std::env::var("AUTH_APP_BASE_PATH")

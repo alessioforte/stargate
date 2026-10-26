@@ -1,10 +1,12 @@
 use crate::api::gateway::upstream::attempt::{DispatchAttempt, dispatch_kind_label};
 use crate::api::gateway::upstream::headers::sanitize_internal_request_headers;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::{
-    internal_context::{InternalContextRuntime, SigningQueueError},
-    observability::telemetry,
-    request_context::{INTERNAL_CONTEXT_HEADER, PropagationDraft},
+use crate::{
+    ctx::{
+        INTERNAL_CONTEXT_HEADER, PropagationDraft,
+        sign::{InternalContextRuntime, SigningQueueError},
+    },
+    obs::telemetry,
 };
 use ctx::{DispatchKind, IssueError};
 use std::{sync::Arc, time::Duration};

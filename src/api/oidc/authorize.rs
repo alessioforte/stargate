@@ -6,7 +6,7 @@ use super::shared::{
     oauth_bad_request, parse_space_delimited, resolve_audience, scope_contains,
 };
 use crate::err::OAuthErrorResponse;
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Query, Request};
 use axum::http::StatusCode;
@@ -322,7 +322,7 @@ async fn login_redirect(
     if query.login_hint.is_none()
         && let Some(subject) = hinted_subject
     {
-        query.login_hint = crate::db::get_user_by_id(subject)
+        query.login_hint = crate::data::db::get_user_by_id(subject)
             .await
             .map_err(OAuthErrorResponse::internal)?
             .map(|user| user.email);
@@ -527,7 +527,7 @@ async fn authorization_client(query: &AuthorizeQuery) -> OAuthResult<db::ent::OA
         return Err(oauth_bad_request("redirect_uri is required"));
     }
 
-    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
+    let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -601,7 +601,7 @@ pub(super) async fn current_authorized_user(
     let Some(sid) = claims.sid.as_deref().filter(|sid| !sid.is_empty()) else {
         return Ok(None);
     };
-    let Some(subject) = crate::etc::store::use_store()
+    let Some(subject) = crate::data::store::use_store()
         .get::<crate::etc::auth::subject::Subject>(sid)
         .await
         .map_err(OAuthErrorResponse::internal)?
@@ -614,7 +614,7 @@ pub(super) async fn current_authorized_user(
     }
 
     let user_id = claims.sub_id.as_deref().unwrap_or(subject.id.as_str());
-    let Some(user) = crate::db::get_user_by_id(user_id)
+    let Some(user) = crate::data::db::get_user_by_id(user_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
@@ -769,7 +769,7 @@ async fn consent_satisfied(
         return Ok(false);
     }
 
-    let Some(consent) = crate::db::get_active_oauth_consent(&user.id, &client.client_id)
+    let Some(consent) = crate::data::db::get_active_oauth_consent(&user.id, &client.client_id)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {

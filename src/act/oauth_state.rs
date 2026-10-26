@@ -1,4 +1,4 @@
-use crate::etc::store::use_store;
+use crate::data::store::use_store;
 use serde::{Deserialize, Serialize};
 use store::Store;
 

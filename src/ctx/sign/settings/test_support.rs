@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in crate::etc::internal_context) fn settings(key_id: &str) -> RuntimeSettings {
+pub(in crate::ctx::sign) fn settings(key_id: &str) -> RuntimeSettings {
     RuntimeSettings {
         signing: signing::Settings::default(),
         issuer: "https://stargate.test/internal-context".to_owned(),

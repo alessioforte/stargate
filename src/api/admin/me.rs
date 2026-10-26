@@ -90,7 +90,7 @@ pub async fn get_admin_me(req: Request) -> Result<Json<AdminMe>, ErrorResponse> 
             kind,
             claims,
         } => {
-            let user = crate::db::get_user_by_id(&user_id)
+            let user = crate::data::db::get_user_by_id(&user_id)
                 .await
                 .map_err(ErrorResponse::internal)?
                 .ok_or_else(|| {

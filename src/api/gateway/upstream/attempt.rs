@@ -1,6 +1,6 @@
 use super::SelectedService;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::observability::telemetry;
+use crate::obs::telemetry;
 use axum::response::Response;
 use ctx::DispatchKind;
 use gate::DynLoadBalancer;

@@ -22,14 +22,19 @@ stargate/
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
 │   ├── act/           # Stateful app flows: login guard, OTP/MFA, sessions, orgs, oauth state, signup,
 │   │                  #   email verify, change password, password policy, token revocation, ACE rules
-│   ├── api/           # Axum routers + handlers; gateway fallback service; auth/console app hosting
+│   ├── api/           # Axum routers + handlers; IAM middleware; gateway fallback service;
+│   │                  #   auth/console app hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
 │   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
-│   ├── db/            # DB pool init (feature-gated postgres/sqlite)
+│   ├── ctx/           # Request context, propagation drafts, audit/authz projections; sign/ signer
+│   ├── data/          # Persistence backends: db/ (SQL pool + repository service), store/
 │   ├── err/           # Error catalog (ErrorCode) -> JSON responses; OAuth error envelope
-│   ├── etc/           # Shared support: auth, http, request_context, observability, server, gate,
-│   │                  #   internal_context, store, env/input/limits/time helpers
-│   └── fun/           # Small helpers (token gen, cookies, base/auth-app URLs, shutdown signal, super-admin)
+│   ├── etc/           # Shared support: auth, gate, features, OAuth client HTTP,
+│   │                  #   env/input/limits/time helpers
+│   ├── fun/           # Small helpers (token gen, display names, super-admin)
+│   ├── obs/           # Logging and telemetry (traces, metrics, logs)
+│   ├── srv/           # Listeners, listener TLS, health, profile, banner, shutdown
+│   └── web/           # Shared HTTP support: request, proxies, CORS/origins, headers, cookies, links
 ├── crates/
 │   ├── ace/           # Access Control Engine (ABAC policy evaluation)
 │   ├── ctx/           # Signed internal-context (`stargate-context` header) contract, issuer, verifier
@@ -70,26 +75,29 @@ stargate/
 - **OpenAPI**: utoipa
 - **Observability**: tracing + OpenTelemetry (OTLP traces, metrics, logs)
 
-### Shared Support (`src/etc/`)
+### Shared Support (paths under `src/`)
 
-- `auth/`: access control, subjects, session JWT config, password helpers.
+- `etc/auth/`: access control, subjects, session JWT config, password helpers.
   `identity.rs` owns verified facts; `verification.rs` owns credential/backing-state checks.
-- `http/`: request extraction, trusted proxies, origins/CORS (`origin.rs` trusted-origin
-  middleware), security and retry headers, IAM limits (`rate_limit.rs`), message envelopes,
-  the outgoing client for OAuth client endpoints (`client_endpoints.rs`).
-- `request_context/`: request metadata, ingress headers, lazy GeoIP; signed-context
+- `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
+  trusted-origin middleware), security and retry headers, the session cookie
+  (`cookies.rs`), base and auth-app URLs (`links.rs`), message envelopes.
+- `api/middleware/rate_limit.rs`: IAM limits (see "API Overview").
+- `etc/http/client_endpoints.rs`: the outgoing client for OAuth client endpoints.
+- `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
-- `observability/`: logging and the telemetry provider (`telemetry/metrics.rs`,
+- `obs/`: logging and the telemetry provider (`telemetry/metrics.rs`,
   `telemetry/propagation.rs`).
-- `server/`: listeners, listener TLS, health lifecycle/probes (`health.rs`),
-  profile validation, startup banner.
-- `gate/`: gateway init, `config.rs` preparation/files, `runtime.rs` atomic snapshot
+- `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`),
+  profile validation, startup banner, shutdown signal and drain (`shutdown.rs`).
+- `etc/gate/`: gateway init, `config.rs` preparation/files, `runtime.rs` atomic snapshot
   activation, `reload.rs` watchers, `resources.rs` process admission/memory permits/
   tracked tasks, `transport/` prepared outgoing HTTP/TLS/mTLS clients.
-- `internal_context/`: signer runtime, `settings.rs`, `material.rs` key/JWKS validation,
-  `signing.rs` bounded CPU workers.
-- `store/`: selected profile interface; `memory.rs` persistence, `redis.rs` init/readiness.
-- `features.rs`: capabilities an operator can switch off, read and validated once at startup
+- `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
+  validation, `signing.rs` bounded CPU workers.
+- `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs` init/readiness.
+- `data/db/`: SQL pool init and the repository service wrappers (`svc.rs`).
+- `etc/features.rs`: capabilities an operator can switch off, read and validated once at startup
   (invalid values stop it). A disabled capability keeps its routes mounted and answers
   `404 feature.disabled` (`require_feature` middleware): unmatched paths fall through to
   the gateway. Today: `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` (see "Passwords" > Signup),
@@ -556,7 +564,7 @@ response nor its timing reveals the account. Admin invitations
 
 Emails: templates come from `apps/mail/emails/*.tsx` (`npm run export` writes
 `.stargate/transactional/*.html`). Action URLs are built by the server
-(`src/fun/auth_links.rs`: `signup_url`, `change_password_url`, `login_url`, based on
+(`src/web/links.rs`: `signup_url`, `change_password_url`, `login_url`, based on
 `AUTH_PUBLIC_BASE_URL` or the local auth app) and rendered as `{{link}}`; `{{name}}`
 is the only other placeholder.
 
@@ -714,7 +722,7 @@ need no database. Docs: `docs/cli.md`.
 `api::server_router` applies the IAM ingress limit and merges probe routes outside
 it; `main.rs` adds security headers, tracing, CORS, compression, and normalize-path.
 
-IAM limits (`src/etc/http/rate_limit.rs`): every IAM route charges the client IP's
+IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's
 ingress allowance, the same `ingress:ip:{ip}` bucket as the gateway, before
 credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
 `/admin/*` principals then charge their own `default` bucket, keyed

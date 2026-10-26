@@ -1,4 +1,4 @@
-use crate::etc::store::use_store;
+use crate::data::store::use_store;
 use db::ent::NewOrganizationMembership;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

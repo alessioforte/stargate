@@ -67,7 +67,7 @@ documentation UI: code, HTTP status, type, English fallback, and link.
 ## Adding or changing a code
 
 1. Add the semantic variant and metadata to `src/err/types.rs`, or add a
-   successful message to `src/etc/http/messages.rs`.
+   successful message to `src/web/messages.rs`.
 2. Use the typed variant at the call site. Do not construct string codes.
 3. Add only the locale overrides that have been translated.
 4. Add safe interpolation values with `with_param`; never include secrets or

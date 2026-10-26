@@ -1,6 +1,6 @@
 use crate::act::sessions::authenticated_session;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use axum::response::Response;
@@ -49,7 +49,7 @@ pub async fn get_account_organizations(req: Request) -> Result<Response, ErrorRe
     let session = authenticated_session(req.get_token()).await?;
     let active_org_id = session.subject.org_id.clone();
 
-    let memberships = crate::db::get_user_organizations(&session.user.id)
+    let memberships = crate::data::db::get_user_organizations(&session.user.id)
         .await
         .map_err(ErrorResponse::internal)?;
 

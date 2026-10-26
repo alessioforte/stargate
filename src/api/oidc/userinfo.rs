@@ -100,7 +100,7 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
     let Some(client_id) = claims.azp.as_deref() else {
         return Err(bearer_unauthorized("invalid token"));
     };
-    let Some(client) = crate::db::get_oauth_client_by_client_id(client_id)
+    let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(ErrorResponse::internal)?
     else {
@@ -176,7 +176,7 @@ async fn handle_userinfo(token: String) -> Result<Json<UserInfoResponse>, ErrorR
         return Err(bearer_unauthorized("invalid token"));
     }
 
-    let Some(user) = crate::db::get_user_by_id(user_id)
+    let Some(user) = crate::data::db::get_user_by_id(user_id)
         .await
         .map_err(ErrorResponse::internal)?
     else {

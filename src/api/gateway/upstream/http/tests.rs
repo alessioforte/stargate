@@ -1,9 +1,10 @@
 use super::*;
-use crate::etc::internal_context::test_support::{PRIVATE_KEY, PUBLIC_KEY};
-use crate::etc::{
-    auth::identity::VerifiedIdentity,
-    internal_context::InternalContextRuntime,
-    request_context::{INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext},
+use crate::ctx::sign::test_support::{PRIVATE_KEY, PUBLIC_KEY};
+use crate::{
+    ctx::{
+        INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
+    },
+    etc::auth::identity::VerifiedIdentity,
 };
 use axum::{Router, body::Body, extract::State, routing::any};
 use chrono::Utc;
@@ -85,7 +86,7 @@ async fn mock_upstream() -> (
 }
 
 fn test_client() -> crate::etc::gate::HyperClient {
-    crate::etc::server::tls::install_crypto_provider();
+    crate::srv::tls::install_crypto_provider();
     let mut connector = HttpConnector::new();
     connector.enforce_http(false);
     let https = HttpsConnectorBuilder::new()

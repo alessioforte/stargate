@@ -1,5 +1,5 @@
+use crate::ctx::sign;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::internal_context;
 use axum::Json;
 use axum::response::IntoResponse;
 use http::HeaderMap;
@@ -15,8 +15,8 @@ use http::header::CACHE_CONTROL;
     )
 )]
 pub async fn get_internal_context_jwks() -> Result<impl IntoResponse, ErrorResponse> {
-    let runtime = internal_context::runtime()
-        .ok_or_else(|| ErrorResponse::new(ErrorCode::InternalContextUnavailable))?;
+    let runtime =
+        sign::runtime().ok_or_else(|| ErrorResponse::new(ErrorCode::InternalContextUnavailable))?;
     let mut headers = HeaderMap::new();
     headers.insert(
         CACHE_CONTROL,

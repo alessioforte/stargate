@@ -1,8 +1,10 @@
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::{
-    gate::RuntimeSnapshot,
-    limits::{ingress_key, limited_response},
-    observability::telemetry,
+use crate::{
+    etc::{
+        gate::RuntimeSnapshot,
+        limits::{ingress_key, limited_response},
+    },
+    obs::telemetry,
 };
 use lim::LimitKind;
 

@@ -2,8 +2,8 @@ use crate::act;
 use crate::act::email_throttle::EmailFlow;
 use crate::err::ErrorResponse;
 use crate::etc;
-use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::fun::{change_password_url, format_name};
+use crate::web::messages::{MessageCode, MessageResponse};
+use crate::{fun::format_name, web::links::change_password_url};
 use axum::Json;
 use db::ent::User;
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,7 @@ pub async fn post_credentials(
 
     // Email only: a nickname or phone number would select a recipient outside
     // the per-recipient throttle's bucket.
-    let user = crate::db::get_user_by_email(&body.email)
+    let user = crate::data::db::get_user_by_email(&body.email)
         .await
         .map_err(ErrorResponse::internal)?;
 

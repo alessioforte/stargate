@@ -16,7 +16,7 @@
 use super::interactions::{self, ConsentDecision, ConsentStage, PendingAuthorization};
 use crate::act::sessions::authenticated_session;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{FromRequest, Path, Request};
 use serde::{Deserialize, Serialize};
@@ -83,18 +83,19 @@ pub async fn get_interaction(
     let (pending, stage) = pending_consent(&interaction_id, &session.user.id).await?;
     let client = interaction_client(&pending).await?;
 
-    let granted_scopes = crate::db::get_active_oauth_consent(&session.user.id, &client.client_id)
-        .await
-        .map_err(ErrorResponse::internal)?
-        .map(|consent| {
-            stage
-                .scopes
-                .iter()
-                .filter(|scope| consent.scopes.contains(scope))
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
+    let granted_scopes =
+        crate::data::db::get_active_oauth_consent(&session.user.id, &client.client_id)
+            .await
+            .map_err(ErrorResponse::internal)?
+            .map(|consent| {
+                stage
+                    .scopes
+                    .iter()
+                    .filter(|scope| consent.scopes.contains(scope))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
 
     Ok(Json(ConsentPromptResponse {
         client: consent_client(&client, pending.query.redirect_uri()),
@@ -124,7 +125,7 @@ pub async fn post_consent(
     req: Request,
 ) -> Result<Json<ConsentDecisionResponse>, ErrorResponse> {
     let session = authenticated_session(req.get_token()).await?;
-    let audit_request = crate::etc::request_context::audit_request_from(req.extensions());
+    let audit_request = crate::ctx::audit_request_from(req.extensions());
     let Json(decision) = Json::<ConsentDecisionRequest>::from_request(req, &())
         .await
         .map_err(|error| {
@@ -138,7 +139,7 @@ pub async fn post_consent(
     }
 
     let client = interaction_client(&pending).await?;
-    let previous = crate::db::get_active_oauth_consent(user_id, &client.client_id)
+    let previous = crate::data::db::get_active_oauth_consent(user_id, &client.client_id)
         .await
         .map_err(ErrorResponse::internal)?;
     let consent = db::ent::OAuthConsent::new(
@@ -161,7 +162,7 @@ pub async fn post_consent(
         db::ent::TrustedAuditActor::user(user_id),
         audit_request,
     );
-    crate::db::upsert_oauth_consent(consent, audit_context)
+    crate::data::db::upsert_oauth_consent(consent, audit_context)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -211,7 +212,7 @@ async fn interaction_client(
     pending: &PendingAuthorization,
 ) -> Result<db::ent::OAuthClient, ErrorResponse> {
     let client_id = pending.query.client_id().unwrap_or_default();
-    crate::db::get_oauth_client_by_client_id(client_id)
+    crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
         .map_err(ErrorResponse::internal)?
         .filter(|client| client.enabled)

@@ -1,9 +1,10 @@
 use super::*;
-use crate::etc::internal_context::test_support::{PRIVATE_KEY, PUBLIC_KEY};
-use crate::etc::{
-    auth::identity::VerifiedIdentity,
-    internal_context::InternalContextRuntime,
-    request_context::{INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext},
+use crate::ctx::sign::test_support::{PRIVATE_KEY, PUBLIC_KEY};
+use crate::{
+    ctx::{
+        INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
+    },
+    etc::auth::identity::VerifiedIdentity,
 };
 use chrono::Utc;
 use ctx::{

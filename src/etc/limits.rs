@@ -1,6 +1,7 @@
 use crate::{
     err::{ErrorCode, ErrorResponse},
-    etc::{http::headers::retry_after_header_value, observability::telemetry},
+    obs::telemetry,
+    web::headers::retry_after_header_value,
 };
 use http::{HeaderMap, HeaderName, HeaderValue};
 use lim::{LimitKind, Limiter, RateLimitDecision, RateLimitError};

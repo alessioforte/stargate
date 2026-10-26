@@ -6,7 +6,7 @@
 //! (see [`invalidate`]) so attr changes propagate on the next request
 //! instead of waiting out the TTL.
 
-use crate::etc::store::use_store;
+use crate::data::store::use_store;
 use serde::{Deserialize, Serialize};
 use store::Store;
 
@@ -60,7 +60,7 @@ pub async fn limit_overrides(org_id: &str) -> Result<OrgLimitOverrides, crate::e
         }
     }
 
-    let overrides = match crate::db::get_organization_by_id(org_id).await {
+    let overrides = match crate::data::db::get_organization_by_id(org_id).await {
         Ok(Some(org)) => overrides_from_attrs(&org.attrs)?,
         // A deleted org has no overrides; cache the empty value so a burst
         // of stale-session traffic doesn't hammer the DB.

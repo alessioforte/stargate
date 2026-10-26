@@ -1,7 +1,7 @@
 mod internal_context;
 mod jwt;
 
-use crate::db;
+use crate::data::db;
 use clap::{Args, Parser, Subcommand};
 use internal_context::InternalContextArgs;
 use jwt::JwtArgs;

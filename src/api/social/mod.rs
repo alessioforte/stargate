@@ -14,10 +14,10 @@ pub use state::post_state;
 
 use crate::act::oauth_state::{self, BrowserSignIn, OAuthState};
 use crate::api::account::session::{IssuedSession, start_user_session};
+use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::features::{SelfServiceRefusal, features};
-use crate::etc::http::request::RequestExt;
-use crate::etc::request_context::audit_request_from;
+use crate::web::request::RequestExt;
 use axum::extract::{Query, Request};
 use axum::response::{IntoResponse, Response};
 use db::ent::TrustedAuditRequest;
@@ -102,7 +102,7 @@ struct StartQuery {
 /// URLs cover it instead.
 fn request_origin(req: &Request) -> Option<String> {
     let host = req.headers().get(http::header::HOST)?.to_str().ok()?;
-    let scheme = if crate::etc::server::tls::enabled().unwrap_or(false) {
+    let scheme = if crate::srv::tls::enabled().unwrap_or(false) {
         "https"
     } else {
         "http"
@@ -240,7 +240,7 @@ async fn browser_callback(
                 .map(|return_to| vec![("return_to", return_to)])
                 .unwrap_or_default();
             // Through the organization picker, as after a password sign-in.
-            let location = crate::fun::auth_app_redirect("select-organization", &params);
+            let location = crate::web::links::auth_app_redirect("select-organization", &params);
             redirect(&location, &[session.cookie, state_cookie("", 0)])
         }
         Err(error) => {
@@ -317,7 +317,7 @@ impl From<&ErrorResponse> for LoginError {
 fn login_failure(return_to: Option<&str>, error: LoginError) -> Response {
     let mut params = vec![("error", error.code())];
     params.extend(return_to.map(|return_to| ("return_to", return_to)));
-    let location = crate::fun::auth_app_redirect("login", &params);
+    let location = crate::web::links::auth_app_redirect("login", &params);
     redirect(&location, &[state_cookie("", 0)])
 }
 
@@ -340,7 +340,7 @@ fn redirect(location: &str, cookies: &[String]) -> Response {
 /// `SameSite=Lax`, so it comes back with the provider's top-level redirect
 /// to the callback. An empty value with `max_age` 0 clears it.
 fn state_cookie(value: &str, max_age_secs: u64) -> String {
-    let secure = if crate::etc::server::tls::enabled().unwrap_or(false) {
+    let secure = if crate::srv::tls::enabled().unwrap_or(false) {
         "; Secure"
     } else {
         ""
@@ -410,7 +410,7 @@ pub fn router() -> axum::Router {
 
     let state = axum::Router::new()
         .route("/oauth/state", post(post_state))
-        .layer(from_fn(crate::etc::http::origin::trusted_origin_middleware))
+        .layer(from_fn(crate::web::origin::trusted_origin_middleware))
         .layer(from_fn_with_state(Feature::Social, require_feature));
     let github = axum::Router::new()
         .route("/oauth/github", get(github::get_github))

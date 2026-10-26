@@ -1,6 +1,6 @@
 use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
-use crate::etc::server::health::{ComponentHealth, check_dependencies};
+use crate::srv::health::{ComponentHealth, check_dependencies};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
@@ -90,7 +90,7 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
 
     #[cfg(feature = "memory")]
     let store_stats = {
-        let store = crate::etc::store::use_store();
+        let store = crate::data::store::use_store();
         let stats = store.get_storage_stats();
         StoreStats {
             total_keys: stats.total_keys,
@@ -107,9 +107,9 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
         version,
         status: overall,
         checked_at: chrono::Utc::now().to_rfc3339(),
-        runtime_profile: crate::etc::server::profile::COMPILED_PROFILE,
-        database_backend: crate::etc::server::profile::COMPILED_DB_BACKEND,
-        state_backend: crate::etc::server::profile::COMPILED_STATE_BACKEND,
+        runtime_profile: crate::srv::profile::COMPILED_PROFILE,
+        database_backend: crate::srv::profile::COMPILED_DB_BACKEND,
+        state_backend: crate::srv::profile::COMPILED_STATE_BACKEND,
         features: FeatureStatus {
             signup_mode: features.signup.as_str(),
             signup_allowed_domains: features.signup_allowed_domains.clone(),

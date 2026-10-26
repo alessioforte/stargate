@@ -1,8 +1,8 @@
+use crate::data::store::use_store;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::auth::jwt::jwt_config;
-use crate::etc::http::messages::{MessageCode, MessageResponse};
-use crate::etc::http::request::RequestExt;
-use crate::etc::store::use_store;
+use crate::web::messages::{MessageCode, MessageResponse};
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::Request;
 use store::Store;
@@ -63,7 +63,7 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
     )
 )]
 pub async fn post_logout_all(req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
-    use crate::etc::http::request::RequestExt;
+    use crate::web::request::RequestExt;
 
     let session = crate::act::sessions::authenticated_session(req.get_token()).await?;
 

@@ -4,13 +4,13 @@ pub(in crate::api::gateway) mod limits;
 use self::limits::{OrgScopedLimit, SelectedLimitPolicies, apply_limits};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::etc::gate::RuntimeSnapshot;
-use crate::etc::{
-    auth::{
+use crate::{
+    ctx::build_env_from,
+    etc::auth::{
         access_control::access_control,
         identity::{AuthKind, VerifiedIdentity},
     },
-    observability::telemetry,
-    request_context,
+    obs::telemetry,
 };
 use ::http::{HeaderMap, Request};
 use axum::body::Body;
@@ -64,7 +64,7 @@ pub async fn apply_policies(
                 };
 
                 let profile = env.unwrap_or(EnvProfile::Geo);
-                let env = request_context::build_env_from(req.extensions_mut(), profile);
+                let env = build_env_from(req.extensions_mut(), profile);
                 let allowed = access_control(
                     &policies.engine,
                     &policies.revision,

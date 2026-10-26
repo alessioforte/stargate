@@ -6,7 +6,7 @@
 
 use crate::act::sessions::authenticated_session;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::etc::http::request::RequestExt;
+use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::{Path, Request};
 use axum::http::StatusCode;
@@ -42,13 +42,13 @@ pub struct AccountConsentsResponse {
 )]
 pub async fn get_consents(req: Request) -> Result<Json<AccountConsentsResponse>, ErrorResponse> {
     let session = authenticated_session(req.get_token()).await?;
-    let consents = crate::db::list_active_oauth_consents(&session.user.id)
+    let consents = crate::data::db::list_active_oauth_consents(&session.user.id)
         .await
         .map_err(ErrorResponse::internal)?;
 
     let mut items = Vec::with_capacity(consents.len());
     for consent in consents {
-        let client_name = crate::db::get_oauth_client_by_client_id(&consent.client_id)
+        let client_name = crate::data::db::get_oauth_client_by_client_id(&consent.client_id)
             .await
             .map_err(ErrorResponse::internal)?
             .map(|client| client.name);
@@ -85,10 +85,10 @@ pub async fn delete_consent(
     let session = authenticated_session(req.get_token()).await?;
     let audit_context = db::ent::TrustedAuditContext::application(
         db::ent::TrustedAuditActor::user(&session.user.id),
-        crate::etc::request_context::audit_request_from(req.extensions()),
+        crate::ctx::audit_request_from(req.extensions()),
     );
 
-    crate::db::revoke_oauth_consent(&session.user.id, &client_id, audit_context)
+    crate::data::db::revoke_oauth_consent(&session.user.id, &client_id, audit_context)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::OAuthConsentNotFound))?;

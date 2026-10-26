@@ -1,8 +1,10 @@
 use crate::api::gateway::authentication::TestAuthenticator;
-use crate::etc::{
-    auth::identity::VerifiedIdentity,
-    gate::{Gate, test_support},
-    http::rate_limit::{charge_admin_principal, ingress_limit_middleware},
+use crate::{
+    api::middleware::rate_limit::{charge_admin_principal, ingress_limit_middleware},
+    etc::{
+        auth::identity::VerifiedIdentity,
+        gate::{Gate, test_support},
+    },
 };
 use async_trait::async_trait;
 use axum::{

@@ -3,7 +3,7 @@ use crate::act::sessions;
 use crate::err::ErrorResponse;
 use crate::etc;
 use crate::etc::auth::jwt::jwt_config;
-use crate::fun::{build_jwt_cookie, format_name};
+use crate::{fun::format_name, web::cookies::build_jwt_cookie};
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
@@ -83,7 +83,7 @@ pub(crate) async fn start_user_session(
 
     let tokens = crate::fun::generate_tokens(claims).map_err(ErrorResponse::internal)?;
 
-    let store = etc::store::use_store();
+    let store = crate::data::store::use_store();
     let refresh_exp = jwt_config().refresh_exp;
     let access_exp = jwt_config().access_exp;
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;

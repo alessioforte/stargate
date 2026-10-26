@@ -2,7 +2,7 @@ use super::{
     Gate, GatewayPreparationError,
     config::{get_policies_path, load_config_from_path},
 };
-use crate::etc::observability::telemetry;
+use crate::obs::telemetry;
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 use std::{path::Path, sync::Arc, thread};
 use tokio::runtime::Handle;

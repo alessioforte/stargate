@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::gateway::execution::{execute_plan_from_replay, plan::ExecutionPlan};
 use crate::api::gateway::upstream::test_support::{replay_request, replay_state};
-use crate::etc::request_context::INTERNAL_CONTEXT_HEADER;
+use crate::ctx::INTERNAL_CONTEXT_HEADER;
 use ctx::DispatchKind;
 use gate::graph::{HeaderValueNode, InternalContextNode};
 

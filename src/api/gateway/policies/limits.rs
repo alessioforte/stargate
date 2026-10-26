@@ -4,7 +4,7 @@ use crate::etc::gate::RuntimeSnapshot;
 use crate::etc::limits::{
     attribute_name, configuration_error, insert_limit_headers, limited_response, validate_limit,
 };
-use crate::etc::{auth::subject::Subject, observability::telemetry};
+use crate::{etc::auth::subject::Subject, obs::telemetry};
 use ::http::HeaderMap;
 use gate::cfg::OnMissingOrg;
 use lim::{LimitKind, Limiter, RateLimitDecision};
