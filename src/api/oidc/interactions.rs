@@ -26,7 +26,7 @@ pub(crate) fn interaction_cookie(id: &str, max_age_secs: u64) -> String {
     let mut cookie = format!(
         "{INTERACTION_COOKIE}={id}; Path={LOGIN_ENDPOINT_PATH}; HttpOnly; SameSite=Strict; Max-Age={max_age_secs}"
     );
-    if crate::srv::tls::enabled().unwrap_or(false) {
+    if crate::srv::tls::served_over_https() {
         cookie.push_str("; Secure");
     }
     cookie

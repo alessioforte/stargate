@@ -98,12 +98,12 @@ struct StartQuery {
     return_to: Option<String>,
 }
 
-/// The origin the browser reached this server at: its `Host` with `https`
-/// when this server terminates TLS. Behind a TLS proxy the configured public
-/// URLs cover it instead.
+/// The origin the browser reached this server at: its `Host`, with `https`
+/// when this server or the proxy in front of it terminates TLS
+/// ([`crate::srv::tls::served_over_https`]).
 fn request_origin(req: &Request) -> Option<String> {
     let host = req.headers().get(http::header::HOST)?.to_str().ok()?;
-    let scheme = if crate::srv::tls::enabled().unwrap_or(false) {
+    let scheme = if crate::srv::tls::served_over_https() {
         "https"
     } else {
         "http"
@@ -335,7 +335,7 @@ fn redirect(location: &str, cookies: &[String]) -> Response {
 /// `SameSite=Lax`, so it comes back with the provider's top-level redirect
 /// to the callback. An empty value with `max_age` 0 clears it.
 fn state_cookie(value: &str, max_age_secs: u64) -> String {
-    let secure = if crate::srv::tls::enabled().unwrap_or(false) {
+    let secure = if crate::srv::tls::served_over_https() {
         "; Secure"
     } else {
         ""

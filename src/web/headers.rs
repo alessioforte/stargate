@@ -15,7 +15,7 @@ pub async fn security_headers_middleware(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use http::header;
-    let tls_enabled = crate::srv::tls::enabled().unwrap_or(false);
+    let https = crate::srv::tls::served_over_https();
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(
@@ -26,7 +26,7 @@ pub async fn security_headers_middleware(
         header::X_FRAME_OPTIONS,
         http::HeaderValue::from_static("DENY"),
     );
-    if tls_enabled {
+    if https {
         headers.insert(
             header::STRICT_TRANSPORT_SECURITY,
             http::HeaderValue::from_static("max-age=63072000; includeSubDomains"),

@@ -132,6 +132,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `telemetry/propagation.rs`).
 - `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`), profile
   validation, startup banner, shutdown signal and drain (`shutdown.rs`).
+  `tls::served_over_https()`: listener TLS or an `https://` public base URL (a proxy
+  terminates TLS); it decides the `Secure` cookie attribute, HSTS, and the request's own
+  origin scheme.
 - `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
   trusted-origin middleware), security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
@@ -688,7 +691,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_RELAY_BATCH` / `AUDIT_RELAY_INTERVAL_MS` | 256 / 1000 | Relay batch size / idle poll |
 | `AUDIT_REDIS_STREAM` | audit.raw | Redis stream for raw audit events |
 | `AUDIT_STREAM_MAXLEN` | 100000 | Approx stream cap (`MAXLEN ~`; 0 = unbounded) |
-| `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY` | false | Listener TLS |
+| `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY` | false | Listener TLS; with it off, an `https://` public base URL still marks the deployment HTTPS |
 | `TRUSTED_PROXIES` | - | Proxy IP/CIDRs allowed to set client IP headers |
 | `CORS_ORIGINS` | - | Allowed CORS origins |
 | `TRUSTED_ORIGINS` | - | Trusted browser origins for sensitive IAM endpoints |

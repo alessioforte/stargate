@@ -1,4 +1,4 @@
-use std::{env, io, path::Path};
+use std::{env, io, path::Path, sync::OnceLock};
 
 pub fn install_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -24,6 +24,23 @@ pub fn enabled() -> io::Result<bool> {
             "TLS_ENABLED must contain valid unicode data",
         )),
     }
+}
+
+/// Whether clients reach this server over HTTPS: its own listener terminates
+/// TLS, or a proxy in front of it does (the public base URL is `https://`).
+/// Cookies get `Secure`, responses carry HSTS, and the request's own origin is
+/// `https://` exactly when this holds. Read once: both inputs are startup
+/// settings.
+pub fn served_over_https() -> bool {
+    static HTTPS: OnceLock<bool> = OnceLock::new();
+    *HTTPS.get_or_init(|| https_from(enabled().unwrap_or(false), &crate::conf::public_base_url()))
+}
+
+fn https_from(listener_tls: bool, public_base_url: &str) -> bool {
+    listener_tls
+        || public_base_url
+            .get(.."https://".len())
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
 }
 
 fn required_path(env_key: &str) -> io::Result<String> {
@@ -85,7 +102,16 @@ pub fn rustls_server_config() -> io::Result<std::sync::Arc<rustls::ServerConfig>
 
 #[cfg(test)]
 mod tests {
-    use super::parse_bool_env;
+    use super::{https_from, parse_bool_env};
+
+    #[test]
+    fn https_comes_from_the_listener_or_the_public_url() {
+        assert!(https_from(true, "http://localhost:5050"));
+        assert!(https_from(false, "https://identity.example.com"));
+        assert!(https_from(false, "HTTPS://identity.example.com"));
+        assert!(!https_from(false, "http://localhost:5050"));
+        assert!(!https_from(false, "https"));
+    }
 
     #[test]
     fn parse_bool_env_accepts_true_values() {
