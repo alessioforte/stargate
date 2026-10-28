@@ -14,7 +14,7 @@ pub struct Probe {
     status: &'static str,
 }
 
-/// Merge after the API rate limiter so probes have no policy dependencies.
+/// Mount outside host dispatch and the API rate limiter so probes have no policy dependencies.
 pub fn router(lifecycle: Lifecycle) -> Router {
     Router::new()
         .route("/livez", get(get_livez))
@@ -96,7 +96,7 @@ mod tests {
     async fn probes_bypass_policies_and_keep_liveness_during_outages_and_shutdown() {
         let lifecycle = Lifecycle::default();
         // Deliberately omit Gate: entering the limiter or gateway would panic.
-        let app = crate::api::server_router(lifecycle.clone());
+        let app = crate::api::server_router(lifecycle.clone(), Default::default());
         for phase in ["starting", "serving", "draining"] {
             match phase {
                 "serving" => lifecycle.mark_ready(),

@@ -1,6 +1,9 @@
 pub mod apps;
 pub mod env;
 pub mod features;
+pub mod hosts;
+
+pub use hosts::iam_hosts;
 
 /// Public base URL of this server: `OAUTH_BASE_URL`, else the issuer
 /// (`JWT_ISSUER`, default `http://localhost:$PORT`). Provider endpoints, links

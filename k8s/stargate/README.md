@@ -90,6 +90,21 @@ not use a rollout token or Deployment checksum; their import is described below.
 `metadata.resource_version`; external-secret deployments can use their
 controller's restart integration.
 
+## Multiple public hosts
+
+When an ingress forwards both `identity.example.com` and `api.example.com` to
+Stargate, put `IAM_HOSTS: identity.example.com` in `runtimeConfig.data` and set
+`JWT_ISSUER` (or `OAUTH_BASE_URL`) to the public identity URL. The public base URL
+host must appear in `IAM_HOSTS`, or startup fails. The comma-separated list accepts
+exact hostnames only, without schemes, ports, paths, or wildcards; comparisons
+ignore case and the request port.
+
+IAM APIs, docs, and hosted apps are served on the identity host. Requests on the
+API host go directly to gateway routing, including paths such as `/docs` and
+`/admin/me`. `/livez` and `/readyz` stay available on every host for kubelet probes.
+Leaving `IAM_HOSTS` unset or empty keeps IAM routes available on every host.
+Ingress host rules must forward each intended hostname to the Service.
+
 ## JWT signing keys
 
 Stargate signs access, refresh, and ID tokens with the keys in

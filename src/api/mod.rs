@@ -1,6 +1,7 @@
 pub mod account;
 pub mod admin;
 pub mod apps;
+mod dispatch;
 pub mod docs;
 pub mod health;
 pub mod i18n;
@@ -133,13 +134,16 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
-pub fn server_router(lifecycle: crate::srv::health::Lifecycle) -> axum::Router {
-    router()
+pub fn server_router(
+    lifecycle: crate::srv::health::Lifecycle,
+    hosts: crate::conf::hosts::IamHosts,
+) -> axum::Router {
+    let iam = router()
         .layer(axum::middleware::from_fn(
             crate::api::middleware::rate_limit::ingress_limit_middleware,
         ))
-        .fallback_service(tower::service_fn(crate::gate::service))
-        .merge(health::router(lifecycle))
+        .fallback_service(tower::service_fn(crate::gate::service));
+    health::router(lifecycle).fallback_service(dispatch::HostDispatch::new(hosts, iam))
 }
 
 pub fn router() -> axum::Router {

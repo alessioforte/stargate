@@ -120,7 +120,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 - `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
   `CONFIG_PATH`), the public base URL (`public_base_url`: `OAUTH_BASE_URL`, else the
   issuer; never the listening host), the hosted apps' base paths (`apps.rs`, read by the app routers,
-  links, and the Console's default callback), and feature toggles (`features.rs`, below).
+  links, and the Console's default callback), IAM host selection (`hosts.rs`,
+  `IAM_HOSTS`, validated once at startup), and feature toggles (`features.rs`, below).
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
   `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
@@ -701,6 +702,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `JWT_ID_TOKEN_KID` | - | Optional RS256 key that signs ID tokens (EC or HMAC active key) |
 | `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
 | `OAUTH_BASE_URL` | issuer | Public base URL (`conf::public_base_url`): provider endpoints, email links, OpenAPI `servers` |
+| `IAM_HOSTS` | all hosts | Comma-separated IAM hostnames, case-insensitive, without schemes, ports, paths, or wildcards; must include the public base URL host |
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
 | `OAUTH_CLIENT_CA_FILE` | - | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`) |
 | `INTERNAL_CONTEXT_*` | see `.env.example` | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue |
@@ -812,8 +814,18 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
   permissions (`src/api/admin/authorization.rs`).
 - `/auth/*` (hosted auth app), `/stargate/*` (console), everything else: gateway fallback.
 
-`api::server_router` applies the IAM ingress limit and merges probe routes outside
-it; `main.rs` adds security headers, tracing, CORS, compression, and normalize-path.
+`IAM_HOSTS` optionally restricts every IAM route above (including docs and hosted
+apps) to exact hostnames. Unset or empty preserves IAM routes on every host.
+Entries are validated once at startup, compared in lowercase without the request
+port, and must include the host of `conf::public_base_url()` (`OAUTH_BASE_URL`, else
+the issuer). Schemes, ports, paths, and wildcards in entries stop startup.
+
+`api::server_router` mounts probes on every host, including pod IPs and hostless
+requests. Its `dispatch::HostDispatch` sends allowed hosts through the IAM router
+and its ingress limit, with the gateway as fallback. Other hosts and hostless
+requests go directly to the gateway when `IAM_HOSTS` is configured, where the
+gateway ingress limit still applies. `main.rs` adds security headers, tracing,
+CORS, compression, and normalize-path to all requests.
 
 IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's
 ingress allowance, the same `ingress:ip:{ip}` bucket as the gateway, before

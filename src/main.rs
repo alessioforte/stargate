@@ -85,6 +85,10 @@ pub async fn run() -> std::io::Result<()> {
         tracing::error!("Invalid feature settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
+    conf::hosts::init().map_err(|error| {
+        tracing::error!("Invalid IAM host settings: {error}");
+        std::io::Error::other(error)
+    })?;
     iam::otp::settings::init().map_err(|error| {
         tracing::error!("Invalid MFA settings: {error}");
         std::io::Error::other(error.to_string())
@@ -105,7 +109,7 @@ pub async fn run() -> std::io::Result<()> {
     gate::spawn_config_sync(gate.clone())?;
     let lifecycle = srv::health::Lifecycle::default();
 
-    let app = api::server_router(lifecycle.clone())
+    let app = api::server_router(lifecycle.clone(), conf::iam_hosts().clone())
         .layer(Extension(Arc::clone(&gate)))
         .layer(from_fn(headers::security_headers_middleware))
         .layer(from_fn(logging::trace_middleware))
