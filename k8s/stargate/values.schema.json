@@ -10,6 +10,9 @@
     "serviceAccount",
     "containerPort",
     "service",
+    "traefik",
+    "trustedProxies",
+    "internalContext",
     "runtimeConfig",
     "jwt",
     "runtimeSecret",
@@ -154,6 +157,90 @@
           "items": { "type": "object" }
         }
       }
+    },
+    "traefik": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "entryPoints", "tls", "identityHost", "apiHosts", "grpc"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "entryPoints": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["secretName", "certResolver"],
+          "properties": {
+            "secretName": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+            },
+            "certResolver": { "type": "string" }
+          }
+        },
+        "identityHost": {
+          "oneOf": [
+            { "type": "string", "const": "" },
+            { "$ref": "#/definitions/hostname" }
+          ]
+        },
+        "apiHosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/hostname" }
+        },
+        "grpc": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": { "enabled": { "type": "boolean" } }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "enabled": { "const": true } } },
+          "then": { "properties": { "identityHost": { "minLength": 1 } } }
+        }
+      ]
+    },
+    "trustedProxies": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Trusted peer CIDRs, one entry per item; use the actual Traefik pod network.",
+      "items": { "type": "string", "minLength": 1, "pattern": "^[^,\\s]+$" }
+    },
+    "internalContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "existingSecret", "mountPath", "issuer", "kid"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "existingSecret": {
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+        },
+        "mountPath": { "type": "string", "pattern": "^/" },
+        "issuer": { "type": "string" },
+        "kid": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "enabled": { "const": true } } },
+          "then": {
+            "properties": {
+              "existingSecret": { "minLength": 1 },
+              "issuer": { "minLength": 1 },
+              "kid": { "minLength": 1 }
+            }
+          }
+        }
+      ]
     },
     "resources": { "type": "object" },
     "probes": {
@@ -380,6 +467,12 @@
     "topologySpreadConstraints": { "type": "array", "items": { "type": "object" } }
   },
   "definitions": {
+    "hostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$"
+    },
     "keyId": {
       "type": "string",
       "maxLength": 128,

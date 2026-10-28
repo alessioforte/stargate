@@ -198,6 +198,48 @@ Cross-field validation that JSON Schema cannot express.
 {{- end -}}
 
 {{- $runtimeData := default (dict) .Values.runtimeConfig.data -}}
+{{- $managed := dict -}}
+{{- if .Values.traefik.enabled -}}
+  {{- if .Values.ingress.enabled -}}
+    {{- fail "traefik.enabled and ingress.enabled are mutually exclusive" -}}
+  {{- end -}}
+  {{- $identity := required "traefik.enabled=true requires traefik.identityHost" .Values.traefik.identityHost -}}
+  {{- $hosts := list (lower $identity) -}}
+  {{- range $host := .Values.traefik.apiHosts -}}
+    {{- if has (lower $host) $hosts -}}
+      {{- fail "traefik.identityHost and traefik.apiHosts must contain distinct hostnames (case-insensitive)" -}}
+    {{- end -}}
+    {{- $hosts = append $hosts (lower $host) -}}
+  {{- end -}}
+  {{- if and .Values.traefik.tls.secretName .Values.traefik.tls.certResolver -}}
+    {{- fail "set only one of traefik.tls.secretName and traefik.tls.certResolver" -}}
+  {{- end -}}
+  {{- $_ := set $managed "IAM_HOSTS" "traefik.identityHost" -}}
+{{- end -}}
+{{- if .Values.trustedProxies -}}
+  {{- $_ := set $managed "TRUSTED_PROXIES" "trustedProxies" -}}
+{{- end -}}
+{{- if .Values.internalContext.enabled -}}
+  {{- range $key := list "existingSecret" "mountPath" "issuer" "kid" -}}
+    {{- if empty (get $.Values.internalContext $key) -}}
+      {{- fail (printf "internalContext.enabled=true requires internalContext.%s" $key) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $_ := set $managed "INTERNAL_CONTEXT_PRIVATE_KEY_PATH" "internalContext.mountPath" -}}
+  {{- $_ := set $managed "INTERNAL_CONTEXT_JWKS_PATH" "internalContext.mountPath" -}}
+  {{- $_ := set $managed "INTERNAL_CONTEXT_ISSUER" "internalContext.issuer" -}}
+  {{- $_ := set $managed "INTERNAL_CONTEXT_KID" "internalContext.kid" -}}
+{{- end -}}
+{{- range $key, $setting := $managed -}}
+  {{- if hasKey $runtimeData $key -}}
+    {{- fail (printf "runtimeConfig.data.%s is chart-managed; set %s instead" $key $setting) -}}
+  {{- end -}}
+  {{- range $env := $.Values.extraEnv -}}
+    {{- if eq (get $env "name") $key -}}
+      {{- fail (printf "extraEnv.%s is chart-managed; set %s instead" $key $setting) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- range $key := list "STARGATE_RUNTIME_PROFILE" "PORT" "CONFIG_PATH" "CONFIG_FILENAME" -}}
   {{- if hasKey $runtimeData $key -}}
     {{- fail (printf "runtimeConfig.data.%s is chart-managed and must be removed" $key) -}}

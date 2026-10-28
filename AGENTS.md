@@ -360,6 +360,19 @@ ACE rules are managed separately via `/admin/access-control/rules` (GET, PUT wit
 updates publish the policy snapshot locally and propagate to cluster peers without bumping
 the gateway config version. `# @id` / `# @description` comments above a rule are metadata.
 
+### Kubernetes Deployment
+
+The Helm chart (`k8s/stargate`) optionally deploys pattern A routing through
+Traefik v3 `IngressRoute` resources (`traefik.enabled`, mutually exclusive with
+the standard Ingress). `values-traefik.yaml` is a three-replica cluster example
+with ingress restricted to Traefik and explicit egress rules. The chart manages
+`IAM_HOSTS` from the identity host, `TRUSTED_PROXIES` from a nonempty peer list,
+and the four signer path/issuer/kid variables when `internalContext.enabled`,
+mounting the existing signing Secret read-only. Active managed settings reject
+duplicates in runtimeConfig data and extraEnv. Optional gRPC routes use h2c with
+higher priority; ordinary HTTP and WebSocket routes keep HTTP transport. Guide:
+`k8s/stargate/README.md`, "Pattern A: Traefik in front".
+
 ### Feature Flags
 
 ```toml

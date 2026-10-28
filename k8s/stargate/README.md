@@ -136,7 +136,9 @@ separate CLI Jobs with the CA mounted instead of enabling those hooks.
 ## Multiple public hosts
 
 When an ingress forwards both `identity.example.com` and `api.example.com` to
-Stargate, put `IAM_HOSTS: identity.example.com` in `runtimeConfig.data` and set
+Stargate, enable the [Traefik integration](#pattern-a-traefik-in-front) below,
+which manages `IAM_HOSTS` from `traefik.identityHost`. With another ingress
+controller, put `IAM_HOSTS: identity.example.com` in `runtimeConfig.data` and set
 `JWT_ISSUER` (or `OAUTH_BASE_URL`) to the public identity URL. The public base URL
 host must appear in `IAM_HOSTS`, or startup fails. The comma-separated list accepts
 exact hostnames only, without schemes, ports, paths, or wildcards; comparisons
@@ -147,6 +149,138 @@ API host go directly to gateway routing, including paths such as `/docs` and
 `/admin/me`. `/livez` and `/readyz` stay available on every host for kubelet probes.
 Leaving `IAM_HOSTS` unset or empty keeps IAM routes available on every host.
 Ingress host rules must forward each intended hostname to the Service.
+
+## Pattern A: Traefik in front
+
+Traefik terminates public TLS and forwards both identity and API hosts to the
+same Stargate Service. Each replica dispatches identity-host requests through
+IAM and other hosts through gateway routing:
+
+```mermaid
+flowchart LR
+    Clients -->|HTTPS| Traefik
+    Traefik -->|identity and API hosts| Service[Stargate Service]
+    Service --> Replicas[Three Stargate replicas]
+    Replicas -->|identity host| IAM[IAM, login, Console]
+    Replicas -->|API hosts| Gateway[Gateway routes]
+```
+
+Install Traefik v3 and its `traefik.io/v1alpha1` CRDs first. This chart creates
+an `IngressRoute` when `traefik.enabled=true`; it rejects enabling the standard
+`ingress.enabled` at the same time. Minimal routing overrides are:
+
+```yaml
+traefik:
+  enabled: true
+  identityHost: identity.example.com
+  apiHosts: [api.example.com]
+  tls:
+    secretName: stargate-tls
+trustedProxies:
+  - 10.42.0.0/16  # Replace with the real Traefik peer network.
+runtimeConfig:
+  data:
+    JWT_ISSUER: https://identity.example.com
+    OAUTH_BASE_URL: https://identity.example.com
+```
+
+The TLS Secret belongs in Stargate's namespace and must cover every configured
+host. Alternatively clear `secretName` and set `traefik.tls.certResolver` to a
+resolver configured in Traefik. With neither selected, `tls: {}` uses Traefik's
+default certificate configuration. Ordinary routes use HTTP to Stargate; setting
+`traefik.grpc.enabled=true` adds a higher-priority `HeaderRegexp` route for each
+host using h2c. WebSocket upgrades continue through the ordinary HTTP routes.
+These are [Traefik IngressRoute options](https://doc.traefik.io/traefik/v3.3/reference/routing-configuration/kubernetes/crd/http/ingressroute/).
+
+Use [values-traefik.yaml](values-traefik.yaml) for the complete three-replica
+cluster example. Before installing, adapt the image, hosts, real pod CIDRs,
+backend namespaces, and NetworkPolicy selectors/ports, and provision the runtime,
+shared JWT, and TLS Secrets. See [cluster deployment](#production-cluster-deployment)
+and [JWT keys](#jwt-signing-keys). Then:
+
+```bash
+helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
+helm template stargate ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
+helm upgrade --install stargate ./k8s/stargate \
+  --namespace identity --create-namespace \
+  --values ./k8s/stargate/values-traefik.yaml --atomic --timeout 10m
+```
+
+The example enables a NetworkPolicy whose ingress peer combines the
+`kube-system` namespace selector and the Traefik pod selector in the same peer.
+Egress is limited to DNS, PostgreSQL, Redis, SMTP, OTLP, and backend namespaces.
+Use a network-policy-enforcing CNI and adapt these rules for managed services,
+NodeLocal DNS, external OAuth/JWKS, and additional upstreams. Keep backend ingress
+policies restricted to Stargate as well. The gateway ConfigMap is only a seed;
+later edits use the database-backed admin API or CLI, as described under
+[gateway configuration](#gateway-configuration).
+
+Preserve the real client IP on **Traefik's** public Service with
+`externalTrafficPolicy: Local`, and set Stargate's `trustedProxies` to the actual
+Traefik peer CIDRs. Local traffic policy requires traffic to reach nodes with
+local Traefik endpoints. On k3s, merge the following into the existing
+`HelmChartConfig` named `traefik` in `kube-system`, or create it if absent; do not
+edit k3s's generated Traefik manifest. See [k3s networking](https://docs.k3s.io/networking/networking-services#traefik-ingress-controller)
+and the [Traefik chart's Service settings](https://github.com/traefik/traefik-helm-chart/blob/master/traefik/values.yaml).
+
+```yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      spec:
+        externalTrafficPolicy: Local
+    additionalArguments:
+      - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=600s
+      - --entrypoints.websecure.transport.respondingtimeouts.writetimeout=0s
+      - --serverstransport.forwardingtimeouts.responseheadertimeout=35s
+```
+
+These timeout values are examples, not deployment defaults. Traefik v3's
+`entryPoints.<name>.transport.respondingTimeouts.readTimeout` defaults to 60s and
+covers the full incoming request body; increase it for long uploads. Keep
+`writeTimeout` suitable for streams. See [entryPoint timeouts](https://doc.traefik.io/traefik/v3.0/routing/entrypoints/#respondingtimeouts).
+Align `serversTransport.forwardingTimeouts.responseHeaderTimeout` with the
+Stargate request/header budgets in [config v1](../../docs/config-v1.md#runtime-deadlines-and-resource-budgets),
+including processing before headers; it does not bound the response body.
+Traefik's default is 0s (no header timeout). The example 35s is above Stargate's
+default 30s upstream-header budget; adjust both for the actual workload. See
+[forwarding timeout semantics](https://doc.traefik.io/traefik/v3.0/routing/services/#forwardingtimeouts).
+
+For Stargate upstream targets pointing to a backend Service ClusterIP, set
+`transport.protocols: [http1]`, as the example gateway seed does. A TCP connection
+is assigned to one backend pod; multiplexing requests on a persistent HTTP/2
+connection concentrates them on that pod. HTTP/1.1 permits distribution across
+the client's connection pool. This follows [Kubernetes Service proxy behavior](https://kubernetes.io/docs/reference/networking/virtual-ips/#proxy-mode-iptables).
+
+To provision the optional internal-context signer, generate material explicitly
+and create its Secret in the release namespace:
+
+```bash
+stargate internal-context generate-key --output-dir ./internal-context --kid gateway-2026-10
+kubectl -n identity create secret generic stargate-internal-context \
+  --from-file=private.pem=./internal-context/private.pem \
+  --from-file=jwks.json=./internal-context/jwks.json
+```
+
+```yaml
+internalContext:
+  enabled: true
+  existingSecret: stargate-internal-context
+  issuer: https://identity.example.com
+  kid: gateway-2026-10
+```
+
+The chart mounts only `private.pem` and `jwks.json` read-only at
+`internalContext.mountPath` and sets the four signer path/issuer/kid variables.
+Keep the private key out of values and ConfigMaps. Restart replicas after
+replacing external key material; see [internal-context operations](../../docs/internal-context-operations.md)
+for consumer trust and rotation. Add `internal_context.audience` to selected
+gateway upstreams when they should receive signed context.
 
 ## JWT signing keys
 
@@ -396,6 +530,18 @@ The chart manages these environment variables and rejects duplicates in
 - `CONFIG_PATH`
 - `CONFIG_FILENAME`
 - `JWT_KID` and `JWT_ID_TOKEN_KID` (set `jwt.activeKid` and `jwt.idTokenKid`)
+- `IAM_HOSTS` when `traefik.enabled` (set `traefik.identityHost`)
+- `TRUSTED_PROXIES` when `trustedProxies` is nonempty (set that list)
+- `INTERNAL_CONTEXT_PRIVATE_KEY_PATH` and `INTERNAL_CONTEXT_JWKS_PATH` when
+  `internalContext.enabled` (set `internalContext.existingSecret` and `mountPath`)
+- `INTERNAL_CONTEXT_ISSUER` and `INTERNAL_CONTEXT_KID` when `internalContext.enabled`
+  (set `internalContext.issuer` and `kid`)
+
+The conditional keys above are also rejected in `extraEnv` while generated by
+the chart. Without their corresponding chart option enabled, they can be
+supplied manually, for example `IAM_HOSTS` with a different ingress controller.
+Do not duplicate managed keys in external ConfigMaps, Secrets, or `extraEnvFrom`;
+the chart cannot inspect externally managed resources.
 
 It also rejects known confidential keys in `runtimeConfig.data`, including
 database passwords, authenticated Redis URLs, JWT secrets, OTP/password
@@ -408,17 +554,37 @@ Use:
 - `extraEnv` and `extraEnvFrom` for additional integrations.
 - `gatewayConfig` for gateway routes and ACE policies.
 - `jwt` for signing keys.
+- `traefik`, `trustedProxies`, and `internalContext` for their managed settings.
 
 ## Validation
 
 ```bash
 helm lint ./k8s/stargate
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
+helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
 helm template edge ./k8s/stargate
 helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
+helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
+helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.grpc.enabled=true
+helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.grpc.enabled=true
+helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
+helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
 helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
 # Expected failure with a kubectl exec alternative:
 helm template edge ./k8s/stargate --set gatewayConfig.importOnUpgrade=true
+# Expected failure: choose one ingress integration.
+helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set ingress.enabled=true
+# Direct-Service probe for policies allowing the test pod:
 helm test stargate --namespace identity
+```
+
+The existing Helm connection-test pod contacts the Stargate Service directly;
+it is outside the Traefik-only ingress peers in `values-traefik.yaml`. For that
+example, check health through the public Traefik routes after deployment:
+
+```bash
+curl --fail https://identity.example.com/livez
+curl --fail https://identity.example.com/readyz
+curl --fail https://api.example.com/readyz
 ```

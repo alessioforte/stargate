@@ -1,0 +1,58 @@
+{{- if .Values.traefik.enabled }}
+{{- include "stargate.validateValues" . -}}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "stargate.fullname" . }}
+  labels:
+    {{- include "stargate.labels" . | nindent 4 }}
+spec:
+  entryPoints:
+    {{- toYaml .Values.traefik.entryPoints | nindent 4 }}
+  routes:
+    - kind: Rule
+      match: {{ printf "Host(`%s`)" .Values.traefik.identityHost | quote }}
+      priority: 10
+      services:
+        - name: {{ include "stargate.fullname" . }}
+          port: http
+          scheme: http
+          passHostHeader: true
+    {{- if .Values.traefik.apiHosts }}
+    {{- $matches := list }}
+    {{- range .Values.traefik.apiHosts }}
+      {{- $matches = append $matches (printf "Host(`%s`)" .) }}
+    {{- end }}
+    - kind: Rule
+      match: {{ join " || " $matches | quote }}
+      priority: 10
+      services:
+        - name: {{ include "stargate.fullname" . }}
+          port: http
+          scheme: http
+          passHostHeader: true
+    {{- end }}
+    {{- if .Values.traefik.grpc.enabled }}
+    {{- range prepend .Values.traefik.apiHosts .Values.traefik.identityHost }}
+    - kind: Rule
+      match: {{ printf "Host(`%s`) && HeaderRegexp(`Content-Type`, `^application/grpc`)" . | quote }}
+      priority: 20
+      services:
+        - name: {{ include "stargate.fullname" $ }}
+          port: http
+          scheme: h2c
+          passHostHeader: true
+    {{- end }}
+    {{- end }}
+  {{- if or .Values.traefik.tls.secretName .Values.traefik.tls.certResolver }}
+  tls:
+    {{- with .Values.traefik.tls.secretName }}
+    secretName: {{ . | quote }}
+    {{- end }}
+    {{- with .Values.traefik.tls.certResolver }}
+    certResolver: {{ . | quote }}
+    {{- end }}
+  {{- else }}
+  tls: {}
+  {{- end }}
+{{- end }}

@@ -120,6 +120,24 @@ spec:
               value: {{ .Values.gatewayConfig.mountPath | quote }}
             - name: CONFIG_FILENAME
               value: {{ .Values.gatewayConfig.fileName | quote }}
+            {{- if .Values.traefik.enabled }}
+            - name: IAM_HOSTS
+              value: {{ .Values.traefik.identityHost | quote }}
+            {{- end }}
+            {{- with .Values.trustedProxies }}
+            - name: TRUSTED_PROXIES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- if .Values.internalContext.enabled }}
+            - name: INTERNAL_CONTEXT_PRIVATE_KEY_PATH
+              value: {{ printf "%s/private.pem" (.Values.internalContext.mountPath | trimSuffix "/") | quote }}
+            - name: INTERNAL_CONTEXT_JWKS_PATH
+              value: {{ printf "%s/jwks.json" (.Values.internalContext.mountPath | trimSuffix "/") | quote }}
+            - name: INTERNAL_CONTEXT_ISSUER
+              value: {{ .Values.internalContext.issuer | quote }}
+            - name: INTERNAL_CONTEXT_KID
+              value: {{ .Values.internalContext.kid | quote }}
+            {{- end }}
             {{- with .Values.jwt.activeKid }}
             - name: JWT_KID
               value: {{ . | quote }}
@@ -152,6 +170,11 @@ spec:
             {{- range $index, $key := .Values.jwt.keys }}
             - name: jwt-key-{{ $index }}
               mountPath: {{ include "stargate.jwtKeyPath" $key.kid }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.internalContext.enabled }}
+            - name: internal-context
+              mountPath: {{ .Values.internalContext.mountPath | quote }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -194,6 +217,17 @@ spec:
           secret:
             secretName: {{ $key.secretName }}
             defaultMode: 0440
+        {{- end }}
+        {{- if .Values.internalContext.enabled }}
+        - name: internal-context
+          secret:
+            secretName: {{ .Values.internalContext.existingSecret | quote }}
+            defaultMode: 0440
+            items:
+              - key: private.pem
+                path: private.pem
+              - key: jwks.json
+                path: jwks.json
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

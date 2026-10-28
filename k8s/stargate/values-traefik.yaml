@@ -1,0 +1,204 @@
+# Pattern A example: Traefik v3 in front of three cluster replicas.
+# Replace hostnames, image, Secrets, CIDRs, namespaces, labels, and ports.
+deployment:
+  mode: cluster
+
+replicaCount: 3
+
+image:
+  repository: registry.example.com/stargate
+  tag: 0.1.0-cluster
+
+persistence:
+  enabled: false
+
+ingress:
+  enabled: false
+
+traefik:
+  enabled: true
+  entryPoints:
+    - websecure
+  identityHost: identity.example.com
+  apiHosts:
+    - api.example.com
+  tls:
+    # Existing kubernetes.io/tls Secret in Stargate's namespace, covering both hosts.
+    secretName: stargate-tls
+    # Alternatively clear secretName and use a resolver configured in Traefik.
+    certResolver: ""
+  grpc:
+    enabled: false
+
+# Example pod network only. Replace it with the real Traefik peer CIDRs.
+# The ingress policy below restricts who can connect within that network.
+trustedProxies:
+  - 10.42.0.0/16
+
+runtimeConfig:
+  data:
+    LOG_FORMAT: json
+    TLS_ENABLED: "false"
+    JWT_ISSUER: https://identity.example.com
+    OAUTH_BASE_URL: https://identity.example.com
+    CONSOLE_PUBLIC_URL: https://identity.example.com
+    CONSOLE_APP_BASE_PATH: /stargate
+    AUTH_APP_BASE_PATH: /auth
+    TRUSTED_ORIGINS: https://identity.example.com
+    CORS_ORIGINS: https://identity.example.com
+    POSTGRES_ENDPOINT: postgres.database.svc.cluster.local:5432
+    POSTGRES_DATABASE: stargate
+    POSTGRES_USERNAME: stargate
+    REDIS_POOL_SIZE: "10"
+
+# Provide POSTGRES_PASSWORD, REDIS_URL, and any enabled feature's secrets here.
+runtimeSecret:
+  existingSecret: stargate-runtime
+
+# Share JWT key material between replicas; see the key-rotation guide in README.md.
+jwt:
+  activeKid: stargate-2026-10
+  keys:
+    - kid: stargate-2026-10
+      secretName: stargate-jwt-2026-10
+
+# Optional gateway-to-backend signing. Generate the Secret before enabling it.
+internalContext:
+  enabled: false
+  # existingSecret: stargate-internal-context
+  # issuer: https://identity.example.com
+  # kid: gateway-2026-10
+
+# These files seed an empty DB only. Use the admin API or CLI for later changes.
+gatewayConfig:
+  config: |
+    schema: stargate/v1
+    ingress:
+      limit: ingress
+      timeout: 250ms
+    limits:
+      default:
+        strategy: gcra
+        params:
+          max_burst: 100
+          replenish_1_per: 1s
+      ingress:
+        strategy: gcra
+        params:
+          max_burst: 100
+          replenish_1_per: 100ms
+    http:
+      upstreams:
+        backend:
+          targets:
+            - url: http://backend.backends.svc.cluster.local:8080
+          transport:
+            protocols: [http1]
+      services:
+        backend:
+          kind: load_balancer
+          upstream: backend
+      routers:
+        backend:
+          match:
+            path:
+              prefix: /
+          service: backend
+
+podDisruptionBudget:
+  enabled: true
+
+# Enable the existing bootstrap hook only after providing its password Secret.
+bootstrap:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Both selectors are in ONE peer: namespace AND pod labels must match.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 5050
+  egress:
+    # CoreDNS. Adapt this rule if using NodeLocal DNS or a different DNS service.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL; managed services need explicit destination CIDRs instead.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: database
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis; adapt namespace, labels, and port to the deployed service.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: database
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # SMTP example (Mailpit). Use the actual SMTP port and namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mail
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mailpit
+      ports:
+        - protocol: TCP
+          port: 1025
+    # Local OTLP collector, with gRPC and HTTP/protobuf listener ports.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    # Backend namespaces. Extend the port list for your upstream Services.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: backends
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+    # Add explicit egress for external OAuth/JWKS and other enabled integrations.
