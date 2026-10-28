@@ -83,9 +83,10 @@ Prefer an external secret controller or a separately managed Secret in
 production. `runtimeSecret.stringData` is intended for development because its
 values are stored in Helm release history.
 
-For existing Secrets and ConfigMaps, set the corresponding `rolloutToken` to a
-non-secret version or revision that changes with the object. Chart-owned
-configuration receives automatic checksums. Terraform can use a Secret's
+For existing runtime Secrets and runtime ConfigMaps, set the corresponding
+`rolloutToken` to a non-secret version or revision that changes with the object.
+Chart-owned runtime settings receive automatic checksums. Gateway seed files do
+not use a rollout token or Deployment checksum; their import is described below. Terraform can use a Secret's
 `metadata.resource_version`; external-secret deployments can use their
 controller's restart integration.
 
@@ -160,19 +161,18 @@ leave an empty key directory behind once removed.
 
 ## Gateway configuration
 
-`gatewayConfig.config` must be a valid `stargate/v1` document. The chart
-also creates the initial `policies` file and mounts both files read-only at
-`/etc/stargate`. Chart rendering rejects missing or unsupported schema
-identifiers; Stargate validates the full configuration at startup.
+Gateway configuration and ACE policies are versioned documents in the database,
+managed through the Console, admin API, or `stargate config import`. The ConfigMap
+provides read-only seed files at `/etc/stargate`: `config.yaml` and `policies` are
+read only when their corresponding database documents do not exist. The gateway
+seed is required for an empty database; a missing policy seed means empty rules.
+The server never writes these mounted files.
 
-Bind the mandatory `ingress.limit` to a named rate limit. The chart defaults
-allow a burst of 100 per resolved client IP and replenish 10 requests/s, with
-a `250ms` store deadline. Gateway and IAM requests share this allowance and
-consume it before authentication/routing; authenticated `/admin/*` principals
-also charge their own `default` bucket. Probes remain exempt. Behind an ingress
-controller or load balancer, set `TRUSTED_PROXIES` to the actual proxy peer
-CIDRs: otherwise every client resolves to the proxy's address and shares one
-allowance.
+`gatewayConfig.config` must declare `schema: stargate/v1`. The chart rejects
+missing/unsupported identifiers, and the server performs full preparation before
+activation. For an existing ConfigMap, its keys must match `fileName` and
+`policiesFileName` (`policies`). Bind the mandatory ingress limit and retain the
+required `default` limit, for example:
 
 ```yaml
 gatewayConfig:
@@ -182,6 +182,11 @@ gatewayConfig:
       limit: ingress
       timeout: 250ms
     limits:
+      default:
+        strategy: gcra
+        params:
+          max_burst: 100
+          replenish_1_per: 1s
       ingress:
         strategy: gcra
         params:
@@ -202,11 +207,44 @@ gatewayConfig:
   policies: ""
 ```
 
-For GitOps deployments, update these values and let Helm roll the pods using
-the generated checksum annotation. The Admin API must not edit the mounted
-files. If runtime editing is required, set `gatewayConfig.create=false`, point
-`gatewayConfig.existingConfigMap` at an operator-managed ConfigMap, and provide
-a separate writable persistence design.
+Gateway and IAM requests share the per-IP ingress allowance before authentication
+and routing; authenticated admin principals also charge their own default bucket.
+Probes remain exempt. Set `TRUSTED_PROXIES` to the actual ingress/load-balancer peer
+CIDRs so clients behind a trusted proxy retain independent IP allowances.
+
+Changing this ConfigMap does not restart pods or replace database documents.
+By default, Console/API edits remain authoritative after Helm upgrades and restarts.
+Cluster replicas receive transactional PostgreSQL notifications; both cluster and
+edge also check at `CONFIG_SYNC_INTERVAL_SECS` (default 30 seconds).
+
+For cluster GitOps deployments, enable:
+
+```yaml
+gatewayConfig:
+  importOnUpgrade: true
+```
+
+The `post-install,post-upgrade` hook imports both mounted documents through the CLI
+using the release image and runtime database settings. It runs after the optional
+bootstrap hook (weight 20), retains its last Job for logs, and replaces it on the
+next upgrade. Enabling this mode accepts that every Helm upgrade overwrites Console
+edits with the mounted files. Unchanged content creates no new version or audit event.
+Full TLS/signer preparation happens on each replica, so referenced material must be
+mounted there. Capacity changes still require a pod restart.
+
+`importOnUpgrade` is rejected in edge mode: a second pod must not mount the SQLite
+ReadWriteOnce PVC. Import inside the existing pod instead, once the updated files
+are visible in its ConfigMap mount:
+
+```bash
+kubectl exec -n identity deployment/stargate -- /bin/server config import --kind gateway --file /etc/stargate/config.yaml
+kubectl exec -n identity deployment/stargate -- /bin/server config import --kind policies --file /etc/stargate/policies
+kubectl exec -n identity deployment/stargate -- /bin/server config export --kind gateway > gateway-backup.yaml
+```
+
+Edge applies external imports on the next periodic check without restarting. Use
+`/admin/health` to inspect active gateway/policy revisions. See [CLI operations](../../docs/cli.md)
+and the [configuration reference](../../docs/config-v1.md#database-seed-files-and-admin-updates).
 
 ## Bootstrap the first administrator
 
@@ -320,5 +358,9 @@ helm lint ./k8s/stargate
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
 helm template edge ./k8s/stargate
 helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
+helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
+helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
+# Expected failure with a kubectl exec alternative:
+helm template edge ./k8s/stargate --set gatewayConfig.importOnUpgrade=true
 helm test stargate --namespace identity
 ```

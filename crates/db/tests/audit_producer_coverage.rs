@@ -113,6 +113,11 @@ fn every_inventory_admin_handler_consumes_the_trusted_admin_boundary() {
 fn non_admin_entrypoints_keep_the_frozen_actor_and_scope_construction() {
     let cases = [
         (
+            "cli_config_import",
+            include_str!("../../../src/cli/config.rs"),
+            "TrustedBackgroundActor::system(None)",
+        ),
+        (
             "gateway_config_seed",
             include_str!("../../../src/gate/snap/config.rs"),
             "TrustedBackgroundActor::system(None)",

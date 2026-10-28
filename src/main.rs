@@ -38,13 +38,16 @@ async fn main() -> std::io::Result<()> {
 }
 
 pub async fn run() -> std::io::Result<()> {
-    println!("{}", banner::LOGO);
-
     dotenv().ok();
     tls::install_crypto_provider();
 
     let cli = cli::parse();
     if let Some(command) = cli.command {
+        // Configuration command output is data; tracing and banners must not enter stdout.
+        if matches!(&command, cli::Command::Config(_)) {
+            return cli::run_cli_command(command).await;
+        }
+        println!("{}", banner::LOGO);
         if command.is_standalone() {
             return cli::run_cli_command(command).await;
         }
@@ -55,6 +58,7 @@ pub async fn run() -> std::io::Result<()> {
         return result;
     }
 
+    println!("{}", banner::LOGO);
     let guard = logging::init();
     iam::pwd::hash::init();
 

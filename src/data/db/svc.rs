@@ -20,7 +20,6 @@ pub async fn get_active_config_document(kind: ConfigKind) -> Result<Option<Confi
     service().get_active_config_document(kind).await
 }
 
-#[cfg(feature = "postgres")]
 pub async fn get_config_revisions() -> Result<Vec<(String, i64, String)>> {
     service().get_config_revisions().await
 }

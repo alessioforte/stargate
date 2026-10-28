@@ -180,7 +180,11 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
         let stop = Arc::new(Notify::new());
         let task = tokio::spawn(with_test_service(
             svc.clone(),
-            cluster::run(second.clone(), stop.clone(), Duration::from_secs(30), None),
+            run(
+                second.clone(),
+                stop.clone(),
+                Wakeups::new(Duration::from_secs(30)),
+            ),
         ));
         wait_for(&second, &barrier.revision, false).await;
 
@@ -244,11 +248,13 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
         let stop = Arc::new(Notify::new());
         let task = tokio::spawn(with_test_service(
             svc.clone(),
-            cluster::run(
+            run(
                 second.clone(),
                 stop.clone(),
-                Duration::from_millis(200),
-                Some(silent_listener),
+                Wakeups {
+                    ticks: tokio::time::interval(Duration::from_millis(200)),
+                    listener: Some(silent_listener),
+                },
             ),
         ));
         wait_for(&second, &barrier.revision, false).await;
@@ -262,4 +268,114 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
         stop_task(stop, task).await;
     })
     .await;
+}
+
+#[cfg(feature = "sqlite")]
+#[tokio::test]
+async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlite_file() {
+    use crate::data::db::with_test_service;
+    use ::db::{
+        DbStore,
+        ent::{
+            ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary, TrustedAuditContext,
+            TrustedBackgroundActor,
+        },
+    };
+    use gate::cfg::Config;
+    use tokio::sync::Notify;
+
+    let directory =
+        std::env::temp_dir().join(format!("stargate-edge-sync-{}", ulid::Ulid::generate()));
+    std::fs::create_dir(&directory).unwrap();
+    let url = format!("sqlite://{}?mode=rwc", directory.join("state.db").display());
+    let reader = ::db::service::init(&url).await.unwrap();
+    let writer = ::db::service::init(&url).await.unwrap();
+    let initial = Config::default();
+    let gate = Arc::new(crate::gate::test_support::gate(initial.clone()));
+
+    async fn external_write(
+        writer: &::db::service::Service,
+        kind: ConfigKind,
+        content: String,
+    ) -> String {
+        let expected = writer
+            .get_active_config_document(kind)
+            .await
+            .unwrap()
+            .map(|document| document.revision);
+        let context = TrustedAuditContext::background(
+            TrustedAuditBoundary::control_plane(),
+            TrustedBackgroundActor::system(None),
+        );
+        let saved = writer
+            .save_config_document(kind, content, expected, ConfigSource::CliImport, context)
+            .await
+            .unwrap();
+        match saved {
+            ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => {
+                document.revision
+            }
+            other => panic!("unexpected external write: {other:?}"),
+        }
+    }
+
+    async fn wait_for(gate: &Gate, kind: ConfigKind, revision: &str) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let active = match kind {
+                    ConfigKind::Gateway => gate.snapshot().config_revision.clone(),
+                    ConfigKind::Policies => gate.policy_snapshot.load().revision.clone(),
+                };
+                if active == revision {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("edge must activate external writes on the next tick");
+    }
+
+    external_write(
+        &writer,
+        ConfigKind::Gateway,
+        initial.to_yaml_string().unwrap(),
+    )
+    .await;
+    external_write(&writer, ConfigKind::Policies, String::new()).await;
+    let stop = Arc::new(Notify::new());
+    let task = tokio::spawn(with_test_service(
+        reader,
+        run(
+            gate.clone(),
+            stop.clone(),
+            Wakeups::new(Duration::from_millis(30)),
+        ),
+    ));
+    let mut changed = initial;
+    for timeout in ["300ms", "400ms"] {
+        changed.ingress.timeout = timeout.to_string();
+        let revision = external_write(
+            &writer,
+            ConfigKind::Gateway,
+            changed.to_yaml_string().unwrap(),
+        )
+        .await;
+        wait_for(&gate, ConfigKind::Gateway, &revision).await;
+    }
+    assert_eq!(gate.snapshot().version, 2);
+    let revision = external_write(
+        &writer,
+        ConfigKind::Policies,
+        "ALLOW user FOR \"edge-import:READ\";".to_string(),
+    )
+    .await;
+    wait_for(&gate, ConfigKind::Policies, &revision).await;
+    stop.notify_one();
+    tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(writer);
+    std::fs::remove_dir_all(directory).unwrap();
 }

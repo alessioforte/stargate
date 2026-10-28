@@ -39,6 +39,8 @@ capacity restart can leave these behind the latest database revisions. Notificat
 and activation failures do not add readiness conditions; the dependency checks remain
 unchanged. Cluster synchronization checks after PostgreSQL notifications/reconnections
 and at `CONFIG_SYNC_INTERVAL_SECS` (default 30 seconds) to recover missed notifications.
+Edge uses the same interval without a listener, including for CLI imports from another
+process sharing the SQLite database file.
 
 Initialization includes database migrations, state-store setup, signing
 configuration, and the compiled gateway configuration. The listener opens
@@ -57,7 +59,7 @@ return request-level `503` responses; they do not change probe readiness.
 
 ## Shutdown
 
-The cluster configuration synchronizer is stopped and awaited before the audit relay.
+The configuration synchronizer is stopped and awaited before the audit relay (when present).
 
 On SIGTERM or SIGINT, Stargate marks readiness false immediately. It keeps
 the listener open for `SERVER_DRAIN_DELAY_SECS` (default `5`, `0` disables the

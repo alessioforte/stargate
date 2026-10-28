@@ -12,6 +12,18 @@ WARNING: JWT_ALGORITHM={{ $jwtAlgorithm }} also signs OIDC ID tokens with JWT_SE
 relying parties cannot verify. Set jwt.idTokenKid to an RS256 key.
 {{- end }}
 
+Gateway configuration and policies are stored in the database; the ConfigMap is a seed by default.
+Changing the seed ConfigMap does not restart pods or replace existing documents.
+{{- if .Values.gatewayConfig.importOnUpgrade }}
+GitOps import is enabled: the post-install/post-upgrade hook overwrites both documents,
+including changes made through the Console. Inspect the retained hook Job with:
+  kubectl logs --namespace {{ .Release.Namespace }} job/{{ include "stargate.configImportName" . }}
+{{- else }}
+Edit documents through the Console/API, or import from inside an existing pod:
+  kubectl exec --namespace {{ .Release.Namespace }} deployment/{{ include "stargate.fullname" . }} -- /bin/server config import --kind gateway --file {{ printf "%s/%s" .Values.gatewayConfig.mountPath .Values.gatewayConfig.fileName | quote }}
+  kubectl exec --namespace {{ .Release.Namespace }} deployment/{{ include "stargate.fullname" . }} -- /bin/server config import --kind policies --file {{ printf "%s/%s" .Values.gatewayConfig.mountPath .Values.gatewayConfig.policiesFileName | quote }}
+{{- end }}
+
 {{- if .Values.bootstrap.enabled }}
 The idempotent bootstrap hook provisions the first administrator and Console OAuth client.
 Inspect it with:

@@ -1,10 +1,8 @@
 use super::Gate;
-#[cfg(any(feature = "postgres", all(test, feature = "memory")))]
 use super::config::GatewayPreparationError;
 use crate::obs::telemetry;
 use std::sync::Arc;
 
-#[cfg(any(feature = "postgres", all(test, feature = "memory")))]
 pub(crate) fn apply_gateway_config(
     gate: &Gate,
     yaml: &str,

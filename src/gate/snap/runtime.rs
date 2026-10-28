@@ -74,7 +74,6 @@ impl Gate {
         self.runtime.load_full()
     }
 
-    #[cfg(any(test, feature = "postgres"))]
     pub(crate) fn activate(
         &self,
         prepared: PreparedConfig,

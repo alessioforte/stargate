@@ -22,7 +22,7 @@ stargate/
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
 │   ├── api/           # Axum routers + handlers; IAM middleware; apps/ auth + console hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
-│   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
+│   ├── cli/           # CLI: admin bootstrap, config export/import, internal-context / jwt generate-key
 │   ├── conf/          # Process-wide configuration: env readers, feature toggles, config dir
 │   ├── ctx/           # Request context, propagation drafts, audit/authz projections; sign/ signer
 │   ├── data/          # Persistence backends: db/ (SQL pool + repository service), store/
@@ -318,7 +318,8 @@ Gateway configuration and ACE rules come from the active `config_documents` rows
 On an empty database, startup seeds each kind once: the gateway from
 `CONFIG_PATH/CONFIG_FILENAME`, and policies from `CONFIG_PATH/policies` (empty when absent).
 A missing gateway seed fails startup. Existing documents take precedence over files.
-The process never creates or writes configuration or policy files and has no file watchers.
+Server startup and activation never create or write configuration or policy seed files
+and use no file watchers. Explicit CLI exports can write the requested backup files.
 Invalid active documents fail startup.
 
 Admin configuration reads return the document revision, version, update time/actor, and
@@ -336,7 +337,8 @@ provides periodic recovery from missed notifications. Failed activations retain 
 snapshot and retry on the next tick; duplicate notifications do not retry the same failed
 revision. Activation failures log once per revision, with a warning when a restart is
 required. Database/listener errors are retried without stopping synchronization. Edge runs
-no synchronizer; the interval setting is still validated at startup. Synchronization stops
+the same periodic checks without a listener, so imports from another process sharing
+its SQLite file apply without restarting. Synchronization stops
 before the audit relay during shutdown. `/admin/health` reports this replica's active
 `config.gatewayRevision` and `config.policiesRevision`.
 
@@ -689,7 +691,7 @@ the same logical columns on PostgreSQL and SQLite.
 |-----|---------|---------|
 | `CONFIG_PATH` | `.stargate` | Directory for gateway/policy seed files; also holds other runtime assets |
 | `CONFIG_FILENAME` | `config.yaml` | Gateway seed filename, used only when its database document is absent |
-| `CONFIG_SYNC_INTERVAL_SECS` | 30 | Cluster document reconciliation interval (integer >= 1); validated at startup |
+| `CONFIG_SYNC_INTERVAL_SECS` | 30 | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup |
 | `PORT` | 5050 | HTTP listen port |
 | `STARGATE_RUNTIME_PROFILE` | - | `edge` or `cluster` (validated against the build) |
 | `JWT_ALGORITHM` | active key / `RS256` | Must match the active key when set; picks the first generated key |
@@ -769,6 +771,12 @@ cargo run --features edge -- admin bootstrap \
   --name "Admin User" --nickname admin \
   --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 
+# Back up or import exact database document content (both profiles)
+cargo run --features edge -- config export --kind gateway --output gateway-backup.yaml
+cargo run --features edge -- config export --kind policies --output policies-backup
+cargo run --features edge -- config import --kind gateway --file gateway.yaml
+cargo run --features edge -- config import --kind policies --file policies
+
 # Next JWT signing key in .stargate/jwks/keys/<kid>/;
 # --id-token creates the RS256 key for JWT_ID_TOKEN_KID
 cargo run --features edge -- jwt generate-key --kid stargate-2026-11
@@ -780,7 +788,13 @@ cargo run --features edge -- internal-context generate-key \
 
 Bootstrap flags: `--password`, `--password-stdin`, `--generate-password`,
 `--oauth-client-id`, `--oauth-redirect-uri`. `jwt` and `internal-context` commands
-need no database. Docs: `docs/cli.md`.
+need no database. Configuration commands require the database, keep stdout free of
+banners/logs, and validate syntax/compilation without local TLS or signer material.
+Imports preserve the submitted text, retry a revision conflict once, and write an
+atomic `cli_import` system audit event for changed content. Runtime replicas do full
+preparation before activation. The Helm ConfigMap is a seed by default; cluster-only
+`gatewayConfig.importOnUpgrade` imports both documents on install/upgrade and replaces
+Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/cli.md`.
 
 ## API Overview
 
@@ -845,7 +859,7 @@ or `ingress`. `429` `retry-after` is whole seconds rounded up (missing duration
 
 SIGTERM/SIGINT -> readiness off -> wait `SERVER_DRAIN_DELAY_SECS` -> gateway admission
 closes and active work is cancelled -> listeners close and connections drain
-(`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop
+(`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop configuration synchronization -> stop
 audit relay -> save in-memory store -> flush telemetry.
 
 ## Frontend (apps/)

@@ -14,11 +14,6 @@
 {{- else if .Values.runtimeSecret.rolloutToken -}}
   {{- $_ := set $podAnnotations "checksum/runtime-secret" (.Values.runtimeSecret.rolloutToken | sha256sum) -}}
 {{- end -}}
-{{- if .Values.gatewayConfig.create -}}
-  {{- $_ := set $podAnnotations "checksum/gateway-config" (include (print $.Template.BasePath "/gateway-configmap.yaml") . | sha256sum) -}}
-{{- else if .Values.gatewayConfig.rolloutToken -}}
-  {{- $_ := set $podAnnotations "checksum/gateway-config" (.Values.gatewayConfig.rolloutToken | sha256sum) -}}
-{{- end -}}
 {{- $strategyType := .Values.deployment.strategy.type -}}
 {{- if empty $strategyType -}}
   {{- $strategyType = ternary "Recreate" "RollingUpdate" (eq .Values.deployment.mode "edge") -}}
