@@ -26,6 +26,7 @@ pub(crate) use snap::apply_policy_document;
 pub(crate) use snap::prepare_config;
 pub(crate) use snap::{ConfigActivation, save_gateway_config};
 pub use snap::{Gate, RuntimeSnapshot, retain_runtime};
+pub(crate) use snap::{shutdown_config_sync, spawn_config_sync};
 #[cfg(test)]
 pub(crate) use transport::DeadlineConnector;
 pub use transport::{HyperClient, PreparedTransport, connection_timed_out};

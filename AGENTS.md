@@ -308,7 +308,7 @@ context feeds ACE and org-level limits. Guide: `docs/multi-org-guide.md`.
 - JWT config
 - GeoIP database
 - Gateway `RuntimeSnapshot` (`ArcSwap`): graph, balancers, limiter, prepared clients,
-  version, generation-owned health probes
+  version, exact document revision, generation-owned health probes
 - ACE `PolicySnapshot` (engine + `sha256:*` revision)
 - Internal-context signer (when configured)
 
@@ -329,12 +329,21 @@ with its safe audit event in one transaction. Conflicts return
 replica. Capacity changes are saved with `activation: restart_required` and retain the
 current runtime until restart. Pinned requests, bodies, mirrors, and WebSockets keep
 their generation. Replacing TLS files alone does not reload prepared transports.
-Propagation to other replicas is not implemented yet (pattern A task 1.2c).
+Cluster replicas subscribe to PostgreSQL `stargate_config` notifications emitted in the
+same transaction as each new document version. A notification or listener reconnection
+checks the active document revisions; `CONFIG_SYNC_INTERVAL_SECS` (default 30, integer >= 1)
+provides periodic recovery from missed notifications. Failed activations retain the prior
+snapshot and retry on the next tick; duplicate notifications do not retry the same failed
+revision. Activation failures log once per revision, with a warning when a restart is
+required. Database/listener errors are retried without stopping synchronization. Edge runs
+no synchronizer; the interval setting is still validated at startup. Synchronization stops
+before the audit relay during shutdown. `/admin/health` reports this replica's active
+`config.gatewayRevision` and `config.policiesRevision`.
 
 ACE rules are managed separately via `/admin/access-control/rules` (GET, PUT with revision,
 `/validate`, `/evaluate`) and `/admin/access-control/capabilities/evaluate`. Their database
-updates publish the policy snapshot on the receiving replica without bumping the gateway
-config version. `# @id` / `# @description` comments above a rule are metadata.
+updates publish the policy snapshot locally and propagate to cluster peers without bumping
+the gateway config version. `# @id` / `# @description` comments above a rule are metadata.
 
 ### Feature Flags
 
@@ -680,6 +689,7 @@ the same logical columns on PostgreSQL and SQLite.
 |-----|---------|---------|
 | `CONFIG_PATH` | `.stargate` | Directory for gateway/policy seed files; also holds other runtime assets |
 | `CONFIG_FILENAME` | `config.yaml` | Gateway seed filename, used only when its database document is absent |
+| `CONFIG_SYNC_INTERVAL_SECS` | 30 | Cluster document reconciliation interval (integer >= 1); validated at startup |
 | `PORT` | 5050 | HTTP listen port |
 | `STARGATE_RUNTIME_PROFILE` | - | `edge` or `cluster` (validated against the build) |
 | `JWT_ALGORITHM` | active key / `RS256` | Must match the active key when set; picks the first generated key |

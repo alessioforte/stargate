@@ -19,6 +19,8 @@ pub(crate) enum GatewayPreparationError {
     Transport(#[from] TransportPreparationError),
     #[error(transparent)]
     Core(#[from] gate::graph::CompileError),
+    #[error("unable to serialize gateway configuration: {0}")]
+    Serialization(String),
     #[error("gateway configuration version exhausted")]
     VersionExhausted,
     #[error(
@@ -30,9 +32,11 @@ pub(crate) enum GatewayPreparationError {
 impl GatewayPreparationError {
     pub(super) fn reload_outcome(&self) -> &'static str {
         match self {
-            Self::Config(_) | Self::Core(_) | Self::VersionExhausted | Self::BudgetChange => {
-                "error"
-            }
+            Self::Config(_)
+            | Self::Core(_)
+            | Self::Serialization(_)
+            | Self::VersionExhausted
+            | Self::BudgetChange => "error",
             Self::InternalContext(_) => "internal_context_error",
             Self::Transport(_) => "transport_error",
         }
@@ -41,19 +45,31 @@ impl GatewayPreparationError {
 
 pub(crate) struct PreparedConfig {
     pub(crate) config: RuntimeConfig,
+    pub(super) config_revision: String,
     pub(super) transports: PreparedTransports,
 }
 
 pub(crate) fn prepare_config(raw: Config) -> Result<PreparedConfig, GatewayPreparationError> {
-    prepare_runtime_config(RuntimeConfig::from_raw(raw)?)
+    let yaml = raw
+        .to_yaml_string()
+        .map_err(|error| GatewayPreparationError::Serialization(error.to_string()))?;
+    prepare_runtime_config(
+        RuntimeConfig::from_raw(raw)?,
+        ::db::ent::config_revision(&yaml),
+    )
 }
 
 pub(super) fn prepare_runtime_config(
     config: RuntimeConfig,
+    config_revision: String,
 ) -> Result<PreparedConfig, GatewayPreparationError> {
     sign::preflight_config(&config)?;
     let transports = transport::prepare(&config)?;
-    Ok(PreparedConfig { config, transports })
+    Ok(PreparedConfig {
+        config,
+        config_revision,
+        transports,
+    })
 }
 
 pub(in crate::gate) fn get_config_path() -> String {
@@ -101,7 +117,10 @@ async fn load_gateway_document_from_path(path: &str) -> anyhow::Result<ConfigDoc
 pub(in crate::gate) fn prepare_gateway_config(
     yaml: &str,
 ) -> Result<PreparedConfig, GatewayPreparationError> {
-    prepare_runtime_config(RuntimeConfig::from_yaml_str(yaml)?)
+    prepare_runtime_config(
+        RuntimeConfig::from_yaml_str(yaml)?,
+        ::db::ent::config_revision(yaml),
+    )
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]

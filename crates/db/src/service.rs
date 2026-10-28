@@ -71,6 +71,13 @@ impl Service {
         sqlx::query("SELECT 1").execute(&self.pool).await?;
         Ok(())
     }
+
+    #[cfg(feature = "postgres")]
+    pub async fn config_listener(&self) -> Result<crate::PgListener> {
+        let mut listener = crate::PgListener::connect_with(&self.pool).await?;
+        listener.listen(crate::CONFIG_CHANNEL).await?;
+        Ok(listener)
+    }
 }
 
 #[derive(Serialize)]
@@ -814,6 +821,12 @@ impl DbStore for Service {
             serde_json::json!({ "source": source.as_str() }),
         )?;
         self.outbox.insert(&mut tx, &event).await?;
+        #[cfg(feature = "postgres")]
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(crate::CONFIG_CHANNEL)
+            .bind(format!("{}:{}", kind.as_str(), document.revision))
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(ConfigSaveOutcome::Saved(document))
     }
@@ -4567,6 +4580,9 @@ mod tests {
         TrustedAuditRequest, TrustedBackgroundActor,
     };
 
+    // Configuration kinds are shared identities, so independent tests must not race each other's CAS writes.
+    static CONFIG_DOCUMENT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     async fn test_service() -> Service {
         dotenvy::dotenv().ok();
         let url = std::env::var("TEST_DATABASE_URL")
@@ -4604,6 +4620,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
     async fn concurrent_config_document_saves_have_one_winner() {
+        let _guard = CONFIG_DOCUMENT_LOCK.lock().await;
         let svc = test_service().await;
         let kind = ConfigKind::Gateway;
         let previous = svc.get_active_config_document(kind).await.unwrap();
@@ -4693,6 +4710,97 @@ mod tests {
         .fetch_one(&svc.pool)
         .await
         .expect("read relay test event id")
+    }
+
+    #[tokio::test]
+    #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
+    async fn config_notifications_are_delivered_only_for_committed_saved_versions() {
+        let _guard = CONFIG_DOCUMENT_LOCK.lock().await;
+        use std::time::Duration;
+        let svc = test_service().await;
+        let mut listener = svc.config_listener().await.unwrap();
+        let kind = ConfigKind::Gateway;
+        let current = svc.get_active_config_document(kind).await.unwrap();
+        let content = ulid::Ulid::generate().to_string();
+        let revision = config_revision(&content);
+        let payload = format!("gateway:{revision}");
+        let outcome = svc
+            .save_config_document(
+                kind,
+                content.clone(),
+                current.map(|document| document.revision),
+                ConfigSource::AdminApi,
+                admin_context(ulid::Ulid::generate().to_string()),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, ConfigSaveOutcome::Saved(_)));
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let notification = listener.recv().await.unwrap();
+                if notification.payload() == payload {
+                    assert_eq!(notification.channel(), crate::CONFIG_CHANNEL);
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("committed save must notify the listener");
+
+        let unchanged = svc
+            .save_config_document(
+                kind,
+                content,
+                Some(revision.clone()),
+                ConfigSource::AdminApi,
+                admin_context(ulid::Ulid::generate().to_string()),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(unchanged, ConfigSaveOutcome::Unchanged(_)));
+        let rejected_content = ulid::Ulid::generate().to_string();
+        let rejected_payload = format!("gateway:{}", config_revision(&rejected_content));
+        let conflict = svc
+            .save_config_document(
+                kind,
+                rejected_content.clone(),
+                Some("stale".to_string()),
+                ConfigSource::AdminApi,
+                admin_context(ulid::Ulid::generate().to_string()),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(conflict, ConfigSaveOutcome::Conflict { .. }));
+        let invalid = TrustedAuditContext::admin_control_plane(
+            TrustedAdminActor::admin("01JZ000000000000000000000A"),
+            TrustedAuditRequest::from_http("", None, None, None),
+        );
+        assert!(
+            svc.save_config_document(
+                kind,
+                rejected_content,
+                Some(revision),
+                ConfigSource::AdminApi,
+                invalid
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), async {
+                loop {
+                    let notification = listener.recv().await.unwrap();
+                    if notification.payload() == payload
+                        || notification.payload() == rejected_payload
+                    {
+                        break;
+                    }
+                }
+            })
+            .await
+            .is_err(),
+            "unchanged, conflicting, and rolled-back saves must not notify"
+        );
     }
 
     // ── Atomicity ────────────────────────────────────────────────────────────

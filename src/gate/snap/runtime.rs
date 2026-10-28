@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 pub struct RuntimeSnapshot {
     pub core: gate::Runtime,
     pub version: u64,
+    pub config_revision: String,
     pub ingress: gate::cfg::CompiledIngress,
     pub settings: gate::cfg::CompiledRuntimeSettings,
     pub resources: Arc<resources::ProcessResources>,
@@ -57,6 +58,7 @@ impl Gate {
             resources: resources.clone(),
             transports: prepared.transports,
             version: 0,
+            config_revision: prepared.config_revision,
         });
         runtime.core.start_probes();
         Ok(Self {
@@ -72,7 +74,7 @@ impl Gate {
         self.runtime.load_full()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "postgres"))]
     pub(crate) fn activate(
         &self,
         prepared: PreparedConfig,
@@ -111,6 +113,7 @@ impl Gate {
             resources: self.resources.clone(),
             transports: prepared.transports,
             version,
+            config_revision: prepared.config_revision,
         });
         let previous = self.runtime.swap(runtime.clone());
         runtime.core.start_probes();

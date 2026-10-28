@@ -14,14 +14,22 @@ fn seed_path() -> String {
 async fn gateway_seed_is_audited_once_and_existing_document_ignores_the_file() {
     with_test_database(async {
         let path = seed_path();
-        let yaml = Config::default().to_yaml_string().unwrap();
+        let yaml = format!(
+            "# Preserve the exact seed revision\n{}",
+            Config::default().to_yaml_string().unwrap()
+        );
         std::fs::write(&path, &yaml).unwrap();
         let first = load_gateway_document_from_path(&path).await.unwrap();
         assert_eq!(first.version, 1);
         assert_eq!(first.source, "seed");
         assert_eq!(first.content, yaml);
         assert_eq!(first.created_by, None);
-        assert!(prepare_gateway_config(&first.content).is_ok());
+        assert_eq!(
+            prepare_gateway_config(&first.content)
+                .unwrap()
+                .config_revision,
+            first.revision
+        );
         let events = db::service()
             .query_outbox_events(&OutboxEventFilter::default(), 10, 0)
             .await

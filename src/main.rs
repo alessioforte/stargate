@@ -98,6 +98,7 @@ pub async fn run() -> std::io::Result<()> {
     aud::spawn()?;
 
     let gate = gate::init().await.map_err(std::io::Error::other)?;
+    gate::spawn_config_sync(gate.clone())?;
     let lifecycle = srv::health::Lifecycle::default();
 
     let app = api::server_router(lifecycle.clone())
@@ -137,6 +138,7 @@ pub async fn run() -> std::io::Result<()> {
         gate.resources.wait(),
     )
     .await;
+    gate::shutdown_config_sync().await;
     aud::shutdown().await;
     store::save().await;
     info!("Shutdown complete");

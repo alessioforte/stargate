@@ -1,12 +1,30 @@
 use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
+use crate::gate::Gate;
 use crate::srv::health::{ComponentHealth, check_dependencies};
 use axum::Json;
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use serde::Serialize;
+use std::sync::Arc;
 use utoipa::ToSchema;
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ConfigStatus {
+    gateway_revision: String,
+    policies_revision: String,
+}
+
+impl ConfigStatus {
+    fn from_gate(gate: &Gate) -> Self {
+        Self {
+            gateway_revision: gate.snapshot().config_revision.clone(),
+            policies_revision: gate.policy_snapshot.load().revision.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +80,7 @@ pub struct AdminHealth {
     database_backend: &'static str,
     state_backend: &'static str,
     features: FeatureStatus,
+    config: ConfigStatus,
     database: ComponentStatus,
     #[cfg(feature = "redis")]
     redis: ComponentStatus,
@@ -82,6 +101,11 @@ pub struct AdminHealth {
 )]
 pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
     authorization::require(&req, Permission::HealthRead)?;
+    let gate = req
+        .extensions()
+        .get::<Arc<Gate>>()
+        .cloned()
+        .ok_or_else(|| ErrorResponse::internal("Gateway runtime extension is missing"))?;
 
     let version = env!("CARGO_PKG_VERSION");
 
@@ -117,6 +141,7 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
             console: features.console,
             social_providers: features.social_providers(),
         },
+        config: ConfigStatus::from_gate(&gate),
         database: dependencies.database.into(),
         #[cfg(feature = "redis")]
         redis: dependencies.redis.into(),
@@ -131,4 +156,47 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
     };
 
     Ok((status, Json(body)).into_response())
+}
+
+#[cfg(all(test, feature = "memory"))]
+mod tests {
+    use super::*;
+    use crate::gate::{apply_policy_document, prepare_config, test_support};
+    use gate::cfg::Config;
+
+    #[test]
+    fn health_reports_active_revisions_and_pinned_snapshots_keep_their_revision() {
+        let initial = Config::default();
+        let gate = test_support::gate(initial.clone());
+        let pinned = gate.snapshot();
+        assert_eq!(
+            pinned.config_revision,
+            db::ent::config_revision(&initial.to_yaml_string().unwrap())
+        );
+        let mut changed = initial;
+        changed.ingress.timeout = "300ms".to_string();
+        gate.activate(prepare_config(changed.clone()).unwrap())
+            .unwrap();
+        apply_policy_document(&gate, "ALLOW user FOR \"health:READ\";").unwrap();
+        let status = serde_json::to_value(ConfigStatus::from_gate(&gate)).unwrap();
+        assert_eq!(
+            status["gatewayRevision"],
+            db::ent::config_revision(&changed.to_yaml_string().unwrap())
+        );
+        assert_eq!(
+            status["policiesRevision"],
+            gate.policy_snapshot.load().revision
+        );
+        assert_ne!(status["gatewayRevision"], pinned.config_revision);
+        let mut needs_restart = changed;
+        needs_restart.runtime.primary_concurrency += 1;
+        assert!(
+            gate.activate(prepare_config(needs_restart).unwrap())
+                .is_err()
+        );
+        assert_eq!(
+            serde_json::to_value(ConfigStatus::from_gate(&gate)).unwrap(),
+            status
+        );
+    }
 }

@@ -1,10 +1,10 @@
 use super::Gate;
-#[cfg(all(test, feature = "memory"))]
+#[cfg(any(feature = "postgres", all(test, feature = "memory")))]
 use super::config::GatewayPreparationError;
 use crate::obs::telemetry;
 use std::sync::Arc;
 
-#[cfg(all(test, feature = "memory"))]
+#[cfg(any(feature = "postgres", all(test, feature = "memory")))]
 pub(crate) fn apply_gateway_config(
     gate: &Gate,
     yaml: &str,
@@ -24,7 +24,10 @@ pub(crate) fn apply_policy_document(
     gate: &Gate,
     content: &str,
 ) -> Result<bool, crate::err::ErrorResponse> {
-    let policies = crate::iam::authz::rules::compile_policy_snapshot(content)?;
+    let policies =
+        crate::iam::authz::rules::compile_policy_snapshot(content).inspect_err(|_| {
+            telemetry::record_config_reload("policies", "error");
+        })?;
     if gate.policy_snapshot.load().revision == policies.revision {
         return Ok(false);
     }

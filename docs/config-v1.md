@@ -68,8 +68,25 @@ saved with `activation: restart_required`: existing routing stays active until
 restart. The Console reloads after a revision conflict and warns when a restart
 is required. Restart always uses the latest database document.
 
-Changes currently apply immediately only to the replica receiving the admin
-request. Propagation across replicas will be implemented in pattern A task 1.2c.
+Changes apply immediately to the receiving replica. In cluster deployments each
+new document version sends a transactional PostgreSQL `stargate_config` notification
+with payload `<kind>:<revision>`. Other replicas compare active revisions, read the
+latest changed documents, and activate them within seconds when notifications arrive.
+The synchronizer also checks after listener reconnections and every
+`CONFIG_SYNC_INTERVAL_SECS` (default `30`, integer >= 1). This periodic pass recovers
+changes whose notifications were missed. Invalid or unrepresentable interval settings
+fail startup, including in edge builds, which run no background synchronizer.
+
+A replica whose transports or signer requirements cannot prepare the document keeps
+its prior snapshot. It logs the failure once for that revision and retries on the next
+periodic pass; duplicate notifications do not cause repeated preparation failures.
+Capacity changes log a restart-required warning once per revision and leave the active
+revision unchanged until restart. Database/listener failures do not terminate the task.
+Synchronization is stopped and awaited before the audit relay during shutdown.
+
+`GET /admin/health` includes `config: { gatewayRevision, policiesRevision }` with
+the responding replica's active revisions. These can differ from stored revisions
+while a restart or a successful activation is pending. Revision values are not metric labels.
 
 ## Model
 
@@ -1132,8 +1149,8 @@ invalid document leaves the previous snapshot active.
 `PUT` requires the current `sha256:*` revision returned by `GET`, validates the
 whole document strictly, and saves a new database version with its audit event in
 one transaction. A stale revision returns `409 access_control.revision_conflict`.
-The live ACE snapshot is published immediately on the receiving replica; propagation
-to other replicas is not implemented yet.
+The live ACE snapshot is published immediately on the receiving replica and propagates
+to cluster peers through the same notification and periodic-check mechanism as the gateway document.
 
 ## Full Routing Example
 

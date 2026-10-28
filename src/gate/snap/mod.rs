@@ -4,6 +4,7 @@ mod body;
 mod config;
 mod reload;
 mod runtime;
+mod sync;
 
 pub use body::retain_runtime;
 #[cfg(all(test, feature = "memory"))]
@@ -18,3 +19,4 @@ pub(crate) use reload::apply_policy_document;
 #[cfg(test)]
 pub(super) use runtime::test_support;
 pub use runtime::{Gate, RuntimeSnapshot};
+pub(crate) use sync::{shutdown_config_sync, spawn_config_sync};

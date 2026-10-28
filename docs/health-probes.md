@@ -32,7 +32,13 @@ Each dependency check has a one-second deadline, including SQL pool acquisition.
 Errors, missing initialized dependencies, and timeouts produce `503`. Checks
 run on each readiness request; responses are not cached. A later successful
 check restores readiness automatically after a dependency outage.
-`/admin/health` uses the same bounded dependency checks.
+`/admin/health` uses the same bounded dependency checks. It also reports
+`config: { gatewayRevision, policiesRevision }`, the exact document revisions
+currently active on the responding replica. A failed activation or a pending
+capacity restart can leave these behind the latest database revisions. Notification
+and activation failures do not add readiness conditions; the dependency checks remain
+unchanged. Cluster synchronization checks after PostgreSQL notifications/reconnections
+and at `CONFIG_SYNC_INTERVAL_SECS` (default 30 seconds) to recover missed notifications.
 
 Initialization includes database migrations, state-store setup, signing
 configuration, and the compiled gateway configuration. The listener opens
@@ -50,6 +56,8 @@ Process admission exhaustion and a full/expired internal-context signing queue
 return request-level `503` responses; they do not change probe readiness.
 
 ## Shutdown
+
+The cluster configuration synchronizer is stopped and awaited before the audit relay.
 
 On SIGTERM or SIGINT, Stargate marks readiness false immediately. It keeps
 the listener open for `SERVER_DRAIN_DELAY_SECS` (default `5`, `0` disables the
