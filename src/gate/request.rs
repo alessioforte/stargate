@@ -12,6 +12,7 @@ use super::{
         strip_internal_context_response,
     },
     routing::router_matches,
+    upstream::headers::UpstreamHeaders,
 };
 use crate::{
     ctx::{PropagationDraft, RequestContext, request_id_from, sign::InternalContextRuntime},
@@ -35,7 +36,7 @@ pub(super) struct RequestState {
     pub(super) original_path: String,
     pub(super) path: String,
     pub(super) query: String,
-    pub(super) preserve_host: bool,
+    pub(super) upstream_headers: UpstreamHeaders,
     pub(super) response_headers: ResponseHeaderMutations,
     pub(super) propagation_draft: Option<Arc<PropagationDraft>>,
     pub(super) internal_context_runtime: Option<Arc<InternalContextRuntime>>,
@@ -159,7 +160,10 @@ async fn handle_request(
         original_path: req.uri().path().to_string(),
         path: req.uri().path().to_string(),
         query: req.uri().query().unwrap_or("").to_string(),
-        preserve_host: false,
+        upstream_headers: UpstreamHeaders::from_request(
+            &req,
+            crate::srv::tls::enabled().unwrap_or(false),
+        ),
         response_headers: ResponseHeaderMutations::default(),
         propagation_draft: None,
         internal_context_runtime: crate::ctx::sign::runtime().cloned(),

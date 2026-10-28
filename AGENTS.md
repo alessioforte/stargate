@@ -185,7 +185,13 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 8. Decide replay eligibility from the method (`GET`, `HEAD`, `OPTIONS`, `TRACE`,
    `PUT`, `DELETE` may fail over; `POST`/`PATCH` dispatch once, regardless of
    `Idempotency-Key`), buffer only when needed, then execute HTTP, WebSocket, or
-   direct response and apply response headers.
+   direct response and apply response headers. Before each upstream dispatch,
+   normalize forwarded headers using the original connection peer and host:
+   remove `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*` field for untrusted
+   or missing peers; retain proxy metadata only for `TRUSTED_PROXIES`, append
+   the peer IP once, and use the actual listener TLS scheme for untrusted peers.
+   These facts survive replay, failover, and mirrors; normalization precedes
+   internal-context sanitization and signing.
 
 Modules: `snap/` (snapshot lifecycle: `config.rs` database documents, seed, preparation and saves,
 `runtime.rs` preparation/publication, `reload.rs` text activation, `body.rs` pinning during streaming),

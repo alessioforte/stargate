@@ -333,6 +333,34 @@ Extensions are not offered, and an upstream response that selects an extension
 or repeats the selected subprotocol is rejected. Internal-context sanitization
 and per-attempt signing run after the final handshake URI and headers are set.
 
+### Forwarded request headers
+
+HTTP requests, failover attempts, mirrors, and WebSocket handshakes use the same
+forwarding rules, including upstreams with `internal_context`. Trust depends on
+the connection peer's IP in `TRUSTED_PROXIES`, independently of the client IP
+derived from incoming headers.
+
+- `X-Forwarded-For` appends the peer IP to a trusted proxy's existing chain.
+  Multiple fields are merged into one in their original order. For an untrusted
+  peer, the chain contains only that peer IP. With no known peer, it is omitted.
+- `X-Forwarded-Proto` preserves a trusted proxy's value; otherwise it is `https`
+  only when Stargate's listener terminates TLS, and `http` otherwise. A public
+  HTTPS URL in `OAUTH_BASE_URL` or the issuer does not change this hop's scheme.
+- `X-Forwarded-Host` preserves a trusted proxy's value; otherwise it is the
+  original incoming Host (including its port), or the HTTP/2 URI authority.
+  This remains available when `preserve_host` is disabled or middleware changes
+  Host, and survives replay to a different upstream.
+
+For an untrusted or missing peer, incoming `Forwarded`, `X-Real-IP`,
+and every header whose name starts with `X-Forwarded-` are removed before
+generating the fields above. This includes custom fields such as
+`X-Forwarded-Client-Cert` and `X-Forwarded-Ssl`. For a trusted peer, prefixed
+headers retain their original values except for the For, Proto, and Host rules
+above.
+Stargate does not generate `Forwarded` or `X-Real-IP`. Forwarding normalization
+runs after request middleware and hop-by-hop cleanup, before internal-context
+sanitization and signing.
+
 ## Routing
 
 Supported matchers:
@@ -445,7 +473,7 @@ http:
       kind: request_headers
       remove: [x-debug]
       set:
-        - name: x-forwarded-app
+        - name: x-app-name
           value: stargate
       add:
         - name: x-extra

@@ -2,7 +2,10 @@ use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::{
     lifecycle::{Execution, body::guarded_body},
     response::strip_internal_context_response,
-    upstream::{headers::strip_hop_by_hop_headers, internal_context::InternalDispatch},
+    upstream::{
+        headers::{UpstreamHeaders, apply_forwarded_headers, strip_hop_by_hop_headers},
+        internal_context::InternalDispatch,
+    },
 };
 use crate::obs::telemetry;
 use axum::{body::Body, response::Response};
@@ -12,7 +15,7 @@ pub async fn handler(
     mut req: http::Request<Body>,
     uri: &str,
     client: &crate::gate::HyperClient,
-    preserve_host: bool,
+    ingress: &UpstreamHeaders,
     internal_dispatch: Option<&InternalDispatch>,
     settings: &gate::cfg::CompiledRuntimeSettings,
     execution: &Execution,
@@ -36,7 +39,8 @@ pub async fn handler(
     }
     *req.uri_mut() = upstream_uri;
     strip_hop_by_hop_headers(req.headers_mut());
-    if !preserve_host {
+    apply_forwarded_headers(req.headers_mut(), ingress);
+    if !ingress.preserve_host {
         req.headers_mut().remove(HOST);
     }
     if let Some(dispatch) = internal_dispatch {

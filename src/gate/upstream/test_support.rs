@@ -26,7 +26,7 @@ pub(super) fn replay_state() -> RequestState {
         original_path: "/orders".to_owned(),
         path: "/orders".to_owned(),
         query: String::new(),
-        preserve_host: false,
+        upstream_headers: Default::default(),
         response_headers: Default::default(),
         propagation_draft: None,
         internal_context_runtime: None,

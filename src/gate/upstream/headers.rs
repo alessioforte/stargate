@@ -2,6 +2,83 @@ use crate::ctx::{INTERNAL_CONTEXT_HEADER, REQUEST_ID_HEADER};
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::graph::HeaderValueNode;
 use http::header::{AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION};
+use std::net::{IpAddr, SocketAddr};
+
+/// Ingress facts survive URI/header rewrites and every replayed dispatch.
+#[derive(Debug, Clone, Default)]
+pub(in crate::gate) struct UpstreamHeaders {
+    pub(in crate::gate) preserve_host: bool,
+    pub(in crate::gate) peer: Option<IpAddr>,
+    pub(in crate::gate) original_host: Option<HeaderValue>,
+    pub(in crate::gate) listener_tls: bool,
+}
+
+impl UpstreamHeaders {
+    pub(in crate::gate) fn from_request<B>(req: &http::Request<B>, listener_tls: bool) -> Self {
+        Self {
+            preserve_host: false,
+            peer: req
+                .extensions()
+                .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                .map(|peer| peer.0.ip()),
+            original_host: req.headers().get(http::header::HOST).cloned().or_else(|| {
+                req.uri()
+                    .authority()
+                    .and_then(|authority| HeaderValue::from_str(authority.as_str()).ok())
+            }),
+            listener_tls,
+        }
+    }
+}
+
+pub(in crate::gate) fn apply_forwarded_headers(headers: &mut HeaderMap, ingress: &UpstreamHeaders) {
+    let trusted = ingress
+        .peer
+        .is_some_and(|peer| crate::web::trusted_proxy::is_trusted_proxy(&peer));
+    forward_from_peer(headers, ingress, trusted);
+}
+
+fn forward_from_peer(headers: &mut HeaderMap, ingress: &UpstreamHeaders, trusted: bool) {
+    if !trusted {
+        let untrusted = headers
+            .keys()
+            .filter(|name| {
+                matches!(name.as_str(), "forwarded" | "x-real-ip")
+                    || name.as_str().starts_with("x-forwarded-")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for name in untrusted {
+            headers.remove(name);
+        }
+    }
+
+    if let Some(peer) = ingress.peer {
+        let mut chain = Vec::new();
+        for value in headers.get_all("x-forwarded-for") {
+            chain.extend_from_slice(value.as_bytes());
+            chain.extend_from_slice(b", ");
+        }
+        chain.extend_from_slice(peer.to_string().as_bytes());
+        // Existing field values and an IP address contain no forbidden bytes.
+        headers.insert("x-forwarded-for", HeaderValue::from_bytes(&chain).unwrap());
+    }
+    if !headers.contains_key("x-forwarded-proto") {
+        headers.insert(
+            "x-forwarded-proto",
+            HeaderValue::from_static(if ingress.listener_tls {
+                "https"
+            } else {
+                "http"
+            }),
+        );
+    }
+    if !headers.contains_key("x-forwarded-host")
+        && let Some(host) = &ingress.original_host
+    {
+        headers.insert("x-forwarded-host", host.clone());
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(in crate::gate) enum InternalHeaderSanitizationError {

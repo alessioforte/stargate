@@ -84,7 +84,7 @@ fn forwards_request_headers_needed_by_upstream() {
     source.insert("x-request-id", "req_123".parse().unwrap());
 
     let mut target = http::HeaderMap::new();
-    copy_forwarded_headers(&mut target, &source, false).unwrap();
+    copy_forwarded_headers(&mut target, &source, &UpstreamHeaders::default()).unwrap();
 
     assert!(target.get(CONNECTION).is_none());
     assert!(target.get(UPGRADE).is_none());
@@ -108,10 +108,14 @@ async fn upstream_request_builds_from_ws_uri() {
     headers.insert(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
     headers.insert("x-trace-id", "trace_1".parse().unwrap());
 
-    let request =
-        build_upstream_request("wss://upstream.example/socket?foo=1", &headers, false, None)
-            .await
-            .unwrap();
+    let request = build_upstream_request(
+        "wss://upstream.example/socket?foo=1",
+        &headers,
+        &UpstreamHeaders::default(),
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(request.uri(), "wss://upstream.example/socket?foo=1");
     assert_eq!(
@@ -127,7 +131,15 @@ fn host_header_is_forwarded_when_preserved() {
     source.insert(HOST, "gateway.local".parse().unwrap());
 
     let mut target = http::HeaderMap::new();
-    copy_forwarded_headers(&mut target, &source, true).unwrap();
+    copy_forwarded_headers(
+        &mut target,
+        &source,
+        &UpstreamHeaders {
+            preserve_host: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(target.get(HOST).unwrap(), "gateway.local");
 }
@@ -169,9 +181,14 @@ async fn internal_websocket_handshake_is_sanitized_verified_and_frame_compatible
     incoming.insert(ORIGIN, "https://client.test".parse().unwrap());
     incoming.insert(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
     let target = format!("ws://{address}/socket?%6awt=secret&safe=%2Fvalue");
-    let request = build_upstream_request(&target, &incoming, false, Some(&internal_dispatch()))
-        .await
-        .unwrap();
+    let request = build_upstream_request(
+        &target,
+        &incoming,
+        &UpstreamHeaders::default(),
+        Some(&internal_dispatch()),
+    )
+    .await
+    .unwrap();
 
     let runtime = crate::gate::upstream::websocket::test_support::runtime(&target, &[], "1s", None);
     let execution = Execution::new(

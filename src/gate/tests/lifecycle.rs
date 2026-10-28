@@ -94,7 +94,7 @@ fn state(runtime: &RuntimeSnapshot) -> RequestState {
         original_path: "/orders".into(),
         path: "/orders".into(),
         query: String::new(),
-        preserve_host: false,
+        upstream_headers: Default::default(),
         response_headers: Default::default(),
         propagation_draft: None,
         internal_context_runtime: None,

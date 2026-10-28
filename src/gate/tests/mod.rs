@@ -1,5 +1,6 @@
 #[cfg(feature = "redis")]
 mod cluster;
+mod forwarded_headers;
 #[cfg(feature = "memory")]
 mod ingress;
 mod lifecycle;

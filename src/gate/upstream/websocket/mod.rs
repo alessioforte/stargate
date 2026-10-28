@@ -1,6 +1,7 @@
 mod handshake;
 mod relay;
 
+use super::headers::UpstreamHeaders;
 use super::internal_context::InternalDispatch;
 use crate::gate::lifecycle::{Execution, body::TransferTimer};
 use crate::{
@@ -20,7 +21,7 @@ pub async fn handler(
     transport: &PreparedTransport,
     mut req: http::Request<Body>,
     uri: &str,
-    preserve_host: bool,
+    ingress: &UpstreamHeaders,
     internal_dispatch: Option<&InternalDispatch>,
     execution: &Execution,
 ) -> Result<Response, ErrorResponse> {
@@ -36,7 +37,7 @@ pub async fn handler(
         .map_err(|_| ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid))?;
 
     let upstream_request =
-        build_upstream_request(uri, req.headers(), preserve_host, internal_dispatch).await?;
+        build_upstream_request(uri, req.headers(), ingress, internal_dispatch).await?;
     let (upstream_ws, upstream_response) = connect_upstream(
         upstream_request,
         transport,

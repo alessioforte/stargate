@@ -133,9 +133,17 @@ async fn prepared_websocket_tls_uses_private_ca_identity_target_name_and_pinned_
     incoming.append(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
     incoming.append(SEC_WEBSOCKET_PROTOCOL, "superchat".parse().unwrap());
     for runtime in [&public, &wrong] {
-        let request = build_upstream_request(&url, &incoming, true, None)
-            .await
-            .unwrap();
+        let request = build_upstream_request(
+            &url,
+            &incoming,
+            &UpstreamHeaders {
+                preserve_host: true,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
         let error = connect_upstream(
             request,
             runtime.transport("socket").unwrap(),
@@ -146,9 +154,17 @@ async fn prepared_websocket_tls_uses_private_ca_identity_target_name_and_pinned_
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::UpstreamConnectionFailed);
     }
-    let request = build_upstream_request(&url, &incoming, true, None)
-        .await
-        .unwrap();
+    let request = build_upstream_request(
+        &url,
+        &incoming,
+        &UpstreamHeaders {
+            preserve_host: true,
+            ..Default::default()
+        },
+        None,
+    )
+    .await
+    .unwrap();
     let (mut socket, response) = connect_upstream(
         request,
         good.transport("socket").unwrap(),

@@ -42,7 +42,7 @@ pub fn apply_middlewares(
                 state.path = normalize_path(&next);
             }
             MiddlewareNode::PreserveHost => {
-                state.preserve_host = true;
+                state.upstream_headers.preserve_host = true;
             }
             MiddlewareNode::RequestHeaders { add, set, remove } => {
                 apply_request_headers(req.headers_mut(), add, set, remove);

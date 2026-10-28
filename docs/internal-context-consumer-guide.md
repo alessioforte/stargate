@@ -40,6 +40,15 @@ is not a consumer dependency. A consumer never receives a private signing key.
 
 ## 2. Configure one trust boundary
 
+Stargate normalizes `X-Forwarded-For`, `X-Forwarded-Proto`, and
+`X-Forwarded-Host` before internal-context signing, using only connection peers
+listed in `TRUSTED_PROXIES` to retain incoming proxy metadata. This also applies
+to failover, mirrors, and WebSocket handshakes. Consumers may trust these
+headers as proxy metadata only when their network boundary admits requests
+exclusively from Stargate. They are unsigned HTTP fields, not identity or
+authorization facts; use the verified `stargate-context` for those. See
+[forwarded request headers](config-v1.md#forwarded-request-headers).
+
 Use configuration owned by the microservice deployment, not request data:
 
 | Setting | Required value |

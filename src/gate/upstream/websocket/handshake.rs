@@ -1,7 +1,10 @@
 use super::UpstreamSocket;
 use crate::gate::{
     lifecycle::Execution,
-    upstream::{headers::strip_hop_by_hop_headers, internal_context::InternalDispatch},
+    upstream::{
+        headers::{UpstreamHeaders, apply_forwarded_headers, strip_hop_by_hop_headers},
+        internal_context::InternalDispatch,
+    },
 };
 use crate::{
     err::{ErrorCode, ErrorResponse},
@@ -120,7 +123,7 @@ pub(super) async fn connect_upstream(
 pub(super) async fn build_upstream_request(
     uri: &str,
     incoming_headers: &http::HeaderMap,
-    preserve_host: bool,
+    ingress: &UpstreamHeaders,
     internal_dispatch: Option<&InternalDispatch>,
 ) -> Result<http::Request<()>, ErrorResponse> {
     let mut request = uri.into_client_request().map_err(|error| {
@@ -128,7 +131,7 @@ pub(super) async fn build_upstream_request(
         ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
     })?;
 
-    copy_forwarded_headers(request.headers_mut(), incoming_headers, preserve_host)?;
+    copy_forwarded_headers(request.headers_mut(), incoming_headers, ingress)?;
     if let Some(dispatch) = internal_dispatch {
         dispatch.prepare(&mut request).await?;
     } else {
@@ -141,11 +144,12 @@ pub(super) async fn build_upstream_request(
 fn copy_forwarded_headers(
     target: &mut http::HeaderMap,
     source: &http::HeaderMap,
-    preserve_host: bool,
+    ingress: &UpstreamHeaders,
 ) -> Result<(), ErrorResponse> {
     let mut source = source.clone();
     strip_hop_by_hop_headers(&mut source);
-    if preserve_host {
+    apply_forwarded_headers(&mut source, ingress);
+    if ingress.preserve_host {
         let mut hosts = source.get_all(HOST).iter();
         let host = hosts
             .next()
