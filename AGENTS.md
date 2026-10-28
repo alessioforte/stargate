@@ -630,9 +630,10 @@ rendered as `{{link}}`; `{{name}}` is the only other placeholder.
 
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_history`,
 `api_keys`, `admin_keys`, `service_accounts`, `oauth_clients`, `oauth_consents`,
-`user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`.
-One migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
-creates the full schema; add new forward migrations from there.
+`user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`,
+`config_documents` (append-only gateway configuration and ACE policy versions).
+The initial migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
+creates the base schema; later forward migrations extend it.
 
 User identity (`crates/db/src/ent/user.rs`, enforced by the users repository on
 every insert/update):

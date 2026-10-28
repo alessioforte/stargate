@@ -34,6 +34,7 @@ const ALLOWED_ACTOR_TYPES: &[&str] = &[
 const ALLOWED_RESOURCE_TYPES: &[&str] = &[
     "admin_key",
     "api_key",
+    "config_document",
     "credential",
     "oauth_client",
     "oauth_consent",
@@ -53,6 +54,8 @@ const ALLOWED_ACTIONS: &[(&str, &str)] = &[
     ("api_key.deleted", "delete"),
     ("api_key.revoked", "update"),
     ("api_key.updated", "update"),
+    ("config_document.created", "create"),
+    ("config_document.updated", "update"),
     ("credential.password_changed", "update"),
     ("credential.rehashed", "update"),
     ("oauth_client.created", "create"),

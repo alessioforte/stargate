@@ -8,7 +8,6 @@ use crate::{
 use ace::{Policy, PolicyAction, PolicyEngine, ResourceAction};
 use gate::PolicySnapshot;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fs::{self, OpenOptions},
@@ -529,12 +528,7 @@ fn format_diagnostics(diagnostics: &[PolicyDiagnostic]) -> String {
 }
 
 fn revision_for(content: &str) -> String {
-    let digest = Sha256::digest(content.as_bytes());
-    let hex = digest
-        .iter()
-        .map(|byte| format!("{:02x}", byte))
-        .collect::<String>();
-    format!("sha256:{}", hex)
+    db::ent::config_revision(content)
 }
 
 fn atomic_write(path: &str, content: &[u8]) -> std::io::Result<()> {
@@ -585,6 +579,14 @@ fn temp_path_for(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn policy_revision_preserves_the_existing_sha256_format() {
+        assert_eq!(
+            revision_for("abc"),
+            "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     fn capability_request(attrs: serde_json::Value) -> EvaluateAccessControlCapabilitiesRequest {
         EvaluateAccessControlCapabilitiesRequest {

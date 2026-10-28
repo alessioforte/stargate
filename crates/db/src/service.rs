@@ -1,17 +1,17 @@
 use super::repo::{
-    AdminKeyRepository, AdminOverviewRepository, ApiKeyRepository, CredentialRepository,
-    OAuthClientRepository, OAuthConsentRepository, OrganizationRepository, OutboxRepository,
-    ServiceAccountRepository, SuperAdminRepository, UserRepository,
+    AdminKeyRepository, AdminOverviewRepository, ApiKeyRepository, ConfigDocumentRepository,
+    CredentialRepository, OAuthClientRepository, OAuthConsentRepository, OrganizationRepository,
+    OutboxRepository, ServiceAccountRepository, SuperAdminRepository, UserRepository,
 };
 use crate::backend::Pool;
 use crate::db::{DbStore, InstanceBootstrapResult};
 use crate::ent::{
     AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, AuditId, AuditOperation, AuditResource,
-    AuditScopeSelector, Credential, CredentialHistory, CredentialType, NewOrganizationMembership,
-    OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
-    OrganizationMembershipMutation, OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount,
-    SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent, canonical_email,
-    canonical_nickname,
+    AuditScopeSelector, ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, Credential,
+    CredentialHistory, CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent,
+    OrgMember, OrgMembership, Organization, OrganizationMembershipMutation, OutboxEventFilter,
+    OutboxEventRow, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
+    ValidatedAuditEvent, canonical_email, canonical_nickname, config_revision,
 };
 use crate::repo::ApiKeyAuditRecord;
 use anyhow::{Context, Result, bail, ensure};
@@ -34,6 +34,7 @@ pub struct Service {
     credential: CredentialRepository,
     oauth_client: OAuthClientRepository,
     oauth_consent: OAuthConsentRepository,
+    config_document: ConfigDocumentRepository,
     api_key: ApiKeyRepository,
     outbox: OutboxRepository,
     service_account: ServiceAccountRepository,
@@ -51,6 +52,7 @@ impl Service {
             credential: CredentialRepository::new(),
             oauth_client: OAuthClientRepository::new(),
             oauth_consent: OAuthConsentRepository::new(),
+            config_document: ConfigDocumentRepository::new(),
             api_key: ApiKeyRepository::new(),
             outbox: OutboxRepository::new(),
             service_account: ServiceAccountRepository::new(),
@@ -243,6 +245,26 @@ impl<'a> From<&'a ServiceAccount> for ServiceAccountAuditSnapshot<'a> {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigDocumentAuditSnapshot<'a> {
+    kind: &'a str,
+    version: i64,
+    revision: &'a str,
+    size_bytes: usize,
+}
+
+impl<'a> From<&'a ConfigDocument> for ConfigDocumentAuditSnapshot<'a> {
+    fn from(document: &'a ConfigDocument) -> Self {
+        Self {
+            kind: &document.kind,
+            version: document.version,
+            revision: &document.revision,
+            size_bytes: document.content.len(),
+        }
+    }
+}
+
 fn snapshot(value: impl Serialize) -> Result<JsonValue> {
     serde_json::to_value(value).context("failed to serialize safe audit snapshot")
 }
@@ -407,6 +429,16 @@ fn ensure_super_admin_bootstrap_context(context: &TrustedAuditContext) -> Result
             && matches!(context.boundary().scope(), AuditScopeSelector::ControlPlane)
             && context.request().is_none(),
         "super-admin bootstrap requires a background system control-plane context"
+    );
+    Ok(())
+}
+
+fn ensure_config_system_context(context: &TrustedAuditContext) -> Result<()> {
+    ensure!(
+        context.actor().actor_type() == "system"
+            && matches!(context.boundary().scope(), AuditScopeSelector::ControlPlane)
+            && context.request().is_none(),
+        "configuration seed and import require a background system control-plane context"
     );
     Ok(())
 }
@@ -689,6 +721,103 @@ pub async fn init(conn: &str) -> Result<Service> {
 
 #[async_trait::async_trait]
 impl DbStore for Service {
+    async fn get_active_config_document(&self, kind: ConfigKind) -> Result<Option<ConfigDocument>> {
+        self.config_document.latest(&self.pool, kind).await
+    }
+
+    async fn get_config_revisions(&self) -> Result<Vec<(String, i64, String)>> {
+        self.config_document.latest_revisions(&self.pool).await
+    }
+
+    async fn save_config_document(
+        &self,
+        kind: ConfigKind,
+        content: String,
+        expected_revision: Option<String>,
+        source: ConfigSource,
+        context: TrustedAuditContext,
+    ) -> Result<ConfigSaveOutcome> {
+        match source {
+            ConfigSource::AdminApi => ensure_admin_control_plane(&context)?,
+            ConfigSource::Seed | ConfigSource::CliImport => ensure_config_system_context(&context)?,
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let current = self.config_document.latest(&mut *tx, kind).await?;
+        if expected_revision.as_deref()
+            != current.as_ref().map(|document| document.revision.as_str())
+        {
+            tx.rollback().await?;
+            return Ok(ConfigSaveOutcome::Conflict { current });
+        }
+
+        let revision = config_revision(&content);
+        if let Some(current) = current.as_ref()
+            && revision == current.revision
+        {
+            tx.rollback().await?;
+            return Ok(ConfigSaveOutcome::Unchanged(current.clone()));
+        }
+
+        let version = match &current {
+            Some(document) => document
+                .version
+                .checked_add(1)
+                .context("configuration version overflow")?,
+            None => 1,
+        };
+        let document = ConfigDocument {
+            id: ulid::Ulid::generate().to_string(),
+            kind: kind.as_str().to_string(),
+            version,
+            revision,
+            content,
+            source: source.as_str().to_string(),
+            created_by: if context.actor().actor_type() == "system" {
+                None
+            } else {
+                context.actor().id().map(str::to_string)
+            },
+            created_at: Utc::now(),
+        };
+        let document = match self.config_document.insert(&mut tx, &document).await {
+            Ok(document) => document,
+            Err(error) => {
+                if matches!(error.downcast_ref::<sqlx::Error>(), Some(sqlx::Error::Database(error)) if error.is_unique_violation())
+                {
+                    // PostgreSQL aborts the transaction on a uniqueness violation.
+                    // Read the winner only after rolling back the failed write.
+                    tx.rollback().await?;
+                    let current = self.config_document.latest(&self.pool, kind).await?;
+                    return Ok(ConfigSaveOutcome::Conflict { current });
+                }
+                return Err(error);
+            }
+        };
+
+        let (action, operation) = if current.is_some() {
+            ("config_document.updated", AuditOperation::Update)
+        } else {
+            ("config_document.created", AuditOperation::Create)
+        };
+        let event = build_outbox_event(
+            &context,
+            document.created_at,
+            AuditResource::new("config_document", kind.as_str()),
+            action,
+            operation,
+            current
+                .as_ref()
+                .map(|document| snapshot(ConfigDocumentAuditSnapshot::from(document)))
+                .transpose()?,
+            Some(snapshot(ConfigDocumentAuditSnapshot::from(&document))?),
+            serde_json::json!({ "source": source.as_str() }),
+        )?;
+        self.outbox.insert(&mut tx, &event).await?;
+        tx.commit().await?;
+        Ok(ConfigSaveOutcome::Saved(document))
+    }
+
     async fn get_admin_overview_stats(&self) -> Result<AdminOverviewStats> {
         self.admin_overview.get(&self.pool).await
     }
@@ -2245,6 +2374,359 @@ mod sqlite_tests {
             TrustedAuditBoundary::control_plane(),
             TrustedBackgroundActor::system(None),
         )
+    }
+
+    fn saved_config(outcome: ConfigSaveOutcome) -> ConfigDocument {
+        match outcome {
+            ConfigSaveOutcome::Saved(document) => document,
+            other => panic!("expected a saved configuration document, got {other:?}"),
+        }
+    }
+
+    async fn config_document_count(svc: &Service) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM config_documents")
+            .fetch_one(&svc.pool)
+            .await
+            .expect("count configuration documents")
+    }
+
+    #[tokio::test]
+    async fn config_documents_append_versions_with_safe_transactional_audit() {
+        let svc = test_service().await;
+        let content = format!("header: SECRET_HEADER_VALUE\n{}", "é".repeat(20_000));
+        let first = saved_config(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                content.clone(),
+                None,
+                ConfigSource::AdminApi,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(first.kind, "gateway");
+        assert_eq!(first.version, 1);
+        assert_eq!(first.content, content);
+        assert_eq!(first.revision, config_revision(&content));
+        assert_eq!(first.source, "admin_api");
+        assert_eq!(first.created_by.as_deref(), trusted_ctx().actor().id());
+        assert!(ulid::Ulid::from_string(&first.id).is_ok());
+
+        let events = audit_payloads(&svc).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["action"], "config_document.created");
+        assert_eq!(events[0]["operation"], "create");
+        assert_eq!(
+            events[0]["resource"],
+            serde_json::json!({"type": "config_document", "id": "gateway", "name": null})
+        );
+        assert_eq!(events[0]["scope"]["kind"], "control_plane");
+        assert_eq!(
+            events[0]["metadata"],
+            serde_json::json!({"source": "admin_api"})
+        );
+        assert!(events[0]["before"].is_null());
+        let first_snapshot = serde_json::json!({
+            "kind": "gateway", "version": 1, "revision": first.revision, "sizeBytes": content.len(),
+        });
+        assert_eq!(events[0]["after"], first_snapshot);
+        assert!(!events[0].to_string().contains("SECRET_HEADER_VALUE"));
+
+        let second = saved_config(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                "new content".to_string(),
+                Some(first.revision.clone()),
+                ConfigSource::AdminApi,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(second.version, 2);
+        assert_ne!(second.id, first.id);
+        assert_eq!(config_document_count(&svc).await, 2);
+        assert_eq!(
+            svc.get_active_config_document(ConfigKind::Gateway)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            second.id
+        );
+        let events = audit_payloads(&svc).await;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1]["action"], "config_document.updated");
+        assert_eq!(events[1]["operation"], "update");
+        assert_eq!(events[1]["before"], first_snapshot);
+        assert_eq!(
+            events[1]["after"],
+            serde_json::json!({
+                "kind": "gateway", "version": 2, "revision": second.revision, "sizeBytes": 11,
+            })
+        );
+        let historical: String =
+            sqlx::query_scalar("SELECT content FROM config_documents WHERE id = $1")
+                .bind(&first.id)
+                .fetch_one(&svc.pool)
+                .await
+                .unwrap();
+        assert_eq!(historical, content);
+    }
+
+    #[tokio::test]
+    async fn config_documents_conflict_or_remain_unchanged_without_new_rows_or_events() {
+        let svc = test_service().await;
+        assert!(
+            svc.get_active_config_document(ConfigKind::Gateway)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(svc.get_config_revisions().await.unwrap().is_empty());
+        let missing = svc
+            .save_config_document(
+                ConfigKind::Gateway,
+                "content".to_string(),
+                Some(config_revision("missing")),
+                ConfigSource::AdminApi,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            missing,
+            ConfigSaveOutcome::Conflict { current: None }
+        ));
+        assert_eq!(config_document_count(&svc).await, 0);
+        assert!(audit_payloads(&svc).await.is_empty());
+
+        let first = saved_config(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                "first".to_string(),
+                None,
+                ConfigSource::AdminApi,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap(),
+        );
+        let active = saved_config(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                "second".to_string(),
+                Some(first.revision.clone()),
+                ConfigSource::AdminApi,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap(),
+        );
+
+        for expected in [None, Some(first.revision), Some(config_revision("unknown"))] {
+            // Even identical content must first satisfy the expected revision.
+            let result = svc
+                .save_config_document(
+                    ConfigKind::Gateway,
+                    active.content.clone(),
+                    expected,
+                    ConfigSource::AdminApi,
+                    trusted_ctx(),
+                )
+                .await
+                .unwrap();
+            match result {
+                ConfigSaveOutcome::Conflict {
+                    current: Some(current),
+                } => assert_eq!(current.id, active.id),
+                other => panic!("expected a conflict with the active document, got {other:?}"),
+            }
+        }
+        let unchanged = svc
+            .save_config_document(
+                ConfigKind::Gateway,
+                active.content.clone(),
+                Some(active.revision),
+                ConfigSource::AdminApi,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap();
+        match unchanged {
+            ConfigSaveOutcome::Unchanged(document) => assert_eq!(document.id, active.id),
+            other => panic!("expected unchanged configuration, got {other:?}"),
+        }
+        assert_eq!(config_document_count(&svc).await, 2);
+        assert_eq!(audit_payloads(&svc).await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn config_documents_enforce_source_context_and_independent_kind_versions() {
+        let svc = test_service().await;
+        for source in [ConfigSource::Seed, ConfigSource::CliImport] {
+            let invalid_contexts = [
+                trusted_ctx(),
+                TrustedAuditContext::background(
+                    TrustedAuditBoundary::application(),
+                    TrustedBackgroundActor::system(None),
+                ),
+                TrustedAuditContext::background(
+                    TrustedAuditBoundary::control_plane(),
+                    TrustedBackgroundActor::service("config-import"),
+                ),
+                TrustedAuditContext::application(
+                    crate::ent::TrustedAuditActor::system(None),
+                    TrustedAuditRequest::from_http(
+                        ulid::Ulid::generate().to_string(),
+                        None,
+                        None,
+                        None,
+                    ),
+                ),
+            ];
+            for context in invalid_contexts {
+                let error = svc
+                    .save_config_document(
+                        ConfigKind::Gateway,
+                        "content".to_string(),
+                        None,
+                        source,
+                        context,
+                    )
+                    .await
+                    .unwrap_err();
+                assert!(
+                    error
+                        .to_string()
+                        .contains("background system control-plane context")
+                );
+            }
+        }
+        for context in [bootstrap_ctx(), user_application_context("user")] {
+            assert!(
+                svc.save_config_document(
+                    ConfigKind::Gateway,
+                    "content".to_string(),
+                    None,
+                    ConfigSource::AdminApi,
+                    context,
+                )
+                .await
+                .is_err()
+            );
+        }
+        assert_eq!(config_document_count(&svc).await, 0);
+        assert!(audit_payloads(&svc).await.is_empty());
+
+        let gateway = saved_config(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                "gateway".to_string(),
+                None,
+                ConfigSource::Seed,
+                bootstrap_ctx(),
+            )
+            .await
+            .unwrap(),
+        );
+        let policies = saved_config(
+            svc.save_config_document(
+                ConfigKind::Policies,
+                "policies".to_string(),
+                None,
+                ConfigSource::CliImport,
+                TrustedAuditContext::background(
+                    TrustedAuditBoundary::control_plane(),
+                    TrustedBackgroundActor::system(Some("config-import".to_string())),
+                ),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(gateway.version, 1);
+        assert_eq!(policies.version, 1);
+        assert_eq!(gateway.created_by, None);
+        assert_eq!(policies.created_by, None);
+        assert_eq!(gateway.source, "seed");
+        assert_eq!(policies.source, "cli_import");
+
+        let admin_key_id = "01JZ000000000000000000000K";
+        let gateway = saved_config(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                "updated gateway".to_string(),
+                Some(gateway.revision),
+                ConfigSource::AdminApi,
+                TrustedAuditContext::admin_control_plane(
+                    TrustedAdminActor::admin_key(admin_key_id),
+                    TrustedAuditRequest::from_http(
+                        ulid::Ulid::generate().to_string(),
+                        None,
+                        None,
+                        None,
+                    ),
+                ),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(gateway.version, 2);
+        assert_eq!(gateway.created_by.as_deref(), Some(admin_key_id));
+        assert_eq!(
+            svc.get_active_config_document(ConfigKind::Policies)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            policies.id
+        );
+        assert_eq!(
+            svc.get_config_revisions().await.unwrap(),
+            vec![
+                ("gateway".to_string(), 2, gateway.revision),
+                ("policies".to_string(), 1, policies.revision),
+            ]
+        );
+        let events = audit_payloads(&svc).await;
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0]["metadata"]["source"], "seed");
+        assert_eq!(events[1]["metadata"]["source"], "cli_import");
+    }
+
+    #[tokio::test]
+    async fn config_document_is_rolled_back_when_audit_validation_fails() {
+        let svc = test_service().await;
+        let invalid = TrustedAuditContext::admin_control_plane(
+            TrustedAdminActor::admin("01JZ000000000000000000000A"),
+            TrustedAuditRequest::from_http("", None, None, None),
+        );
+        assert!(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                "content".to_string(),
+                None,
+                ConfigSource::AdminApi,
+                invalid,
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(config_document_count(&svc).await, 0);
+        assert!(audit_payloads(&svc).await.is_empty());
+        let document = saved_config(
+            svc.save_config_document(
+                ConfigKind::Gateway,
+                "content".to_string(),
+                None,
+                ConfigSource::AdminApi,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(document.version, 1);
     }
 
     fn console_bootstrap_client(redirect_uri: &str) -> OAuthClient {
@@ -4117,6 +4599,77 @@ mod tests {
 
     fn unique_nick() -> String {
         ulid::Ulid::generate().to_string()
+    }
+
+    #[tokio::test]
+    #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
+    async fn concurrent_config_document_saves_have_one_winner() {
+        let svc = test_service().await;
+        let kind = ConfigKind::Gateway;
+        let previous = svc.get_active_config_document(kind).await.unwrap();
+        let initial = svc
+            .save_config_document(
+                kind,
+                ulid::Ulid::generate().to_string(),
+                previous.map(|document| document.revision),
+                ConfigSource::AdminApi,
+                admin_context(ulid::Ulid::generate().to_string()),
+            )
+            .await
+            .unwrap();
+        let ConfigSaveOutcome::Saved(initial) = initial else {
+            panic!("initial configuration must be saved");
+        };
+        let request_ids = [
+            ulid::Ulid::generate().to_string(),
+            ulid::Ulid::generate().to_string(),
+        ];
+        let (first, second) = tokio::join!(
+            svc.save_config_document(
+                kind,
+                "first contender".to_string(),
+                Some(initial.revision.clone()),
+                ConfigSource::AdminApi,
+                admin_context(request_ids[0].clone())
+            ),
+            svc.save_config_document(
+                kind,
+                "second contender".to_string(),
+                Some(initial.revision),
+                ConfigSource::AdminApi,
+                admin_context(request_ids[1].clone())
+            ),
+        );
+        let (saved, conflict) = match (first.unwrap(), second.unwrap()) {
+            (
+                ConfigSaveOutcome::Saved(saved),
+                ConfigSaveOutcome::Conflict {
+                    current: Some(current),
+                },
+            )
+            | (
+                ConfigSaveOutcome::Conflict {
+                    current: Some(current),
+                },
+                ConfigSaveOutcome::Saved(saved),
+            ) => (saved, current),
+            other => panic!("expected exactly one saved version and one conflict, got {other:?}"),
+        };
+        assert_eq!(saved.version, initial.version + 1);
+        assert_eq!(conflict.id, saved.id);
+        assert_eq!(
+            svc.get_active_config_document(kind)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            saved.id
+        );
+        assert_eq!(
+            count_outbox_by_request_id(&svc, &request_ids[0]).await
+                + count_outbox_by_request_id(&svc, &request_ids[1]).await,
+            1,
+        );
     }
 
     async fn insert_outbox_relay_event(svc: &Service, request_id: &str) -> String {

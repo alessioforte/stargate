@@ -2,6 +2,7 @@ mod admin_key;
 mod admin_overview;
 mod api_key;
 mod audit;
+mod config_document;
 mod credential;
 mod oauth_client;
 mod oauth_consent;
@@ -16,6 +17,9 @@ pub use admin_key::*;
 pub use admin_overview::*;
 pub use api_key::*;
 pub use audit::*;
+pub use config_document::{
+    ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, config_revision,
+};
 pub use credential::*;
 pub use oauth_client::*;
 pub use oauth_consent::*;
