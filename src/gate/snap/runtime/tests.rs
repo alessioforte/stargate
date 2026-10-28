@@ -1,4 +1,4 @@
-use super::super::{load_config_from_path, reload_gateway_config_from_path};
+use super::super::{apply_gateway_config, config::prepare_gateway_config};
 use super::{Gate, GatewayPreparationError};
 use crate::gate::test_support::{CA, CLIENT_KEY, SERVER_CERT, SERVER_KEY, TlsFiles};
 use crate::gate::{RuntimeSnapshot, transport::TransportPreparationError};
@@ -150,10 +150,8 @@ async fn assert_upstream_works(runtime: &RuntimeSnapshot, url: &str) {
 async fn failed_tls_reload_keeps_routes_and_prepared_clients_then_recovers() {
     let upstream = MtlsUpstream::start().await;
     let files = TlsFiles::new();
-    let path = files.path("config.yaml");
     let mut raw = files.config(&upstream.url);
-    raw.to_file(&path);
-    let prepared = load_config_from_path(&path).unwrap();
+    let prepared = prepare_gateway_config(&raw.to_yaml_string().unwrap()).unwrap();
     let gate = Gate::new(
         Arc::new(lim::State::new()),
         prepared,
@@ -164,9 +162,8 @@ async fn failed_tls_reload_keeps_routes_and_prepared_clients_then_recovers() {
     assert_upstream_works(&runtime, &upstream.url).await;
 
     raw.http.routers.get_mut("secure").unwrap().priority = Some(123);
-    raw.to_file(&path);
     std::fs::remove_file(files.path("client-key.pem")).unwrap();
-    let error = reload_gateway_config_from_path(&gate, &path).unwrap_err();
+    let error = apply_gateway_config(&gate, &raw.to_yaml_string().unwrap()).unwrap_err();
     assert!(matches!(
         error,
         GatewayPreparationError::Transport(TransportPreparationError::ReadFile {
@@ -181,7 +178,10 @@ async fn failed_tls_reload_keeps_routes_and_prepared_clients_then_recovers() {
     assert_upstream_works(&runtime, &upstream.url).await;
 
     files.write("client-key.pem", CLIENT_KEY);
-    assert_eq!(reload_gateway_config_from_path(&gate, &path).unwrap(), 1);
+    assert_eq!(
+        apply_gateway_config(&gate, &raw.to_yaml_string().unwrap()).unwrap(),
+        1
+    );
     assert!(!Arc::ptr_eq(&runtime, &gate.snapshot()));
     assert_eq!(gate.snapshot().core.graph.routers[0].priority, 123);
     assert_upstream_works(&gate.snapshot(), &upstream.url).await;
@@ -190,11 +190,13 @@ async fn failed_tls_reload_keeps_routes_and_prepared_clients_then_recovers() {
 #[test]
 fn invalid_initial_transport_returns_a_preparation_error() {
     let files = TlsFiles::new();
-    let path = files.path("config.yaml");
-    files.config("https://localhost:8443").to_file(&path);
+    let yaml = files
+        .config("https://localhost:8443")
+        .to_yaml_string()
+        .unwrap();
     files.write("ca.pem", b"");
     assert!(matches!(
-        load_config_from_path(&path),
+        prepare_gateway_config(&yaml),
         Err(GatewayPreparationError::Transport(
             TransportPreparationError::EmptyCertificates { kind: "CA" }
         ))
@@ -462,10 +464,8 @@ async fn failed_preparation_retains_active_probes_and_success_retires_the_old_ge
     let gate = crate::gate::test_support::gate(raw.clone());
     let pinned = gate.snapshot();
     wait_for_health_count(&old, 2).await;
-    let path = files.path("config.yaml");
-    raw.to_file(&path);
     std::fs::remove_file(files.path("client-key.pem")).unwrap();
-    assert!(reload_gateway_config_from_path(&gate, &path).is_err());
+    assert!(apply_gateway_config(&gate, &raw.to_yaml_string().unwrap()).is_err());
     assert!(Arc::ptr_eq(&pinned, &gate.snapshot()));
     assert_eq!(gate.snapshot().version, 0);
     wait_for_health_count(&old, health_count(&old) + 2).await;

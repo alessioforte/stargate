@@ -31,7 +31,7 @@ Chart and resource names.
 {{- end -}}
 
 {{/*
-Labels. Bootstrap and test pods intentionally use different `name` labels so
+Labels. Hook and test pods intentionally use different `name` labels so
 the Service selector can never route traffic to them.
 */}}
 {{- define "stargate.commonLabels" -}}
@@ -73,6 +73,18 @@ the Service selector can never route traffic to them.
 {{ toYaml $labels }}
 {{- end -}}
 
+{{- define "stargate.configImportLabels" -}}
+{{- $labels := mergeOverwrite
+  (include "stargate.commonLabels" . | fromYaml)
+  (dict
+    "app.kubernetes.io/name" (printf "%s-config-import" (include "stargate.name" . | trunc 49 | trimSuffix "-"))
+    "app.kubernetes.io/instance" .Release.Name
+    "app.kubernetes.io/component" "config-import"
+  )
+-}}
+{{ toYaml $labels }}
+{{- end -}}
+
 {{- define "stargate.testLabels" -}}
 {{- $labels := mergeOverwrite
   (include "stargate.commonLabels" . | fromYaml)
@@ -88,6 +100,10 @@ the Service selector can never route traffic to them.
 {{/*
 Referenced resource names.
 */}}
+{{- define "stargate.configImportName" -}}
+{{- printf "%s-config-import" (include "stargate.fullname" . | trunc 49 | trimSuffix "-") -}}
+{{- end -}}
+
 {{- define "stargate.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "stargate.fullname" .) .Values.serviceAccount.name -}}
@@ -245,6 +261,10 @@ Cross-field validation that JSON Schema cannot express.
   {{- if and $hmac (empty (get $secretData "JWT_SECRET")) -}}
     {{- fail "cluster mode with an HMAC JWT algorithm requires runtimeSecret.stringData.JWT_SECRET" -}}
   {{- end -}}
+{{- end -}}
+
+{{- if and (eq $mode "edge") .Values.gatewayConfig.importOnUpgrade -}}
+  {{- fail "gatewayConfig.importOnUpgrade is cluster-only: use kubectl exec in the existing edge pod to run /bin/server config import; a second pod must not mount the SQLite ReadWriteOnce PVC" -}}
 {{- end -}}
 
 {{- if and .Values.gatewayConfig.create (not (empty .Values.gatewayConfig.existingConfigMap)) -}}

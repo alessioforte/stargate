@@ -6,7 +6,7 @@ use crate::gate::performance::{
 use crate::{
     ctx::sign,
     gate::{
-        reload_gateway_config_from_path,
+        apply_gateway_config,
         test_support::{CLIENT_KEY, TlsFiles},
     },
 };
@@ -28,28 +28,27 @@ fn histogram<'a>(values: &'a BTreeMap<String, Value>, name: &str, labels: &[&str
 
 async fn reload_during_traffic(fixture: Fixture) -> u64 {
     let files = TlsFiles::new();
-    let path = files.path("config.yaml");
     for index in 0..10 {
         tokio::time::sleep(Duration::from_millis(40)).await;
         if index == 3 {
             let pinned = fixture.gate.snapshot();
             let mut secure = fixture.config.clone();
             secure.mtls = Some(files.mtls());
-            secure.to_file(&path);
+            let yaml = secure.to_yaml_string().unwrap();
             std::fs::remove_file(files.path("client-key.pem")).unwrap();
-            assert!(reload_gateway_config_from_path(&fixture.gate, &path).is_err());
+            assert!(apply_gateway_config(&fixture.gate, &yaml).is_err());
             assert!(Arc::ptr_eq(&pinned, &fixture.gate.snapshot()));
             files.write("client-key.pem", b"invalid PEM key");
-            assert!(reload_gateway_config_from_path(&fixture.gate, &path).is_err());
+            assert!(apply_gateway_config(&fixture.gate, &yaml).is_err());
             assert!(Arc::ptr_eq(&pinned, &fixture.gate.snapshot()));
             files.write("client-key.pem", CLIENT_KEY);
             assert_eq!(
-                reload_gateway_config_from_path(&fixture.gate, &path).unwrap(),
+                apply_gateway_config(&fixture.gate, &yaml).unwrap(),
                 pinned.version + 1
             );
         }
-        fixture.config.to_file(&path);
-        reload_gateway_config_from_path(&fixture.gate, &path).unwrap();
+        let yaml = fixture.config.to_yaml_string().unwrap();
+        apply_gateway_config(&fixture.gate, &yaml).unwrap();
     }
     fixture.gate.snapshot().version
 }

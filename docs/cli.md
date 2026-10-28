@@ -8,6 +8,8 @@ Current command tree:
 
 ```text
 stargate admin bootstrap
+stargate config export --kind gateway|policies [--output <file>]
+stargate config import --kind gateway|policies --file <file>
 stargate internal-context generate-key
 stargate jwt generate-key
 ```
@@ -20,6 +22,55 @@ creates the next JWT signing key in `keys/<kid>/` (refusing to overwrite) and
 prints the rotation steps. With `--id-token` the key is RS256 and meant for
 `JWT_ID_TOKEN_KID` (also with an HMAC `JWT_ALGORITHM`). It needs no database. See
 [Signing keys and rotation](oauth-oidc-provider-guide.md#signing-keys-and-rotation).
+
+## Export and import configuration documents
+
+These commands use the selected profile's database without starting the HTTP
+server, the state store, or the configuration synchronizer. Configuration command
+stdout contains only the document or import result, with no banner or application logs.
+
+```bash
+cargo run --features edge -- config export --kind gateway --output gateway-backup.yaml
+cargo run --features edge -- config export --kind policies > policies-backup
+cargo run --features edge -- config import --kind gateway --file gateway.yaml
+cargo run --features edge -- config import --kind policies --file policies
+```
+
+Use `--features cluster` for PostgreSQL, or run the same arguments with the built
+binary (`/bin/server` in the container). Export writes the active document's exact
+stored text to stdout or `--output`, including comments and formatting. It exits
+unsuccessfully if the document is absent. An empty policies document exports as
+empty content.
+
+Import requires an explicit `stargate/v1` gateway schema and parses/compiles the
+configuration, or applies the same policy-document analysis as the admin validation
+API. It does not read upstream TLS certificates or internal-context keys: those
+files need only exist on the receiving server replicas. Invalid input is not saved.
+
+Import reads the current database revision and uses it for the conditional write.
+A concurrent revision conflict causes one reread/retry; a second conflict fails
+the command. A changed document appends a version and its audit event in the same
+transaction (`source: cli_import`, background system actor in the control plane).
+Identical content adds neither a version nor an event. The result is exactly
+`imported version <n> (<revision>)` or `unchanged`.
+
+Running servers perform full transport/signer preparation before activation.
+Cluster replicas react to PostgreSQL notifications and periodic checks. Edge uses
+only the timer, so a CLI import from another process sharing the SQLite file is
+applied within `CONFIG_SYNC_INTERVAL_SECS` (default 30 seconds), without restarting.
+A failed activation keeps the prior snapshot; capacity changes require a restart.
+`GET /admin/health` exposes the responding replica's active document revisions.
+
+In Kubernetes edge deployments, run the import inside the existing pod rather
+than creating a second pod that mounts the SQLite ReadWriteOnce PVC:
+
+```bash
+kubectl exec -n identity deployment/stargate -- /bin/server config import --kind gateway --file /etc/stargate/config.yaml
+kubectl exec -n identity deployment/stargate -- /bin/server config import --kind policies --file /etc/stargate/policies
+```
+
+The chart's optional `gatewayConfig.importOnUpgrade` hook is cluster-only. See
+[Gateway configuration](../k8s/stargate/README.md#gateway-configuration).
 
 ## Bootstrap the instance
 

@@ -4,15 +4,41 @@ use anyhow::Result;
 use db::{
     DbStore, InstanceBootstrapResult,
     ent::{
-        AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, Credential, CredentialHistory,
-        CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember,
-        OrgMembership, Organization, OrganizationMembershipMutation, OutboxEventFilter,
-        OutboxEventRow, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
+        AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, ConfigDocument, ConfigKind,
+        ConfigSaveOutcome, ConfigSource, Credential, CredentialHistory, CredentialType,
+        NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership,
+        Organization, OrganizationMembershipMutation, OutboxEventFilter, OutboxEventRow, Profile,
+        ServiceAccount, SuperAdmin, TrustedAuditContext, User,
     },
 };
 
 pub async fn get_admin_overview_stats() -> Result<AdminOverviewStats> {
     service().get_admin_overview_stats().await
+}
+
+pub async fn get_active_config_document(kind: ConfigKind) -> Result<Option<ConfigDocument>> {
+    service().get_active_config_document(kind).await
+}
+
+pub async fn get_config_revisions() -> Result<Vec<(String, i64, String)>> {
+    service().get_config_revisions().await
+}
+
+#[cfg(feature = "postgres")]
+pub async fn config_listener() -> Result<db::PgListener> {
+    service().config_listener().await
+}
+
+pub async fn save_config_document(
+    kind: ConfigKind,
+    content: String,
+    expected_revision: Option<String>,
+    source: ConfigSource,
+    context: TrustedAuditContext,
+) -> Result<ConfigSaveOutcome> {
+    service()
+        .save_config_document(kind, content, expected_revision, source, context)
+        .await
 }
 
 // ── Users ───────────────────────────────────────────────────────────────────

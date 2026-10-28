@@ -1,6 +1,6 @@
 # Stargate Config v1
 
-Stargate now expects `config.yaml` to use the explicit v1 schema:
+Gateway configuration documents use the explicit v1 schema:
 
 ```yaml
 schema: stargate/v1
@@ -8,8 +8,7 @@ schema: stargate/v1
 
 Every supplied YAML document and admin JSON submission must explicitly contain
 `schema: stargate/v1`. Missing and unsupported identifiers are rejected; there is
-no compatibility parser or automatic conversion. Generated defaults use this
-identifier too. Startup, hot reload, and admin writes compile the candidate and
+no compatibility parser or automatic conversion. Startup, activation, and admin writes compile the candidate and
 prepare its HTTP/TLS transports and internal-context signer requirements first.
 Invalid reloads leave the previous routes and transports active. Invalid admin
 submissions are not saved, and invalid initial preparation stops startup before
@@ -31,13 +30,92 @@ active snapshot/version nor its probes.
 The IAM ingress middleware also pins a snapshot for downstream handlers.
 Admin overview reports its graph counts and `configVersion` together. The
 independent ACE policy engine/revision pair is loaded once per request; policy
-file updates change that revision without changing `configVersion`.
+document updates change that revision without changing `configVersion`.
 
 GCRA limits require a nonzero `max_burst` and a positive, representable
 `replenish_1_per`. The combined duration/burst must fit the supported timestamp
 range. Liveness probe intervals default to `5s`; explicitly configured zero,
 malformed, or unrepresentable intervals are rejected before activation. These
 errors also reject admin saves.
+
+## Database, Seed Files, and Admin Updates
+
+The database is the source of truth for gateway configuration and ACE policies.
+Startup reads the latest version of each kind from `config_documents`. Only when
+that kind has no database document does it read its seed file:
+
+- Gateway: `CONFIG_PATH/CONFIG_FILENAME` (default `.stargate/config.yaml`). A missing
+  seed fails startup with `no gateway configuration in the database and no seed file at <path>`.
+- Policies: `CONFIG_PATH/policies`, or an empty document when the file is absent.
+
+Each seed is saved once with `source: seed` and an audit event. Concurrent replicas
+use the winning database document. Existing database documents ignore seed changes;
+invalid active documents fail startup. The server never creates or writes these files,
+and file changes do not trigger reloads. Seed files can be mounted read-only.
+
+`GET /admin/configurations` returns `{ revision, version, updatedAt, updatedBy,
+config }`. `?format=yaml` returns the exact stored YAML. Both responses include the
+quoted revision in `ETag`. `PUT` takes `{ revision, config }` and rejects stale
+revisions with `409 configuration.revision_conflict`. Unknown envelope fields are
+rejected. The candidate's graph, transports, and signer requirements are prepared
+before persistence. An accepted update appends a version and a safe audit event
+in one transaction; identical content appends neither. Document contents never
+appear in audit snapshots.
+
+The update response includes the saved document and `activation: applied` after
+publishing on the receiving replica. A change to process capacity budgets is
+saved with `activation: restart_required`: existing routing stays active until
+restart. The Console reloads after a revision conflict and warns when a restart
+is required. Restart always uses the latest database document.
+
+Changes apply immediately to the receiving replica. In cluster deployments each
+new document version sends a transactional PostgreSQL `stargate_config` notification
+with payload `<kind>:<revision>`. Other replicas compare active revisions, read the
+latest changed documents, and activate them within seconds when notifications arrive.
+The synchronizer also checks after listener reconnections and every
+`CONFIG_SYNC_INTERVAL_SECS` (default `30`, integer >= 1). This periodic pass recovers
+changes whose notifications were missed. Invalid or unrepresentable interval settings
+fail startup. Edge runs the same periodic reconciliation without a PostgreSQL listener,
+so imports from another process sharing the SQLite file activate on the next tick.
+
+A replica whose transports or signer requirements cannot prepare the document keeps
+its prior snapshot. It logs the failure once for that revision and retries on the next
+periodic pass; duplicate notifications do not cause repeated preparation failures.
+Capacity changes log a restart-required warning once per revision and leave the active
+revision unchanged until restart. Database/listener failures do not terminate the task.
+Synchronization is stopped and awaited before the audit relay during shutdown.
+
+`GET /admin/health` includes `config: { gatewayRevision, policiesRevision }` with
+the responding replica's active revisions. These can differ from stored revisions
+while a restart or a successful activation is pending. Revision values are not metric labels.
+
+## Changing and Backing Up Documents
+
+Use the Console for interactive edits or the admin API with the current revision.
+The Console reloads after a conflict and warns when capacity changes require a restart.
+For backups and declarative imports, use the database-backed CLI:
+
+```bash
+stargate config export --kind gateway --output gateway-backup.yaml
+stargate config export --kind policies --output policies-backup
+stargate config import --kind gateway --file gateway.yaml
+stargate config import --kind policies --file policies
+```
+
+Export preserves exact stored content. Import validates gateway YAML/compilation or
+policy diagnostics without requiring local upstream TLS or internal-context files.
+It uses the current revision, rereads/retries once on conflict, and saves an audited
+`cli_import` version when content changes. Replicas perform full preparation before
+activation; invalid or unavailable local material leaves the previous snapshot active.
+Edge picks up external CLI imports through its periodic database check.
+
+The Helm chart keeps mounted ConfigMap files as seeds by default and no longer
+restarts pods for gateway seed changes. Cluster-only `gatewayConfig.importOnUpgrade`
+enables a hook that imports both documents after installs/upgrades, accepting that
+those files replace Console edits. In edge, import via `kubectl exec` in the existing
+pod instead of mounting its ReadWriteOnce SQLite PVC in a second Job pod. See
+[CLI operations](cli.md#export-and-import-configuration-documents) and the
+[chart guide](../k8s/stargate/README.md#gateway-configuration).
 
 ## Model
 
@@ -235,8 +313,8 @@ still verified during each TLS handshake.
 
 Clients are built before activation. Request-time lookup only clones a prepared
 client and performs no credential-file reads or TLS construction. Replacing
-credential files alone does not reload the clients: change the gateway
-configuration content to trigger preparation. If a candidate fails, fix its
+credential files alone does not reload the clients: save the gateway
+configuration through the admin API to trigger preparation, even with unchanged content. If a candidate fails, fix its
 files and save that candidate again; existing prepared clients remain usable
 throughout.
 
@@ -430,7 +508,7 @@ Omitting `internal_context` preserves the existing upstream behavior and emits
 no signed context.
 
 Stargate parses and compiles the block and preflights the separate signing key
-and matching public `kid` before activation. A rejected startup or hot reload
+and matching public `kid` before activation. A rejected startup or activation
 never replaces the previous active graph. Do not enable the block for an
 upstream until its deployed consumer follows the fail-closed validation and
 ownership requirements in `docs/internal-context-consumer-guide.md`. Keep real
@@ -989,9 +1067,9 @@ Response headers report the check closest to exhaustion, and
 (`org`, `subject`, or `ip` for `ip_fallback` checks). Denials carry the same
 headers for the check that rejected.
 
-`kind: access_control` points at resources evaluated by the ACE rule file
+`kind: access_control` points at resources evaluated by the ACE policy document
 (`.stargate/policies`). The gateway config decides where a check applies; the
-ACE file decides which subjects may access that resource.
+ACE document decides which subjects may access that resource.
 
 Example ACE rules:
 
@@ -1029,7 +1107,7 @@ ALLOW user FOR "billing" WHEN user.org_id == "01H8XYZ..." AND user.org_role == "
 ALLOW api_key FOR "ingest" WHEN api_key.org_id == "01H8XYZ...";
 ```
 
-The admin rule APIs manage this file directly:
+The admin rule APIs manage the database policy document:
 
 - `GET /admin/access-control/rules`
 - `PUT /admin/access-control/rules`
@@ -1040,7 +1118,7 @@ The admin rule APIs manage this file directly:
 The capability evaluator answers which ACE capabilities a hypothetical actor
 has under supplied attributes and request context. It enumerates only resource
 names declared in the active in-memory snapshot compiled from the ACE policy
-file; it does not inspect or intersect gateway routers, services, or
+document; it does not inspect or intersect gateway routers, services, or
 access-control policy references. The console exposes it under **Access Control
 Policies → Capabilities**.
 
@@ -1091,16 +1169,17 @@ simulation from caller-supplied attributes; it does not load or verify a
 persisted user or API key.
 
 Both evaluation endpoints use the same immutable in-memory policy snapshot as
-gateway authorization. They do not read or parse the policy file per request.
+gateway authorization. They do not read the database or parse the policy document per request.
 The snapshot atomically pairs the parsed engine with its revision, so an
 evaluation and the revision returned or propagated for it cannot come from
-different reloads. File changes are strictly parsed before activation; an
+different activations. Submitted documents are strictly parsed before saving; an
 invalid document leaves the previous snapshot active.
 
 `PUT` requires the current `sha256:*` revision returned by `GET`, validates the
-whole document strictly, writes the file atomically, and reloads the live ACE
-engine immediately. In clustered deployments this is safe only when all nodes
-share the same policy file storage; otherwise the endpoint is node-local.
+whole document strictly, and saves a new database version with its audit event in
+one transaction. A stale revision returns `409 access_control.revision_conflict`.
+The live ACE snapshot is published immediately on the receiving replica and propagates
+to cluster peers through the same notification and periodic-check mechanism as the gateway document.
 
 ## Full Routing Example
 

@@ -11,7 +11,9 @@ import type {
   ApiKey,
   ApiKeyAttrsRequest,
   ApiKeyQuery,
-  Configuration,
+  ConfigurationDocument,
+  UpdateConfigurationRequest,
+  UpdateConfigurationResponse,
   CreateAdminKeyRequest,
   CreateAdminKeyResponse,
   CreateApiKeyRequest,
@@ -115,17 +117,17 @@ export default class AdminApiService {
   }
 
   getConfigurations() {
-    return this.request<Configuration>({
+    return this.request<ConfigurationDocument>({
       url: "/configurations",
       method: "GET",
     });
   }
 
-  updateConfigurations(configuration: Configuration) {
-    return this.request<void>({
+  updateConfigurations(body: UpdateConfigurationRequest) {
+    return this.request<UpdateConfigurationResponse>({
       url: "/configurations",
       method: "PUT",
-      data: configuration,
+      data: body,
     });
   }
 

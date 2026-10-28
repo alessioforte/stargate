@@ -1,0 +1,76 @@
+use super::*;
+use crate::data::db::with_test_database;
+use crate::iam::authz::rules::compile_policy_snapshot;
+use ::db::ent::OutboxEventFilter;
+
+fn seed_path() -> String {
+    std::env::temp_dir()
+        .join(format!("stargate-policy-seed-{}", ulid::Ulid::generate()))
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn policy_seed_is_audited_once_and_existing_document_ignores_the_file() {
+    with_test_database(async {
+        let path = seed_path();
+        let content = "ALLOW user FOR \"reports:READ\";";
+        std::fs::write(&path, content).unwrap();
+        let document = load_policies_document_from_path(&path).await.unwrap();
+        assert_eq!(document.version, 1);
+        assert_eq!(document.source, "seed");
+        assert_eq!(document.content, content);
+        assert!(compile_policy_snapshot(&document.content).is_ok());
+        std::fs::write(&path, "invalid replacement seed").unwrap();
+        assert_eq!(
+            load_policies_document_from_path(&path).await.unwrap().id,
+            document.id
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "invalid replacement seed"
+        );
+        std::fs::remove_file(path).unwrap();
+        let events = db::service()
+            .query_outbox_events(&OutboxEventFilter::default(), 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        let event: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(event["action"], "config_document.created");
+        assert_eq!(event["metadata"]["source"], "seed");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn missing_policy_seed_creates_an_empty_document_without_creating_files() {
+    with_test_database(async {
+        let path = format!("{}/missing/policies", seed_path());
+        let document = load_policies_document_from_path(&path).await.unwrap();
+        assert_eq!(document.content, "");
+        assert_eq!(document.version, 1);
+        assert_eq!(document.source, "seed");
+        assert!(compile_policy_snapshot(&document.content).is_ok());
+        assert!(!std::path::Path::new(&path).parent().unwrap().exists());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn invalid_active_policies_fail_compilation_instead_of_using_the_seed() {
+    with_test_database(async {
+        let path = seed_path();
+        std::fs::write(&path, "ALLOW user WHEN invalid;").unwrap();
+        let document = load_policies_document_from_path(&path).await.unwrap();
+        assert!(compile_policy_snapshot(&document.content).is_err());
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(
+            load_policies_document_from_path(&path).await.unwrap().id,
+            document.id
+        );
+        std::fs::remove_file(path).unwrap();
+    })
+    .await;
+}

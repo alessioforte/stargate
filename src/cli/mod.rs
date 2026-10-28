@@ -1,3 +1,4 @@
+mod config;
 mod internal_context;
 mod jwt;
 
@@ -18,6 +19,8 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Admin(AdminArgs),
+    /// Export or import database-backed configuration documents.
+    Config(config::ConfigArgs),
     InternalContext(InternalContextArgs),
     /// Manage JWT signing keys.
     Jwt(JwtArgs),
@@ -100,6 +103,7 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
         Command::Admin(admin) => match admin.command {
             AdminCommand::Bootstrap(args) => run_bootstrap(args).await,
         },
+        Command::Config(args) => config::run(args).await,
         Command::InternalContext(args) => internal_context::run(args),
         Command::Jwt(args) => jwt::run(args),
     }

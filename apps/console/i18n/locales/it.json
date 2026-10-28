@@ -1,4 +1,5 @@
 {
+  "warning": "Attenzione",
   "failoverReplayDescription": "I tentativi automatici usano GET, HEAD, OPTIONS, TRACE, PUT e DELETE. Gli altri metodi vengono inviati una sola volta, anche con Idempotency-Key. I target non disponibili possono essere saltati prima dell’invio.",
   "ingressLimit": "Limite di ingresso",
   "ingressLimitDescription": "Controllo obbligatorio per IP su richieste gateway e IAM, prima di autenticazione e routing.",
@@ -322,6 +323,8 @@
     "apiKeyDeleteFailed": "Impossibile eliminare la chiave API",
     "apiKeyDeleted": "Chiave API eliminata",
     "gatewayConfigurationUpdateFailed": "Impossibile aggiornare la configurazione del gateway",
+    "gatewayConfigurationConflict": "La configurazione del gateway è cambiata. La versione più recente è stata ricaricata: controllala prima di salvare di nuovo.",
+    "gatewayConfigurationRestartRequired": "Configurazione del gateway salvata. Riavvia Stargate per applicare le modifiche alle capacità.",
     "gatewayConfigurationUpdated": "Configurazione del gateway aggiornata",
     "oauthClientCreateFailed": "Impossibile creare il client OAuth",
     "oauthClientCreated": "Client OAuth creato",

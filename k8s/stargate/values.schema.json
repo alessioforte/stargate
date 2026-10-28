@@ -272,8 +272,8 @@
       "additionalProperties": false,
       "required": [
         "create",
+        "importOnUpgrade",
         "existingConfigMap",
-        "rolloutToken",
         "annotations",
         "mountPath",
         "fileName",
@@ -283,8 +283,8 @@
       ],
       "properties": {
         "create": { "type": "boolean" },
+        "importOnUpgrade": { "type": "boolean", "default": false },
         "existingConfigMap": { "type": "string" },
-        "rolloutToken": { "type": "string" },
         "annotations": { "$ref": "#/definitions/stringMap" },
         "mountPath": { "type": "string", "pattern": "^/" },
         "fileName": { "type": "string", "pattern": "^[^/]+$" },

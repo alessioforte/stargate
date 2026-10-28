@@ -38,13 +38,16 @@ async fn main() -> std::io::Result<()> {
 }
 
 pub async fn run() -> std::io::Result<()> {
-    println!("{}", banner::LOGO);
-
     dotenv().ok();
     tls::install_crypto_provider();
 
     let cli = cli::parse();
     if let Some(command) = cli.command {
+        // Configuration command output is data; tracing and banners must not enter stdout.
+        if matches!(&command, cli::Command::Config(_)) {
+            return cli::run_cli_command(command).await;
+        }
+        println!("{}", banner::LOGO);
         if command.is_standalone() {
             return cli::run_cli_command(command).await;
         }
@@ -55,6 +58,7 @@ pub async fn run() -> std::io::Result<()> {
         return result;
     }
 
+    println!("{}", banner::LOGO);
     let guard = logging::init();
     iam::pwd::hash::init();
 
@@ -97,7 +101,8 @@ pub async fn run() -> std::io::Result<()> {
 
     aud::spawn()?;
 
-    let gate = gate::init().map_err(std::io::Error::other)?;
+    let gate = gate::init().await.map_err(std::io::Error::other)?;
+    gate::spawn_config_sync(gate.clone())?;
     let lifecycle = srv::health::Lifecycle::default();
 
     let app = api::server_router(lifecycle.clone())
@@ -137,6 +142,7 @@ pub async fn run() -> std::io::Result<()> {
         gate.resources.wait(),
     )
     .await;
+    gate::shutdown_config_sync().await;
     aud::shutdown().await;
     store::save().await;
     info!("Shutdown complete");

@@ -111,7 +111,6 @@ lim = { path = "crates/lim" }
 lru = "0.18"
 maxminddb = { version = "0.30.3", features = ["simdutf8"] }
 moka = { version = "0.12.16", features = ["sync"] }
-notify = "8.2.0"
 clap = { version = "4.6.6", features = ["derive"] }
 
 [features]

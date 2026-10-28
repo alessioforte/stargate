@@ -19,36 +19,38 @@ mod upstream;
 pub(crate) use policies::org_limits::invalidate as invalidate_org_limits;
 #[cfg(all(test, feature = "memory"))]
 pub(crate) use request::IngressPause;
-pub(crate) use snap::prepare_config;
 #[cfg(all(test, feature = "memory"))]
-pub(crate) use snap::reload_gateway_config_from_path;
-pub use snap::{Gate, RuntimeSnapshot, reload_policy_engine, retain_runtime};
+pub(crate) use snap::apply_gateway_config;
+pub(crate) use snap::apply_policy_document;
+#[cfg(test)]
+pub(crate) use snap::prepare_config;
+pub(crate) use snap::{ConfigActivation, save_gateway_config};
+pub use snap::{Gate, RuntimeSnapshot, retain_runtime};
+pub(crate) use snap::{shutdown_config_sync, spawn_config_sync};
 #[cfg(test)]
 pub(crate) use transport::DeadlineConnector;
 pub use transport::{HyperClient, PreparedTransport, connection_timed_out};
 
 use crate::data::store::use_store;
-use crate::iam::authz::storage::get_policies_path;
 use ::http::Request;
 use axum::{
     body::Body,
     response::{IntoResponse, Response},
 };
-use snap::{get_config_path, load_config_from_path, watch_config_file, watch_policies_file};
+use snap::{load_gateway_document, prepare_gateway_config};
 use std::{convert::Infallible, sync::Arc};
 
-pub fn init() -> anyhow::Result<Arc<Gate>> {
-    let config_file_path = get_config_path()?;
-    let prepared = load_config_from_path(&config_file_path)?;
-    let store = use_store();
-    let policies_path = get_policies_path();
-    let policies = crate::iam::authz::rules::load_policy_snapshot(&policies_path)
+pub async fn init() -> anyhow::Result<Arc<Gate>> {
+    let document = load_gateway_document().await?;
+    let prepared = prepare_gateway_config(&document.content)?;
+    let policies = crate::iam::authz::storage::load_policies_document().await?;
+    let policies = crate::iam::authz::rules::compile_policy_snapshot(&policies.content)
         .map_err(|error| anyhow::anyhow!("Unable to load access-control policies: {error}"))?;
-
-    let gate = Arc::new(Gate::new(Arc::new(store.clone()), prepared, policies)?);
-    watch_config_file(&config_file_path, &gate);
-    watch_policies_file(&policies_path, &gate);
-    Ok(gate)
+    Ok(Arc::new(Gate::new(
+        Arc::new(use_store().clone()),
+        prepared,
+        policies,
+    )?))
 }
 
 pub async fn service(req: Request<Body>) -> Result<Response, Infallible> {

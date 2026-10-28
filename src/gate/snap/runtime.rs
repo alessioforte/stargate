@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 pub struct RuntimeSnapshot {
     pub core: gate::Runtime,
     pub version: u64,
+    pub config_revision: String,
     pub ingress: gate::cfg::CompiledIngress,
     pub settings: gate::cfg::CompiledRuntimeSettings,
     pub resources: Arc<resources::ProcessResources>,
@@ -35,6 +36,11 @@ pub struct Gate {
     pub resources: Arc<resources::ProcessResources>,
 }
 
+pub(crate) struct PreparedActivation {
+    core: gate::Runtime,
+    prepared: PreparedConfig,
+}
+
 impl Gate {
     pub(crate) fn new(
         store: Arc<lim::State>,
@@ -52,6 +58,7 @@ impl Gate {
             resources: resources.clone(),
             transports: prepared.transports,
             version: 0,
+            config_revision: prepared.config_revision,
         });
         runtime.core.start_probes();
         Ok(Self {
@@ -71,12 +78,26 @@ impl Gate {
         &self,
         prepared: PreparedConfig,
     ) -> Result<u64, GatewayPreparationError> {
+        self.publish(self.prepare_activation(prepared)?)
+    }
+
+    pub(crate) fn prepare_activation(
+        &self,
+        prepared: PreparedConfig,
+    ) -> Result<PreparedActivation, GatewayPreparationError> {
         if prepared.config.compiled.runtime.budgets != self.resources.budgets {
             return Err(GatewayPreparationError::BudgetChange);
         }
         let core = self.builder.prepare(&prepared.config)?;
-        // Serialize only activation: file reads, TLS and core construction all
-        // finish before touching the active generation or its probes.
+        Ok(PreparedActivation { core, prepared })
+    }
+
+    pub(crate) fn publish(
+        &self,
+        activation: PreparedActivation,
+    ) -> Result<u64, GatewayPreparationError> {
+        let PreparedActivation { core, prepared } = activation;
+        // Preparation finishes before touching the active generation or its probes.
         let _activation = self.activation.lock().expect("Activation lock poisoned");
         let version = self
             .runtime
@@ -91,6 +112,7 @@ impl Gate {
             resources: self.resources.clone(),
             transports: prepared.transports,
             version,
+            config_revision: prepared.config_revision,
         });
         let previous = self.runtime.swap(runtime.clone());
         runtime.core.start_probes();

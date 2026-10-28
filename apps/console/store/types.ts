@@ -9,6 +9,7 @@ import type {
   ApiKey,
   ApiKeyQuery,
   Configuration,
+  ConfigurationDocument,
   CreateAdminKeyRequest,
   CreateAdminKeyResponse,
   CreateApiKeyRequest,
@@ -102,7 +103,7 @@ export interface State {
   accessControlCapabilitiesEvaluation: StoreItem<EvaluateAccessControlCapabilitiesResponse>;
   adminKeys: StoreItem<List<AdminKey>>;
   apiKeys: StoreItem<List<ApiKey>>;
-  configuration: StoreItem<Configuration>;
+  configuration: StoreItem<ConfigurationDocument>;
   oauthClients: StoreItem<List<OAuthClient>>;
   organizations: StoreItem<List<Organization>>;
   serviceAccounts: StoreItem<List<ServiceAccount>>;

@@ -23,6 +23,7 @@ import type {
   ApiKey,
   ApiKeyQuery,
   Configuration,
+  ConfigurationDocument,
   CreateAdminKeyRequest,
   CreateAdminKeyResponse,
   CreateApiKeyRequest,
@@ -98,7 +99,7 @@ const initialState: State = {
     new StoreItem<EvaluateAccessControlCapabilitiesResponse>(null),
   adminKeys: new StoreItem<List<AdminKey>>(null),
   apiKeys: new StoreItem<List<ApiKey>>(null),
-  configuration: new StoreItem<Configuration>(null),
+  configuration: new StoreItem<ConfigurationDocument>(null),
   oauthClients: new StoreItem<List<OAuthClient>>(null),
   organizations: new StoreItem<List<Organization>>(null),
   serviceAccounts: new StoreItem<List<ServiceAccount>>(null),
@@ -160,7 +161,7 @@ function notificationText(
 
 function showStoreNotification(
   locale: string,
-  type: "error" | "success",
+  type: "error" | "success" | "warning",
   message: string,
 ) {
   showNotification({
@@ -811,18 +812,30 @@ const store: StateCreator<State & Actions> = (set, get) => ({
     set({ configuration: configuration.setSuccess(data) });
   },
 
-  updateConfigurations: async (configuration: Configuration) => {
-    const configurationItem = get().configuration;
-    set({ configuration: configurationItem.setLoading() });
+  updateConfigurations: async (config: Configuration) => {
+    const item = get().configuration;
+    const document = item.data;
+    if (!document) return false;
+    set({ configuration: item.setLoading() });
 
-    const { error, message } = await localizedApiResponse(
+    const { data, error, message, status } = await localizedApiResponse(
       get().language,
-      services.admin.updateConfigurations(configuration),
+      services.admin.updateConfigurations({
+        revision: document.revision,
+        config,
+      }),
     );
-
-    if (error) {
-      set({ configuration: configurationItem.setError(message) });
-
+    if (error || !data) {
+      if (status === 409) {
+        showStoreNotification(
+          get().language,
+          "warning",
+          notificationText(get().language, "gatewayConfigurationConflict"),
+        );
+        await get().getConfigurations();
+        return false;
+      }
+      set({ configuration: item.setError(message) });
       showStoreNotification(
         get().language,
         "error",
@@ -832,13 +845,18 @@ const store: StateCreator<State & Actions> = (set, get) => ({
       return false;
     }
 
+    const { activation, ...savedDocument } = data;
+    set({ configuration: item.setSuccess(savedDocument) });
     showStoreNotification(
       get().language,
-      "success",
-      notificationText(get().language, "gatewayConfigurationUpdated"),
+      activation === "restart_required" ? "warning" : "success",
+      notificationText(
+        get().language,
+        activation === "restart_required"
+          ? "gatewayConfigurationRestartRequired"
+          : "gatewayConfigurationUpdated",
+      ),
     );
-
-    set({ configuration: configurationItem.setSuccess(configuration) });
     return true;
   },
 

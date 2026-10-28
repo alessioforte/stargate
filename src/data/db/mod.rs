@@ -2,6 +2,27 @@ mod svc;
 
 pub use svc::*;
 
+#[cfg(test)]
+tokio::task_local! {
+    static TEST_SERVICE: ::db::service::Service;
+}
+
+#[cfg(test)]
+pub(crate) async fn with_test_service<F: std::future::Future>(
+    service: ::db::service::Service,
+    future: F,
+) -> F::Output {
+    TEST_SERVICE.scope(service, future).await
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+pub(crate) async fn with_test_database<F: std::future::Future>(future: F) -> F::Output {
+    let service = ::db::service::init("sqlite::memory:")
+        .await
+        .expect("in-memory database");
+    with_test_service(service, future).await
+}
+
 #[cfg(feature = "postgres")]
 mod postgres {
     use db::service::{self, Service};
@@ -29,6 +50,10 @@ mod postgres {
     }
 
     pub fn service() -> Service {
+        #[cfg(test)]
+        if let Ok(service) = super::TEST_SERVICE.try_with(Clone::clone) {
+            return service;
+        }
         DB.get()
             .expect("DB service not initialized — init() must be called first")
             .clone()
@@ -67,6 +92,10 @@ mod sqlite {
     }
 
     pub fn service() -> service::Service {
+        #[cfg(test)]
+        if let Ok(service) = super::TEST_SERVICE.try_with(Clone::clone) {
+            return service;
+        }
         DB.get()
             .expect("DB service not initialized — init() must be called first")
             .clone()

@@ -35,6 +35,12 @@ pub mod service;
 ))]
 pub use db::{DbStore, InstanceBootstrapResult};
 
+#[cfg(feature = "postgres")]
+pub use sqlx::postgres::PgListener;
+
+#[cfg(feature = "postgres")]
+pub const CONFIG_CHANNEL: &str = "stargate_config";
+
 /// Serializes the PostgreSQL tests that claim outbox rows, across every
 /// module of this crate: cargo runs tests in parallel, and each claim takes
 /// every pending row it can lock, so a concurrent claimer would steal (and

@@ -166,12 +166,14 @@ runtimeSecret:
   annotations: {}
   stringData: {}
 
-# Stargate requires both files at startup. An existing ConfigMap must contain
-# keys matching `fileName` and `policiesFileName`.
+# Read-only seed files, used only when the corresponding database document is absent.
+# An existing ConfigMap must contain keys matching `fileName` and `policiesFileName`.
 gatewayConfig:
   create: true
+  # Cluster only: import both documents after every install/upgrade, overwriting Console edits.
+  # Edge imports must run inside the existing pod with kubectl exec.
+  importOnUpgrade: false
   existingConfigMap: ""
-  rolloutToken: ""
   annotations: {}
   mountPath: /etc/stargate
   fileName: config.yaml

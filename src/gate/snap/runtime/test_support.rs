@@ -2,7 +2,8 @@
 use gate::cfg::Config;
 
 pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super::RuntimeSnapshot> {
-    let prepared = super::super::config::prepare_runtime_config(config).unwrap();
+    let revision = db::ent::config_revision(&config.raw.to_yaml_string().unwrap());
+    let prepared = super::super::config::prepare_runtime_config(config, revision).unwrap();
     let core = gate::Runtime::prepare(prepared.config.compiled.http, lim::Limiter::new()).unwrap();
     std::sync::Arc::new(super::RuntimeSnapshot {
         core,
@@ -13,6 +14,7 @@ pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super:
         settings: prepared.config.compiled.runtime,
         transports: prepared.transports,
         version: 0,
+        config_revision: prepared.config_revision,
     })
 }
 
@@ -38,6 +40,7 @@ pub(crate) fn gate_with_limiter(config: Config, limiter: lim::Limiter) -> super:
         resources: gate.resources.clone(),
         transports: prepared.transports,
         version: 0,
+        config_revision: prepared.config_revision,
     });
     gate.runtime.store(runtime.clone());
     runtime.core.start_probes();

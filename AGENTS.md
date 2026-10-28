@@ -22,7 +22,7 @@ stargate/
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
 │   ├── api/           # Axum routers + handlers; IAM middleware; apps/ auth + console hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
-│   ├── cli/           # CLI: admin bootstrap, internal-context / jwt generate-key
+│   ├── cli/           # CLI: admin bootstrap, config export/import, internal-context / jwt generate-key
 │   ├── conf/          # Process-wide configuration: env readers, feature toggles, config dir
 │   ├── ctx/           # Request context, propagation drafts, audit/authz projections; sign/ signer
 │   ├── data/          # Persistence backends: db/ (SQL pool + repository service), store/
@@ -101,7 +101,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   checks (`verification.rs`), session JWT config and keyring (`jwt.rs`,
   `jwt_keyring.rs`), login guard, JWT revocation (`revocation.rs`).
 - `authz/`: ACE evaluation (`evaluation.rs`), rule management (`rules.rs`), the
-  policies file (`storage.rs`), super-admin checks (`admin.rs`).
+  database-backed policy documents and their seed (`storage.rs`), super-admin checks (`admin.rs`).
 - `sess/`: sign-in (`issuance.rs`: `start_user_session` returns the tokens; `api`
   adds the cookie and JSON), session registry (`registry.rs`), token minting (`tokens.rs`).
 - `user/`: signup requests, email verification, nicknames, display names (`profile.rs`).
@@ -174,8 +174,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
    `Idempotency-Key`), buffer only when needed, then execute HTTP, WebSocket, or
    direct response and apply response headers.
 
-Modules: `snap/` (snapshot lifecycle: `config.rs` preparation/files, `runtime.rs`
-atomic activation, `reload.rs` watchers, `body.rs` pinning during streaming),
+Modules: `snap/` (snapshot lifecycle: `config.rs` database documents, seed, preparation and saves,
+`runtime.rs` preparation/publication, `reload.rs` text activation, `body.rs` pinning during streaming),
 `resources.rs` (process admission, memory permits, tracked tasks), `transport/`
 (prepared outgoing HTTP/TLS/mTLS clients), `limits.rs` (ingress bucket key, limit
 selection/validation), `request.rs` (orchestration), `authentication.rs`,
@@ -308,26 +308,44 @@ context feeds ACE and org-level limits. Guide: `docs/multi-org-guide.md`.
 - JWT config
 - GeoIP database
 - Gateway `RuntimeSnapshot` (`ArcSwap`): graph, balancers, limiter, prepared clients,
-  version, generation-owned health probes
+  version, exact document revision, generation-owned health probes
 - ACE `PolicySnapshot` (engine + `sha256:*` revision)
 - Internal-context signer (when configured)
 
-### Config Hot-Reload
+### Configuration Storage and Activation
 
-`notify` watches `config.yaml` and the ACE policy file; content comparison avoids
-false positives.
-- A candidate is parsed, compiled, internal-context-preflighted, and fully prepared
-  (transports, graph, balancers, limiter, unstarted probes) before publishing.
-- On success: next config version, atomic snapshot swap, new probes start, old retire.
-  Pinned requests, bodies, mirrors, and WebSockets keep their generation.
-- On failure: log, record a bounded reload outcome, keep the previous snapshot.
-- Admin config endpoints run the same preparation before saving. Replacing TLS
-  files alone does not reload.
+Gateway configuration and ACE rules come from the active `config_documents` rows in SQL.
+On an empty database, startup seeds each kind once: the gateway from
+`CONFIG_PATH/CONFIG_FILENAME`, and policies from `CONFIG_PATH/policies` (empty when absent).
+A missing gateway seed fails startup. Existing documents take precedence over files.
+Server startup and activation never create or write configuration or policy seed files
+and use no file watchers. Explicit CLI exports can write the requested backup files.
+Invalid active documents fail startup.
 
-ACE rules (`.stargate/policies`) are managed separately via
-`/admin/access-control/rules` (GET, PUT with revision, `/validate`, `/evaluate`)
-and `/admin/access-control/capabilities/evaluate`; updates do not bump the
-gateway config version. `# @id` / `# @description` comments above a rule are metadata.
+Admin configuration reads return the document revision, version, update time/actor, and
+parsed config (or the stored YAML with `?format=yaml`), with an ETag. Writes require the
+current revision, fully prepare the candidate before saving it, and append the version
+with its safe audit event in one transaction. Conflicts return
+`409 configuration.revision_conflict`. Successful saves publish immediately on the receiving
+replica. Capacity changes are saved with `activation: restart_required` and retain the
+current runtime until restart. Pinned requests, bodies, mirrors, and WebSockets keep
+their generation. Replacing TLS files alone does not reload prepared transports.
+Cluster replicas subscribe to PostgreSQL `stargate_config` notifications emitted in the
+same transaction as each new document version. A notification or listener reconnection
+checks the active document revisions; `CONFIG_SYNC_INTERVAL_SECS` (default 30, integer >= 1)
+provides periodic recovery from missed notifications. Failed activations retain the prior
+snapshot and retry on the next tick; duplicate notifications do not retry the same failed
+revision. Activation failures log once per revision, with a warning when a restart is
+required. Database/listener errors are retried without stopping synchronization. Edge runs
+the same periodic checks without a listener, so imports from another process sharing
+its SQLite file apply without restarting. Synchronization stops
+before the audit relay during shutdown. `/admin/health` reports this replica's active
+`config.gatewayRevision` and `config.policiesRevision`.
+
+ACE rules are managed separately via `/admin/access-control/rules` (GET, PUT with revision,
+`/validate`, `/evaluate`) and `/admin/access-control/capabilities/evaluate`. Their database
+updates publish the policy snapshot locally and propagate to cluster peers without bumping
+the gateway config version. `# @id` / `# @description` comments above a rule are metadata.
 
 ### Feature Flags
 
@@ -630,9 +648,10 @@ rendered as `{{link}}`; `{{name}}` is the only other placeholder.
 
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_history`,
 `api_keys`, `admin_keys`, `service_accounts`, `oauth_clients`, `oauth_consents`,
-`user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`.
-One migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
-creates the full schema; add new forward migrations from there.
+`user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`,
+`config_documents` (append-only gateway configuration and ACE policy versions).
+The initial migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
+creates the base schema; later forward migrations extend it.
 
 User identity (`crates/db/src/ent/user.rs`, enforced by the users repository on
 every insert/update):
@@ -670,6 +689,9 @@ the same logical columns on PostgreSQL and SQLite.
 
 | Var | Default | Purpose |
 |-----|---------|---------|
+| `CONFIG_PATH` | `.stargate` | Directory for gateway/policy seed files; also holds other runtime assets |
+| `CONFIG_FILENAME` | `config.yaml` | Gateway seed filename, used only when its database document is absent |
+| `CONFIG_SYNC_INTERVAL_SECS` | 30 | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup |
 | `PORT` | 5050 | HTTP listen port |
 | `STARGATE_RUNTIME_PROFILE` | - | `edge` or `cluster` (validated against the build) |
 | `JWT_ALGORITHM` | active key / `RS256` | Must match the active key when set; picks the first generated key |
@@ -749,6 +771,12 @@ cargo run --features edge -- admin bootstrap \
   --name "Admin User" --nickname admin \
   --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 
+# Back up or import exact database document content (both profiles)
+cargo run --features edge -- config export --kind gateway --output gateway-backup.yaml
+cargo run --features edge -- config export --kind policies --output policies-backup
+cargo run --features edge -- config import --kind gateway --file gateway.yaml
+cargo run --features edge -- config import --kind policies --file policies
+
 # Next JWT signing key in .stargate/jwks/keys/<kid>/;
 # --id-token creates the RS256 key for JWT_ID_TOKEN_KID
 cargo run --features edge -- jwt generate-key --kid stargate-2026-11
@@ -760,7 +788,13 @@ cargo run --features edge -- internal-context generate-key \
 
 Bootstrap flags: `--password`, `--password-stdin`, `--generate-password`,
 `--oauth-client-id`, `--oauth-redirect-uri`. `jwt` and `internal-context` commands
-need no database. Docs: `docs/cli.md`.
+need no database. Configuration commands require the database, keep stdout free of
+banners/logs, and validate syntax/compilation without local TLS or signer material.
+Imports preserve the submitted text, retry a revision conflict once, and write an
+atomic `cli_import` system audit event for changed content. Runtime replicas do full
+preparation before activation. The Helm ConfigMap is a seed by default; cluster-only
+`gatewayConfig.importOnUpgrade` imports both documents on install/upgrade and replaces
+Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/cli.md`.
 
 ## API Overview
 
@@ -825,7 +859,7 @@ or `ingress`. `429` `retry-after` is whole seconds rounded up (missing duration
 
 SIGTERM/SIGINT -> readiness off -> wait `SERVER_DRAIN_DELAY_SECS` -> gateway admission
 closes and active work is cancelled -> listeners close and connections drain
-(`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop
+(`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop configuration synchronization -> stop
 audit relay -> save in-memory store -> flush telemetry.
 
 ## Frontend (apps/)

@@ -1,8 +1,8 @@
 use crate::ent::{
-    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, Credential, CredentialHistory,
-    CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership,
-    Organization, OrganizationMembershipMutation, Profile, ServiceAccount, SuperAdmin,
-    TrustedAuditContext, User,
+    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, ConfigDocument, ConfigKind,
+    ConfigSaveOutcome, ConfigSource, Credential, CredentialHistory, CredentialType,
+    NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
+    OrganizationMembershipMutation, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -17,6 +17,20 @@ pub struct InstanceBootstrapResult {
 pub trait DbStore {
     // ── Admin overview ──────────────────────────────────────────────────────
     async fn get_admin_overview_stats(&self) -> Result<AdminOverviewStats>;
+
+    // ── Configuration documents ────────────────────────────────────────────
+    async fn get_active_config_document(&self, kind: ConfigKind) -> Result<Option<ConfigDocument>>;
+    async fn get_config_revisions(&self) -> Result<Vec<(String, i64, String)>>;
+    /// Append a version only if the active revision matches. `None` requires
+    /// an empty history for this kind. Identical content produces no audit event.
+    async fn save_config_document(
+        &self,
+        kind: ConfigKind,
+        content: String,
+        expected_revision: Option<String>,
+        source: ConfigSource,
+        context: TrustedAuditContext,
+    ) -> Result<ConfigSaveOutcome>;
 
     // ── Users ───────────────────────────────────────────────────────────────
     async fn bootstrap_instance(
