@@ -90,6 +90,49 @@ not use a rollout token or Deployment checksum; their import is described below.
 `metadata.resource_version`; external-secret deployments can use their
 controller's restart integration.
 
+## Managed PostgreSQL and TLS
+
+Provision the target database separately when the application role has no
+`CREATEDB` privilege or cannot connect to the `postgres` maintenance database.
+Set `POSTGRES_CREATE_DATABASE` to `"false"`; schema migrations still run on the
+target database. With the default `"true"`, Stargate creates a missing database
+using the same credentials and TLS settings as its main pool. Concurrent creation
+is accepted only after a new query confirms that the requested database exists.
+
+`POSTGRES_ENDPOINT` accepts `host`, `host:port`, `[ipv6]`, or `[ipv6]:port`, with
+default port 5432. Credentials are separate fields: store `POSTGRES_PASSWORD` in
+the runtime Secret exactly as supplied, without URL encoding.
+
+`POSTGRES_SSLMODE` accepts `disable`, `prefer` (default), `require`, `verify-ca`,
+or `verify-full`. Use `verify-full` to verify both the certificate chain and the
+server hostname. For a private CA, mount its PEM certificate read-only and set
+`POSTGRES_SSLROOTCERT` to that path:
+
+```yaml
+runtimeConfig:
+  data:
+    POSTGRES_ENDPOINT: postgres.managed.example:5432
+    POSTGRES_DATABASE: stargate
+    POSTGRES_USERNAME: stargate
+    POSTGRES_CREATE_DATABASE: "false"
+    POSTGRES_SSLMODE: verify-full
+    POSTGRES_SSLROOTCERT: /etc/stargate/postgres/ca.pem
+extraVolumes:
+  - name: postgres-ca
+    configMap:
+      name: postgres-ca
+extraVolumeMounts:
+  - name: postgres-ca
+    mountPath: /etc/stargate/postgres
+    readOnly: true
+```
+
+Create `postgres-ca` with a `ca.pem` key. Mount the CA at the same path in every
+CLI process or Job using these settings. Chart `extraVolumes` and
+`extraVolumeMounts` apply to the Deployment; the current bootstrap and config
+import hooks do not inherit these mounts. When a private CA is required, use
+separate CLI Jobs with the CA mounted instead of enabling those hooks.
+
 ## Multiple public hosts
 
 When an ingress forwards both `identity.example.com` and `api.example.com` to

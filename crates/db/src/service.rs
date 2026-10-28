@@ -662,67 +662,32 @@ impl Service {
     }
 }
 
-/// Connect to the `postgres` maintenance database and create the target
-/// database if it does not already exist.
 #[cfg(feature = "postgres")]
-pub async fn ensure_database(user: &str, password: &str, host: &str, database: &str) {
-    let maintenance_url = format!("postgres://{}:{}@{}/postgres", user, password, host);
-    let pool = match sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&maintenance_url)
-        .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Cannot connect to PostgreSQL server: {}", e);
-            return;
-        }
-    };
+mod postgres;
+#[cfg(feature = "postgres")]
+pub use postgres::{ensure_database, init_with_options};
 
-    // Check if the database exists (parameterized query to avoid injection)
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
-            .bind(database)
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(false);
-
-    if !exists {
-        // CREATE DATABASE cannot use bind parameters, but `database` comes
-        // from an env var set by the operator, not from user input.
-        let stmt = format!("CREATE DATABASE \"{}\"", database);
-        match sqlx::query(sqlx::AssertSqlSafe(stmt)).execute(&pool).await {
-            Ok(_) => eprintln!("Created database '{}'", database),
-            Err(e) => eprintln!("Failed to create database '{}': {}", database, e),
-        }
-    }
-
-    pool.close().await;
+fn pool_max_connections() -> u32 {
+    std::env::var("DB_POOL_MAX")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(20)
 }
 
-// Generic init function that works with any database URL
+/// Initialize and migrate a database identified by a URL (also used by tests and benchmarks).
+#[cfg(feature = "postgres")]
 pub async fn init(conn: &str) -> Result<Service> {
-    let max_connections: u32 = std::env::var("DB_POOL_MAX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(20);
+    init_with_options(conn.parse()?).await
+}
 
-    #[cfg(feature = "sqlite")]
+#[cfg(feature = "sqlite")]
+pub async fn init(conn: &str) -> Result<Service> {
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(max_connections)
+        .max_connections(pool_max_connections())
         .connect(conn)
         .await?;
-
-    #[cfg(feature = "postgres")]
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(max_connections)
-        .connect(conn)
-        .await?;
-
     let service = Service::new(pool);
-
     service.migrate().await?;
-
     Ok(service)
 }
 

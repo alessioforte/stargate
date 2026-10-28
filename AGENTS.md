@@ -126,7 +126,12 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
   `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
   validation, `signing.rs` bounded CPU workers.
-- `data/db/`: SQL pool init and the repository service wrappers (`svc.rs`).
+- `data/db/`: SQL pool init, PostgreSQL endpoint/TLS/creation settings (`settings.rs`),
+  and the repository service wrappers (`svc.rs`). PostgreSQL fields go directly into
+  `PgConnectOptions`, including unencoded credentials. Optional database creation
+  uses the same credentials/TLS through the `postgres` maintenance database;
+  concurrent-create errors are benign only for `42P04`, or `23505` on
+  `pg_database_datname_index`, after a fresh existence query confirms the target.
   `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs`
   init/readiness.
 - `obs/`: logging and the telemetry provider (`telemetry/metrics.rs`,
@@ -706,7 +711,12 @@ the same logical columns on PostgreSQL and SQLite.
 | `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
 | `OAUTH_CLIENT_CA_FILE` | - | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`) |
 | `INTERNAL_CONTEXT_*` | see `.env.example` | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue |
-| `POSTGRES_ENDPOINT` / `_USERNAME` / `_PASSWORD` / `_DATABASE` | - | Postgres (cluster) |
+| `POSTGRES_ENDPOINT` | localhost:5432 | Cluster DB endpoint: host, host:port, [ipv6], or [ipv6]:port; invalid endpoints stop startup |
+| `POSTGRES_USERNAME` / `_PASSWORD` / `_DATABASE` | root / root / stargate | PostgreSQL fields passed directly to sqlx; no URL encoding |
+| `POSTGRES_SSLMODE` | prefer | disable, prefer, require, verify-ca, or verify-full; other values stop startup |
+| `POSTGRES_SSLROOTCERT` | - | Private root CA PEM path for PostgreSQL TLS |
+| `POSTGRES_CREATE_DATABASE` | true | true/false; false skips maintenance DB access and CREATE DATABASE; migrations still run |
+| `DB_POOL_MAX` | 20 | Maximum connections in each SQL pool |
 | `REDIS_URL` | - | Redis (cluster) |
 | `RUST_LOG`, `LOG_DIR`, `LOG_FILE_ENABLED`, `LOG_CONSOLE_ENABLED` | - | Logging |
 | `OTEL_ENABLED` | auto | OTLP export; on when an endpoint is set |

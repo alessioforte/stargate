@@ -36,7 +36,7 @@ pub mod service;
 pub use db::{DbStore, InstanceBootstrapResult};
 
 #[cfg(feature = "postgres")]
-pub use sqlx::postgres::PgListener;
+pub use sqlx::postgres::{PgConnectOptions, PgListener, PgSslMode};
 
 #[cfg(feature = "postgres")]
 pub const CONFIG_CHANNEL: &str = "stargate_config";

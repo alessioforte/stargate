@@ -1,3 +1,5 @@
+#[cfg(feature = "postgres")]
+mod settings;
 mod svc;
 
 pub use svc::*;
@@ -32,16 +34,12 @@ mod postgres {
     static DB: OnceCell<Service> = OnceCell::new();
 
     pub async fn init() -> anyhow::Result<()> {
-        let password = std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "root".to_string());
-        let user = std::env::var("POSTGRES_USERNAME").unwrap_or_else(|_| "root".to_string());
-        let host = std::env::var("POSTGRES_ENDPOINT").unwrap_or_else(|_| "localhost".to_string());
-        let database =
-            std::env::var("POSTGRES_DATABASE").unwrap_or_else(|_| "stargate".to_string());
-
-        service::ensure_database(&user, &password, &host, &database).await;
-
-        let db_url = format!("postgres://{}:{}@{}/{}", user, password, host, database);
-        let service = service::init(&db_url).await?;
+        let settings = super::settings::PostgresSettings::from_env()?;
+        let options = settings.connect_options();
+        if settings.create_database {
+            service::ensure_database(&options).await?;
+        }
+        let service = service::init_with_options(options).await?;
 
         info!("PostgreSQL service initialized successfully");
         DB.set(service)
