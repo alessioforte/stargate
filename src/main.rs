@@ -51,15 +51,18 @@ pub async fn run() -> std::io::Result<()> {
         if command.is_standalone() {
             return cli::run_cli_command(command).await;
         }
-        let guard = logging::init();
+        let guard = logging::init(logging::Settings::from_env()?);
         iam::pwd::hash::init();
         let result = cli::run_cli_command(command).await;
         guard.shutdown();
         return result;
     }
 
-    println!("{}", banner::LOGO);
-    let guard = logging::init();
+    let log_settings = logging::Settings::from_env()?;
+    if log_settings.format() != logging::LogFormat::Json {
+        println!("{}", banner::LOGO);
+    }
+    let guard = logging::init(log_settings);
     iam::pwd::hash::init();
 
     let version = env!("CARGO_PKG_VERSION");

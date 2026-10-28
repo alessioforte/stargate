@@ -138,7 +138,7 @@ runtimeConfig:
   rolloutToken: ""
   annotations: {}
   data:
-    LOG_FILE_ENABLED: "false"
+    LOG_FORMAT: json
 
 # JWT signing keys. Edge keeps them on the PVC (generated as RS256 on first
 # start; rotate with `stargate jwt generate-key` in the pod). Cluster replicas

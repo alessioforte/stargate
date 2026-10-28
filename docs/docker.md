@@ -17,6 +17,16 @@ Published release images (`ghcr.io/alessioforte/stargate:<version>`) are built
 with the `cluster` profile for `linux/amd64` and `linux/arm64`. There is no
 `latest` tag; see [Releasing Stargate](RELEASING.md).
 
+Release images write JSON logs to stdout by default, without ANSI colors or the
+server banner; read them with `docker logs stargate` or `docker compose logs`.
+`LOG_FORMAT` accepts `json`, `compact`, or `pretty` (debug builds default to
+`pretty`). JSON includes request span context: `request_id` and, when
+OpenTelemetry is active, its valid `trace_id`. `LOG_CONSOLE_ENABLED` defaults to
+`true`; optional JSON files require `LOG_FILE_ENABLED=true` and use `LOG_DIR`
+(default `/app/.stargate/logs` in the image). If both sinks are disabled, stdout
+stays enabled. Text formats use ANSI only when stdout is a terminal. CLI data
+output and banners keep their existing behavior.
+
 ## Build an image
 
 Choose exactly one backend profile:
@@ -84,7 +94,7 @@ docker run --rm \
 ```
 
 The named volume persists SQLite, the in-memory store snapshot, generated key
-material, policies, and logs. On its first use, Docker initializes the empty
+material, policies, and optional log files. On its first use, Docker initializes the empty
 volume with the Console, auth UI, and mail templates bundled in the image.
 
 If the admin configuration API must update `config.yaml`, remove `readonly` and

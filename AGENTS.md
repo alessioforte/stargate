@@ -134,8 +134,15 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `pg_database_datname_index`, after a fresh existence query confirms the target.
   `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs`
   init/readiness.
-- `obs/`: logging and the telemetry provider (`telemetry/metrics.rs`,
-  `telemetry/propagation.rs`).
+- `obs/`: logging (`logging/settings.rs` parses the format and sinks), and the
+  telemetry provider (`telemetry/metrics.rs`, `telemetry/propagation.rs`). Logs go
+  to stdout by default; `LOG_FORMAT` defaults to pretty in debug and JSON in
+  release. Optional files remain JSON. ANSI requires a stdout terminal and a text
+  format. The server validates settings before its banner and omits it in JSON
+  mode; CLI output keeps its existing behavior. JSON includes the current span
+  and span list: request logs retain `request_id`, including in nested spans, and
+  record the valid SDK `trace_id` when OpenTelemetry is active. With it disabled,
+  `trace_id` stays absent; no synthetic trace id is generated.
 - `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`), profile
   validation, startup banner, shutdown signal and drain (`shutdown.rs`).
   `tls::served_over_https()`: listener TLS or an `https://` public base URL (a proxy
@@ -718,7 +725,11 @@ the same logical columns on PostgreSQL and SQLite.
 | `POSTGRES_CREATE_DATABASE` | true | true/false; false skips maintenance DB access and CREATE DATABASE; migrations still run |
 | `DB_POOL_MAX` | 20 | Maximum connections in each SQL pool |
 | `REDIS_URL` | - | Redis (cluster) |
-| `RUST_LOG`, `LOG_DIR`, `LOG_FILE_ENABLED`, `LOG_CONSOLE_ENABLED` | - | Logging |
+| `RUST_LOG` | - | Tracing/log filter directives |
+| `LOG_FORMAT` | pretty (debug), json (release) | Console format: json, compact, or pretty; invalid values stop logging initialization |
+| `LOG_CONSOLE_ENABLED` | true | Log to stdout; stays enabled if both sinks are disabled |
+| `LOG_FILE_ENABLED` | false | Enable optional JSON log files |
+| `LOG_DIR` | .stargate/logs | Directory used only when file logging is enabled |
 | `OTEL_ENABLED` | auto | OTLP export; on when an endpoint is set |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` / `_PROTOCOL` | - / grpc | OTLP target (per-signal overrides exist) |
 | `AUDIT_RELAY_ENABLED` | true | Run the outbox relay (cluster) |

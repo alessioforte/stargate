@@ -14,7 +14,7 @@ persistence:
 
 runtimeConfig:
   data:
-    LOG_FILE_ENABLED: "false"
+    LOG_FORMAT: json
     JWT_ISSUER: https://identity.example.com
     OAUTH_BASE_URL: https://identity.example.com
     CONSOLE_PUBLIC_URL: https://identity.example.com

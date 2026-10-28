@@ -33,8 +33,7 @@ services:
       SMTP_PORT: "1025"
       SMTP_FROM: Stargate <no-reply@stargate.localhost>
       EMAIL_OTP_PEPPER: quickstart-only-change-me
-      LOG_FILE_ENABLED: "false"
-      LOG_CONSOLE_ENABLED: "true"
+      LOG_FORMAT: json
     volumes:
       # Gateway config and access-control rules (editable from the Console).
       - stargate-config:/app/.stargate/config

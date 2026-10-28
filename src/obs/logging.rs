@@ -1,11 +1,10 @@
 use crate::{
-    conf::env::bool_or,
     ctx::{RequestContext, sanitize_ingress_headers},
     obs::telemetry,
     web::request::RequestExt,
 };
 use chrono::Utc;
-use std::time::Instant;
+use std::{io::IsTerminal, time::Instant};
 use tracing::info;
 use tracing_subscriber::{
     EnvFilter, Registry,
@@ -14,6 +13,9 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 use ulid::Ulid;
+
+mod settings;
+pub use settings::{LogFormat, Settings};
 
 pub struct LogGuard {
     _guards: Vec<tracing_appender::non_blocking::WorkerGuard>,
@@ -26,19 +28,13 @@ impl LogGuard {
     }
 }
 
-pub fn init() -> LogGuard {
+pub fn init(settings: Settings) -> LogGuard {
     let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| ".stargate/logs".to_string());
     let env_filter = EnvFilter::from_default_env();
-    let mut file_enabled = bool_or("LOG_FILE_ENABLED", true);
-    let mut console_enabled = bool_or("LOG_CONSOLE_ENABLED", cfg!(debug_assertions));
-    let pretty_console = bool_or("LOG_PRETTY_CONSOLE", cfg!(debug_assertions));
+    let file_enabled = settings.file_enabled;
+    let console_enabled = settings.console_enabled;
     let mut guards = Vec::new();
     let telemetry_guard = telemetry::init();
-
-    if !file_enabled && !console_enabled {
-        console_enabled = true;
-        file_enabled = false;
-    }
 
     let file_layer = if file_enabled {
         let file_appender = tracing_appender::rolling::daily(log_dir.clone(), "stargate.log");
@@ -47,6 +43,8 @@ pub fn init() -> LogGuard {
         Some(
             fmt::layer()
                 .json()
+                .with_current_span(true)
+                .with_span_list(true)
                 .with_writer(non_blocking)
                 .with_timer(UtcTime::rfc_3339())
                 .with_span_events(fmt::format::FmtSpan::CLOSE)
@@ -73,12 +71,17 @@ pub fn init() -> LogGuard {
             .with_thread_names(true)
             .with_target(true)
             .with_level(true)
-            .with_ansi(true);
-        if pretty_console {
-            Some(base.pretty().boxed())
-        } else {
-            Some(base.compact().boxed())
-        }
+            .with_writer(std::io::stdout)
+            .with_ansi(settings.format.ansi(std::io::stdout().is_terminal()));
+        Some(match settings.format {
+            LogFormat::Json => base
+                .json()
+                .with_current_span(true)
+                .with_span_list(true)
+                .boxed(),
+            LogFormat::Pretty => base.pretty().boxed(),
+            LogFormat::Compact => base.compact().boxed(),
+        })
     } else {
         None
     };
@@ -116,7 +119,7 @@ pub fn init() -> LogGuard {
         log_dir,
         file_enabled,
         console_enabled,
-        pretty_console = console_enabled && pretty_console,
+        format = settings.format.as_str(),
         otel_enabled = telemetry_guard.enabled(),
         "Logging initialized"
     );
@@ -176,6 +179,7 @@ pub async fn trace_middleware(
     let span = tracing::info_span!(
         "http_request",
         request_id = %request_id,
+        trace_id = tracing::field::Empty,
         http.method = %method,
         http.path = %path,
         http.query = %query,
@@ -195,6 +199,9 @@ pub async fn trace_middleware(
 
     telemetry::set_span_parent_from_headers(&span, req.headers());
     let trace_id = telemetry::trace_id_from_span(&span);
+    if let Some(trace_id) = trace_id.as_deref() {
+        span.record("trace_id", trace_id);
+    }
     req.extensions_mut().insert(RequestContext::new(
         request_id.clone(),
         now,
@@ -222,48 +229,4 @@ pub async fn trace_middleware(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{Router, body::Body, middleware::from_fn, routing::get};
-    use http::{Request, StatusCode};
-    use tower::ServiceExt;
-
-    async fn assert_sanitized(req: axum::extract::Request) -> StatusCode {
-        assert!(
-            req.headers()
-                .get_all("stargate-context")
-                .iter()
-                .next()
-                .is_none()
-        );
-        let request_ids = req
-            .headers()
-            .get_all("x-request-id")
-            .iter()
-            .collect::<Vec<_>>();
-        assert_eq!(request_ids.len(), 1);
-        let context = req.extensions().get::<RequestContext>().unwrap();
-        assert_eq!(request_ids[0], context.request_id());
-        StatusCode::NO_CONTENT
-    }
-
-    #[tokio::test]
-    async fn trace_boundary_sanitizes_gateway_owned_headers_before_handler() {
-        let app = Router::new()
-            .route("/", get(assert_sanitized))
-            .layer(from_fn(trace_middleware));
-        let request = Request::builder()
-            .uri("/")
-            .header("stargate-context", "attacker-one")
-            .header("stargate-context", "attacker-two")
-            .header("x-request-id", "attacker-one")
-            .header("x-request-id", "attacker-two")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = app.oneshot(request).await.unwrap();
-
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        assert_eq!(response.headers().get_all("x-request-id").iter().count(), 1);
-    }
-}
+mod tests;
