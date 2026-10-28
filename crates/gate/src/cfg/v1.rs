@@ -46,9 +46,8 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn to_file(&self, path: &str) {
-        let config_str = serde_saphyr::to_string(self).expect("Unable to serialize config");
-        std::fs::write(path, config_str).expect("Unable to write config file");
+    pub fn to_yaml_string(&self) -> Result<String, serde_saphyr::SerializeError> {
+        serde_saphyr::to_string(self)
     }
 
     pub fn compile(&self) -> Result<CompiledConfig, CompileError> {

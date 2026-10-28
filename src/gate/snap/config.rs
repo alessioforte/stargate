@@ -1,7 +1,13 @@
 use crate::ctx::sign;
+use crate::data::db;
+use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::transport::{self, PreparedTransports, TransportPreparationError};
+use ::db::ent::{
+    ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary,
+    TrustedAuditContext, TrustedBackgroundActor,
+};
 use gate::cfg::{Config, RuntimeConfig};
-use std::{env, path::Path};
+use std::{env, sync::Arc};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GatewayPreparationError {
@@ -50,17 +56,114 @@ pub(super) fn prepare_runtime_config(
     Ok(PreparedConfig { config, transports })
 }
 
-pub(in crate::gate) fn get_config_path() -> std::io::Result<String> {
-    let dir = crate::conf::config_dir();
-    if !Path::new(&dir).exists() {
-        std::fs::create_dir_all(&dir)?;
-    }
+pub(in crate::gate) fn get_config_path() -> String {
     let filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
-    Ok(format!("{}/{}", dir, filename))
+    format!("{}/{}", crate::conf::config_dir(), filename)
 }
 
-pub(in crate::gate) fn load_config_from_path(
-    path: &str,
-) -> Result<PreparedConfig, GatewayPreparationError> {
-    prepare_runtime_config(RuntimeConfig::from_file(path)?)
+pub(in crate::gate) async fn load_gateway_document() -> anyhow::Result<ConfigDocument> {
+    load_gateway_document_from_path(&get_config_path()).await
 }
+
+async fn load_gateway_document_from_path(path: &str) -> anyhow::Result<ConfigDocument> {
+    if let Some(document) = db::get_active_config_document(ConfigKind::Gateway).await? {
+        return Ok(document);
+    }
+    let content = match tokio::fs::read_to_string(path).await {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            anyhow::bail!("no gateway configuration in the database and no seed file at {path}")
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let context = TrustedAuditContext::background(
+        TrustedAuditBoundary::control_plane(),
+        TrustedBackgroundActor::system(None),
+    );
+    match db::save_config_document(
+        ConfigKind::Gateway,
+        content,
+        None,
+        ConfigSource::Seed,
+        context,
+    )
+    .await?
+    {
+        ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => Ok(document),
+        ConfigSaveOutcome::Conflict { .. } => db::get_active_config_document(ConfigKind::Gateway)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!("gateway configuration disappeared after concurrent seeding")
+            }),
+    }
+}
+
+pub(in crate::gate) fn prepare_gateway_config(
+    yaml: &str,
+) -> Result<PreparedConfig, GatewayPreparationError> {
+    prepare_runtime_config(RuntimeConfig::from_yaml_str(yaml)?)
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ConfigActivation {
+    Applied,
+    RestartRequired,
+}
+
+pub(crate) async fn save_gateway_config(
+    gate: Arc<super::Gate>,
+    config: Config,
+    revision: String,
+    context: TrustedAuditContext,
+) -> Result<(ConfigDocument, ConfigActivation), ErrorResponse> {
+    let runtime = gate.clone();
+    let (yaml, activation) = tokio::task::spawn_blocking(move || {
+        let prepared = prepare_config(config).map_err(invalid_config)?;
+        let yaml = prepared
+            .config
+            .raw
+            .to_yaml_string()
+            .map_err(ErrorResponse::internal)?;
+        let activation = match runtime.prepare_activation(prepared) {
+            Ok(activation) => Some(activation),
+            Err(GatewayPreparationError::BudgetChange) => None,
+            Err(error) => return Err(invalid_config(error)),
+        };
+        Ok::<_, ErrorResponse>((yaml, activation))
+    })
+    .await
+    .map_err(ErrorResponse::internal)??;
+    let document = match db::save_config_document(
+        ConfigKind::Gateway,
+        yaml,
+        Some(revision),
+        ConfigSource::AdminApi,
+        context,
+    )
+    .await
+    .map_err(ErrorResponse::internal)?
+    {
+        ConfigSaveOutcome::Conflict { .. } => {
+            return Err(ErrorResponse::new(ErrorCode::ConfigurationRevisionConflict));
+        }
+        ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => document,
+    };
+    let outcome = match activation {
+        Some(activation) => {
+            gate.publish(activation).map_err(invalid_config)?;
+            crate::obs::telemetry::record_config_reload("gateway_config", "success");
+            ConfigActivation::Applied
+        }
+        None => ConfigActivation::RestartRequired,
+    };
+    Ok((document, outcome))
+}
+
+fn invalid_config(error: GatewayPreparationError) -> ErrorResponse {
+    crate::obs::telemetry::record_config_reload("gateway_config", error.reload_outcome());
+    ErrorResponse::new(ErrorCode::ConfigurationInvalid).with_message(error.to_string())
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests;

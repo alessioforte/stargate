@@ -6,16 +6,10 @@ use crate::{
     },
 };
 use ace::{Policy, PolicyAction, PolicyEngine, ResourceAction};
+use db::ent::{ConfigSaveOutcome, TrustedAuditContext};
 use gate::PolicySnapshot;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -199,20 +193,22 @@ struct ParsedDocument {
     diagnostics: Vec<PolicyDiagnostic>,
 }
 
-static POLICY_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+pub async fn read_rules() -> Result<AccessControlRulesResponse, ErrorResponse> {
+    let document = super::storage::read_policies_document()
+        .await
+        .map_err(ErrorResponse::internal)?;
+    Ok(rules_response(document.content, document.revision))
+}
 
-pub fn read_rules() -> Result<AccessControlRulesResponse, ErrorResponse> {
-    let path = crate::iam::authz::storage::get_policies_path();
-    let content = read_policy_file(&path)?;
+fn rules_response(content: String, revision: String) -> AccessControlRulesResponse {
     let parsed = parse_policy_document(&content);
-
-    Ok(AccessControlRulesResponse {
-        revision: revision_for(&content),
+    AccessControlRulesResponse {
+        revision,
         content,
         valid: parsed.diagnostics.is_empty(),
         diagnostics: parsed.diagnostics,
         rules: parsed.rules.into_iter().map(|rule| rule.schema).collect(),
-    })
+    }
 }
 
 pub fn validate_rules(
@@ -226,37 +222,26 @@ pub fn validate_rules(
     }
 }
 
-pub fn update_rules(
+pub async fn update_rules(
     request: UpdateAccessControlRulesRequest,
+    context: TrustedAuditContext,
 ) -> Result<AccessControlRulesResponse, ErrorResponse> {
-    let _guard = POLICY_WRITE_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| ErrorResponse::internal("policy write lock poisoned"))?;
-
-    let path = crate::iam::authz::storage::get_policies_path();
-    let current = read_policy_file(&path)?;
-    let current_revision = revision_for(&current);
-    if request.revision != current_revision {
-        return Err(ErrorResponse::new(ErrorCode::AccessControlRevisionConflict)
-            .with_param("revision", request.revision));
-    }
-
     let parsed = parse_policy_document(&request.content);
     if !parsed.diagnostics.is_empty() {
         return Err(ErrorResponse::new(ErrorCode::AccessControlPoliciesInvalid)
             .with_param("diagnostics", format_diagnostics(&parsed.diagnostics)));
     }
-
-    atomic_write(&path, request.content.as_bytes()).map_err(ErrorResponse::internal)?;
-
-    Ok(AccessControlRulesResponse {
-        revision: revision_for(&request.content),
-        content: request.content,
-        valid: true,
-        diagnostics: Vec::new(),
-        rules: parsed.rules.into_iter().map(|rule| rule.schema).collect(),
-    })
+    match super::storage::save_policies_document(request.content, request.revision, context)
+        .await
+        .map_err(ErrorResponse::internal)?
+    {
+        ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => {
+            Ok(rules_response(document.content, document.revision))
+        }
+        ConfigSaveOutcome::Conflict { .. } => {
+            Err(ErrorResponse::new(ErrorCode::AccessControlRevisionConflict))
+        }
+    }
 }
 
 pub fn evaluate_rules(
@@ -343,22 +328,13 @@ fn evaluate_capabilities_with_engine(
     }
 }
 
-pub(crate) fn load_policy_snapshot(path: &str) -> Result<PolicySnapshot, ErrorResponse> {
-    let content = read_policy_file(path)?;
-    compile_policy_snapshot(&content)
-}
-
-fn compile_policy_snapshot(content: &str) -> Result<PolicySnapshot, ErrorResponse> {
+pub(crate) fn compile_policy_snapshot(content: &str) -> Result<PolicySnapshot, ErrorResponse> {
     let parsed = parse_evaluable_document(content)?;
     let mut engine = PolicyEngine::new();
     for rule in parsed.rules {
         engine.add_policy(rule.policy);
     }
     Ok(PolicySnapshot::new(engine, revision_for(content)))
-}
-
-fn read_policy_file(path: &str) -> Result<String, ErrorResponse> {
-    fs::read_to_string(path).map_err(ErrorResponse::internal)
 }
 
 fn parse_policy_document(content: &str) -> ParsedDocument {
@@ -529,50 +505,6 @@ fn format_diagnostics(diagnostics: &[PolicyDiagnostic]) -> String {
 
 fn revision_for(content: &str) -> String {
     db::ent::config_revision(content)
-}
-
-fn atomic_write(path: &str, content: &[u8]) -> std::io::Result<()> {
-    let path = Path::new(path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let tmp_path = temp_path_for(path);
-    let write_result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp_path)?;
-        file.write_all(content)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&tmp_path, path)?;
-        Ok(())
-    })();
-
-    if write_result.is_err() {
-        let _ = fs::remove_file(&tmp_path);
-    }
-
-    write_result
-}
-
-fn temp_path_for(path: &Path) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("policies");
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    parent.join(format!(
-        ".{}.{}.{}.tmp",
-        file_name,
-        std::process::id(),
-        nanos
-    ))
 }
 
 #[cfg(test)]

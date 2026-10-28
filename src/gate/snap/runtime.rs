@@ -35,6 +35,11 @@ pub struct Gate {
     pub resources: Arc<resources::ProcessResources>,
 }
 
+pub(crate) struct PreparedActivation {
+    core: gate::Runtime,
+    prepared: PreparedConfig,
+}
+
 impl Gate {
     pub(crate) fn new(
         store: Arc<lim::State>,
@@ -67,16 +72,31 @@ impl Gate {
         self.runtime.load_full()
     }
 
+    #[cfg(test)]
     pub(crate) fn activate(
         &self,
         prepared: PreparedConfig,
     ) -> Result<u64, GatewayPreparationError> {
+        self.publish(self.prepare_activation(prepared)?)
+    }
+
+    pub(crate) fn prepare_activation(
+        &self,
+        prepared: PreparedConfig,
+    ) -> Result<PreparedActivation, GatewayPreparationError> {
         if prepared.config.compiled.runtime.budgets != self.resources.budgets {
             return Err(GatewayPreparationError::BudgetChange);
         }
         let core = self.builder.prepare(&prepared.config)?;
-        // Serialize only activation: file reads, TLS and core construction all
-        // finish before touching the active generation or its probes.
+        Ok(PreparedActivation { core, prepared })
+    }
+
+    pub(crate) fn publish(
+        &self,
+        activation: PreparedActivation,
+    ) -> Result<u64, GatewayPreparationError> {
+        let PreparedActivation { core, prepared } = activation;
+        // Preparation finishes before touching the active generation or its probes.
         let _activation = self.activation.lock().expect("Activation lock poisoned");
         let version = self
             .runtime

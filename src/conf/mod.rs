@@ -12,8 +12,8 @@ pub fn public_base_url() -> String {
     oidc::metadata::endpoint_base_url(&jwt::issuer_from_env(), configured.as_deref(), &port)
 }
 
-/// Directory holding the gateway configuration and the access-control
-/// policies (`CONFIG_PATH`, default `.stargate`).
+/// Directory holding gateway/policy seed files and other runtime assets
+/// (`CONFIG_PATH`, default `.stargate`).
 pub fn config_dir() -> String {
     std::env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string())
 }

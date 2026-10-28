@@ -101,7 +101,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   checks (`verification.rs`), session JWT config and keyring (`jwt.rs`,
   `jwt_keyring.rs`), login guard, JWT revocation (`revocation.rs`).
 - `authz/`: ACE evaluation (`evaluation.rs`), rule management (`rules.rs`), the
-  policies file (`storage.rs`), super-admin checks (`admin.rs`).
+  database-backed policy documents and their seed (`storage.rs`), super-admin checks (`admin.rs`).
 - `sess/`: sign-in (`issuance.rs`: `start_user_session` returns the tokens; `api`
   adds the cookie and JSON), session registry (`registry.rs`), token minting (`tokens.rs`).
 - `user/`: signup requests, email verification, nicknames, display names (`profile.rs`).
@@ -174,8 +174,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
    `Idempotency-Key`), buffer only when needed, then execute HTTP, WebSocket, or
    direct response and apply response headers.
 
-Modules: `snap/` (snapshot lifecycle: `config.rs` preparation/files, `runtime.rs`
-atomic activation, `reload.rs` watchers, `body.rs` pinning during streaming),
+Modules: `snap/` (snapshot lifecycle: `config.rs` database documents, seed, preparation and saves,
+`runtime.rs` preparation/publication, `reload.rs` text activation, `body.rs` pinning during streaming),
 `resources.rs` (process admission, memory permits, tracked tasks), `transport/`
 (prepared outgoing HTTP/TLS/mTLS clients), `limits.rs` (ingress bucket key, limit
 selection/validation), `request.rs` (orchestration), `authentication.rs`,
@@ -312,22 +312,29 @@ context feeds ACE and org-level limits. Guide: `docs/multi-org-guide.md`.
 - ACE `PolicySnapshot` (engine + `sha256:*` revision)
 - Internal-context signer (when configured)
 
-### Config Hot-Reload
+### Configuration Storage and Activation
 
-`notify` watches `config.yaml` and the ACE policy file; content comparison avoids
-false positives.
-- A candidate is parsed, compiled, internal-context-preflighted, and fully prepared
-  (transports, graph, balancers, limiter, unstarted probes) before publishing.
-- On success: next config version, atomic snapshot swap, new probes start, old retire.
-  Pinned requests, bodies, mirrors, and WebSockets keep their generation.
-- On failure: log, record a bounded reload outcome, keep the previous snapshot.
-- Admin config endpoints run the same preparation before saving. Replacing TLS
-  files alone does not reload.
+Gateway configuration and ACE rules come from the active `config_documents` rows in SQL.
+On an empty database, startup seeds each kind once: the gateway from
+`CONFIG_PATH/CONFIG_FILENAME`, and policies from `CONFIG_PATH/policies` (empty when absent).
+A missing gateway seed fails startup. Existing documents take precedence over files.
+The process never creates or writes configuration or policy files and has no file watchers.
+Invalid active documents fail startup.
 
-ACE rules (`.stargate/policies`) are managed separately via
-`/admin/access-control/rules` (GET, PUT with revision, `/validate`, `/evaluate`)
-and `/admin/access-control/capabilities/evaluate`; updates do not bump the
-gateway config version. `# @id` / `# @description` comments above a rule are metadata.
+Admin configuration reads return the document revision, version, update time/actor, and
+parsed config (or the stored YAML with `?format=yaml`), with an ETag. Writes require the
+current revision, fully prepare the candidate before saving it, and append the version
+with its safe audit event in one transaction. Conflicts return
+`409 configuration.revision_conflict`. Successful saves publish immediately on the receiving
+replica. Capacity changes are saved with `activation: restart_required` and retain the
+current runtime until restart. Pinned requests, bodies, mirrors, and WebSockets keep
+their generation. Replacing TLS files alone does not reload prepared transports.
+Propagation to other replicas is not implemented yet (pattern A task 1.2c).
+
+ACE rules are managed separately via `/admin/access-control/rules` (GET, PUT with revision,
+`/validate`, `/evaluate`) and `/admin/access-control/capabilities/evaluate`. Their database
+updates publish the policy snapshot on the receiving replica without bumping the gateway
+config version. `# @id` / `# @description` comments above a rule are metadata.
 
 ### Feature Flags
 
@@ -671,6 +678,8 @@ the same logical columns on PostgreSQL and SQLite.
 
 | Var | Default | Purpose |
 |-----|---------|---------|
+| `CONFIG_PATH` | `.stargate` | Directory for gateway/policy seed files; also holds other runtime assets |
+| `CONFIG_FILENAME` | `config.yaml` | Gateway seed filename, used only when its database document is absent |
 | `PORT` | 5050 | HTTP listen port |
 | `STARGATE_RUNTIME_PROFILE` | - | `edge` or `cluster` (validated against the build) |
 | `JWT_ALGORITHM` | active key / `RS256` | Must match the active key when set; picks the first generated key |

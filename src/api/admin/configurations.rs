@@ -1,218 +1,130 @@
 use super::{
     authorization::{self, Permission},
-    extract_json, extract_query,
+    extract_json, extract_query, take_admin_audit_context,
 };
+use crate::data::db;
 use crate::err::{ErrorCode, ErrorResponse};
-use axum::Json;
-use axum::extract::Request;
-use axum::response::{IntoResponse, Response};
+use crate::gate::{ConfigActivation, Gate, save_gateway_config};
+use ::db::ent::{ConfigDocument, ConfigKind};
+use axum::{
+    Json,
+    extract::Request,
+    response::{IntoResponse, Response},
+};
 use gate::cfg::{Config, RuntimeConfig};
-use http::header::CONTENT_TYPE;
-use serde::Deserialize;
-use std::env;
-use std::fs;
+use http::header::{CONTENT_TYPE, ETAG};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 struct ConfigFormatQuery {
     format: Option<String>,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigurationDocument {
+    revision: String,
+    version: i64,
+    updated_at: String,
+    updated_by: Option<String>,
+    #[schema(value_type = Object)]
+    config: Config,
+}
+
+impl ConfigurationDocument {
+    fn from_document(document: ConfigDocument) -> Result<Self, ErrorResponse> {
+        let config = RuntimeConfig::from_yaml_str(&document.content)
+            .map_err(ErrorResponse::internal)?
+            .raw;
+        Ok(Self {
+            revision: document.revision,
+            version: document.version,
+            updated_at: document.created_at.to_rfc3339(),
+            updated_by: document.created_by,
+            config,
+        })
+    }
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateConfigurationRequest {
+    revision: String,
+    #[schema(value_type = Object)]
+    config: Config,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct UpdateConfigurationResponse {
+    #[serde(flatten)]
+    document: ConfigurationDocument,
+    activation: ConfigActivation,
+}
+
 #[utoipa::path(
     get,
     path = "/admin/configurations",
     tags = ["Admin", "Configurations"],
+    params(ConfigFormatQuery),
     responses(
-        (status = 200, description = "OK"),
+        (status = 200, description = "Gateway configuration document", body = ConfigurationDocument),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
-        (status = 404, description = "Config file not found", body = ErrorResponse),
+        (status = 404, description = "Gateway configuration not found", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
 pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse> {
     authorization::require(&req, Permission::ConfigurationsRead)?;
-
     let query: ConfigFormatQuery = extract_query(&req)?;
-    let format = query.format.unwrap_or_else(|| "json".to_string());
-
-    let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
-    let config_filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
-    let path = format!("{}/{}", config_path, config_filename);
-
-    let content = fs::read_to_string(&path)
-        .map_err(|_| ErrorResponse::new(ErrorCode::ConfigurationNotFound))?;
-
-    match format.as_str() {
-        "yaml" => Ok(http::Response::builder()
-            .status(200)
-            .header(CONTENT_TYPE, "application/yaml")
-            .body(axum::body::Body::from(content))
-            .unwrap()
-            .into_response()),
-        _ => {
-            let config = RuntimeConfig::from_yaml_str(&content).map_err(ErrorResponse::internal)?;
-            Ok(Json(config.raw).into_response())
-        }
-    }
+    let document = db::get_active_config_document(ConfigKind::Gateway)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::ConfigurationNotFound))?;
+    let etag = format!("\"{}\"", document.revision);
+    let mut response = if query.format.as_deref() == Some("yaml") {
+        ([(CONTENT_TYPE, "application/yaml")], document.content).into_response()
+    } else {
+        Json(ConfigurationDocument::from_document(document)?).into_response()
+    };
+    response
+        .headers_mut()
+        .insert(ETAG, etag.parse().map_err(ErrorResponse::internal)?);
+    Ok(response)
 }
 
 #[utoipa::path(
     put,
     path = "/admin/configurations",
     tags = ["Admin", "Configurations"],
+    request_body = UpdateConfigurationRequest,
     responses(
-        (status = 200, description = "OK"),
-        (status = 400, description = "Bad request", body = ErrorResponse),
+        (status = 200, description = "Configuration saved", body = UpdateConfigurationResponse),
+        (status = 400, description = "Invalid configuration", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 409, description = "Configuration revision conflict", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-pub async fn update_configurations(req: Request) -> Result<Response, ErrorResponse> {
+pub async fn update_configurations(mut req: Request) -> Result<Response, ErrorResponse> {
     authorization::require(&req, Permission::ConfigurationsUpdate)?;
-
-    let config: Config = extract_json(req).await?;
-    let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| ".stargate".to_string());
-    let config_filename = env::var("CONFIG_FILENAME").unwrap_or_else(|_| "config.yaml".to_string());
-    let path = format!("{}/{}", config_path, config_filename);
-    tokio::task::spawn_blocking(move || save_configuration(config, &path))
-        .await
-        .map_err(ErrorResponse::internal)??;
-
-    Ok(http::Response::builder()
-        .status(200)
-        .body(axum::body::Body::empty())
-        .unwrap()
-        .into_response())
+    let context = take_admin_audit_context(req.extensions_mut())?;
+    let gate = req
+        .extensions()
+        .get::<Arc<Gate>>()
+        .cloned()
+        .ok_or_else(|| ErrorResponse::internal("Gateway runtime extension is missing"))?;
+    let payload: UpdateConfigurationRequest = extract_json(req).await?;
+    let (document, activation) =
+        save_gateway_config(gate, payload.config, payload.revision, context).await?;
+    Ok(Json(UpdateConfigurationResponse {
+        document: ConfigurationDocument::from_document(document)?,
+        activation,
+    })
+    .into_response())
 }
 
-fn save_configuration(config: Config, path: &str) -> Result<(), ErrorResponse> {
-    let prepared = crate::gate::prepare_config(config).map_err(|error| {
-        ErrorResponse::new(ErrorCode::ConfigurationInvalid).with_message(error.to_string())
-    })?;
-    prepared.config.raw.to_file(path);
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{save_configuration, update_configurations};
-    use crate::api::admin::{
-        AdminPrincipal,
-        authorization::{AdminAuthorization, Permission},
-    };
-    use axum::body::Body;
-    use gate::cfg::{Config, RuntimeConfig, SCHEMA};
-    use http::{Request, StatusCode};
-
-    #[tokio::test]
-    async fn admin_input_requires_the_supported_explicit_schema() {
-        let defaults = serde_json::to_value(Config::default()).unwrap();
-        for mut payload in [
-            serde_json::json!({ "http": {} }),
-            serde_json::json!({ "schema": null }),
-            serde_json::json!({ "schema": "stargate/v2alpha1" }),
-            serde_json::json!({ "schema": "stargate/v2" }),
-        ] {
-            payload["ingress"] = defaults["ingress"].clone();
-            payload["limits"] = defaults["limits"].clone();
-            let mut req = Request::builder()
-                .method("PUT")
-                .uri("/admin/configurations")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
-                .unwrap();
-            req.extensions_mut().insert(AdminAuthorization::admin_key(
-                AdminPrincipal::AdminKey {
-                    key_id: "schema-test".to_string(),
-                },
-                [Permission::ConfigurationsUpdate].into_iter().collect(),
-            ));
-            let error = update_configurations(req).await.unwrap_err();
-            assert_eq!(error.status, StatusCode::BAD_REQUEST);
-            assert!(error.message.contains("schema"));
-        }
-    }
-
-    #[test]
-    fn invalid_admin_submission_does_not_replace_the_saved_config() {
-        let path = std::env::temp_dir().join(format!(
-            "stargate-admin-config-{}.yaml",
-            ulid::Ulid::generate()
-        ));
-        let path_str = path.to_str().unwrap();
-        save_configuration(Config::default(), path_str).unwrap();
-        let original = std::fs::read(&path).unwrap();
-        assert_eq!(
-            RuntimeConfig::from_file(path_str).unwrap().raw.schema,
-            SCHEMA
-        );
-
-        for schema in ["stargate/v2alpha1", "stargate/v2", ""] {
-            let config = Config {
-                schema: schema.to_string(),
-                ..Config::default()
-            };
-            let error = save_configuration(config, path_str).unwrap_err();
-            assert_eq!(error.status, StatusCode::BAD_REQUEST);
-            assert!(error.message.contains(SCHEMA));
-            assert_eq!(std::fs::read(&path).unwrap(), original);
-        }
-        for (limit, timeout) in [("missing", "250ms"), ("ingress", "0s")] {
-            let mut config = Config::default();
-            config.ingress.limit = limit.into();
-            config.ingress.timeout = timeout.into();
-            let error = save_configuration(config, path_str).unwrap_err();
-            assert_eq!(error.status, StatusCode::BAD_REQUEST);
-            assert!(error.message.contains("ingress"));
-            assert_eq!(std::fs::read(&path).unwrap(), original);
-        }
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn unprepared_admin_transports_do_not_replace_the_saved_config() {
-        use crate::gate::test_support::{SERVER_KEY, TlsFiles};
-
-        let files = TlsFiles::new();
-        let path = files.path("config.yaml");
-        save_configuration(Config::default(), &path).unwrap();
-        let original = std::fs::read(&path).unwrap();
-        let valid = files.config("https://localhost:8443");
-
-        let mut missing_key = valid.clone();
-        missing_key.mtls.as_mut().unwrap().client_key_path = files.path("missing-key.pem");
-        let mut mismatched_key = valid.clone();
-        mismatched_key.mtls.as_mut().unwrap().client_key_path =
-            files.write("other-key.pem", SERVER_KEY);
-        let mut invalid_duration = serde_json::to_value(&valid).unwrap();
-        invalid_duration["http"]["upstreams"]["secure"]["transport"] =
-            serde_json::json!({ "connect_timeout": "9223372036854775807s" });
-        let mut invalid_limit = serde_json::to_value(&valid).unwrap();
-        invalid_limit["limits"] = serde_json::json!({"default": {"strategy": "gcra", "params": {"max_burst": 0, "replenish_1_per": "1s"}}});
-        let mut invalid_probe = serde_json::to_value(&valid).unwrap();
-        invalid_probe["http"]["upstreams"]["secure"]["load_balancer"]["liveness_probe"] =
-            serde_json::json!({"path": "/health", "interval": "0s"});
-
-        let mut invalid_runtime = valid.clone();
-        invalid_runtime.runtime.response_header_timeout = "0s".into();
-        let mut invalid_budget = valid.clone();
-        invalid_budget.runtime.primary_concurrency = 0;
-
-        for candidate in [
-            invalid_runtime,
-            invalid_budget,
-            missing_key,
-            mismatched_key,
-            serde_json::from_value(invalid_duration).unwrap(),
-            serde_json::from_value(invalid_limit).unwrap(),
-            serde_json::from_value(invalid_probe).unwrap(),
-        ] {
-            let error = save_configuration(candidate, &path).unwrap_err();
-            assert_eq!(error.status, StatusCode::BAD_REQUEST);
-            assert_eq!(std::fs::read(&path).unwrap(), original);
-        }
-        save_configuration(valid, &path).unwrap();
-        assert!(RuntimeConfig::from_file(&path).unwrap().raw.mtls.is_some());
-    }
-}
+#[cfg(all(test, feature = "sqlite"))]
+mod tests;

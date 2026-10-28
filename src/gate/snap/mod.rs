@@ -6,12 +6,15 @@ mod reload;
 mod runtime;
 
 pub use body::retain_runtime;
-pub(crate) use config::{GatewayPreparationError, prepare_config};
-pub(super) use config::{get_config_path, load_config_from_path};
 #[cfg(all(test, feature = "memory"))]
-pub(crate) use reload::reload_gateway_config_from_path;
-pub use reload::reload_policy_engine;
-pub(super) use reload::{watch_config_file, watch_policies_file};
+pub(crate) use config::GatewayPreparationError;
+#[cfg(test)]
+pub(crate) use config::prepare_config;
+pub(crate) use config::{ConfigActivation, save_gateway_config};
+pub(super) use config::{load_gateway_document, prepare_gateway_config};
+#[cfg(all(test, feature = "memory"))]
+pub(crate) use reload::apply_gateway_config;
+pub(crate) use reload::apply_policy_document;
 #[cfg(test)]
 pub(super) use runtime::test_support;
 pub use runtime::{Gate, RuntimeSnapshot};

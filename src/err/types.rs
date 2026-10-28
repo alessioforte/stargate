@@ -110,6 +110,7 @@ pub enum ErrorCode {
     OutboxEventNotFound,
     ConfigurationNotFound,
     ConfigurationInvalid,
+    ConfigurationRevisionConflict,
     AccessControlRevisionConflict,
     AccessControlPoliciesInvalid,
     AccessControlEvaluationUnavailable,
@@ -254,6 +255,7 @@ impl ErrorCode {
         Self::OutboxEventNotFound,
         Self::ConfigurationNotFound,
         Self::ConfigurationInvalid,
+        Self::ConfigurationRevisionConflict,
         Self::AccessControlRevisionConflict,
         Self::AccessControlPoliciesInvalid,
         Self::AccessControlEvaluationUnavailable,
@@ -406,6 +408,7 @@ impl ErrorCode {
             Self::OutboxEventNotFound => "outbox_event.not_found",
             Self::ConfigurationNotFound => "configuration.not_found",
             Self::ConfigurationInvalid => "configuration.invalid",
+            Self::ConfigurationRevisionConflict => "configuration.revision_conflict",
             Self::AccessControlRevisionConflict => "access_control.revision_conflict",
             Self::AccessControlPoliciesInvalid => "access_control.policies_invalid",
             Self::AccessControlEvaluationUnavailable => "access_control.evaluation_unavailable",
@@ -776,13 +779,20 @@ impl ErrorCode {
             Self::OutboxEventNotFound => {
                 definition(Status::NOT_FOUND, NotFound, "Outbox event not found")
             }
-            Self::ConfigurationNotFound => {
-                definition(Status::NOT_FOUND, NotFound, "Configuration file not found")
-            }
+            Self::ConfigurationNotFound => definition(
+                Status::NOT_FOUND,
+                NotFound,
+                "Gateway configuration not found",
+            ),
             Self::ConfigurationInvalid => definition(
                 Status::BAD_REQUEST,
                 Validation,
                 "Gateway configuration is invalid",
+            ),
+            Self::ConfigurationRevisionConflict => definition(
+                Status::CONFLICT,
+                Conflict,
+                "Gateway configuration changed since it was loaded",
             ),
             Self::AccessControlRevisionConflict => definition(
                 Status::CONFLICT,

@@ -1,6 +1,6 @@
 use super::{
     authorization::{self, Permission},
-    extract_json,
+    extract_json, take_admin_audit_context,
 };
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::Gate;
@@ -30,7 +30,7 @@ use std::sync::Arc;
 pub async fn get_access_control_rules(req: Request) -> Result<Response, ErrorResponse> {
     authorization::require(&req, Permission::AccessControlRead)?;
 
-    Ok(Json(read_rules()?).into_response())
+    Ok(Json(read_rules().await?).into_response())
 }
 
 #[utoipa::path(
@@ -47,13 +47,14 @@ pub async fn get_access_control_rules(req: Request) -> Result<Response, ErrorRes
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-pub async fn update_access_control_rules(req: Request) -> Result<Response, ErrorResponse> {
+pub async fn update_access_control_rules(mut req: Request) -> Result<Response, ErrorResponse> {
     authorization::require(&req, Permission::AccessControlUpdate)?;
 
+    let context = take_admin_audit_context(req.extensions_mut())?;
     let gate = gate_from_request(&req)?;
     let payload: UpdateAccessControlRulesRequest = extract_json(req).await?;
-    let response = update_rules(payload)?;
-    crate::gate::reload_policy_engine(gate.as_ref())?;
+    let response = update_rules(payload, context).await?;
+    crate::gate::apply_policy_document(gate.as_ref(), &response.content)?;
 
     Ok(Json(response).into_response())
 }

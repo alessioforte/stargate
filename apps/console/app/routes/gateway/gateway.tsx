@@ -15,7 +15,7 @@ const GatewayPage = () => {
 
   const { configuration, getConfigurations, updateConfigurations } = useStore();
 
-  const savedConfig = configuration.data;
+  const savedConfig = configuration.data?.config;
   const builder = useGatewayConfigBuilder(savedConfig);
 
   useEffect(() => {
@@ -39,10 +39,7 @@ const GatewayPage = () => {
   const handleSave = async () => {
     if (!builder.config) return;
 
-    const saved = await updateConfigurations(builder.config);
-    if (saved) {
-      getConfigurations();
-    }
+    await updateConfigurations(builder.config);
   };
 
   return (

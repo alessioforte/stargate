@@ -1,4 +1,5 @@
 {
+  "warning": "Warning",
   "failoverReplayDescription": "Automatic retries use GET, HEAD, OPTIONS, TRACE, PUT, and DELETE. Other methods dispatch once, even with an Idempotency-Key. Unavailable targets can be skipped before dispatch.",
   "ingressLimit": "Ingress rate limit",
   "ingressLimitDescription": "Required per-IP admission for gateway and IAM requests, before authentication and routing.",
@@ -322,6 +323,8 @@
     "apiKeyDeleteFailed": "Failed to delete API key",
     "apiKeyDeleted": "API key deleted successfully",
     "gatewayConfigurationUpdateFailed": "Failed to update gateway configuration",
+    "gatewayConfigurationConflict": "The gateway configuration changed. The latest version has been reloaded; review it before saving again.",
+    "gatewayConfigurationRestartRequired": "Gateway configuration saved. Restart Stargate to apply the capacity changes.",
     "gatewayConfigurationUpdated": "Gateway configuration updated successfully",
     "oauthClientCreateFailed": "Failed to create OAuth client",
     "oauthClientCreated": "OAuth client created successfully",

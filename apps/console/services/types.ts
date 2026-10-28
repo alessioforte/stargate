@@ -181,6 +181,23 @@ export interface UserSessionsRevocationResponse {
 
 export type Configuration = JsonValue;
 
+export interface ConfigurationDocument {
+  revision: string;
+  version: number;
+  updatedAt: string;
+  updatedBy?: string | null;
+  config: Configuration;
+}
+
+export interface UpdateConfigurationRequest {
+  revision: string;
+  config: Configuration;
+}
+
+export type UpdateConfigurationResponse = ConfigurationDocument & {
+  activation: "applied" | "restart_required";
+};
+
 export type AccessControlEffect = "allow" | "deny";
 export type AccessControlResourceAction =
   | "READ"

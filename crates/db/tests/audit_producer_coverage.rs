@@ -2,6 +2,14 @@ const SERVICE_SOURCE: &str = include_str!("../src/service.rs");
 const REPOSITORY_MODULE_SOURCE: &str = include_str!("../src/repo/mod.rs");
 
 const ADMIN_SOURCES: &[(&str, &str)] = &[
+    (
+        "configurations",
+        include_str!("../../../src/api/admin/configurations.rs"),
+    ),
+    (
+        "access_control_rules",
+        include_str!("../../../src/api/admin/access_control_rules.rs"),
+    ),
     ("users", include_str!("../../../src/api/admin/users.rs")),
     (
         "organizations",
@@ -26,6 +34,9 @@ const ADMIN_SOURCES: &[(&str, &str)] = &[
 ];
 
 const ADMIN_MUTATIONS: &[&str] = &[
+    "save_config_document(",
+    "save_gateway_config(",
+    "update_rules(",
     "create_user(",
     "update_user(",
     "delete_user(",
@@ -101,6 +112,16 @@ fn every_inventory_admin_handler_consumes_the_trusted_admin_boundary() {
 #[test]
 fn non_admin_entrypoints_keep_the_frozen_actor_and_scope_construction() {
     let cases = [
+        (
+            "gateway_config_seed",
+            include_str!("../../../src/gate/snap/config.rs"),
+            "TrustedBackgroundActor::system(None)",
+        ),
+        (
+            "policies_seed",
+            include_str!("../../../src/iam/authz/storage.rs"),
+            "TrustedBackgroundActor::system(None)",
+        ),
         (
             "signup",
             include_str!("../../../src/api/signup/complete.rs"),

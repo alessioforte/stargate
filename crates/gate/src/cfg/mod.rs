@@ -22,8 +22,6 @@ use graph::CompiledConfig;
 use serde_json::Value;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::path::Path;
-use tracing::info;
 
 pub const SCHEMA: &str = "stargate/v1";
 
@@ -72,13 +70,6 @@ impl Error for ConfigLoadError {
 
 impl RuntimeConfig {
     pub fn from_file(path: &str) -> Result<Self, ConfigLoadError> {
-        if !Path::new(path).exists() {
-            info!(schema = SCHEMA, "Creating gate configuration yaml file");
-            let raw = v1::Config::default();
-            raw.to_file(path);
-            return Self::from_raw(raw);
-        }
-
         let file = std::fs::read_to_string(path).map_err(|source| ConfigLoadError::Io {
             path: path.to_string(),
             source,
@@ -249,17 +240,11 @@ http:
     }
 
     #[test]
-    fn generated_default_file_uses_the_supported_schema() {
+    fn missing_config_file_returns_not_found_without_creating_a_file() {
         let path = config_path();
-        let config = RuntimeConfig::from_file(path.to_str().unwrap()).unwrap();
-        assert_eq!(config.raw.schema, SCHEMA);
-        assert_eq!(config.compiled.schema, SCHEMA);
-        let yaml = std::fs::read_to_string(&path).unwrap();
-        assert!(yaml.contains("schema: stargate/v1"));
-        assert_eq!(
-            RuntimeConfig::from_yaml_str(&yaml).unwrap().raw.schema,
-            SCHEMA
-        );
-        std::fs::remove_file(path).unwrap();
+        let error = RuntimeConfig::from_file(path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(error, ConfigLoadError::Io { source, .. }
+            if source.kind() == std::io::ErrorKind::NotFound));
+        assert!(!path.exists());
     }
 }

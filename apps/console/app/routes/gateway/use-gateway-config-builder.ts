@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDisclosure } from "@mantine/hooks";
-import type { JsonValue } from "@/services/types";
+import type { Configuration, JsonValue } from "@/services/types";
 import {
   gatewaySections,
   getPathRecord,
@@ -19,7 +19,9 @@ import { getGatewayObjectRows } from "./gateway-table-utils";
 
 export type DrawerMode = "create" | "edit";
 
-export function useGatewayConfigBuilder(savedConfig: JsonValue | undefined) {
+export function useGatewayConfigBuilder(
+  savedConfig: Configuration | undefined,
+) {
   const [selectedSectionKey, setSelectedSectionKey] = useState("routers");
   const [selectedName, setSelectedName] = useState("");
   const [draftObjectName, setDraftObjectName] = useState("");
