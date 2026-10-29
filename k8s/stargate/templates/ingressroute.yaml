@@ -10,8 +10,24 @@ spec:
   entryPoints:
     {{- toYaml .Values.traefik.entryPoints | nindent 4 }}
   routes:
+    {{- if .Values.traefik.adminAllowList.enabled }}
     - kind: Rule
+      match: {{ printf "Host(`%s`) && %s" .Values.traefik.identityHost (include "stargate.adminPathRule" .) | quote }}
+      priority: 30
+      middlewares:
+        - name: {{ include "stargate.adminAllowListName" . }}
+      services:
+        - name: {{ include "stargate.fullname" . }}
+          port: http
+          scheme: http
+          passHostHeader: true
+    {{- end }}
+    - kind: Rule
+      {{- if .Values.traefik.adminAllowList.enabled }}
+      match: {{ printf "Host(`%s`) && !%s" .Values.traefik.identityHost (include "stargate.adminPathRule" .) | quote }}
+      {{- else }}
       match: {{ printf "Host(`%s`)" .Values.traefik.identityHost | quote }}
+      {{- end }}
       priority: 10
       services:
         - name: {{ include "stargate.fullname" . }}
@@ -35,7 +51,11 @@ spec:
     {{- if .Values.traefik.grpc.enabled }}
     {{- range prepend .Values.traefik.apiHosts .Values.traefik.identityHost }}
     - kind: Rule
+      {{- if and $.Values.traefik.adminAllowList.enabled (eq . $.Values.traefik.identityHost) }}
+      match: {{ printf "Host(`%s`) && HeaderRegexp(`Content-Type`, `^application/grpc`) && !%s" . (include "stargate.adminPathRule" $) | quote }}
+      {{- else }}
       match: {{ printf "Host(`%s`) && HeaderRegexp(`Content-Type`, `^application/grpc`)" . | quote }}
+      {{- end }}
       priority: 20
       services:
         - name: {{ include "stargate.fullname" $ }}

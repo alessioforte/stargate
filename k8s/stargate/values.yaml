@@ -84,6 +84,10 @@ traefik:
   apiHosts: []
   grpc:
     enabled: false
+  adminAllowList:
+    enabled: false
+    sourceRange: []
+    ipStrategyDepth: 0
 
 # Trusted peer CIDRs (Traefik pod networks), joined into TRUSTED_PROXIES.
 trustedProxies: []

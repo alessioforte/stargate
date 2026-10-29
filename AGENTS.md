@@ -391,6 +391,12 @@ duplicates in runtimeConfig data and extraEnv. Optional gRPC routes use h2c with
 higher priority; ordinary HTTP and WebSocket routes keep HTTP transport. Guide:
 `k8s/stargate/README.md`, "Pattern A: Traefik in front".
 
+An optional Traefik IP allow-list protects the identity host's `/admin` and
+`/stargate` prefixes. Its route takes priority over gRPC, and the public identity
+routes exclude protected and ambiguous paths to prevent fallback around the
+middleware. Administrators' browser IPs must be allowed; canonical `/auth` and
+`/oauth` paths remain public. Direct Service access needs separate network controls.
+
 ### Feature Flags
 
 ```toml

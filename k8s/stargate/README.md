@@ -215,6 +215,44 @@ policies restricted to Stargate as well. The gateway ConfigMap is only a seed;
 later edits use the database-backed admin API or CLI, as described under
 [gateway configuration](#gateway-configuration).
 
+To restrict the identity host's admin API and Console, enable the Traefik IP
+allow-list and replace these example ranges with the addresses administrators
+use from their browsers (for example, their VPN or corporate network):
+
+```yaml
+traefik:
+  adminAllowList:
+    enabled: true
+    sourceRange: [203.0.113.0/24, 2001:db8::/32]
+    ipStrategyDepth: 0
+```
+
+The allow-list is disabled by default. When enabled, it requires a nonempty list
+of valid IP addresses or CIDRs. The Console calls `/admin/*` from the browser;
+allowing only server addresses will not allow administrators to use it. The
+canonical login paths `/auth` and `/oauth` remain public. The protected route has
+priority over the ordinary and gRPC routes. The public identity routes exclude
+the protected paths, so a missing or invalid middleware cannot expose them by
+falling through to a public route.
+
+The route also applies the allow-list to potentially ambiguous identity-host paths:
+those containing repeated slashes, percent escapes or dot segments, and
+case-insensitive variants of the protected prefixes. Use canonical paths for
+public endpoints. Keep Traefik's path sanitization enabled and use Traefik 3.4.1
+or later; see [Traefik's path handling](https://doc.traefik.io/traefik/v3.6/security/request-path/).
+If `CONSOLE_APP_BASE_PATH` is changed, protect that additional path separately.
+The middleware covers requests through this IngressRoute only: restrict direct
+Service access and any other ingress routes, for example with the NetworkPolicy
+in `values-traefik.yaml`.
+
+With `ipStrategyDepth: 0`, Traefik checks the connecting peer's address. A
+positive depth selects an address from `X-Forwarded-For`, counting from the
+right; set it for the actual proxy chain and configure Traefik's own trusted
+forwarded-header peers so clients cannot forge that chain. This setting is
+separate from Stargate's `trustedProxies`. A depth beyond the available chain
+does not select an address. Verify access from both permitted and other networks
+after deployment. See [Traefik's IP allow-list](https://doc.traefik.io/traefik/v3.5/reference/routing-configuration/http/middlewares/ipallowlist/).
+
 Preserve the real client IP on **Traefik's** public Service with
 `externalTrafficPolicy: Local`, and set Stargate's `trustedProxies` to the actual
 Traefik peer CIDRs. Local traffic policy requires traffic to reach nodes with
@@ -567,6 +605,11 @@ helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
 helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.grpc.enabled=true
 helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.grpc.enabled=true
+helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true --set 'traefik.adminAllowList.sourceRange[0]=192.0.2.0/24'
+helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true --set 'traefik.adminAllowList.sourceRange[0]=192.0.2.0/24'
+python3 ./k8s/stargate/tests/test_admin_allowlist.py
+# Expected failure: an enabled allow-list needs at least one source range.
+helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
 helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true

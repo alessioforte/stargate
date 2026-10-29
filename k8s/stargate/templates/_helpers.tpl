@@ -104,6 +104,15 @@ Referenced resource names.
 {{- printf "%s-config-import" (include "stargate.fullname" . | trunc 49 | trimSuffix "-") -}}
 {{- end -}}
 
+{{/* Keep protected and ambiguous paths out of public identity routes. */}}
+{{- define "stargate.adminPathRule" -}}
+(PathPrefix(`/admin`) || PathPrefix(`/stargate`) || PathRegexp(`(?i)(//|%|(^|/)[.]{1,2}(/|$)|^/(admin|stargate))`))
+{{- end -}}
+
+{{- define "stargate.adminAllowListName" -}}
+{{- printf "%s-admin-allowlist" (include "stargate.fullname" . | trunc 47 | trimSuffix "-") -}}
+{{- end -}}
+
 {{- define "stargate.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "stargate.fullname" .) .Values.serviceAccount.name -}}
@@ -199,6 +208,14 @@ Cross-field validation that JSON Schema cannot express.
 
 {{- $runtimeData := default (dict) .Values.runtimeConfig.data -}}
 {{- $managed := dict -}}
+{{- if .Values.traefik.adminAllowList.enabled -}}
+  {{- if not .Values.traefik.enabled -}}
+    {{- fail "traefik.adminAllowList.enabled=true requires traefik.enabled=true" -}}
+  {{- end -}}
+  {{- if empty .Values.traefik.adminAllowList.sourceRange -}}
+    {{- fail "traefik.adminAllowList.enabled=true requires a nonempty sourceRange" -}}
+  {{- end -}}
+{{- end -}}
 {{- if .Values.traefik.enabled -}}
   {{- if .Values.ingress.enabled -}}
     {{- fail "traefik.enabled and ingress.enabled are mutually exclusive" -}}
