@@ -178,7 +178,7 @@ impl Wakeups {
     }
 }
 
-async fn work(gate: &Gate, mut wakeups: Wakeups) {
+async fn work(gate: &Arc<Gate>, mut wakeups: Wakeups) {
     let mut gateway = RevisionState::default();
     let mut policies = RevisionState::default();
     let mut database_failed = false;
@@ -198,7 +198,7 @@ async fn work(gate: &Gate, mut wakeups: Wakeups) {
 }
 
 async fn synchronize(
-    gate: &Gate,
+    gate: &Arc<Gate>,
     gateway: &mut RevisionState,
     policies: &mut RevisionState,
     trigger: Trigger,
@@ -231,14 +231,22 @@ async fn synchronize(
             continue;
         }
         let result = match kind {
-            ConfigKind::Gateway => apply_gateway_config(gate, &document.content)
-                .map(|_| ())
-                .map_err(|error| {
-                    (
-                        matches!(&error, GatewayPreparationError::BudgetChange),
-                        error.reload_outcome(),
-                    )
-                }),
+            ConfigKind::Gateway => {
+                let gate = gate.clone();
+                let content = document.content;
+                tokio::task::spawn_blocking(move || {
+                    apply_gateway_config(&gate, &content)
+                        .map(|_| ())
+                        .map_err(|error| {
+                            (
+                                matches!(&error, GatewayPreparationError::BudgetChange),
+                                error.reload_outcome(),
+                            )
+                        })
+                })
+                .await
+                .unwrap_or(Err((false, "error")))
+            }
             ConfigKind::Policies => apply_policy_document(gate, &document.content)
                 .map(|_| ())
                 .map_err(|_| (false, "error")),
