@@ -20,7 +20,7 @@ import {
 import React, { useEffect, useState } from "react";
 import { Box } from "@mantine/core";
 import Empty from "../empty/empty";
-import { selectionColumn } from "./rox-checkbox";
+import { selectionColumn } from "./selection-column";
 import { type TableProps } from "./types";
 import classes from "./table.module.css";
 
@@ -51,6 +51,13 @@ const Table = <T, V>({
   const [sorting, setSorting] = useState<SortingState>(defaultSorting ?? []);
   const [pageIndex, setPageIndex] = React.useState(
     paginationOptions?.pageIndex ?? 0,
+  );
+  // Captured once so the initial page size effect does not re-run on prop changes.
+  const [initialPageSize] = useState(
+    () =>
+      paginationOptions?.defaultPageSize ??
+      paginationOptions?.pageSize ??
+      DEFAULT_PAGE_LIMIT_SMALL,
   );
 
   const table = useReactTable({
@@ -84,19 +91,14 @@ const Table = <T, V>({
   const { rows } = table.getRowModel();
 
   useEffect(() => {
-    setPageIndex(paginationOptions?.pageIndex ?? 0);
-    table.setPageSize(
-      paginationOptions?.defaultPageSize ??
-        paginationOptions?.pageSize ??
-        DEFAULT_PAGE_LIMIT_SMALL,
-    );
-  }, []);
+    table.setPageSize(initialPageSize);
+  }, [table, initialPageSize]);
 
   useEffect(() => {
     const indexes = Object.keys(rowSelection).map((i) => Number(i));
     const selectedRows = data.filter((_, i) => indexes.includes(i));
     onSelectionChange?.(selectedRows);
-  }, [rowSelection]);
+  }, [rowSelection, data, onSelectionChange]);
 
   useEffect(() => {
     setPageIndex(paginationOptions?.pageIndex ?? 0);
