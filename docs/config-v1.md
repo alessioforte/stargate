@@ -338,28 +338,33 @@ and per-attempt signing run after the final handshake URI and headers are set.
 HTTP requests, failover attempts, mirrors, and WebSocket handshakes use the same
 forwarding rules, including upstreams with `internal_context`. Trust depends on
 the connection peer's IP in `TRUSTED_PROXIES`, independently of the client IP
-derived from incoming headers.
+derived from incoming headers. Processing happens in this order:
 
-- `X-Forwarded-For` appends the peer IP to a trusted proxy's existing chain.
+1. At gateway ingress, before router matching and route middleware, discard
+   `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*` field from an untrusted or
+   missing peer. This includes custom fields such as `X-Forwarded-Client-Cert`
+   and `X-Forwarded-Ssl`. Trusted proxy fields remain available to routing.
+2. Apply route middleware. Operator-provided forwarding metadata, such as
+   `X-Forwarded-Prefix: /api` alongside `strip_prefix`, is preserved regardless
+   of the original peer's trust.
+3. At upstream dispatch, after hop-by-hop cleanup and before internal-context
+   sanitization/signing, complete the forwarding fields without removing them.
+
+- `X-Forwarded-For` appends the peer IP to the remaining or operator-provided chain.
   Multiple fields are merged into one in their original order. For an untrusted
-  peer, the chain contains only that peer IP. With no known peer, it is omitted.
-- `X-Forwarded-Proto` preserves a trusted proxy's value; otherwise it is `https`
+  peer without middleware overrides, the chain contains only that peer IP.
+  With no known peer, no hop is added.
+- `X-Forwarded-Proto` preserves an existing value; otherwise it is `https`
   only when Stargate's listener terminates TLS, and `http` otherwise. A public
   HTTPS URL in `OAUTH_BASE_URL` or the issuer does not change this hop's scheme.
-- `X-Forwarded-Host` preserves a trusted proxy's value; otherwise it is the
+- `X-Forwarded-Host` preserves an existing value; otherwise it is the
   original incoming Host (including its port), or the HTTP/2 URI authority.
   This remains available when `preserve_host` is disabled or middleware changes
   Host, and survives replay to a different upstream.
 
-For an untrusted or missing peer, incoming `Forwarded`, `X-Real-IP`,
-and every header whose name starts with `X-Forwarded-` are removed before
-generating the fields above. This includes custom fields such as
-`X-Forwarded-Client-Cert` and `X-Forwarded-Ssl`. For a trusted peer, prefixed
-headers retain their original values except for the For, Proto, and Host rules
-above.
-Stargate does not generate `Forwarded` or `X-Real-IP`. Forwarding normalization
-runs after request middleware and hop-by-hop cleanup, before internal-context
-sanitization and signing.
+Stargate does not generate `Forwarded` or `X-Real-IP`. Replay, failover and
+mirrors retain the ingress facts and middleware output; every dispatch adds
+the same gateway hop once.
 
 ## Routing
 

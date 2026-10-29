@@ -12,7 +12,7 @@ use super::{
         strip_internal_context_response,
     },
     routing::router_matches,
-    upstream::headers::UpstreamHeaders,
+    upstream::headers::{UpstreamHeaders, strip_untrusted_forwarded_headers},
 };
 use crate::{
     ctx::{PropagationDraft, RequestContext, request_id_from, sign::InternalContextRuntime},
@@ -116,6 +116,9 @@ async fn handle_request(
     let graph = &runtime.core.graph;
 
     let client_ip = req.get_client_ip();
+    let upstream_headers =
+        UpstreamHeaders::from_request(&req, crate::srv::tls::enabled().unwrap_or(false));
+    strip_untrusted_forwarded_headers(req.headers_mut(), upstream_headers.peer);
     ingress::apply_ingress_limit(&runtime, &client_ip, execution)
         .instrument(tracing::debug_span!("gateway.ingress"))
         .await?;
@@ -160,10 +163,7 @@ async fn handle_request(
         original_path: req.uri().path().to_string(),
         path: req.uri().path().to_string(),
         query: req.uri().query().unwrap_or("").to_string(),
-        upstream_headers: UpstreamHeaders::from_request(
-            &req,
-            crate::srv::tls::enabled().unwrap_or(false),
-        ),
+        upstream_headers,
         response_headers: ResponseHeaderMutations::default(),
         propagation_draft: None,
         internal_context_runtime: crate::ctx::sign::runtime().cloned(),

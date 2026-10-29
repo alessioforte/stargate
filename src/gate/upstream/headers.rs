@@ -33,14 +33,15 @@ impl UpstreamHeaders {
     }
 }
 
-pub(in crate::gate) fn apply_forwarded_headers(headers: &mut HeaderMap, ingress: &UpstreamHeaders) {
-    let trusted = ingress
-        .peer
-        .is_some_and(|peer| crate::web::trusted_proxy::is_trusted_proxy(&peer));
-    forward_from_peer(headers, ingress, trusted);
+pub(in crate::gate) fn strip_untrusted_forwarded_headers(
+    headers: &mut HeaderMap,
+    peer: Option<IpAddr>,
+) {
+    let trusted = peer.is_some_and(|peer| crate::web::trusted_proxy::is_trusted_proxy(&peer));
+    strip_forwarded_headers(headers, trusted);
 }
 
-fn forward_from_peer(headers: &mut HeaderMap, ingress: &UpstreamHeaders, trusted: bool) {
+fn strip_forwarded_headers(headers: &mut HeaderMap, trusted: bool) {
     if !trusted {
         let untrusted = headers
             .keys()
@@ -54,7 +55,9 @@ fn forward_from_peer(headers: &mut HeaderMap, ingress: &UpstreamHeaders, trusted
             headers.remove(name);
         }
     }
+}
 
+pub(in crate::gate) fn apply_forwarded_headers(headers: &mut HeaderMap, ingress: &UpstreamHeaders) {
     if let Some(peer) = ingress.peer {
         let mut chain = Vec::new();
         for value in headers.get_all("x-forwarded-for") {

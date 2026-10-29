@@ -5,7 +5,7 @@ use crate::{
         RuntimeSnapshot,
         execution::{execute_plan_with_request, plan::build_execution_plan},
         request::RequestState,
-        upstream::headers::UpstreamHeaders,
+        upstream::headers::{UpstreamHeaders, strip_untrusted_forwarded_headers},
     },
     iam::auth::identity::VerifiedIdentity,
 };
@@ -88,11 +88,16 @@ fn add_proxy_headers(headers: &mut HeaderMap, internal: bool) {
     }
 }
 
-fn request_state(runtime: &RuntimeSnapshot, req: &Request<Body>, internal: bool) -> RequestState {
+fn request_state(
+    runtime: &RuntimeSnapshot,
+    req: &mut Request<Body>,
+    internal: bool,
+) -> RequestState {
     let mut state = state(runtime);
     state.path = req.uri().path().into();
     state.query = req.uri().query().unwrap_or("").into();
     state.upstream_headers = UpstreamHeaders::from_request(req, false);
+    strip_untrusted_forwarded_headers(req.headers_mut(), state.upstream_headers.peer);
     if internal {
         let signer = ContextSigner::from_rsa_pem(
             SignerConfig::new("https://gateway.test/internal", "test", 30).unwrap(),
@@ -220,7 +225,7 @@ async fn check_http(trusted: bool, internal: bool, forward: bool) {
         internal,
     );
     *req.version_mut() = http::Version::HTTP_2;
-    let state = request_state(&runtime, &req, internal);
+    let state = request_state(&runtime, &mut req, internal);
     req.headers_mut()
         .insert(HOST, "rewritten.test".parse().unwrap());
     let plan = build_execution_plan(&runtime.core.graph, "root", "request-id").unwrap();
@@ -257,7 +262,7 @@ async fn check_http(trusted: bool, internal: bool, forward: bool) {
     let mut req = incoming(&format!("/orders?{HTTP_QUERY}"), internal);
     req.headers_mut()
         .insert(HOST, ORIGINAL_HOST.parse().unwrap());
-    let state = request_state(&runtime, &req, internal);
+    let state = request_state(&runtime, &mut req, internal);
     let plan = build_execution_plan(&runtime.core.graph, "backup", "request-id").unwrap();
     let response = execute_plan_with_request(&runtime, &plan, req, &state)
         .await
@@ -303,10 +308,10 @@ async fn check_websocket(trusted: bool, internal: bool, forward: bool) {
         config["http"]["upstreams"]["socket"]["forward_credentials"] = true.into();
     }
     let runtime = runtime(config, internal);
-    let app = Router::new().fallback(any(move |req: Request<Body>| {
+    let app = Router::new().fallback(any(move |mut req: Request<Body>| {
         let runtime = runtime.clone();
         async move {
-            let state = request_state(&runtime, &req, internal);
+            let state = request_state(&runtime, &mut req, internal);
             let plan = build_execution_plan(&runtime.core.graph, "socket", "request-id").unwrap();
             execute_plan_with_request(&runtime, &plan, req, &state).await
         }
@@ -344,6 +349,57 @@ async fn check_websocket(trusted: bool, internal: bool, forward: bool) {
     gateway.abort();
 }
 
+#[cfg(feature = "memory")]
+async fn check_gateway_ingress(trusted: bool) {
+    let upstream = Upstream::start(Outcome::Status(200)).await;
+    let mut config = serde_json::to_value(gate::cfg::Config::default()).unwrap();
+    config["http"] = json!({
+        "upstreams": {"orders": {"targets": [{"url": upstream.url}]}},
+        "services": {
+            "orders": {"kind": "load_balancer", "upstream": "orders"},
+            "matched": {"kind": "direct_response", "status": 201},
+            "fallback": {"kind": "direct_response", "status": 404}
+        },
+        "middlewares": {
+            "strip-api": {"kind": "strip_prefix", "prefixes": ["/api"]},
+            "prefix": {"kind": "request_headers", "set": [{"name": "x-forwarded-prefix", "value": "/api"}]}
+        },
+        "routers": {
+            "matched": {"priority": 10, "match": {"all": [
+                {"path": {"exact": "/match"}},
+                {"header": {"name": "x-forwarded-host", "eq": "proxy.test:443"}}
+            ]}, "service": "matched"},
+            "proxy": {"match": {"path": {"prefix": "/api"}}, "service": "orders", "middlewares": ["strip-api", "prefix"]},
+            "fallback": {"priority": -10, "match": {"path": {"prefix": "/"}}, "service": "fallback"}
+        }
+    });
+    let gate = Arc::new(crate::gate::test_support::gate(
+        serde_json::from_value(config).unwrap(),
+    ));
+    for (path, status) in [
+        ("/api/orders", 200),
+        ("/match", if trusted { 201 } else { 404 }),
+    ] {
+        let mut req = Request::builder()
+            .uri(path)
+            .header(HOST, ORIGINAL_HOST)
+            .header("x-forwarded-host", "proxy.test:443")
+            .header("x-forwarded-prefix", "/evil")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+        ));
+        req.extensions_mut().insert(gate.clone());
+        let response = crate::gate::service(req).await.unwrap();
+        assert_eq!(response.status(), status);
+    }
+    let records = upstream.records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].uri.path(), "/orders");
+    assert_eq!(records[0].headers["x-forwarded-prefix"], "/api");
+}
+
 #[test]
 fn upstreams_share_the_forwarding_trust_boundary() {
     const CASE: &str = "STARGATE_TEST_FORWARDED_PEER";
@@ -358,6 +414,8 @@ fn upstreams_share_the_forwarding_trust_boundary() {
                     check_websocket(case == "trusted", internal, forward).await;
                 }
             }
+            #[cfg(feature = "memory")]
+            check_gateway_ingress(case == "trusted").await;
         });
         return;
     }

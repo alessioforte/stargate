@@ -175,6 +175,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 2. Resolve the client IP (trusted proxies only) and charge the mandatory
    `ingress.limit` IP bucket, bounded by `ingress.timeout` (default 250ms):
    `429` on denial, `503` on store failure, before any credential check or route match.
+   Capture the original peer and host and strip `Forwarded`, `X-Real-IP`, and
+   every `X-Forwarded-*` field from untrusted or missing peers before routing
+   and middleware. Operator middleware may then supply forwarding metadata.
 3. Verify API key / JWT / OAuth token and capture the subject.
 4. Match compiled v1 routers (descending `priority`, declaration order for ties).
 5. Apply route middlewares (path rewrite, preserve host, header transforms).
@@ -186,10 +189,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
    `PUT`, `DELETE` may fail over; `POST`/`PATCH` dispatch once, regardless of
    `Idempotency-Key`), buffer only when needed, then execute HTTP, WebSocket, or
    direct response and apply response headers. Before each upstream dispatch,
-   normalize forwarded headers using the original connection peer and host:
-   remove `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*` field for untrusted
-   or missing peers; retain proxy metadata only for `TRUSTED_PROXIES`, append
-   the peer IP once, and use the actual listener TLS scheme for untrusted peers.
+   complete forwarded headers using the original connection peer and host:
+   append the peer IP once, preserve middleware output, and fill missing
+   proto/host values with the actual listener TLS scheme and original host.
    These facts survive replay, failover, and mirrors; normalization precedes
    internal-context sanitization and signing.
 

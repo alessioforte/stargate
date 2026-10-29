@@ -24,7 +24,8 @@ fn forwarding_uses_the_connection_peer_and_original_host_or_authority() {
         *req.uri_mut() = "https://backend.test/rewritten".parse().unwrap();
         req.headers_mut()
             .insert(http::header::HOST, "rewritten.test".parse().unwrap());
-        forward_from_peer(req.headers_mut(), &ingress, false);
+        strip_forwarded_headers(req.headers_mut(), false);
+        apply_forwarded_headers(req.headers_mut(), &ingress);
         assert_eq!(req.headers()["x-forwarded-for"], "2001:db8::10");
         assert_eq!(req.headers()["x-forwarded-host"], expected);
         assert_eq!(req.headers()["x-forwarded-proto"], "https");
@@ -53,7 +54,7 @@ fn trusted_forwarding_merges_all_for_fields_in_order_and_keeps_proxy_metadata() 
     ] {
         headers.insert(name, value.parse().unwrap());
     }
-    forward_from_peer(&mut headers, &ingress, true);
+    apply_forwarded_headers(&mut headers, &ingress);
     assert_eq!(headers.get_all("x-forwarded-for").iter().count(), 1);
     assert_eq!(
         headers["x-forwarded-for"],
@@ -83,7 +84,8 @@ fn custom_forwarded_fields_require_a_trusted_peer() {
         headers.insert(&ssl, "on".parse().unwrap());
         headers.insert("x-forwardedness", "keep".parse().unwrap());
 
-        forward_from_peer(&mut headers, &ingress, trusted);
+        strip_forwarded_headers(&mut headers, trusted);
+        apply_forwarded_headers(&mut headers, &ingress);
 
         if trusted {
             let values = headers.get_all(&cert).iter().collect::<Vec<_>>();
@@ -113,6 +115,7 @@ fn missing_peer_discards_claimed_addresses_without_inventing_a_hop() {
     ] {
         headers.insert(name, "spoofed".parse().unwrap());
     }
+    strip_untrusted_forwarded_headers(&mut headers, None);
     apply_forwarded_headers(&mut headers, &UpstreamHeaders::default());
     assert_eq!(headers.len(), 1);
     assert_eq!(headers["x-forwarded-proto"], "http");
@@ -128,7 +131,7 @@ fn trusted_peer_without_proxy_metadata_gets_listener_scheme_and_original_host() 
             ..Default::default()
         };
         let mut headers = HeaderMap::new();
-        forward_from_peer(&mut headers, &ingress, true);
+        apply_forwarded_headers(&mut headers, &ingress);
         assert_eq!(headers["x-forwarded-for"], "127.0.0.1");
         assert_eq!(headers["x-forwarded-host"], "public.test:8080");
         assert_eq!(
@@ -137,6 +140,26 @@ fn trusted_peer_without_proxy_metadata_gets_listener_scheme_and_original_host() 
         );
         assert_eq!(headers.len(), 3);
     }
+}
+
+#[test]
+fn operator_forwarding_metadata_survives_completion_after_untrusted_ingress() {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-forwarded-prefix", "/evil".parse().unwrap());
+    strip_untrusted_forwarded_headers(&mut headers, None);
+    assert!(!headers.contains_key("x-forwarded-prefix"));
+    headers.insert("x-forwarded-prefix", "/api".parse().unwrap());
+    headers.insert("x-forwarded-proto", "https".parse().unwrap());
+    headers.insert("x-forwarded-host", "public.test".parse().unwrap());
+    let ingress = UpstreamHeaders {
+        peer: Some("127.0.0.1".parse().unwrap()),
+        ..Default::default()
+    };
+    apply_forwarded_headers(&mut headers, &ingress);
+    assert_eq!(headers["x-forwarded-prefix"], "/api");
+    assert_eq!(headers["x-forwarded-proto"], "https");
+    assert_eq!(headers["x-forwarded-host"], "public.test");
+    assert_eq!(headers["x-forwarded-for"], "127.0.0.1");
 }
 
 #[test]
