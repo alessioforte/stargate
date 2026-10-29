@@ -362,6 +362,7 @@ async fn ingress_backend_failure_and_timeout_fail_closed_and_release_process_adm
         .await
         .unwrap();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()["retry-after"], "10");
         assert_eq!(error_code(response).await, "gateway.ingress_unavailable");
         assert!(entered.load(Ordering::SeqCst));
         assert!(dropped.load(Ordering::SeqCst));

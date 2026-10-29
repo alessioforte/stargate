@@ -858,8 +858,10 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
 
 ## API Overview
 
-- `GET /livez` (process liveness), `GET /readyz` (initialized, not draining, SQL and
-  cluster Redis up). See `docs/health-probes.md`.
+- `GET /livez` (process liveness), `GET /readyz` (initialized, not draining, SQL up).
+  Redis does not gate readiness; when it is down, all other requests fail closed
+  at ingress with `503` and `Retry-After: 10`, including `/admin/health` itself.
+  Its handler retains Redis diagnostics. See `docs/health-probes.md`.
 - `GET /docs` (OpenAPI JSON), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
 - `/.well-known/*`: OAuth/OIDC metadata, JWKS, `stargate-context-jwks.json`
 - `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA,

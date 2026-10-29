@@ -90,7 +90,12 @@ impl DependencyHealth {
     }
 }
 
-/// Shared by readiness probes and authenticated operator diagnostics.
+/// Readiness depends on SQL, not the shared state store.
+pub async fn check_database() -> ComponentHealth {
+    ComponentHealth::check(crate::data::db::ping()).await
+}
+
+/// Bounded dependency checks for authenticated operator diagnostics.
 pub async fn check_dependencies() -> DependencyHealth {
     DependencyHealth::check(
         crate::data::db::ping(),

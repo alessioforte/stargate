@@ -1,4 +1,4 @@
-use crate::srv::health::{Lifecycle, check_dependencies};
+use crate::srv::health::{Lifecycle, check_database};
 use axum::{
     Json, Router,
     extract::State,
@@ -39,16 +39,21 @@ pub async fn get_livez() -> Response {
     path = "/readyz",
     tags = ["Health"],
     summary = "Traffic readiness",
-    description = "Ready after initialization, before shutdown, and while SQL and (in cluster mode) Redis respond. Each dependency has a one-second timeout; checks run concurrently. No authentication or rate limiting.",
+    description = "Ready after initialization, before shutdown, and while SQL responds within one second. Redis does not gate readiness. No authentication or rate limiting.",
     responses(
         (status = 200, description = "Ready for traffic", body = Probe),
         (status = 503, description = "Not ready for traffic", body = Probe)
     )
 )]
 pub async fn get_readyz(State(lifecycle): State<Lifecycle>) -> Response {
-    let ready = lifecycle
-        .check_ready(async { check_dependencies().await.is_healthy() })
-        .await;
+    readiness_response(lifecycle, async { check_database().await.is_healthy() }).await
+}
+
+async fn readiness_response(
+    lifecycle: Lifecycle,
+    check: impl std::future::Future<Output = bool>,
+) -> Response {
+    let ready = lifecycle.check_ready(check).await;
     respond(
         readiness_status(ready),
         Probe {
@@ -103,7 +108,7 @@ mod tests {
                 "draining" => lifecycle.begin_shutdown(),
                 _ => (),
             }
-            // SQL and Redis are uninitialized; readiness must fail closed.
+            // SQL is uninitialized; readiness must fail closed.
             for (path, status, body) in [
                 ("/livez", StatusCode::OK, json!({"status": "alive"})),
                 (
@@ -136,6 +141,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn readiness_requires_sql_and_respects_lifecycle() {
+        let lifecycle = Lifecycle::default();
+        assert_eq!(
+            readiness_response(lifecycle.clone(), async { true })
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        lifecycle.mark_ready();
+        assert_eq!(
+            readiness_response(lifecycle.clone(), async { true })
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            readiness_response(lifecycle.clone(), async { false })
+                .await
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        lifecycle.begin_shutdown();
+        assert_eq!(
+            readiness_response(lifecycle, async { true }).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 
     #[test]

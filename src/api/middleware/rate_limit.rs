@@ -147,6 +147,35 @@ mod tests {
             .to_string()
     }
 
+    struct UnavailableIngress;
+
+    #[async_trait::async_trait]
+    impl lim::RateLimit for UnavailableIngress {
+        fn kind(&self) -> lim::LimitKind {
+            lim::LimitKind::Rate
+        }
+
+        async fn check(&self, _key: &str, _cost: u64) -> lim::Result<lim::RateLimitDecision> {
+            Err(lim::RateLimitError::BackendError(
+                "store unavailable".into(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn unavailable_ingress_store_rejects_iam_requests() {
+        let mut limiter = lim::Limiter::new();
+        limiter.add_limit("ingress".into(), Box::new(UnavailableIngress));
+        let gate = Arc::new(test_support::gate_with_limiter(config(1, 1), limiter));
+        let response = app(gate)
+            .oneshot(request("203.0.113.1:1000"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()["retry-after"], "10");
+        assert_eq!(error_code(response).await, "iam.limiter_unavailable");
+    }
+
     #[tokio::test]
     async fn iam_middleware_and_downstream_reader_share_the_ingress_generation() {
         let gate = Arc::new(test_support::gate(config(100, 100)));

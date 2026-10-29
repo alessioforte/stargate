@@ -158,12 +158,27 @@ pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
     Ok((status, Json(body)).into_response())
 }
 
-#[cfg(all(test, feature = "memory"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "memory")]
     use crate::gate::{apply_policy_document, prepare_config, test_support};
+    #[cfg(feature = "memory")]
     use gate::cfg::Config;
 
+    #[cfg(feature = "redis")]
+    #[test]
+    fn redis_failure_is_reported_as_unhealthy() {
+        let component = ComponentStatus::from(ComponentHealth {
+            latency_ms: 1.0,
+            error: Some("Redis unavailable".into()),
+        });
+        let json = serde_json::to_value(component).unwrap();
+        assert_eq!(json["status"], "unhealthy");
+        assert_eq!(json["detail"], "Redis unavailable");
+    }
+
+    #[cfg(feature = "memory")]
     #[test]
     fn health_reports_active_revisions_and_pinned_snapshots_keep_their_revision() {
         let initial = Config::default();

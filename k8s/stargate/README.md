@@ -525,11 +525,16 @@ the Service.
   required by the architecture.
 
 Startup and liveness probes use `/livez`; readiness and the Helm connection
-test use `/readyz`. Readiness checks SQLite in edge mode and PostgreSQL plus
-Redis in cluster mode, with concurrent one-second dependency timeouts.
+test use `/readyz`. Readiness checks SQLite in edge mode and PostgreSQL in
+cluster mode, with a one-second SQL timeout; Redis does not gate readiness.
 The public probes bypass authentication and rate limiting.
 
-`/admin/health` provides authenticated dependency diagnostics. See
+When Redis is down, ready replicas remain in service, but all requests except
+the probes fail closed at the ingress limiter with Stargate's `503` and
+`Retry-After: 10`, including static pages and gateway direct responses. Traffic
+can recover as soon as Redis returns. `/admin/health` reports Redis health when
+its handler is reached, but its own request is blocked by the IAM ingress
+limiter during a Redis outage. See
 [Health and readiness probes](../../docs/health-probes.md) for response contracts
 and shutdown behavior. `SERVER_DRAIN_DELAY_SECS` defaults to 5 seconds;
 allow room in `terminationGracePeriodSeconds` for that delay, connection

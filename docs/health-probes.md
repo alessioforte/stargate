@@ -16,7 +16,9 @@ and bypass authentication, API rate limiting, gateway ingress/process admission,
 and gateway routing policies.
 They use the normal HTTP or HTTPS listener; no extra port is required.
 Dependency errors and latency details appear only in `/admin/health`, which
-retains its super-admin authorization and normal API middleware.
+retains its super-admin authorization and normal API middleware. A Redis outage
+also prevents requests from reaching this handler through the normal listener,
+because the IAM ingress limiter fails closed before authorization.
 
 ## Readiness conditions
 
@@ -25,14 +27,15 @@ and the required dependencies respond:
 
 - Edge: SQL `SELECT 1` against SQLite. The in-memory state store is initialized
   during startup and has no remote connectivity check.
-- Cluster: SQL `SELECT 1` against PostgreSQL and `PING` against the initialized
-  Redis state-store pool. Both checks run concurrently.
+- Cluster: SQL `SELECT 1` against PostgreSQL. Redis does not gate readiness.
 
-Each dependency check has a one-second deadline, including SQL pool acquisition.
-Errors, missing initialized dependencies, and timeouts produce `503`. Checks
+The SQL check has a one-second deadline, including pool acquisition.
+SQL errors, a missing initialized pool, and timeouts produce `503`. Checks
 run on each readiness request; responses are not cached. A later successful
-check restores readiness automatically after a dependency outage.
-`/admin/health` uses the same bounded dependency checks. It also reports
+check restores readiness automatically after a SQL outage.
+`/admin/health` checks SQL and, in cluster mode, Redis concurrently with a
+one-second deadline per check; a failed Redis check is reported as unhealthy.
+It also reports
 `config: { gatewayRevision, policiesRevision }`, the exact document revisions
 currently active on the responding replica. A failed activation or a pending
 capacity restart can leave these behind the latest database revisions. Notification
@@ -41,6 +44,13 @@ unchanged. Cluster synchronization checks after PostgreSQL notifications/reconne
 and at `CONFIG_SYNC_INTERVAL_SECS` (default 30 seconds) to recover missed notifications.
 Edge uses the same interval without a listener, including for CLI imports from another
 process sharing the SQLite database file.
+
+With Redis unavailable after startup, replicas remain ready while SQL is healthy.
+All requests except `/livez` and `/readyz` fail closed at the ingress limiter,
+including static auth and Console pages, `/admin/health`, and gateway direct
+responses. Stargate responds with `503`, `Retry-After: 10`, a request ID, and
+`iam.limiter_unavailable` or `gateway.ingress_unavailable`. Once Redis recovers,
+requests can succeed without waiting for readiness to restore the endpoints.
 
 Initialization includes database migrations, state-store setup, signing
 configuration, and the compiled gateway configuration. The listener opens
@@ -86,6 +96,6 @@ not a guarantee that every load balancer has stopped routing traffic.
 
 The chart uses `/livez` for startup/liveness and `/readyz` for readiness and
 the Helm connection test. Custom `probes.*` overrides are supported.
-The default three-second probe timeout exceeds the one-second dependency
+The default three-second probe timeout exceeds the one-second SQL
 deadline. Probe intervals and failure thresholds determine how quickly
 Kubernetes reacts to failures.
