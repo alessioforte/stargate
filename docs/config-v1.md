@@ -63,7 +63,10 @@ in one transaction; identical content appends neither. Document contents never
 appear in audit snapshots.
 
 The update response includes the saved document and `activation: applied` after
-publishing on the receiving replica. A change to process capacity budgets is
+publishing on the receiving replica. An identical save whose revision is already
+active returns `applied` without replacing the generation or restarting probes;
+a replica that is behind still activates the document. A change to process
+capacity budgets is
 saved with `activation: restart_required`: existing routing stays active until
 restart. The Console reloads after a revision conflict and warns when a restart
 is required. Restart always uses the latest database document.
@@ -313,10 +316,12 @@ still verified during each TLS handshake.
 
 Clients are built before activation. Request-time lookup only clones a prepared
 client and performs no credential-file reads or TLS construction. Replacing
-credential files alone does not reload the clients: save the gateway
-configuration through the admin API to trigger preparation, even with unchanged content. If a candidate fails, fix its
-files and save that candidate again; existing prepared clients remain usable
-throughout.
+credential files alone does not reload the clients. An unchanged save retains
+the current generation if its revision is already active; restart the replica
+to reload TLS material without changing the document. An unchanged save still
+activates a document whose revision has not reached this replica. If a
+candidate fails preparation, fix its files and save that candidate again;
+existing prepared clients remain usable throughout.
 
 WebSockets use the pinned transport's prepared trust roots and client identity,
 with ALPN restricted to `http/1.1`. The connection's DNS destination, TLS server

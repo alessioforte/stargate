@@ -359,6 +359,8 @@ with its safe audit event in one transaction. Conflicts return
 replica. Capacity changes are saved with `activation: restart_required` and retain the
 current runtime until restart. Pinned requests, bodies, mirrors, and WebSockets keep
 their generation. Replacing TLS files alone does not reload prepared transports.
+An unchanged save keeps the existing generation when its document revision is already
+active on this replica; it still activates the document when the replica is behind.
 Cluster replicas subscribe to PostgreSQL `stargate_config` notifications emitted in the
 same transaction as each new document version. A notification or listener reconnection
 checks the active document revisions; `CONFIG_SYNC_INTERVAL_SECS` (default 30, integer >= 1)

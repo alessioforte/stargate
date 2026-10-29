@@ -217,7 +217,8 @@ async fn updates_publish_after_saving_and_stale_revisions_change_neither_documen
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(json_body(response).await["version"], 2);
-        assert_eq!(gate.snapshot().version, 2);
+        assert_eq!(gate.snapshot().version, 1);
+        assert!(Arc::ptr_eq(&active, &gate.snapshot()));
         assert_eq!(
             db::service()
                 .count_outbox_events(&OutboxEventFilter::default())
@@ -239,6 +240,52 @@ async fn updates_publish_after_saving_and_stale_revisions_change_neither_documen
                 .routers[0]
                 .service,
             "ready"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn unchanged_save_still_activates_a_document_missing_from_this_replica() {
+    with_test_database(async {
+        let (gate, initial) = fixture().await;
+        let config: Config = serde_json::from_value(routed_config()).unwrap();
+        let saved = db::save_config_document(
+            ConfigKind::Gateway,
+            config.to_yaml_string().unwrap(),
+            Some(initial.revision),
+            ConfigSource::CliImport,
+            TrustedAuditContext::background(
+                TrustedAuditBoundary::control_plane(),
+                TrustedBackgroundActor::system(None),
+            ),
+        )
+        .await
+        .unwrap();
+        let ConfigSaveOutcome::Saved(document) = saved else {
+            panic!("new imported document")
+        };
+        assert_ne!(gate.snapshot().config_revision, document.revision);
+        let response = router(gate.clone())
+            .oneshot(request(
+                "PUT",
+                "/admin/configurations",
+                Some(json!({"revision": document.revision, "config": config})),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        assert_eq!(body["activation"], "applied");
+        assert_eq!(body["version"], document.version);
+        assert_eq!(gate.snapshot().config_revision, document.revision);
+        assert_eq!(gate.snapshot().version, 1);
+        assert_eq!(
+            db::service()
+                .count_outbox_events(&OutboxEventFilter::default())
+                .await
+                .unwrap(),
+            2
         );
     })
     .await;

@@ -171,6 +171,11 @@ pub(crate) async fn save_gateway_config(
         ConfigSaveOutcome::Conflict { .. } => {
             return Err(ErrorResponse::new(ErrorCode::ConfigurationRevisionConflict));
         }
+        ConfigSaveOutcome::Unchanged(document)
+            if gate.snapshot().config_revision == document.revision =>
+        {
+            return Ok((document, ConfigActivation::Applied));
+        }
         ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => document,
     };
     let outcome = match activation {
