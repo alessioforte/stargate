@@ -516,6 +516,41 @@ http:
       upstream: api-v1
 ```
 
+### Credential forwarding
+
+Upstreams default to `forward_credentials: false`. Before HTTP dispatch or a
+WebSocket handshake, Stargate removes `Authorization`, `x-api-key`, the `jwt`
+session cookie, and the `token`, `access_token`, and `jwt` query parameters,
+including percent-encoded parameter names. Without internal context, cookie
+removal tolerates application values such as JSON or comma-separated consent
+values: only `jwt=` items are removed, preserving other cookie bytes and items
+without `=`. Internal-context dispatch keeps its strict cookie parsing.
+The cleanup runs after request-header middleware, including on failover and
+mirror attempts.
+
+A `request_headers` middleware that sets `Authorization` or `x-api-key` is
+subject to the same cleanup unless `forward_credentials: true`. Static backend
+secrets should not be stored in the configuration document (database, Console,
+or exports). Backend service credentials will be a separate feature using
+secret references.
+
+An OAuth resource server that validates incoming tokens itself may opt in:
+
+```yaml
+http:
+  upstreams:
+    resource-server:
+      targets:
+        - url: https://resource.example.com
+      forward_credentials: true
+```
+
+This forwards `Authorization`, `x-api-key`, the `jwt` cookie, and token query
+parameters to that upstream. `Proxy-Authorization` is never forwarded, and
+fields nominated by `Connection` are always removed by hop-by-hop cleanup.
+Credential forwarding cannot be enabled together with `internal_context` on
+the same upstream.
+
 ### Internal context
 
 An upstream may declare the audience that will receive Stargate's signed
@@ -532,8 +567,8 @@ http:
 ```
 
 `audience` is required, must not be blank, and is limited to 256 UTF-8 bytes.
-Omitting `internal_context` preserves the existing upstream behavior and emits
-no signed context.
+Omitting `internal_context` emits no signed context. Credential forwarding
+still requires the explicit opt-in described above.
 
 Stargate parses and compiles the block and preflights the separate signing key
 and matching public `kid` before activation. A rejected startup or activation

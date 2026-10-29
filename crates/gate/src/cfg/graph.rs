@@ -34,6 +34,7 @@ pub struct UpstreamNode {
     pub load_balancer: LoadBalancer,
     pub transport: Option<TransportNode>,
     pub internal_context: Option<InternalContextNode>,
+    pub forward_credentials: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

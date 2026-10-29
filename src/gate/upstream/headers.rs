@@ -11,6 +11,7 @@ pub(in crate::gate) struct UpstreamHeaders {
     pub(in crate::gate) peer: Option<IpAddr>,
     pub(in crate::gate) original_host: Option<HeaderValue>,
     pub(in crate::gate) listener_tls: bool,
+    pub(in crate::gate) forward_credentials: bool,
 }
 
 impl UpstreamHeaders {
@@ -27,6 +28,7 @@ impl UpstreamHeaders {
                     .and_then(|authority| HeaderValue::from_str(authority.as_str()).ok())
             }),
             listener_tls,
+            forward_credentials: false,
         }
     }
 }
@@ -128,19 +130,49 @@ pub(in crate::gate) fn sanitize_internal_request_headers(
     headers: &mut HeaderMap,
     request_id: &str,
 ) -> Result<(), InternalHeaderSanitizationError> {
-    headers.remove(AUTHORIZATION);
-    headers.remove(PROXY_AUTHORIZATION);
-    headers.remove("x-api-key");
+    strip_credential_headers(headers);
+    sanitize_cookies(headers);
     headers.remove("baggage");
     headers.remove(&INTERNAL_CONTEXT_HEADER);
     headers.remove(&REQUEST_ID_HEADER);
-
-    sanitize_cookies(headers);
 
     let request_id = HeaderValue::from_str(request_id)
         .map_err(|_| InternalHeaderSanitizationError::InvalidRequestId)?;
     headers.insert(&REQUEST_ID_HEADER, request_id);
     Ok(())
+}
+
+pub(in crate::gate) fn strip_credentials(headers: &mut HeaderMap) {
+    strip_credential_headers(headers);
+    let cookies = headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|value| {
+            let retained = value
+                .as_bytes()
+                .split(|byte| *byte == b';')
+                // Space and tab are the only ASCII whitespace allowed in a header value.
+                .map(<[u8]>::trim_ascii)
+                .filter(|item| !item.starts_with(b"jwt="))
+                .collect::<Vec<_>>()
+                .join(b"; ".as_slice());
+            if retained.is_empty() {
+                None
+            } else {
+                Some(HeaderValue::from_bytes(&retained).unwrap())
+            }
+        })
+        .collect::<Vec<_>>();
+    headers.remove(COOKIE);
+    for value in cookies {
+        headers.append(COOKIE, value);
+    }
+}
+
+fn strip_credential_headers(headers: &mut HeaderMap) {
+    headers.remove(AUTHORIZATION);
+    headers.remove(PROXY_AUTHORIZATION);
+    headers.remove("x-api-key");
 }
 
 fn sanitize_cookies(headers: &mut HeaderMap) {

@@ -39,6 +39,7 @@ http:
     let ExecutionPlan::Upstream {
         service_name,
         internal_context,
+        ..
     } = &plan
     else {
         panic!("expected an upstream leaf");

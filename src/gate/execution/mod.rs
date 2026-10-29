@@ -124,6 +124,7 @@ impl PlanExecutor<'_> {
                 ExecutionPlan::Upstream {
                     service_name,
                     internal_context,
+                    forward_credentials,
                 } => {
                     let balancer =
                         self.runtime
@@ -147,6 +148,7 @@ impl PlanExecutor<'_> {
                         service_name: service_name.clone(),
                         upstream_base_url: upstream.base_url.clone(),
                         internal_context: internal_context.clone(),
+                        forward_credentials: *forward_credentials,
                     };
                     self.execute_leaf(selected, may_failover && self.can_failover())
                         .await

@@ -25,6 +25,7 @@ pub(in crate::gate) fn build_execution_plan(
             Ok(ExecutionPlan::Upstream {
                 service_name: name.clone(),
                 internal_context: upstream_node.internal_context.clone(),
+                forward_credentials: upstream_node.forward_credentials,
             })
         }
         ServiceNode::Weighted { services, .. } => {
@@ -127,6 +128,7 @@ pub(in crate::gate) enum ExecutionPlan {
     Upstream {
         service_name: String,
         internal_context: Option<InternalContextNode>,
+        forward_credentials: bool,
     },
     DirectResponse {
         status: u16,

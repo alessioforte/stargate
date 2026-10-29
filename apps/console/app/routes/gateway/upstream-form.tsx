@@ -55,6 +55,7 @@ interface FormValues {
   protocols: UpstreamProtocol[];
   internalContextEnabled: boolean;
   audience: string;
+  forwardCredentials: boolean;
 }
 
 interface BuildResult {
@@ -81,6 +82,7 @@ const defaultValues: FormValues = {
   protocols: [],
   internalContextEnabled: false,
   audience: "",
+  forwardCredentials: false,
 };
 
 function createTarget(
@@ -180,6 +182,7 @@ function upstreamToFormValues(
     audience: internalContext
       ? getString(internalContext.audience)
       : defaultValues.audience,
+    forwardCredentials: selectedValue.forward_credentials === true,
   };
 }
 
@@ -193,6 +196,9 @@ function isHttpTargetUrl(value: string) {
 }
 
 function formValuesToUpstream(values: FormValues): BuildResult {
+  if (values.forwardCredentials && values.internalContextEnabled) {
+    return { errorKey: "forwardCredentialsConflict", value: null };
+  }
   if (values.targets.length === 0) {
     return { errorKey: "targetRequired", value: null };
   }
@@ -250,6 +256,7 @@ function formValuesToUpstream(values: FormValues): BuildResult {
     targets,
     load_balancer: loadBalancer,
   };
+  if (values.forwardCredentials) upstream.forward_credentials = true;
 
   if (values.transportEnabled) {
     const transport: JsonRecord = {
@@ -560,6 +567,14 @@ const UpstreamForm: React.FC<GatewayNamedFormProps> = ({
       <Divider size={3} />
 
       <Stack p="xs" gap="xs">
+        <Switch
+          label={t("forwardCredentials")}
+          description={t("forwardCredentialsDescription")}
+          checked={values.forwardCredentials}
+          onChange={(event) =>
+            setField("forwardCredentials", event.currentTarget.checked)
+          }
+        />
         <Switch
           label={t("enableInternalContext")}
           checked={values.internalContextEnabled}

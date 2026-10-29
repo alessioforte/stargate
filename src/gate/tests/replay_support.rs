@@ -28,6 +28,7 @@ pub(super) enum Outcome {
 #[derive(Clone)]
 pub(super) struct CommittedRequest {
     pub(super) method: Method,
+    pub(super) uri: http::Uri,
     pub(super) headers: HeaderMap,
     pub(super) body: Bytes,
 }
@@ -57,7 +58,7 @@ impl Upstream {
                                 async move {
                                     let (parts, body) = request.into_parts();
                                     let body = body.collect().await.map_err(io::Error::other)?.to_bytes();
-                                    records.lock().unwrap().push(CommittedRequest { method: parts.method, headers: parts.headers, body });
+                                    records.lock().unwrap().push(CommittedRequest { method: parts.method, uri: parts.uri, headers: parts.headers, body });
                                     match outcome {
                                         // The operation has committed. Fail the connection before
                                         // any response headers can tell the gateway it succeeded.
@@ -132,6 +133,7 @@ pub(super) fn state(runtime: &RuntimeSnapshot) -> RequestState {
 
 pub(super) fn planned(name: &str) -> ExecutionPlan {
     ExecutionPlan::Upstream {
+        forward_credentials: false,
         service_name: name.into(),
         internal_context: None,
     }

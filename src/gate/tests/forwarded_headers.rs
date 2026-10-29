@@ -27,6 +27,9 @@ use tokio_tungstenite::{
 
 const ORIGINAL_HOST: &str = "frontend.test:8443";
 const AUDIENCE: &str = "urn:stargate:service:test";
+const HTTP_QUERY: &str = "access_token=a&page=2&jwt=b&access%5Ftoken=c&%74oken=d&keep=%2F";
+const WS_QUERY: &str = "token=a&page=2&access%5Ftoken=b&jwt=c&keep=%2F";
+const EXTERNAL_COOKIES: &str = "consent=a,b; prefs={\"x\":1}; jwt=session-token; sid=1; flag";
 
 fn runtime(config: serde_json::Value, internal: bool) -> Arc<RuntimeSnapshot> {
     let mut runtime = crate::gate::test_support::runtime(
@@ -50,16 +53,16 @@ fn runtime(config: serde_json::Value, internal: bool) -> Arc<RuntimeSnapshot> {
     runtime
 }
 
-fn incoming(uri: &str) -> Request<Body> {
+fn incoming(uri: &str, internal: bool) -> Request<Body> {
     let mut req = Request::builder().uri(uri).body(Body::empty()).unwrap();
     req.extensions_mut().insert(ConnectInfo(
         "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
     ));
-    add_proxy_headers(req.headers_mut());
+    add_proxy_headers(req.headers_mut(), internal);
     req
 }
 
-fn add_proxy_headers(headers: &mut HeaderMap) {
+fn add_proxy_headers(headers: &mut HeaderMap, internal: bool) {
     for (name, value) in [
         ("x-forwarded-for", "1.2.3.4"),
         ("x-forwarded-for", "5.6.7.8"),
@@ -71,14 +74,24 @@ fn add_proxy_headers(headers: &mut HeaderMap) {
         ("x-forwarded-ssl", "on"),
         ("forwarded", "for=1.2.3.4;proto=https"),
         ("x-real-ip", "1.2.3.4"),
+        ("authorization", "Bearer client-token"),
+        ("x-api-key", "client-key"),
+        ("proxy-authorization", "Basic proxy-token"),
+        ("cookie", "theme=dark; jwt=session-token; cart=123"),
+        ("connection", "x-connection-secret"),
+        ("x-connection-secret", "must-not-forward"),
     ] {
         headers.append(name, value.parse().unwrap());
+    }
+    if !internal {
+        headers.insert("cookie", EXTERNAL_COOKIES.parse().unwrap());
     }
 }
 
 fn request_state(runtime: &RuntimeSnapshot, req: &Request<Body>, internal: bool) -> RequestState {
     let mut state = state(runtime);
     state.path = req.uri().path().into();
+    state.query = req.uri().query().unwrap_or("").into();
     state.upstream_headers = UpstreamHeaders::from_request(req, false);
     if internal {
         let signer = ContextSigner::from_rsa_pem(
@@ -112,7 +125,7 @@ fn request_state(runtime: &RuntimeSnapshot, req: &Request<Body>, internal: bool)
     state
 }
 
-fn assert_headers(headers: &HeaderMap, trusted: bool, internal: bool) {
+fn assert_headers(headers: &HeaderMap, trusted: bool, internal: bool, forward: bool, phase: &str) {
     assert_eq!(headers.get_all("x-forwarded-for").iter().count(), 1);
     assert_eq!(
         headers["x-forwarded-for"],
@@ -150,9 +163,37 @@ fn assert_headers(headers: &HeaderMap, trusted: bool, internal: bool) {
     }
     assert_eq!(headers.contains_key("stargate-context"), internal);
     assert_ne!(headers[HOST], ORIGINAL_HOST);
+    assert!(!headers.contains_key("proxy-authorization"));
+    assert!(
+        !headers.contains_key("x-connection-secret"),
+        "connection-nominated field leaked during {phase}"
+    );
+    if forward {
+        assert_eq!(headers["authorization"], "Bearer client-token");
+        assert_eq!(headers["x-api-key"], "client-key");
+        assert_eq!(headers["cookie"], EXTERNAL_COOKIES);
+    } else {
+        assert!(!headers.contains_key("authorization"));
+        assert!(!headers.contains_key("x-api-key"));
+        assert_eq!(
+            headers["cookie"],
+            if internal {
+                "theme=dark; cart=123"
+            } else {
+                "consent=a,b; prefs={\"x\":1}; sid=1; flag"
+            }
+        );
+    }
 }
 
-async fn check_http(trusted: bool, internal: bool) {
+fn assert_query(uri: &http::Uri, forward: bool, original: &str) {
+    assert_eq!(
+        uri.query(),
+        Some(if forward { original } else { "page=2&keep=%2F" })
+    );
+}
+
+async fn check_http(trusted: bool, internal: bool, forward: bool) {
     let primary = Upstream::start(Outcome::Status(503)).await;
     let backup = Upstream::start(Outcome::Status(200)).await;
     let mirror = Upstream::start(Outcome::Status(200)).await;
@@ -162,10 +203,22 @@ async fn check_http(trusted: bool, internal: bool) {
     config["http"]["services"]["mirror"] = json!({"kind":"load_balancer","upstream":"mirror"});
     config["http"]["services"]["root"] =
         json!({"kind":"mirror","service":"entry","mirrors":[{"service":"mirror","percent":100}]});
+    if forward {
+        for name in ["primary", "backup"] {
+            config["http"]["upstreams"][name]["forward_credentials"] = true.into();
+        }
+    }
+    if !internal {
+        // A mirror can have a different policy from its primary and failover.
+        config["http"]["upstreams"]["mirror"]["forward_credentials"] = (!forward).into();
+    }
     let runtime = runtime(config, internal);
     // HTTP/2 can carry the original authority without a Host header. Replay
     // reconstructs the upstream URI and must retain these ingress facts.
-    let mut req = incoming(&format!("https://{ORIGINAL_HOST}/orders"));
+    let mut req = incoming(
+        &format!("https://{ORIGINAL_HOST}/orders?{HTTP_QUERY}"),
+        internal,
+    );
     *req.version_mut() = http::Version::HTTP_2;
     let state = request_state(&runtime, &req, internal);
     req.headers_mut()
@@ -183,14 +236,25 @@ async fn check_http(trusted: bool, internal: bool) {
     })
     .await
     .unwrap();
-    for upstream in [&primary, &backup, &mirror] {
+    for (upstream, upstream_forward) in [
+        (&primary, forward),
+        (&backup, forward),
+        (&mirror, !internal && !forward),
+    ] {
         let records = upstream.records();
         assert_eq!(records.len(), 1);
-        assert_headers(&records[0].headers, trusted, internal);
+        assert_query(&records[0].uri, upstream_forward, HTTP_QUERY);
+        assert_headers(
+            &records[0].headers,
+            trusted,
+            internal,
+            upstream_forward,
+            "HTTP replay",
+        );
     }
 
     // A direct HTTP/1 dispatch takes the Host path and does not use replay.
-    let mut req = incoming("/orders");
+    let mut req = incoming(&format!("/orders?{HTTP_QUERY}"), internal);
     req.headers_mut()
         .insert(HOST, ORIGINAL_HOST.parse().unwrap());
     let state = request_state(&runtime, &req, internal);
@@ -201,19 +265,28 @@ async fn check_http(trusted: bool, internal: bool) {
     assert_eq!(response.status(), 200);
     let records = backup.records();
     assert_eq!(records.len(), 2);
-    assert_headers(&records[1].headers, trusted, internal);
+    assert_query(&records[1].uri, forward, HTTP_QUERY);
+    assert_headers(
+        &records[1].headers,
+        trusted,
+        internal,
+        forward,
+        "HTTP direct",
+    );
 }
 
 // Tungstenite's handshake callback fixes the error type to a full HTTP response.
 #[allow(clippy::result_large_err)]
-async fn check_websocket(trusted: bool, internal: bool) {
+async fn check_websocket(trusted: bool, internal: bool, forward: bool) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_url = format!("http://{}", listener.local_addr().unwrap());
     let (sender, captured) = oneshot::channel();
     let upstream = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let callback = move |request: &WsRequest, response: WsResponse| {
-            sender.send(request.headers().clone()).unwrap();
+            sender
+                .send((request.uri().clone(), request.headers().clone()))
+                .unwrap();
             Ok(response)
         };
         let mut socket = accept_hdr_async(stream, callback).await.unwrap();
@@ -226,6 +299,9 @@ async fn check_websocket(trusted: bool, internal: bool) {
         "upstreams":{"socket":{"targets":[{"url":upstream_url}]}},
         "services":{"socket":{"kind":"load_balancer","upstream":"socket"}}
     });
+    if forward {
+        config["http"]["upstreams"]["socket"]["forward_credentials"] = true.into();
+    }
     let runtime = runtime(config, internal);
     let app = Router::new().fallback(any(move |req: Request<Body>| {
         let runtime = runtime.clone();
@@ -236,7 +312,7 @@ async fn check_websocket(trusted: bool, internal: bool) {
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("ws://{}/socket", listener.local_addr().unwrap());
+    let url = format!("ws://{}/socket?{WS_QUERY}", listener.local_addr().unwrap());
     let gateway = tokio::spawn(async move {
         axum::serve(
             listener,
@@ -249,9 +325,15 @@ async fn check_websocket(trusted: bool, internal: bool) {
     request
         .headers_mut()
         .insert(HOST, ORIGINAL_HOST.parse().unwrap());
-    add_proxy_headers(request.headers_mut());
+    add_proxy_headers(request.headers_mut(), internal);
+    request.headers_mut().insert(
+        http::header::CONNECTION,
+        "upgrade, x-connection-secret".parse().unwrap(),
+    );
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
-    assert_headers(&captured.await.unwrap(), trusted, internal);
+    let (uri, headers) = captured.await.unwrap();
+    assert_query(&uri, forward, WS_QUERY);
+    assert_headers(&headers, trusted, internal, forward, "WebSocket");
     socket.send(Message::Text("echo".into())).await.unwrap();
     assert_eq!(
         socket.next().await.unwrap().unwrap(),
@@ -268,8 +350,13 @@ fn upstreams_share_the_forwarding_trust_boundary() {
     if let Ok(case) = std::env::var(CASE) {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             for internal in [false, true] {
-                check_http(case == "trusted", internal).await;
-                check_websocket(case == "trusted", internal).await;
+                for forward in [false, true] {
+                    if internal && forward {
+                        continue;
+                    }
+                    check_http(case == "trusted", internal, forward).await;
+                    check_websocket(case == "trusted", internal, forward).await;
+                }
             }
         });
         return;

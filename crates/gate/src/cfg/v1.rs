@@ -128,6 +128,8 @@ pub struct Upstream {
     pub transport: Option<Transport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub internal_context: Option<InternalContext>,
+    #[serde(default)]
+    pub forward_credentials: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,6 +451,13 @@ fn compile_upstreams(
             }
         }
 
+        if upstream.forward_credentials && upstream.internal_context.is_some() {
+            return Err(CompileError::new(
+                format!("http.upstreams.{}.forward_credentials", name),
+                "cannot forward credentials with internal context",
+            ));
+        }
+
         out.insert(
             name.clone(),
             UpstreamNode {
@@ -463,6 +472,7 @@ fn compile_upstreams(
                     name,
                     upstream.internal_context.as_ref(),
                 )?,
+                forward_credentials: upstream.forward_credentials,
             },
         );
     }
@@ -1206,6 +1216,26 @@ mod tests {
 
     fn parse_config(yaml: &str) -> Config {
         serde_saphyr::from_str(yaml).expect("config should parse")
+    }
+
+    #[test]
+    fn upstream_credential_forwarding_defaults_off_and_rejects_internal_context() {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        value["http"] = serde_json::json!({
+            "upstreams": {"orders": {"targets": [{"url": "http://orders.test"}]}}
+        });
+        let config: Config = serde_json::from_value(value.clone()).unwrap();
+        assert!(!config.http.upstreams["orders"].forward_credentials);
+        assert!(!config.compile().unwrap().http.upstreams["orders"].forward_credentials);
+
+        value["http"]["upstreams"]["orders"]["forward_credentials"] = true.into();
+        let config: Config = serde_json::from_value(value.clone()).unwrap();
+        assert!(config.compile().unwrap().http.upstreams["orders"].forward_credentials);
+        value["http"]["upstreams"]["orders"]["internal_context"] =
+            serde_json::json!({"audience": "urn:orders"});
+        let config: Config = serde_json::from_value(value).unwrap();
+        let error = config.compile().unwrap_err();
+        assert_eq!(error.path, "http.upstreams.orders.forward_credentials");
     }
 
     #[test]

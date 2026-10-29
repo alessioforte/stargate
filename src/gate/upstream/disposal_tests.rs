@@ -141,6 +141,7 @@ fn generated_body(mode: BodyMode, guard: BodyGuard) -> Body {
 
 fn plan(failover: bool) -> ExecutionPlan {
     let upstream = ExecutionPlan::Upstream {
+        forward_credentials: false,
         service_name: SERVICE.to_string(),
         internal_context: None,
     };

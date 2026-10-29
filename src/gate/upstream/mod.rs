@@ -2,6 +2,7 @@ pub(in crate::gate) mod attempt;
 pub(in crate::gate) mod headers;
 pub(in crate::gate) mod http;
 pub(in crate::gate) mod internal_context;
+pub(in crate::gate) mod uri;
 pub(in crate::gate) mod websocket;
 use attempt::{AttemptObservation, DispatchAttempt, attempt_limit_failure, record_attempt_metrics};
 use gate::graph::{HeaderValueNode, InternalContextNode, ResponseBodyNode};
@@ -34,7 +35,10 @@ pub(super) async fn execute_selected_with_request(
             service_name,
             upstream_base_url,
             internal_context,
+            forward_credentials,
         } => {
+            let mut upstream_headers = state.upstream_headers.clone();
+            upstream_headers.forward_credentials = *forward_credentials;
             let attempt = DispatchAttempt::primary();
             let protocol = req.get_protocol();
             let uri = upstream_uri(upstream_base_url, state);
@@ -59,7 +63,7 @@ pub(super) async fn execute_selected_with_request(
                     transport,
                     req,
                     &uri,
-                    &state.upstream_headers,
+                    &upstream_headers,
                     internal_dispatch.as_ref(),
                     &state.execution,
                 )
@@ -73,7 +77,7 @@ pub(super) async fn execute_selected_with_request(
                     req,
                     &uri,
                     &client,
-                    &state.upstream_headers,
+                    &upstream_headers,
                     internal_dispatch.as_ref(),
                     &runtime.settings,
                     &state.execution,
@@ -105,7 +109,10 @@ pub(super) async fn execute_selected_from_replay(
             service_name,
             upstream_base_url,
             internal_context,
+            forward_credentials,
         } => {
+            let mut upstream_headers = state.upstream_headers.clone();
+            upstream_headers.forward_credentials = *forward_credentials;
             let attempt =
                 dispatch_attempt.ok_or_else(|| attempt_limit_failure(service_name, "unknown"))?;
             let uri = upstream_uri(upstream_base_url, state);
@@ -128,7 +135,7 @@ pub(super) async fn execute_selected_from_replay(
                 req,
                 &uri,
                 &client,
-                &state.upstream_headers,
+                &upstream_headers,
                 internal_dispatch.as_ref(),
                 &runtime.settings,
                 &state.execution,
@@ -210,6 +217,7 @@ pub(super) enum SelectedService {
         service_name: String,
         upstream_base_url: String,
         internal_context: Option<InternalContextNode>,
+        forward_credentials: bool,
     },
     DirectResponse {
         status: u16,

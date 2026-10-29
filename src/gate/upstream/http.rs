@@ -3,8 +3,11 @@ use crate::gate::{
     lifecycle::{Execution, body::guarded_body},
     response::strip_internal_context_response,
     upstream::{
-        headers::{UpstreamHeaders, apply_forwarded_headers, strip_hop_by_hop_headers},
+        headers::{
+            UpstreamHeaders, apply_forwarded_headers, strip_credentials, strip_hop_by_hop_headers,
+        },
         internal_context::InternalDispatch,
+        uri::sanitize_auth_uri,
     },
 };
 use crate::obs::telemetry;
@@ -46,6 +49,11 @@ pub async fn handler(
     if let Some(dispatch) = internal_dispatch {
         dispatch.prepare(&mut req).await?;
     } else {
+        if !ingress.forward_credentials {
+            *req.uri_mut() = sanitize_auth_uri(req.uri())
+                .map_err(|_| ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed))?;
+            strip_credentials(req.headers_mut());
+        }
         telemetry::inject_context(req.headers_mut());
     }
 

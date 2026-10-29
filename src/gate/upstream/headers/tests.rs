@@ -248,3 +248,53 @@ fn any_ambiguous_cookie_omits_the_whole_cookie_header() {
 
     assert!(headers.get_all(COOKIE).iter().next().is_none());
 }
+
+#[test]
+fn external_credentials_preserve_non_session_cookie_bytes() {
+    let cases: &[(&[u8], Option<&[u8]>)] = &[
+        (
+            br#"consent=a,b; prefs={"x":1}; jwt=t; sid=1"#,
+            Some(br#"consent=a,b; prefs={"x":1}; sid=1"#),
+        ),
+        (b"flag; jwt=t; sid=1", Some(b"flag; sid=1")),
+        (b"odd=\xff; jwt=t", Some(b"odd=\xff")),
+        (
+            b" \tflag\t ; jwt=t; sid=has space ",
+            Some(b"flag; sid=has space"),
+        ),
+        (b"JWT=keep; jwt =keep; jwt=t", Some(b"JWT=keep; jwt =keep")),
+        (b"jwt=t", None),
+        (b"\tjwt=t ; jwt=other\t", None),
+    ];
+    for (input, expected) in cases {
+        let mut headers = HeaderMap::new();
+        headers.insert(COOKIE, HeaderValue::from_bytes(input).unwrap());
+
+        strip_credentials(&mut headers);
+
+        assert_eq!(headers.get(COOKIE).map(HeaderValue::as_bytes), *expected);
+    }
+}
+
+#[test]
+fn external_credentials_strip_session_only_cookie_fields_independently() {
+    let mut headers = HeaderMap::new();
+    headers.append(COOKIE, HeaderValue::from_static("consent=a,b; jwt=t"));
+    headers.append(COOKIE, HeaderValue::from_static("jwt=other"));
+    headers.append(COOKIE, HeaderValue::from_static("flag; prefs={\"x\":1}"));
+
+    strip_credentials(&mut headers);
+
+    let values = headers
+        .get_all(COOKIE)
+        .iter()
+        .map(HeaderValue::as_bytes)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        values,
+        [
+            b"consent=a,b".as_slice(),
+            b"flag; prefs={\"x\":1}".as_slice()
+        ]
+    );
+}

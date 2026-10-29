@@ -72,6 +72,7 @@ fn runtime(config: gate::cfg::Config) -> Arc<RuntimeSnapshot> {
 }
 fn selected(url: &str) -> SelectedService {
     SelectedService::Upstream {
+        forward_credentials: false,
         service_name: "leaf".into(),
         upstream_base_url: url.into(),
         internal_context: None,
@@ -79,6 +80,7 @@ fn selected(url: &str) -> SelectedService {
 }
 fn planned() -> ExecutionPlan {
     ExecutionPlan::Upstream {
+        forward_credentials: false,
         service_name: "leaf".into(),
         internal_context: None,
     }

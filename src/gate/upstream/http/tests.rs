@@ -370,7 +370,7 @@ async fn issuance_failure_contacts_no_upstream() {
 }
 
 #[tokio::test]
-async fn absent_internal_block_preserves_existing_forwarding_behavior() {
+async fn opted_in_external_backend_receives_credentials() {
     let (base_url, captured, server) = mock_upstream().await;
     let req = http::Request::builder()
         .method("GET")
@@ -385,7 +385,10 @@ async fn absent_internal_block_preserves_existing_forwarding_behavior() {
         req,
         &format!("{base_url}/external?token=still-forwarded&keep=1"),
         &test_client(),
-        &UpstreamHeaders::default(),
+        &UpstreamHeaders {
+            forward_credentials: true,
+            ..Default::default()
+        },
         None,
         &gate::cfg::RuntimeSettings::default().compile().unwrap(),
         &Execution::default(),

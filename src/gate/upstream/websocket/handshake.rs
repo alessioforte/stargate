@@ -2,8 +2,11 @@ use super::UpstreamSocket;
 use crate::gate::{
     lifecycle::Execution,
     upstream::{
-        headers::{UpstreamHeaders, apply_forwarded_headers, strip_hop_by_hop_headers},
+        headers::{
+            UpstreamHeaders, apply_forwarded_headers, strip_credentials, strip_hop_by_hop_headers,
+        },
         internal_context::InternalDispatch,
+        uri::sanitize_auth_uri,
     },
 };
 use crate::{
@@ -135,6 +138,11 @@ pub(super) async fn build_upstream_request(
     if let Some(dispatch) = internal_dispatch {
         dispatch.prepare(&mut request).await?;
     } else {
+        if !ingress.forward_credentials {
+            *request.uri_mut() = sanitize_auth_uri(request.uri())
+                .map_err(|_| ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed))?;
+            strip_credentials(request.headers_mut());
+        }
         telemetry::inject_context(request.headers_mut());
     }
 

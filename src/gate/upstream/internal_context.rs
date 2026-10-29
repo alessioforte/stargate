@@ -1,6 +1,7 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::upstream::attempt::{DispatchAttempt, dispatch_kind_label};
 use crate::gate::upstream::headers::sanitize_internal_request_headers;
+use crate::gate::upstream::uri::sanitize_auth_uri;
 use crate::{
     ctx::{
         INTERNAL_CONTEXT_HEADER, PropagationDraft,
@@ -54,7 +55,7 @@ impl InternalDispatch {
         &self,
         req: &mut http::Request<B>,
     ) -> Result<(), ErrorResponse> {
-        let uri = sanitize_internal_uri(req.uri())
+        let uri = sanitize_auth_uri(req.uri())
             .map_err(|_| internal_failure(&self.service, self.kind, "sanitization", None, None))?;
         *req.uri_mut() = uri;
 
@@ -214,76 +215,6 @@ fn internal_failure(
         );
     }
     ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct QuerySanitizationError;
-
-fn sanitize_internal_uri(uri: &http::Uri) -> Result<http::Uri, QuerySanitizationError> {
-    let Some(path_and_query) = uri.path_and_query() else {
-        return Ok(uri.clone());
-    };
-    let Some(query) = path_and_query.query() else {
-        return Ok(uri.clone());
-    };
-    let query = sanitize_auth_query(query)?;
-    let next = if query.is_empty() {
-        path_and_query.path().to_owned()
-    } else {
-        format!("{}?{}", path_and_query.path(), query)
-    };
-
-    let mut parts = uri.clone().into_parts();
-    parts.path_and_query = Some(
-        next.parse::<http::uri::PathAndQuery>()
-            .map_err(|_| QuerySanitizationError)?,
-    );
-    http::Uri::from_parts(parts).map_err(|_| QuerySanitizationError)
-}
-
-fn sanitize_auth_query(query: &str) -> Result<String, QuerySanitizationError> {
-    let mut retained = Vec::new();
-    for pair in query.split('&') {
-        let key = pair.split_once('=').map_or(pair, |(key, _)| key);
-        if !is_auth_query_key(key)? {
-            retained.push(pair);
-        }
-    }
-    Ok(retained.join("&"))
-}
-
-fn is_auth_query_key(key: &str) -> Result<bool, QuerySanitizationError> {
-    let mut decoded = Vec::with_capacity(key.len());
-    let bytes = key.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] != b'%' {
-            decoded.push(bytes[index]);
-            index += 1;
-            continue;
-        }
-        if index + 2 >= bytes.len() {
-            return Err(QuerySanitizationError);
-        }
-        let high = hex_value(bytes[index + 1]).ok_or(QuerySanitizationError)?;
-        let low = hex_value(bytes[index + 2]).ok_or(QuerySanitizationError)?;
-        decoded.push((high << 4) | low);
-        index += 3;
-    }
-
-    Ok(matches!(
-        decoded.as_slice(),
-        b"token" | b"access_token" | b"jwt"
-    ))
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

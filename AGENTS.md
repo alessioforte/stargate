@@ -246,6 +246,12 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
 - Upstreams: `transport.connect_timeout`, `transport.protocols` (`http1`/`http2`;
   WebSocket needs `http1`), `load_balancer.liveness_probe` and `circuit_breaker`
   (`fail_threshold` 3, `cooldown` 30s), optional `internal_context.audience`.
+  `forward_credentials` defaults to false, removing Authorization, API keys,
+  the `jwt` cookie and token query parameters before dispatch. Other cookies
+  use tolerant byte-based removal unless internal context requires strict parsing.
+  Opt in for a backend that validates the credentials;
+  this cannot be combined with internal context. Proxy-Authorization and
+  Connection-nominated fields are always removed as hop-by-hop headers.
 - Routers: `response_mode: stream` for long-lived responses (default `finite`).
 - `runtime` defaults: primary 1024 / mirror 64 slots, replay 2 MiB per request /
   64 MiB total, upload idle 15s, connect 5s, response headers 30s, body idle 30s,

@@ -32,6 +32,7 @@ fn dispatch_attempts_count_only_network_calls_and_reset_by_kind() {
         body: None,
     };
     let upstream = SelectedService::Upstream {
+        forward_credentials: false,
         service_name: "orders".to_owned(),
         upstream_base_url: "http://orders.test".to_owned(),
         internal_context: None,

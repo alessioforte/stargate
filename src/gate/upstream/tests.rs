@@ -126,6 +126,7 @@ async fn transport_failure_advances_even_without_status_rules() {
     let plan = ExecutionPlan::Failover {
         services: vec![
             ExecutionPlan::Upstream {
+                forward_credentials: false,
                 service_name: "unreachable".to_owned(),
                 internal_context: None,
             },
@@ -156,6 +157,7 @@ async fn internal_context_failure_never_fails_over() {
     let plan = ExecutionPlan::Failover {
         services: vec![
             ExecutionPlan::Upstream {
+                forward_credentials: false,
                 service_name: "orders".to_owned(),
                 internal_context: Some(InternalContextNode {
                     audience: "urn:stargate:service:orders".to_owned(),
@@ -200,6 +202,7 @@ async fn local_errors_and_shadow_attempts_preserve_upstream_health() {
                     lb::BaseLoadBalancer::new(lb::RoundRobin::new(), vec![target]),
                 );
                 let selected = SelectedService::Upstream {
+                    forward_credentials: false,
                     service_name: "orders".to_owned(),
                     upstream_base_url: url.to_owned(),
                     internal_context: signed.then(|| InternalContextNode {
