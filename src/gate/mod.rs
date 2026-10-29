@@ -24,7 +24,7 @@ pub(crate) use snap::apply_gateway_config;
 pub(crate) use snap::apply_policy_document;
 #[cfg(test)]
 pub(crate) use snap::prepare_config;
-pub(crate) use snap::{ConfigActivation, save_gateway_config};
+pub(crate) use snap::{ConfigActivation, save_gateway_config, validate_gateway_document};
 pub use snap::{Gate, RuntimeSnapshot, retain_runtime};
 pub(crate) use snap::{shutdown_config_sync, spawn_config_sync};
 #[cfg(test)]

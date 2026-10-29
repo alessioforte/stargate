@@ -343,6 +343,8 @@ Gateway configuration and ACE rules come from the active `config_documents` rows
 On an empty database, startup seeds each kind once: the gateway from
 `CONFIG_PATH/CONFIG_FILENAME`, and policies from `CONFIG_PATH/policies` (empty when absent).
 A missing gateway seed fails startup. Existing documents take precedence over files.
+Seeds are parsed and validated before persistence; an invalid seed creates neither
+a document nor an audit event, so correcting the seed allows startup to retry.
 Server startup and activation never create or write configuration or policy seed files
 and use no file watchers. Explicit CLI exports can write the requested backup files.
 Invalid active documents fail startup.

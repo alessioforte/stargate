@@ -11,7 +11,7 @@ pub use body::retain_runtime;
 pub(crate) use config::GatewayPreparationError;
 #[cfg(test)]
 pub(crate) use config::prepare_config;
-pub(crate) use config::{ConfigActivation, save_gateway_config};
+pub(crate) use config::{ConfigActivation, save_gateway_config, validate_gateway_document};
 pub(super) use config::{load_gateway_document, prepare_gateway_config};
 #[cfg(all(test, feature = "memory"))]
 pub(crate) use reload::apply_gateway_config;

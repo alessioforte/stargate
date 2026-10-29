@@ -81,6 +81,10 @@ pub(in crate::gate) async fn load_gateway_document() -> anyhow::Result<ConfigDoc
     load_gateway_document_from_path(&get_config_path()).await
 }
 
+pub(crate) fn validate_gateway_document(content: &str) -> Result<(), gate::cfg::ConfigLoadError> {
+    RuntimeConfig::from_yaml_str(content).map(|_| ())
+}
+
 async fn load_gateway_document_from_path(path: &str) -> anyhow::Result<ConfigDocument> {
     if let Some(document) = db::get_active_config_document(ConfigKind::Gateway).await? {
         return Ok(document);
@@ -92,6 +96,7 @@ async fn load_gateway_document_from_path(path: &str) -> anyhow::Result<ConfigDoc
         }
         Err(error) => return Err(error.into()),
     };
+    validate_gateway_document(&content)?;
     let context = TrustedAuditContext::background(
         TrustedAuditBoundary::control_plane(),
         TrustedBackgroundActor::system(None),

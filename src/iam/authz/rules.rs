@@ -222,6 +222,17 @@ pub fn validate_rules(
     }
 }
 
+pub(crate) fn validate_policy_document(content: &str) -> Result<(), String> {
+    let validated = validate_rules(ValidateAccessControlRulesRequest {
+        content: content.to_owned(),
+    });
+    if validated.valid {
+        Ok(())
+    } else {
+        Err(format_diagnostics(&validated.diagnostics))
+    }
+}
+
 pub async fn update_rules(
     request: UpdateAccessControlRulesRequest,
     context: TrustedAuditContext,

@@ -1,11 +1,10 @@
 use crate::data::db;
-use crate::iam::authz::rules::{ValidateAccessControlRulesRequest, validate_rules};
+use crate::iam::authz::rules::validate_policy_document;
 use ::db::ent::{
     ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary,
     TrustedAuditContext, TrustedBackgroundActor,
 };
 use clap::{Args, Subcommand, ValueEnum};
-use gate::cfg::RuntimeConfig;
 use std::{
     io::{self, Write},
     path::PathBuf,
@@ -102,7 +101,7 @@ async fn active_document(kind: ConfigKind) -> io::Result<ConfigDocument> {
 fn validate_document(kind: ConfigKind, content: &str) -> io::Result<()> {
     match kind {
         ConfigKind::Gateway => {
-            RuntimeConfig::from_yaml_str(content).map_err(|_| {
+            crate::gate::validate_gateway_document(content).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "invalid gateway configuration document",
@@ -110,15 +109,12 @@ fn validate_document(kind: ConfigKind, content: &str) -> io::Result<()> {
             })?;
         }
         ConfigKind::Policies => {
-            let validated = validate_rules(ValidateAccessControlRulesRequest {
-                content: content.to_string(),
-            });
-            if !validated.valid {
-                return Err(io::Error::new(
+            validate_policy_document(content).map_err(|_| {
+                io::Error::new(
                     io::ErrorKind::InvalidData,
                     "invalid access-control policies document",
-                ));
-            }
+                )
+            })?;
         }
     }
     Ok(())

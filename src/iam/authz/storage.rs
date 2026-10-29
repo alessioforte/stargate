@@ -21,6 +21,7 @@ async fn load_policies_document_from_path(path: &str) -> anyhow::Result<ConfigDo
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error.into()),
     };
+    super::rules::validate_policy_document(&content).map_err(anyhow::Error::msg)?;
     let context = TrustedAuditContext::background(
         TrustedAuditBoundary::control_plane(),
         TrustedBackgroundActor::system(None),
