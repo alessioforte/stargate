@@ -43,6 +43,10 @@ spec:
           env:
             - name: STARGATE_RUNTIME_PROFILE
               value: {{ .Values.deployment.mode | quote }}
+            {{- if .Values.migrations.job.enabled }}
+            - name: DB_MIGRATE_ON_START
+              value: "false"
+            {{- end }}
             - name: STARGATE_IMPORT_GATEWAY_FILE
               value: {{ printf "%s/%s" .Values.gatewayConfig.mountPath .Values.gatewayConfig.fileName | quote }}
             - name: STARGATE_IMPORT_POLICIES_FILE

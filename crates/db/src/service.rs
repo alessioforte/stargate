@@ -66,6 +66,33 @@ impl Service {
         Ok(())
     }
 
+    /// Verify the embedded migrations have been applied without modifying the database.
+    pub async fn verify_schema(&self) -> Result<()> {
+        #[cfg(feature = "postgres")]
+        let exists_query = "SELECT COUNT(*) FROM pg_catalog.pg_class WHERE oid = to_regclass('_sqlx_migrations') AND relkind IN ('r', 'p')";
+        #[cfg(feature = "sqlite")]
+        let exists_query =
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'";
+        let exists: i64 = sqlx::query_scalar(exists_query)
+            .fetch_one(&self.pool)
+            .await?;
+        if exists == 0 {
+            bail!("database schema is behind this binary: run `stargate db migrate`");
+        }
+        let applied: Vec<i64> =
+            sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success = true")
+                .fetch_all(&self.pool)
+                .await?;
+        if MIGRATOR
+            .iter()
+            .filter(|migration| !migration.migration_type.is_down_migration())
+            .any(|migration| !applied.contains(&migration.version))
+        {
+            bail!("database schema is behind this binary: run `stargate db migrate`");
+        }
+        Ok(())
+    }
+
     /// Lightweight connectivity check — executes `SELECT 1`.
     pub async fn ping(&self) -> Result<()> {
         sqlx::query("SELECT 1").execute(&self.pool).await?;
@@ -674,7 +701,7 @@ fn pool_max_connections() -> u32 {
         .unwrap_or(20)
 }
 
-/// Initialize and migrate a database identified by a URL (also used by tests and benchmarks).
+/// Connect to a database identified by a URL without running migrations.
 #[cfg(feature = "postgres")]
 pub async fn init(conn: &str) -> Result<Service> {
     init_with_options(conn.parse()?).await
@@ -686,9 +713,7 @@ pub async fn init(conn: &str) -> Result<Service> {
         .max_connections(pool_max_connections())
         .connect(conn)
         .await?;
-    let service = Service::new(pool);
-    service.migrate().await?;
-    Ok(service)
+    Ok(Service::new(pool))
 }
 
 #[async_trait::async_trait]
@@ -2338,6 +2363,33 @@ mod sqlite_tests {
         let service = Service::new(pool);
         service.migrate().await.expect("migrations apply");
         service
+    }
+
+    #[tokio::test]
+    async fn schema_verification_requires_all_embedded_migrations() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let service = Service::new(pool);
+        let error = service.verify_schema().await.unwrap_err();
+        assert!(error.to_string().contains("run `stargate db migrate`"));
+        service.migrate().await.unwrap();
+        service.verify_schema().await.unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
+            .bind(MIGRATOR.iter().next().unwrap().version)
+            .execute(&service.pool)
+            .await
+            .unwrap();
+        assert!(
+            service
+                .verify_schema()
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("run `stargate db migrate`")
+        );
     }
 
     fn trusted_ctx() -> TrustedAuditContext {
@@ -4553,7 +4605,9 @@ mod tests {
         let url = std::env::var("TEST_DATABASE_URL")
             .or_else(|_| std::env::var("DATABASE_URL"))
             .expect("TEST_DATABASE_URL or DATABASE_URL must be set for postgres tests");
-        init(&url).await.expect("DB init failed")
+        let service = init(&url).await.expect("DB init failed");
+        service.migrate().await.expect("migrations apply");
+        service
     }
 
     async fn count_outbox_by_request_id(svc: &Service, req_id: &str) -> i64 {

@@ -85,6 +85,23 @@ the Service selector can never route traffic to them.
 {{ toYaml $labels }}
 {{- end -}}
 
+{{- define "stargate.migrationsLabels" -}}
+{{- $serverName := include "stargate.name" . -}}
+{{- $jobName := printf "%s-migrations" ($serverName | trunc 52 | trimSuffix "-") -}}
+{{- if eq $jobName $serverName -}}
+  {{- $jobName = printf "%s-migratejob" ($serverName | trunc 52 | trimSuffix "-") -}}
+{{- end -}}
+{{- $labels := mergeOverwrite
+  (include "stargate.commonLabels" . | fromYaml)
+  (dict
+    "app.kubernetes.io/name" $jobName
+    "app.kubernetes.io/instance" .Release.Name
+    "app.kubernetes.io/component" "migrations"
+  )
+-}}
+{{ toYaml $labels }}
+{{- end -}}
+
 {{- define "stargate.testLabels" -}}
 {{- $labels := mergeOverwrite
   (include "stargate.commonLabels" . | fromYaml)
@@ -102,6 +119,26 @@ Referenced resource names.
 */}}
 {{- define "stargate.configImportName" -}}
 {{- printf "%s-config-import" (include "stargate.fullname" . | trunc 49 | trimSuffix "-") -}}
+{{- end -}}
+
+{{- define "stargate.migrationsName" -}}
+{{- printf "%s-migrations" (include "stargate.fullname" . | trunc 52 | trimSuffix "-") -}}
+{{- end -}}
+
+{{- define "stargate.migrationsEnvName" -}}
+{{- printf "%s-migrations-env" (include "stargate.fullname" . | trunc 48 | trimSuffix "-") -}}
+{{- end -}}
+
+{{- define "stargate.runtimeConfigData" -}}
+{{- range $key, $value := .Values.runtimeConfig.data }}
+{{ $key }}: {{ $value | quote }}
+{{- end -}}
+{{- end -}}
+
+{{- define "stargate.runtimeSecretData" -}}
+{{- range $key, $value := .Values.runtimeSecret.stringData }}
+{{ $key }}: {{ $value | quote }}
+{{- end -}}
 {{- end -}}
 
 {{/* Keep protected and ambiguous paths out of public identity routes. */}}
@@ -208,6 +245,15 @@ Cross-field validation that JSON Schema cannot express.
 
 {{- $runtimeData := default (dict) .Values.runtimeConfig.data -}}
 {{- $managed := dict -}}
+{{- if .Values.migrations.job.enabled -}}
+  {{- if eq $mode "edge" -}}
+    {{- fail "migrations.job.enabled is cluster-only: edge runs SQLite migrations on startup" -}}
+  {{- end -}}
+  {{- if hasKey (default (dict) .Values.runtimeSecret.stringData) "DB_MIGRATE_ON_START" -}}
+    {{- fail "runtimeSecret.stringData.DB_MIGRATE_ON_START is chart-managed; set migrations.job.enabled instead" -}}
+  {{- end -}}
+  {{- $_ := set $managed "DB_MIGRATE_ON_START" "migrations.job.enabled" -}}
+{{- end -}}
 {{- if .Values.traefik.adminAllowList.enabled -}}
   {{- if not .Values.traefik.enabled -}}
     {{- fail "traefik.adminAllowList.enabled=true requires traefik.enabled=true" -}}

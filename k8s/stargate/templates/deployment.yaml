@@ -120,6 +120,10 @@ spec:
               value: {{ .Values.gatewayConfig.mountPath | quote }}
             - name: CONFIG_FILENAME
               value: {{ .Values.gatewayConfig.fileName | quote }}
+            {{- if .Values.migrations.job.enabled }}
+            - name: DB_MIGRATE_ON_START
+              value: "false"
+            {{- end }}
             {{- if .Values.traefik.enabled }}
             - name: IAM_HOSTS
               value: {{ .Values.traefik.identityHost | quote }}

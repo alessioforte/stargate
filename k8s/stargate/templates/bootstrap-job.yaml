@@ -61,6 +61,10 @@ spec:
           env:
             - name: STARGATE_RUNTIME_PROFILE
               value: {{ .Values.deployment.mode | quote }}
+            {{- if .Values.migrations.job.enabled }}
+            - name: DB_MIGRATE_ON_START
+              value: "false"
+            {{- end }}
             - name: STARGATE_BOOTSTRAP_PASSWORD
               valueFrom:
                 secretKeyRef:

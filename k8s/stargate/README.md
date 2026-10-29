@@ -129,7 +129,7 @@ extraVolumeMounts:
 
 Create `postgres-ca` with a `ca.pem` key. Mount the CA at the same path in every
 CLI process or Job using these settings. Chart `extraVolumes` and
-`extraVolumeMounts` apply to the Deployment; the current bootstrap and config
+`extraVolumeMounts` apply to the Deployment and migration Job; the bootstrap and config
 import hooks do not inherit these mounts. When a private CA is required, use
 separate CLI Jobs with the CA mounted instead of enabling those hooks.
 
@@ -476,6 +476,48 @@ Edge applies external imports on the next periodic check without restarting. Use
 `/admin/health` to inspect active gateway/policy revisions. See [CLI operations](../../docs/cli.md)
 and the [configuration reference](../../docs/config-v1.md#database-seed-files-and-admin-updates).
 
+## Database migrations
+
+By default, every process initializes the schema on startup. In cluster mode,
+enable the optional migration Job to run migrations before each install or
+upgrade, then let the server and other release Jobs verify the schema without
+running migrations:
+
+```yaml
+migrations:
+  job:
+    enabled: true
+    existingSecret: stargate-migration-credentials
+```
+
+Create the optional Secret before installing; its `POSTGRES_USERNAME` and
+`POSTGRES_PASSWORD` keys must name a role allowed to apply schema changes. If
+`existingSecret` is empty, the Job uses the application credentials. For an
+already provisioned database, set `POSTGRES_CREATE_DATABASE: "false"` to avoid
+requiring database creation privileges. The application role needs read access
+to `_sqlx_migrations` for the schema check. The chart sets
+`DB_MIGRATE_ON_START=false` explicitly in the Deployment, bootstrap Job, and
+import Job when migrations are enabled; this takes precedence over `envFrom`,
+including external ConfigMaps and Secrets.
+
+The Job and its dedicated copies of chart-created runtime ConfigMaps and Secrets
+are pre-install and pre-upgrade hooks. They use the new release's values. An
+external runtime ConfigMap or Secret is referenced directly and must exist before
+`helm install`; otherwise the Job and Deployment cannot start and report
+`CreateContainerConfigError`. An existing migration Secret and any resources referenced
+by `extraEnv`, `extraEnvFrom` or `extraVolumes` must already exist before
+installation. The Job uses the
+namespace's default ServiceAccount without a mounted token. It has distinct
+labels from server pods; if the namespace denies egress by default, allow the
+Job access to DNS and PostgreSQL separately. A failed Job fails the install or
+upgrade before the rollout and leaves existing pods unchanged. Hook resources
+may remain after a failed run and are replaced on the next attempt.
+
+During a rolling upgrade, old replicas continue using the upgraded schema.
+Migrations must therefore remain compatible with the previous release: add
+new structures first and remove old ones in a later release. The Job is
+cluster-only; edge applies SQLite migrations at startup.
+
 ## Bootstrap the first administrator
 
 Stargate does not create privileged resources during server startup. The
@@ -572,6 +614,7 @@ The chart manages these environment variables and rejects duplicates in
 - `PORT`
 - `CONFIG_PATH`
 - `CONFIG_FILENAME`
+- `DB_MIGRATE_ON_START` when `migrations.job.enabled` (set that option)
 - `JWT_KID` and `JWT_ID_TOKEN_KID` (set `jwt.activeKid` and `jwt.idTokenKid`)
 - `IAM_HOSTS` when `traefik.enabled` (set `traefik.identityHost`)
 - `TRUSTED_PROXIES` when `trustedProxies` is nonempty (set that list)
@@ -619,6 +662,11 @@ helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalCon
 helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
 helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
+helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set migrations.job.enabled=true
+helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set migrations.job.enabled=true
+python3 ./k8s/stargate/tests/test_migrations_job.py  # Requires Python and Ruby.
+# Expected failure: migration Jobs require the cluster profile.
+helm template edge ./k8s/stargate --set migrations.job.enabled=true
 # Expected failure with a kubectl exec alternative:
 helm template edge ./k8s/stargate --set gatewayConfig.importOnUpgrade=true
 # Expected failure: choose one ingress integration.

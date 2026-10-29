@@ -10,6 +10,7 @@ Current command tree:
 stargate admin bootstrap
 stargate config export --kind gateway|policies [--output <file>]
 stargate config import --kind gateway|policies --file <file>
+stargate db migrate
 stargate internal-context generate-key
 stargate jwt generate-key
 ```
@@ -22,6 +23,25 @@ creates the next JWT signing key in `keys/<kid>/` (refusing to overwrite) and
 prints the rotation steps. With `--id-token` the key is RS256 and meant for
 `JWT_ID_TOKEN_KID` (also with an HMAC `JWT_ALGORITHM`). It needs no database. See
 [Signing keys and rotation](oauth-oidc-provider-guide.md#signing-keys-and-rotation).
+
+## Database migrations
+
+By default, startup and database-backed CLI commands apply the embedded
+migrations. Set `DB_MIGRATE_ON_START=false` to require an already migrated
+database instead; if any embedded migration is missing, initialization fails
+with instructions to run `stargate db migrate`. The variable accepts `true`
+or `false` and defaults to `true`.
+
+Run migrations explicitly with credentials that can change the schema:
+
+```bash
+cargo run --no-default-features --features cluster -- db migrate
+```
+
+Use the same database connection variables as the server, or `--features edge`
+for SQLite. The command applies migrations regardless of `DB_MIGRATE_ON_START`
+and exits without starting the server. For a provisioned PostgreSQL database,
+set `POSTGRES_CREATE_DATABASE=false` when the role cannot create databases.
 
 ## Export and import configuration documents
 

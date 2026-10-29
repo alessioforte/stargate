@@ -22,7 +22,7 @@ stargate/
 │   ├── main.rs        # Entry: init logging/telemetry/DB/services, Axum router, Hyper server (plain or TLS)
 │   ├── api/           # Axum routers + handlers; IAM middleware; apps/ auth + console hosting
 │   ├── aud/           # PostgreSQL -> Redis audit outbox relay (cluster only)
-│   ├── cli/           # CLI: admin bootstrap, config export/import, internal-context / jwt generate-key
+│   ├── cli/           # CLI: admin bootstrap, db migrate, config export/import, internal-context / jwt generate-key
 │   ├── conf/          # Process-wide configuration: env readers, feature toggles, config dir
 │   ├── ctx/           # Request context, propagation drafts, audit/authz projections; sign/ signer
 │   ├── data/          # Persistence backends: db/ (SQL pool + repository service), store/
@@ -397,6 +397,14 @@ routes exclude protected and ambiguous paths to prevent fallback around the
 middleware. Administrators' browser IPs must be allowed; canonical `/auth` and
 `/oauth` paths remain public. Direct Service access needs separate network controls.
 
+An optional cluster-only pre-install/pre-upgrade migration Job uses dedicated
+hook configuration and optional DDL credentials. It sets the chart-managed
+`DB_MIGRATE_ON_START=false` explicitly in the server, bootstrap, and import
+environment so they verify the schema even with external runtime resources.
+Migration pods use distinct labels and need their own egress
+policy when the namespace denies traffic by default. Old replicas keep serving
+during the migration, so schema changes must remain compatible with them.
+
 ### Feature Flags
 
 ```toml
@@ -759,8 +767,9 @@ the same logical columns on PostgreSQL and SQLite.
 | `POSTGRES_USERNAME` / `_PASSWORD` / `_DATABASE` | root / root / stargate | PostgreSQL fields passed directly to sqlx; no URL encoding |
 | `POSTGRES_SSLMODE` | prefer | disable, prefer, require, verify-ca, or verify-full; other values stop startup |
 | `POSTGRES_SSLROOTCERT` | - | Private root CA PEM path for PostgreSQL TLS |
-| `POSTGRES_CREATE_DATABASE` | true | true/false; false skips maintenance DB access and CREATE DATABASE; migrations still run |
+| `POSTGRES_CREATE_DATABASE` | true | true/false; false skips maintenance DB access and CREATE DATABASE |
 | `DB_POOL_MAX` | 20 | Maximum connections in each SQL pool |
+| `DB_MIGRATE_ON_START` | true | true/false; false checks the schema without migrating; run `stargate db migrate` separately |
 | `REDIS_URL` | - | Redis (cluster) |
 | `RUST_LOG` | - | Tracing/log filter directives |
 | `LOG_FORMAT` | pretty (debug), json (release) | Console format: json, compact, or pretty; invalid values stop logging initialization |

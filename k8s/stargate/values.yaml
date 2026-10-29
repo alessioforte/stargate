@@ -159,6 +159,12 @@ networkPolicy:
   ingress: []
   egress: []
 
+# Run migrations before cluster installs and upgrades.
+migrations:
+  job:
+    enabled: false
+    existingSecret: ""
+
 # Non-confidential environment variables. Sensitive keys are rejected here;
 # put them in runtimeSecret instead.
 runtimeConfig:

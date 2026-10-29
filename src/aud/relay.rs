@@ -385,6 +385,7 @@ mod tests {
         let svc = db::service::init(&database_url)
             .await
             .expect("initialize relay test database");
+        svc.migrate().await.expect("apply relay test migrations");
         let store = RedisStore::new(&redis_url)
             .await
             .expect("initialize relay test Redis store");

@@ -21,6 +21,8 @@ pub enum Command {
     Admin(AdminArgs),
     /// Export or import database-backed configuration documents.
     Config(config::ConfigArgs),
+    /// Manage the database schema.
+    Db(DbArgs),
     InternalContext(InternalContextArgs),
     /// Manage JWT signing keys.
     Jwt(JwtArgs),
@@ -36,6 +38,18 @@ impl Command {
 pub struct AdminArgs {
     #[command(subcommand)]
     pub command: AdminCommand,
+}
+
+#[derive(Debug, Args)]
+pub struct DbArgs {
+    #[command(subcommand)]
+    command: DbCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum DbCommand {
+    /// Apply the embedded database migrations.
+    Migrate,
 }
 
 #[derive(Debug, Subcommand)]
@@ -104,6 +118,12 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
             AdminCommand::Bootstrap(args) => run_bootstrap(args).await,
         },
         Command::Config(args) => config::run(args).await,
+        Command::Db(args) => match args.command {
+            DbCommand::Migrate => {
+                crate::srv::profile::validate_runtime_profile()?;
+                db::migrate().await.map_err(io::Error::other)
+            }
+        },
         Command::InternalContext(args) => internal_context::run(args),
         Command::Jwt(args) => jwt::run(args),
     }
@@ -216,6 +236,18 @@ async fn run_bootstrap(args: BootstrapArgs) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_database_migration_command() {
+        let cli = Cli::try_parse_from(["stargate", "db", "migrate"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Db(DbArgs {
+                command: DbCommand::Migrate
+            }))
+        ));
+        assert!(!cli.command.unwrap().is_standalone());
+    }
 
     #[test]
     fn parses_internal_context_key_generation_command() {

@@ -141,6 +141,7 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
     let redis_url =
         std::env::var("CONFIG_SYNC_TEST_REDIS_URL").expect("dedicated Redis test service required");
     let svc = ::db::service::init(&database_url).await.unwrap();
+    svc.migrate().await.unwrap();
     let store = Arc::new(store::RedisStore::new(&redis_url).await.unwrap());
     let label = ulid::Ulid::generate().to_string();
     let initial = write(
@@ -289,6 +290,7 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
     std::fs::create_dir(&directory).unwrap();
     let url = format!("sqlite://{}?mode=rwc", directory.join("state.db").display());
     let reader = ::db::service::init(&url).await.unwrap();
+    reader.migrate().await.unwrap();
     let writer = ::db::service::init(&url).await.unwrap();
     let initial = Config::default();
     let gate = Arc::new(crate::gate::test_support::gate(initial.clone()));

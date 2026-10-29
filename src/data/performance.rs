@@ -14,6 +14,7 @@ async fn cluster_backend_round_trips() {
     let database_url = std::env::var("STARGATE_BENCH_DATABASE_URL").unwrap();
     let state = Arc::new(store::RedisStore::new(&redis_url).await.unwrap());
     let database = db::service::init(&database_url).await.unwrap();
+    database.migrate().await.unwrap();
     let key = format!("benchmark:{}", ulid::Ulid::generate());
     let subject = crate::iam::auth::subject::Subject::new(
         key.clone(),

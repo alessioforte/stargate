@@ -1,0 +1,122 @@
+{{- if .Values.migrations.job.enabled }}
+{{- include "stargate.validateValues" . -}}
+{{- if .Values.runtimeConfig.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stargate.migrationsEnvName" . }}
+  labels:
+    {{- include "stargate.migrationsLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  {{- include "stargate.runtimeConfigData" . | nindent 2 }}
+---
+{{- end }}
+{{- if .Values.runtimeSecret.create }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "stargate.migrationsEnvName" . }}
+  labels:
+    {{- include "stargate.migrationsLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+type: Opaque
+stringData:
+  {{- include "stargate.runtimeSecretData" . | nindent 2 }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "stargate.migrationsName" . }}
+  labels:
+    {{- include "stargate.migrationsLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "stargate.migrationsLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrations
+          image: {{ include "stargate.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["/bin/server", "db", "migrate"]
+          env:
+            - name: STARGATE_RUNTIME_PROFILE
+              value: {{ .Values.deployment.mode | quote }}
+            {{- range .Values.extraEnv }}
+            {{- if not (and $.Values.migrations.job.existingSecret (has .name (list "POSTGRES_USERNAME" "POSTGRES_PASSWORD"))) }}
+            {{- toYaml (list .) | nindent 12 }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.migrations.job.existingSecret }}
+            - name: POSTGRES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: POSTGRES_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: POSTGRES_PASSWORD
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                {{- if .Values.runtimeConfig.create }}
+                name: {{ include "stargate.migrationsEnvName" . }}
+                {{- else }}
+                name: {{ include "stargate.runtimeConfigName" . }}
+                {{- end }}
+            {{- if .Values.runtimeSecret.create }}
+            - secretRef:
+                name: {{ include "stargate.migrationsEnvName" . }}
+            {{- else if .Values.runtimeSecret.existingSecret }}
+            - secretRef:
+                name: {{ include "stargate.runtimeSecretName" . }}
+            {{- end }}
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

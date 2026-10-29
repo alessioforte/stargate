@@ -7,9 +7,7 @@ pub async fn init_with_options(options: PgConnectOptions) -> Result<Service> {
         .max_connections(pool_max_connections())
         .connect_with(options)
         .await?;
-    let service = Service::new(pool);
-    service.migrate().await?;
-    Ok(service)
+    Ok(Service::new(pool))
 }
 
 /// Create the target database through `postgres`, retaining credentials and TLS settings.
