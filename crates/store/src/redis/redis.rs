@@ -363,12 +363,16 @@ impl RedisStore {
             StoreError::ConnectionFailed(format!("Failed to create Redis client: {}", e))
         })?;
 
+        Self::with_client(client, config).await
+    }
+
+    /// Create a store from a client with prepared connection and TLS settings.
+    pub async fn with_client(client: redis::Client, config: RedisPoolConfig) -> StoreResult<Self> {
         let pool = RedisPool::new(&client, &config).await?;
 
         tracing::info!(
-            "Redis store created with pool of {} connection(s) for {}",
-            pool.size(),
-            url
+            "Redis store created with pool of {} connection(s)",
+            pool.size()
         );
 
         Ok(Self {

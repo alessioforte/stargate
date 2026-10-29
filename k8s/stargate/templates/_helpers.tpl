@@ -313,7 +313,7 @@ Cross-field validation that JSON Schema cannot express.
     {{- fail (printf "runtimeConfig.data.%s is chart-managed; set %s instead" $key $value) -}}
   {{- end -}}
 {{- end -}}
-{{- range $key := list "POSTGRES_PASSWORD" "REDIS_URL" "JWT_SECRET" "EMAIL_OTP_PEPPER" "PASSWORD_PEPPER" "SMTP_PASSWORD" "GOOGLE_OAUTH_CLIENT_SECRET" "GITHUB_OAUTH_CLIENT_SECRET" -}}
+{{- range $key := list "POSTGRES_PASSWORD" "REDIS_URL" "REDIS_PASSWORD" "JWT_SECRET" "EMAIL_OTP_PEPPER" "PASSWORD_PEPPER" "SMTP_PASSWORD" "GOOGLE_OAUTH_CLIENT_SECRET" "GITHUB_OAUTH_CLIENT_SECRET" -}}
   {{- if hasKey $runtimeData $key -}}
     {{- fail (printf "runtimeConfig.data.%s is sensitive; use runtimeSecret instead" $key) -}}
   {{- end -}}

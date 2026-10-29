@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 async-trait = "0.1.92"
 rand = "0.10.2"
-redis = { version = "1.6.0", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.6.0", features = ["tokio-rustls-comp", "tls-rustls-webpki-roots", "connection-manager"] }
 serde = { version = "1.0.229", features = ["derive"] }
 store = { path = "../store" }
 thiserror = "2.0.20"

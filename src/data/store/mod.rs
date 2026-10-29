@@ -2,6 +2,8 @@
 mod memory;
 #[cfg(feature = "redis")]
 mod redis;
+#[cfg(feature = "redis")]
+mod settings;
 
 #[cfg(feature = "memory")]
 pub use memory::{init, save, use_store};

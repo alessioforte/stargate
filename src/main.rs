@@ -100,7 +100,10 @@ pub async fn run() -> std::io::Result<()> {
     ctx::sign::init().map_err(std::io::Error::other)?;
     iam::pwd::policy::init();
     geoip::init();
+    #[cfg(feature = "memory")]
     store::init().await;
+    #[cfg(feature = "redis")]
+    store::init().await.map_err(std::io::Error::other)?;
     if let Err(e) = data::db::init().await {
         tracing::error!("Database initialization failed: {}", e);
         std::process::exit(1);

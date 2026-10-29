@@ -70,7 +70,9 @@ metadata:
 type: Opaque
 stringData:
   POSTGRES_PASSWORD: replace-me
-  REDIS_URL: rediss://user:password@redis.example:6379
+  REDIS_URL: rediss://redis.example:6379
+  REDIS_USERNAME: stargate
+  REDIS_PASSWORD: replace-me
   EMAIL_OTP_PEPPER: replace-with-a-long-random-value
 ```
 
@@ -132,6 +134,25 @@ CLI process or Job using these settings. Chart `extraVolumes` and
 `extraVolumeMounts` apply to the Deployment and migration Job; the bootstrap and config
 import hooks do not inherit these mounts. When a private CA is required, use
 separate CLI Jobs with the CA mounted instead of enabling those hooks.
+
+## Redis TLS and availability
+
+Set `REDIS_URL` to a `rediss://` endpoint to verify the server certificate
+and hostname using public CA roots. For a private CA, mount a PEM bundle and
+set `REDIS_CA_FILE` to its path; this bundle replaces the public roots. An
+unreadable or invalid CA file stops startup. TLS verification cannot be disabled.
+
+Provide ACL credentials as `REDIS_USERNAME` and `REDIS_PASSWORD` in the runtime
+Secret, without URL encoding. Alternatively, put them in the URL; using both
+sources stops startup. The same connection settings apply to the state store,
+rate limiters, and audit relay.
+
+Use one stable endpoint for the Redis primary, such as a managed service or an
+operator-managed Service in the cluster. Sentinel and Redis Cluster discovery
+are not supported. During failover, requests that need Redis can return `503`
+for several seconds while connections recover. See
+[Health and readiness probes](../../docs/health-probes.md) for readiness and
+ingress behavior during an outage.
 
 ## Multiple public hosts
 
@@ -630,7 +651,7 @@ Do not duplicate managed keys in external ConfigMaps, Secrets, or `extraEnvFrom`
 the chart cannot inspect externally managed resources.
 
 It also rejects known confidential keys in `runtimeConfig.data`, including
-database passwords, authenticated Redis URLs, JWT secrets, OTP/password
+database and Redis passwords, Redis URLs, JWT secrets, OTP/password
 peppers, SMTP passwords, and the Google/GitHub OAuth client secrets.
 
 Use:

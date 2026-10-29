@@ -133,7 +133,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   concurrent-create errors are benign only for `42P04`, or `23505` on
   `pg_database_datname_index`, after a fresh existence query confirms the target.
   `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs`
-  init/readiness.
+  init/readiness and Redis TLS/credential settings (`settings.rs`). Redis uses
+  verified TLS for `rediss://`, public roots by default or `REDIS_CA_FILE`, and
+  separate credentials without URL encoding. The store, limiter, and audit relay
+  share the same pool; URL credentials cannot be combined with separate fields.
 - `obs/`: logging (`logging/settings.rs` parses the format and sinks), and the
   telemetry provider (`telemetry/metrics.rs`, `telemetry/propagation.rs`). Logs go
   to stdout by default; `LOG_FORMAT` defaults to pretty in debug and JSON in
@@ -770,7 +773,9 @@ the same logical columns on PostgreSQL and SQLite.
 | `POSTGRES_CREATE_DATABASE` | true | true/false; false skips maintenance DB access and CREATE DATABASE |
 | `DB_POOL_MAX` | 20 | Maximum connections in each SQL pool |
 | `DB_MIGRATE_ON_START` | true | true/false; false checks the schema without migrating; run `stargate db migrate` separately |
-| `REDIS_URL` | - | Redis (cluster) |
+| `REDIS_URL` | redis://localhost:6379 | Redis endpoint; `rediss://` verifies the server and hostname |
+| `REDIS_USERNAME` / `REDIS_PASSWORD` | - | Optional ACL credentials, passed without URL encoding; cannot be combined with URL credentials |
+| `REDIS_CA_FILE` | - | Private CA PEM roots for `rediss://`; replace public roots |
 | `RUST_LOG` | - | Tracing/log filter directives |
 | `LOG_FORMAT` | pretty (debug), json (release) | Console format: json, compact, or pretty; invalid values stop logging initialization |
 | `LOG_CONSOLE_ENABLED` | true | Log to stdout; stays enabled if both sinks are disabled |

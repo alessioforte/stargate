@@ -3,11 +3,10 @@ use tokio::sync::OnceCell;
 
 static STORE: OnceCell<RedisStore> = OnceCell::const_new();
 
-pub async fn init() -> &'static RedisStore {
+pub async fn init() -> anyhow::Result<&'static RedisStore> {
     STORE
-        .get_or_init(|| async {
-            let url =
-                std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+        .get_or_try_init(|| async {
+            let client = super::settings::client_from_env()?;
 
             let pool_size: usize = std::env::var("REDIS_POOL_SIZE")
                 .ok()
@@ -20,15 +19,14 @@ pub async fn init() -> &'static RedisStore {
             #[cfg(not(feature = "redis-compression"))]
             let com = Compression::None;
             let com_config = CompressionConfig::new(com);
-            let store = RedisStore::with_config(&url, config)
-                .await
-                .expect("Failed to create Redis store")
+            let store = RedisStore::with_client(client, config)
+                .await?
                 .with_compression(com_config);
             tracing::info!(
                 "Redis store initialized with pool of {} connection(s)",
                 store.pool_size()
             );
-            store
+            Ok(store)
         })
         .await
 }
