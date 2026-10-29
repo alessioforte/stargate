@@ -25,6 +25,11 @@ export const upstreamProtocolOptions = [
   { value: "http2", label: "HTTP/2" },
 ] as const;
 
+export const probeProtocolOptions = [
+  { value: "http", label: "HTTP" },
+  { value: "grpc", label: "gRPC" },
+] as const;
+
 export const serviceKindOptions = [
   { value: "load_balancer", label: "Load balancer" },
   { value: "weighted", label: "Weighted" },

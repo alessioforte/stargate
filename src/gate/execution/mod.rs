@@ -188,10 +188,19 @@ impl PlanExecutor<'_> {
                 Err(error)
                     if self.can_failover()
                         && has_fallback
-                        && error.code == ErrorCode::UpstreamConnectionFailed =>
+                        && matches!(
+                            error.code,
+                            ErrorCode::UpstreamConnectionFailed
+                                | ErrorCode::GatewayGrpcHttp2Required
+                        ) =>
                 {
-                    telemetry::record_gateway_failover("transport", None);
-                    tracing::warn!("Failing over after upstream transport error");
+                    let reason = if error.code == ErrorCode::GatewayGrpcHttp2Required {
+                        "protocol"
+                    } else {
+                        "transport"
+                    };
+                    telemetry::record_gateway_failover(reason, None);
+                    tracing::warn!(reason, code = %error.code, "Failing over after upstream error");
                     last_error = Some(error);
                     owns_pending_response = false;
                 }

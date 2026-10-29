@@ -53,7 +53,7 @@ pub(in crate::gate) fn spawn_mirrors(
         let replay = replay.clone();
         let mut state = state.clone();
         // Mirrors have their own total budget and never retain primary admission.
-        state.execution = crate::gate::lifecycle::Execution::new(
+        state.execution = state.execution.for_mirror(
             runtime.settings.mirror_timeout,
             resources.shutdown.child_token(),
         );

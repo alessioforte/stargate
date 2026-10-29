@@ -28,6 +28,7 @@ import {
   isLoadBalancerStrategy,
   isUpstreamProtocol,
   loadBalancerStrategyOptions,
+  probeProtocolOptions,
   upstreamProtocolOptions,
   type LoadBalancerStrategy,
   type UpstreamProtocol,
@@ -44,6 +45,8 @@ interface FormValues {
   targets: TargetValues[];
   loadBalancerStrategy: LoadBalancerStrategy;
   livenessEnabled: boolean;
+  livenessProtocol: "http" | "grpc";
+  livenessService: string;
   livenessPath: string;
   livenessInterval: string;
   livenessTimeout: string;
@@ -71,6 +74,8 @@ const defaultValues: FormValues = {
   targets: [],
   loadBalancerStrategy: "round_robin",
   livenessEnabled: false,
+  livenessProtocol: "http",
+  livenessService: "",
   livenessPath: "/health",
   livenessInterval: "",
   livenessTimeout: "",
@@ -153,6 +158,8 @@ function upstreamToFormValues(
       ? loadBalancer.strategy
       : defaultValues.loadBalancerStrategy,
     livenessEnabled: Boolean(livenessProbe),
+    livenessProtocol: livenessProbe?.protocol === "grpc" ? "grpc" : "http",
+    livenessService: livenessProbe ? getString(livenessProbe.service) : "",
     livenessPath: livenessProbe
       ? getString(livenessProbe.path, defaultValues.livenessPath)
       : defaultValues.livenessPath,
@@ -226,9 +233,21 @@ function formValuesToUpstream(values: FormValues): BuildResult {
 
   if (values.livenessEnabled) {
     const path = values.livenessPath.trim();
-    if (!path) return { errorKey: "livenessPathRequired", value: null };
+    if (values.livenessProtocol === "http" && !path)
+      return { errorKey: "livenessPathRequired", value: null };
+    if (
+      values.livenessProtocol === "grpc" &&
+      values.transportEnabled &&
+      values.protocols.length > 0 &&
+      !values.protocols.includes("http2")
+    ) {
+      return { errorKey: "grpcProbeRequiresHttp2", value: null };
+    }
 
-    const livenessProbe: JsonRecord = { path };
+    const livenessProbe: JsonRecord = { protocol: values.livenessProtocol };
+    if (values.livenessProtocol === "http") livenessProbe.path = path;
+    else if (values.livenessService.trim())
+      livenessProbe.service = values.livenessService.trim();
     const interval = values.livenessInterval.trim();
     const timeout = values.livenessTimeout.trim();
     if (interval) livenessProbe.interval = interval;
@@ -460,14 +479,34 @@ const UpstreamForm: React.FC<GatewayNamedFormProps> = ({
         />
         {values.livenessEnabled && (
           <>
-            <TextInput
+            <Select
               variant="filled"
-              label={t("probePath")}
-              value={values.livenessPath}
-              onChange={(event) =>
-                setField("livenessPath", event.currentTarget.value)
+              label={t("probeProtocol")}
+              data={probeProtocolOptions}
+              value={values.livenessProtocol}
+              onChange={(value) =>
+                setField("livenessProtocol", value === "grpc" ? "grpc" : "http")
               }
             />
+            {values.livenessProtocol === "http" ? (
+              <TextInput
+                variant="filled"
+                label={t("probePath")}
+                value={values.livenessPath}
+                onChange={(event) =>
+                  setField("livenessPath", event.currentTarget.value)
+                }
+              />
+            ) : (
+              <TextInput
+                variant="filled"
+                label={t("grpcProbeService")}
+                value={values.livenessService}
+                onChange={(event) =>
+                  setField("livenessService", event.currentTarget.value)
+                }
+              />
+            )}
             <Group grow align="flex-start">
               <TextInput
                 variant="filled"

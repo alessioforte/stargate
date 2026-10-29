@@ -371,6 +371,54 @@ Stargate does not generate `Forwarded` or `X-Real-IP`. Replay, failover and
 mirrors retain the ingress facts and middleware output; every dispatch adds
 the same gateway hop once.
 
+## gRPC
+
+Route gRPC calls by their path, such as `/example.Service/Method`. Use an
+HTTP/2 upstream transport and an h2c route in Traefik for cleartext HTTP/2.
+Requests whose content type starts with `application/grpc` use gRPC error
+responses; gRPC-Web is not supported.
+
+```yaml
+http:
+  upstreams:
+    grpc-api:
+      targets: [{ url: http://grpc-api:50051 }]
+      transport: { protocols: [http2] }
+  services:
+    grpc-api: { kind: load_balancer, upstream: grpc-api }
+  routers:
+    grpc-api:
+      match: { path: { prefix: /example.Service/ } }
+      service: grpc-api
+      response_mode: stream
+      timeouts:
+        request: none
+        upload_idle: none
+```
+
+Router `timeouts.request` and `timeouts.upload_idle` override the corresponding
+runtime values. A value is a positive duration or `none`; `none` is allowed only
+when `response_mode: stream`. Use an unlimited upload idle timeout for client
+streams with long pauses. `grpc-timeout` accepts up to eight digits followed by
+`H`, `M`, `S`, `m`, `u`, or `n`; the shorter client or router deadline applies.
+Each upstream attempt receives the remaining deadline as `grpc-timeout`, rounded
+up to milliseconds or a coarser unit when necessary. With no deadline the header
+is removed. A gRPC request to an HTTP/1-only upstream fails with `UNAVAILABLE`
+without contacting the upstream. Eligible requests can fail over to another
+service; the failover metric records the `protocol` reason.
+The ingress and authentication stages before route selection remain bounded by
+the runtime request timeout and any client deadline.
+
+Before response headers, gateway errors use HTTP 200 with `grpc-status` and a
+percent-encoded `grpc-message`, with an empty body. Authentication failures map
+to `UNAUTHENTICATED`, access denial to `PERMISSION_DENIED`, missing routes to
+`UNIMPLEMENTED`, limits to `RESOURCE_EXHAUSTED`, timeouts to
+`DEADLINE_EXCEEDED`, and unavailable upstreams to `UNAVAILABLE`. Limit and
+retry headers remain available. After response headers, timeout or cancellation
+is reported in gRPC trailers. Backend responses and their trailers pass through.
+The `stargate.gateway.grpc.responses` counter records statuses 0–16 with router
+and service labels when headers or trailers provide a status.
+
 ## Routing
 
 Supported matchers:
@@ -649,7 +697,8 @@ are documented in `docs/internal-context-operations.md`.
 Each upstream target is fronted by a circuit breaker. Two independent signals
 drive it:
 
-- **Active liveness probe** — periodic request to `liveness_probe.path`.
+- **Active liveness probe** — periodic HTTP request to `liveness_probe.path`, or
+  a gRPC health check when `liveness_probe.protocol: grpc`.
 - **Passive feedback** — outcomes of live proxied traffic. Transport errors and
   `502`/`503`/`504` responses count as failures; any other received response
   counts as a success. Mirror (shadow) traffic never affects the breaker.
@@ -678,6 +727,28 @@ http:
 Both `liveness_probe` and `circuit_breaker` are optional; omitting
 `circuit_breaker` uses the defaults shown above.
 
+For gRPC, set `protocol: grpc` and optionally `service` to the service name for
+`grpc.health.v1.Health/Check`; the default is the empty service name. The
+upstream must enable HTTP/2. Only a successful gRPC response with status
+`SERVING` marks the target healthy. Both HTTP and gRPC probes use the upstream's
+prepared TLS trust and client identity, including the configured mTLS material.
+HTTP probes require `path` and cannot specify `service`; gRPC probes accept
+`service` and cannot specify `path`.
+
+```yaml
+http:
+  upstreams:
+    grpc-api:
+      targets: [{ url: http://grpc-api:50051 }]
+      transport:
+        protocols: [http2]
+      load_balancer:
+        liveness_probe:
+          protocol: grpc
+          service: example.Service
+          interval: 5s
+```
+
 Weighted traffic split:
 
 ```yaml
@@ -705,7 +776,8 @@ http:
           percent: 100
 ```
 
-Failover by transport error and selected response status for eligible operations:
+Failover by transport error, incompatible gRPC upstream protocol, and selected
+response status for eligible operations:
 
 ```yaml
 http:
@@ -872,11 +944,13 @@ http:
       response_mode: stream  # default: finite
 ```
 
-`stream` retains the finite budget through response headers, then uses
-`response_body_idle_timeout` and primary concurrency admission without a fixed
-response lifetime. Nonempty data and trailers count as progress. WebSocket
-sessions always follow the stream policy. HTTP uploads remain finite and
-use the upload idle and request budgets, including on response-stream routes.
+For ordinary HTTP, `stream` retains the inherited request budget through
+response headers, then uses `response_body_idle_timeout` and primary admission
+without a fixed response lifetime. An explicit router request timeout also
+applies after headers; `none` removes that deadline. gRPC streams retain the
+effective router/client request deadline after headers. Nonempty data and
+trailers count as progress. Uploads use the router's upload idle and request
+budgets, including on response-stream routes.
 WebSocket DNS/TCP/TLS uses the selected upstream's connect timeout; the upstream
 Upgrade handshake then uses `response_header_timeout`. Both are capped by the
 remaining total budget, as is the downstream upgrade. Frame receipt and

@@ -251,6 +251,9 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
 - Upstreams: `transport.connect_timeout`, `transport.protocols` (`http1`/`http2`;
   WebSocket needs `http1`), `load_balancer.liveness_probe` and `circuit_breaker`
   (`fail_threshold` 3, `cooldown` 30s), optional `internal_context.audience`.
+  Probes support HTTP and gRPC health checks; gRPC probes require HTTP/2.
+  Both use a client prepared once per upstream with its TLS trust and client
+  identity. The load balancer never creates a fallback probe client.
   `forward_credentials` defaults to false, removing Authorization, API keys,
   the `jwt` cookie and token query parameters before dispatch. Other cookies
   use tolerant byte-based removal unless internal context requires strict parsing.
@@ -258,6 +261,10 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   this cannot be combined with internal context. Proxy-Authorization and
   Connection-nominated fields are always removed as hop-by-hop headers.
 - Routers: `response_mode: stream` for long-lived responses (default `finite`).
+  Optional `timeouts.request` and `timeouts.upload_idle` override runtime values;
+  `none` is allowed only for streams. gRPC requires an HTTP/2 upstream and sends
+  the remaining `grpc-timeout` on every attempt; it returns gateway errors and
+  stream failures as gRPC status, and records completed statuses.
 - `runtime` defaults: primary 1024 / mirror 64 slots, replay 2 MiB per request /
   64 MiB total, upload idle 15s, connect 5s, response headers 30s, body idle 30s,
   mirror 5s, request 60s. Capacity fields require a restart.
@@ -269,16 +276,17 @@ Full reference: `docs/config-v1.md`.
 ### Traffic Management
 
 Implemented: weighted splits, mirrors (bounded disposal of discarded bodies),
-failover on transport error and selected statuses with per-service boundaries,
+failover on transport error, incompatible gRPC upstream protocol, and selected
+statuses with per-service boundaries,
 direct responses, catch-all fallback routes, replay buffering, per-upstream
 protocol policy, finite/stream deadlines, WebSocket proxying, upstream mTLS,
-signed internal context.
+signed internal context, gRPC over HTTP/2 with unary and streaming calls.
 
 Partial: the circuit breaker (probes + live traffic; transport errors and
 502/503/504 trip it, mirrors do not) is per-process, not shared across cluster
 nodes, and its trip statuses are not configurable.
 
-Missing: retry with backoff, request hedging, gRPC / gRPC-Web, GraphQL-aware
+Missing: retry with backoff, request hedging, gRPC-Web, GraphQL-aware
 routing, first-class SSE handling, geo-aware matchers.
 
 ### Internal Context

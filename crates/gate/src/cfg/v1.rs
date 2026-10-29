@@ -1,8 +1,8 @@
 use super::graph::{
     CompileError, CompiledConfig, HeaderValueNode, HttpGraph, InternalContextNode, MatchExprNode,
     MiddlewareNode, MirrorServiceNode, NamedValuePredicate, PathPredicate, PolicyNode,
-    ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TransportNode, UpstreamNode,
-    UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
+    ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TimeoutOverride, TransportNode,
+    UpstreamNode, UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
 };
 use super::{
     Ingress, Limit, LimitSpec, LoadBalancer, MtlsConfig, ResponseMode, RuntimeSettings, SCHEMA,
@@ -313,6 +313,8 @@ pub enum AuthStrategy {
 pub struct Router {
     #[serde(default)]
     pub response_mode: ResponseMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeouts: Option<RouterTimeouts>,
     #[serde(default)]
     pub priority: Option<i32>,
     #[serde(rename = "match")]
@@ -327,6 +329,15 @@ pub struct Router {
     /// scope and the subject's `attrs.quota`.
     #[serde(default)]
     pub quota_cost: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterTimeouts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_idle: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -411,6 +422,42 @@ fn compile_upstreams(
                 message,
             )
         })?;
+        if let Some(probe) = &upstream.load_balancer.liveness_probe {
+            match probe.protocol {
+                super::load_balancer::ProbeProtocol::Http if probe.service.is_some() => {
+                    return Err(CompileError::new(
+                        format!("http.upstreams.{name}.load_balancer.liveness_probe.service"),
+                        "service is only allowed for gRPC probes",
+                    ));
+                }
+                super::load_balancer::ProbeProtocol::Http if probe.path.is_none() => {
+                    return Err(CompileError::new(
+                        format!("http.upstreams.{name}.load_balancer.liveness_probe.path"),
+                        "HTTP probes require a path",
+                    ));
+                }
+                super::load_balancer::ProbeProtocol::Grpc => {
+                    if probe.path.is_some() {
+                        return Err(CompileError::new(
+                            format!("http.upstreams.{name}.load_balancer.liveness_probe.path"),
+                            "path is only allowed for HTTP probes",
+                        ));
+                    }
+                    let protocols = upstream
+                        .transport
+                        .as_ref()
+                        .map(|transport| transport.protocols.as_slice())
+                        .unwrap_or_default();
+                    if !protocols.is_empty() && !protocols.contains(&UpstreamProtocol::Http2) {
+                        return Err(CompileError::new(
+                            format!("http.upstreams.{name}.load_balancer.liveness_probe.protocol"),
+                            "gRPC probes require HTTP/2 to be enabled",
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
         if upstream.targets.is_empty() {
             return Err(CompileError::new(
                 format!("http.upstreams.{}.targets", name),
@@ -943,9 +990,53 @@ fn compile_routers(
             ));
         }
 
+        let compile_timeout = |field: &str,
+                               value: Option<&str>|
+         -> Result<TimeoutOverride, CompileError> {
+            let Some(value) = value else {
+                return Ok(TimeoutOverride::Inherit);
+            };
+            let path = format!("http.routers.{name}.timeouts.{field}");
+            if value == "none" {
+                if router.response_mode != ResponseMode::Stream {
+                    return Err(CompileError::new(
+                        path,
+                        "none requires response_mode: stream",
+                    ));
+                }
+                return Ok(TimeoutOverride::Disabled);
+            }
+            let duration = tools::parse_duration(value)
+                .ok()
+                .and_then(|value| value.to_std().ok())
+                .filter(|value| {
+                    !value.is_zero() && std::time::Instant::now().checked_add(*value).is_some()
+                })
+                .ok_or_else(|| {
+                    CompileError::new(path, "must be a positive, representable duration or none")
+                })?;
+            Ok(TimeoutOverride::Duration(duration))
+        };
+        let request_timeout = compile_timeout(
+            "request",
+            router
+                .timeouts
+                .as_ref()
+                .and_then(|timeouts| timeouts.request.as_deref()),
+        )?;
+        let upload_idle_timeout = compile_timeout(
+            "upload_idle",
+            router
+                .timeouts
+                .as_ref()
+                .and_then(|timeouts| timeouts.upload_idle.as_deref()),
+        )?;
+
         out.push(RouterNode {
             name: name.clone(),
             response_mode: router.response_mode,
+            request_timeout,
+            upload_idle_timeout,
             priority: router.priority.unwrap_or(0),
             order,
             matcher: compile_match_expr(&router.matcher, format!("http.routers.{}.match", name))?,
@@ -1206,7 +1297,7 @@ fn compile_regex(path: String, pattern: &str) -> Result<Regex, CompileError> {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, TimeoutOverride};
     use crate::{
         cfg::AuthStrategy,
         graph::{
@@ -1216,6 +1307,107 @@ mod tests {
 
     fn parse_config(yaml: &str) -> Config {
         serde_saphyr::from_str(yaml).expect("config should parse")
+    }
+
+    #[test]
+    fn validates_router_timeout_overrides() {
+        let mut raw = serde_json::to_value(Config::default()).unwrap();
+        raw["http"] = serde_json::json!({
+            "services": {"local": {"kind": "direct_response", "status": 200}},
+            "routers": {"api": {"match": {"path": {"prefix": "/"}}, "service": "local"}}
+        });
+        for field in ["request", "upload_idle"] {
+            for invalid in ["bad", "0s", "-1s", "none"] {
+                let mut value = raw.clone();
+                value["http"]["routers"]["api"]["timeouts"][field] = invalid.into();
+                let error = serde_json::from_value::<Config>(value)
+                    .unwrap()
+                    .compile()
+                    .unwrap_err();
+                assert!(
+                    error
+                        .to_string()
+                        .contains(&format!("http.routers.api.timeouts.{field}"))
+                );
+            }
+        }
+        raw["http"]["routers"]["api"]["response_mode"] = "stream".into();
+        raw["http"]["routers"]["api"]["timeouts"] =
+            serde_json::json!({"request":"2m", "upload_idle":"none"});
+        let compiled = serde_json::from_value::<Config>(raw)
+            .unwrap()
+            .compile()
+            .unwrap();
+        assert_eq!(
+            compiled.http.routers[0].request_timeout,
+            TimeoutOverride::Duration(std::time::Duration::from_secs(120))
+        );
+        assert_eq!(
+            compiled.http.routers[0].upload_idle_timeout,
+            TimeoutOverride::Disabled
+        );
+    }
+
+    #[test]
+    fn grpc_probes_require_http2_and_http_probes_require_a_path() {
+        let mut raw = serde_json::to_value(Config::default()).unwrap();
+        raw["http"] = serde_json::json!({
+            "upstreams": {"api": {"targets": [{"url": "http://localhost:50051"}],
+                "transport": {"protocols": ["http1"]},
+                "load_balancer": {"strategy": "round_robin", "liveness_probe": {"protocol": "grpc", "service": "example.Service"}}}},
+            "services": {"api": {"kind": "load_balancer", "upstream": "api"}},
+            "routers": {"api": {"match": {"path": {"prefix": "/"}}, "service": "api"}}
+        });
+        let error = serde_json::from_value::<Config>(raw.clone())
+            .unwrap()
+            .compile()
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("http.upstreams.api.load_balancer.liveness_probe.protocol")
+        );
+        raw["http"]["upstreams"]["api"]["transport"]["protocols"] = serde_json::json!(["http2"]);
+        serde_json::from_value::<Config>(raw.clone())
+            .unwrap()
+            .compile()
+            .unwrap();
+        let mut bad = raw.clone();
+        bad["http"]["upstreams"]["api"]["load_balancer"]["liveness_probe"]["path"] =
+            "/health".into();
+        let error = serde_json::from_value::<Config>(bad)
+            .unwrap()
+            .compile()
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("http.upstreams.api.load_balancer.liveness_probe.path")
+        );
+        raw["http"]["upstreams"]["api"]["load_balancer"]["liveness_probe"]["protocol"] =
+            "http".into();
+        let error = serde_json::from_value::<Config>(raw.clone())
+            .unwrap()
+            .compile()
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("http.upstreams.api.load_balancer.liveness_probe.service")
+        );
+        raw["http"]["upstreams"]["api"]["load_balancer"]["liveness_probe"]
+            .as_object_mut()
+            .unwrap()
+            .remove("service");
+        let error = serde_json::from_value::<Config>(raw)
+            .unwrap()
+            .compile()
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("http.upstreams.api.load_balancer.liveness_probe.path")
+        );
     }
 
     #[test]

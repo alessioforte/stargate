@@ -18,9 +18,28 @@ pub struct RuntimeSnapshot {
 }
 
 impl RuntimeSnapshot {
+    #[cfg(test)]
     pub fn client(&self, service: &str) -> Option<HyperClient> {
         self.transport(service)
             .map(|transport| transport.http.clone())
+    }
+
+    pub fn client_for(
+        &self,
+        service: &str,
+        grpc: bool,
+    ) -> Result<HyperClient, crate::err::ErrorResponse> {
+        use crate::err::{ErrorCode, ErrorResponse};
+        let transport = self
+            .transport(service)
+            .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
+        match grpc {
+            false => Ok(transport.http.clone()),
+            true => transport
+                .grpc_http
+                .clone()
+                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayGrpcHttp2Required)),
+        }
     }
 
     pub fn transport(&self, service: &str) -> Option<&PreparedTransport> {
@@ -49,6 +68,7 @@ impl Gate {
     ) -> Result<Self, GatewayPreparationError> {
         let builder = RuntimeBuilder::new(store);
         let core = builder.prepare(&prepared.config)?;
+        configure_probes(&core, &prepared.transports);
         let settings = prepared.config.compiled.runtime.clone();
         let resources = resources::ProcessResources::new(settings.budgets);
         let runtime = Arc::new(RuntimeSnapshot {
@@ -89,6 +109,7 @@ impl Gate {
             return Err(GatewayPreparationError::BudgetChange);
         }
         let core = self.builder.prepare(&prepared.config)?;
+        configure_probes(&core, &prepared.transports);
         Ok(PreparedActivation { core, prepared })
     }
 
@@ -118,6 +139,22 @@ impl Gate {
         runtime.core.start_probes();
         previous.core.stop_probes();
         Ok(version)
+    }
+}
+
+fn configure_probes(core: &gate::Runtime, transports: &PreparedTransports) {
+    let mut configured = std::collections::HashSet::new();
+    for (service, node) in &core.graph.services {
+        let gate::graph::ServiceNode::LoadBalancer { upstream, .. } = node else {
+            continue;
+        };
+        if configured.insert(upstream)
+            && let Some(client) = transports
+                .get(service)
+                .and_then(|transport| transport.probe_client.as_ref())
+        {
+            core.balancers[service].set_health_client(client.clone());
+        }
     }
 }
 

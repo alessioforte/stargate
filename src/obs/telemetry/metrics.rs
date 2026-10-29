@@ -10,6 +10,7 @@ struct Metrics {
     http_server_requests: Counter<u64>,
     http_server_duration: Histogram<f64>,
     gateway_requests: Counter<u64>,
+    gateway_grpc_responses: Counter<u64>,
     gateway_duration: Histogram<f64>,
     gateway_transfer_duration: Histogram<f64>,
     gateway_upstream_requests: Counter<u64>,
@@ -54,6 +55,10 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         gateway_requests: meter
             .u64_counter("stargate.gateway.requests")
             .with_description("Requests handled by the gateway fallback")
+            .build(),
+        gateway_grpc_responses: meter
+            .u64_counter("stargate.gateway.grpc.responses")
+            .with_description("Completed gRPC responses by router, service, and gRPC status")
             .build(),
         gateway_duration: meter
             .f64_histogram("stargate.gateway.duration")
@@ -182,6 +187,17 @@ pub fn record_gateway_request(router: &str, service: &str, status: u16, elapsed:
     METRICS
         .gateway_duration
         .record(duration_ms(elapsed), &attrs);
+}
+
+pub fn record_gateway_grpc_response(router: &str, service: &str, status: u8) {
+    METRICS.gateway_grpc_responses.add(
+        1,
+        &[
+            KeyValue::new("router", router.to_string()),
+            KeyValue::new("service", service.to_string()),
+            KeyValue::new("grpc_status", i64::from(status)),
+        ],
+    );
 }
 
 pub fn record_gateway_upstream_attempt(

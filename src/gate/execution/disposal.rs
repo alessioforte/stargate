@@ -87,7 +87,7 @@ async fn discard_body(
         match execution
             .run(
                 "disposal",
-                deadline.saturating_duration_since(Instant::now()),
+                Some(deadline.saturating_duration_since(Instant::now())),
                 body.frame(),
             )
             .await

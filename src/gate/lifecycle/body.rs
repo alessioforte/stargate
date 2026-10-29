@@ -12,14 +12,21 @@ use std::{
 use tokio::time::{Instant, Sleep};
 use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::gate) enum Termination {
+    Error,
+    GrpcTrailers,
+}
+
 /// Timers are polled before the body, including always-ready empty frames.
 /// Dropping the body immediately drops its permits and cancels its upload.
 pub(in crate::gate) fn guarded_body(
     body: Body,
     execution: Execution,
-    idle: Duration,
+    idle: Option<Duration>,
     phase: &'static str,
     admission: Option<Arc<Admission>>,
+    termination: Termination,
 ) -> Body {
     // The outer downstream wrapper owns admission; inner wrappers must not
     // count the same response again. Uploads have their own lifetime.
@@ -41,10 +48,11 @@ pub(in crate::gate) fn guarded_body(
         execution,
         idle,
         phase,
-        idle_timer: Box::pin(tokio::time::sleep(idle)),
+        idle_timer: idle.map(|idle| Box::pin(tokio::time::sleep(idle))),
         deadline,
         cancelled,
         admission,
+        termination,
         ready_frames: 0,
     })
 }
@@ -54,12 +62,13 @@ struct ProgressBody {
     timer: Option<TransferTimer>,
     body: Option<Body>,
     execution: Execution,
-    idle: Duration,
+    idle: Option<Duration>,
     phase: &'static str,
-    idle_timer: Pin<Box<Sleep>>,
+    idle_timer: Option<Pin<Box<Sleep>>>,
     deadline: Option<Pin<Box<Sleep>>>,
     cancelled: Pin<Box<WaitForCancellationFutureOwned>>,
     admission: Option<Arc<Admission>>,
+    termination: Termination,
     ready_frames: usize,
 }
 
@@ -93,17 +102,25 @@ impl hyper::body::Body for ProgressBody {
             .is_some_and(|deadline| deadline.as_mut().poll(cx).is_ready())
         {
             Some(this.execution.timeout("total"))
-        } else if this.idle_timer.as_mut().poll(cx).is_ready() {
+        } else if this
+            .idle_timer
+            .as_mut()
+            .is_some_and(|timer| timer.as_mut().poll(cx).is_ready())
+        {
             Some(this.execution.timeout(this.phase))
         } else {
             None
         };
         if let Some(error) = failure {
+            let cancelled = error.code == ErrorCode::GatewayCancelled;
             this.finish(if error.code == ErrorCode::GatewayCancelled {
                 "cancelled"
             } else {
                 "timeout"
             });
+            if this.termination == Termination::GrpcTrailers {
+                return Poll::Ready(Some(Ok(grpc_terminal_frame(cancelled))));
+            }
             return Poll::Ready(Some(Err(axum::Error::new(error))));
         }
         if this.ready_frames == 64 {
@@ -112,11 +129,28 @@ impl hyper::body::Body for ProgressBody {
             return Poll::Pending;
         }
         let result = Pin::new(this.body.as_mut().unwrap()).poll_frame(cx);
+        if this.termination == Termination::GrpcTrailers
+            && matches!(&result, Poll::Ready(Some(Err(_))))
+        {
+            let cancelled = this.execution.cancellation.is_cancelled();
+            let timed_out = this.execution.failure().is_some_and(|error| {
+                matches!(
+                    error.code,
+                    ErrorCode::GatewayTimeout | ErrorCode::GatewayUploadTimeout
+                )
+            });
+            if cancelled || timed_out {
+                this.finish(if cancelled { "cancelled" } else { "timeout" });
+                return Poll::Ready(Some(Ok(grpc_terminal_frame(cancelled))));
+            }
+        }
         match &result {
             Poll::Ready(Some(Ok(frame))) => {
                 this.ready_frames += 1;
-                if frame.data_ref().is_some_and(|data| !data.is_empty()) || frame.is_trailers() {
-                    this.idle_timer.as_mut().reset(Instant::now() + this.idle);
+                if (frame.data_ref().is_some_and(|data| !data.is_empty()) || frame.is_trailers())
+                    && let (Some(timer), Some(idle)) = (&mut this.idle_timer, this.idle)
+                {
+                    timer.as_mut().reset(Instant::now() + idle);
                 }
                 if this.body.as_ref().unwrap().is_end_stream() {
                     this.finish("complete");
@@ -155,6 +189,23 @@ impl hyper::body::Body for ProgressBody {
             .as_ref()
             .map_or_else(|| SizeHint::with_exact(0), Body::size_hint)
     }
+}
+
+fn grpc_terminal_frame(cancelled: bool) -> Frame<Bytes> {
+    let mut trailers = http::HeaderMap::new();
+    trailers.insert(
+        "grpc-status",
+        http::HeaderValue::from_static(if cancelled { "1" } else { "4" }),
+    );
+    trailers.insert(
+        "grpc-message",
+        http::HeaderValue::from_static(if cancelled {
+            "Request cancelled"
+        } else {
+            "Deadline exceeded"
+        }),
+    );
+    Frame::trailers(trailers)
 }
 
 pub(in crate::gate) struct TransferTimer {

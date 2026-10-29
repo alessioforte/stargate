@@ -115,6 +115,7 @@
     "gateway.policy_configuration_invalid": "La configurazione della policy del gateway non è valida",
     "gateway.request_preparation_failed": "Non è stato possibile preparare la richiesta upstream",
     "gateway.http_client_unavailable": "Il client HTTP del gateway non è disponibile",
+    "gateway.grpc_http2_required": "Il servizio upstream non consente HTTP/2 richiesto da gRPC",
     "gateway.no_healthy_upstream": "Nessun servizio upstream disponibile",
     "gateway.organization_context_required": "Il contesto dell'organizzazione è obbligatorio",
     "gateway.limit_configuration_invalid": "La configurazione del limite selezionato del gateway non è valida",

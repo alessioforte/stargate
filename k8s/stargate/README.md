@@ -212,6 +212,9 @@ default certificate configuration. Ordinary routes use HTTP to Stargate; setting
 `traefik.grpc.enabled=true` adds a higher-priority `HeaderRegexp` route for each
 host using h2c. WebSocket upgrades continue through the ordinary HTTP routes.
 These are [Traefik IngressRoute options](https://doc.traefik.io/traefik/v3.3/reference/routing-configuration/kubernetes/crd/http/ingressroute/).
+For gRPC, enable `traefik.grpc.enabled` and configure Stargate's gRPC upstreams
+with `transport.protocols: [http2]`. See [gRPC routes, deadlines, and health
+checks](../../docs/config-v1.md#grpc).
 
 Use [values-traefik.yaml](values-traefik.yaml) for the complete three-replica
 cluster example. Before installing, adapt the image, hosts, real pod CIDRs,

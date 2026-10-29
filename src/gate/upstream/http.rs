@@ -1,6 +1,9 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::{
-    lifecycle::{Execution, body::guarded_body},
+    lifecycle::{
+        Execution,
+        body::{Termination, guarded_body},
+    },
     response::strip_internal_context_response,
     upstream::{
         headers::{
@@ -57,21 +60,26 @@ pub async fn handler(
         telemetry::inject_context(req.headers_mut());
     }
 
+    if execution.grpc {
+        crate::gate::grpc::forward_timeout(req.headers_mut(), execution)?;
+    }
+
     let (parts, body) = req.into_parts();
     let req = http::Request::from_parts(
         parts,
         guarded_body(
             body,
             execution.clone(),
-            settings.upload_idle_timeout,
+            execution.upload_idle(settings.upload_idle_timeout),
             "upload",
             None,
+            Termination::Error,
         ),
     );
     let response = execution
         .run(
             "response_headers",
-            settings.response_header_timeout,
+            Some(settings.response_header_timeout),
             client.request(req),
         )
         .await?
@@ -97,9 +105,10 @@ pub async fn handler(
     let mut proxied = Response::new(guarded_body(
         Body::new(body),
         execution.response(),
-        settings.response_body_idle_timeout,
+        Some(settings.response_body_idle_timeout),
         "response_body",
         None,
+        Termination::Error,
     ));
     *proxied.status_mut() = parts.status;
     *proxied.version_mut() = parts.version;

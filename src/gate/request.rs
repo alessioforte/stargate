@@ -42,6 +42,12 @@ pub(super) struct RequestState {
     pub(super) internal_context_runtime: Option<Arc<InternalContextRuntime>>,
 }
 
+struct RequestDeadlines {
+    started: tokio::time::Instant,
+    grpc_deadline: Option<tokio::time::Instant>,
+    updates: tokio::sync::watch::Sender<Option<tokio::time::Instant>>,
+}
+
 #[cfg(all(test, feature = "memory"))]
 #[derive(Clone)]
 pub(crate) struct IngressPause {
@@ -51,10 +57,16 @@ pub(crate) struct IngressPause {
 
 pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
     let started = Instant::now();
+    let grpc_request = super::grpc::is_grpc_request(req.headers());
     let mut router_name = "unmatched".to_string();
     let mut service_name = "unmatched".to_string();
 
     let result: Result<Response, ErrorResponse> = async {
+        let grpc_timeout = if grpc_request {
+            super::grpc::timeout(req.headers())?
+        } else {
+            None
+        };
         let gate = req
             .extensions()
             .get::<Arc<Gate>>()
@@ -64,21 +76,35 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
         let runtime = gate.snapshot();
         let policies = gate.policy_snapshot.load_full();
         let admission = runtime.resources.admit_primary()?;
-        let execution = lifecycle::Execution::new(
+        let request_started = tokio::time::Instant::now();
+        let mut execution = lifecycle::Execution::new(
             runtime.settings.request_timeout,
             admission.cancellation.clone(),
         );
+        execution.grpc = grpc_request;
+        let grpc_deadline = grpc_timeout.and_then(|timeout| request_started.checked_add(timeout));
+        if let Some(deadline) = grpc_deadline {
+            execution.deadline = Some(
+                execution
+                    .deadline
+                    .map_or(deadline, |current| current.min(deadline)),
+            );
+        }
+        let (deadlines, updates) = tokio::sync::watch::channel(execution.deadline);
         req.extensions_mut().insert(admission.clone());
         execution
-            .run(
-                "total",
-                runtime.settings.request_timeout,
+            .run_with_deadline_updates(
+                updates,
                 handle_request(
                     req,
                     runtime.clone(),
                     policies,
                     &execution,
-                    admission,
+                    RequestDeadlines {
+                        started: request_started,
+                        grpc_deadline,
+                        updates: deadlines,
+                    },
                     &mut router_name,
                     &mut service_name,
                 ),
@@ -96,7 +122,22 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
         tracing::Span::current().record("otel.status_code", "ERROR");
     }
 
-    result
+    if grpc_request {
+        match result {
+            Ok(response) => Ok(super::grpc::observe_response(
+                response,
+                router_name,
+                service_name,
+            )),
+            Err(error) => {
+                let status = super::grpc::status_for_http(error.status);
+                telemetry::record_gateway_grpc_response(&router_name, &service_name, status);
+                Ok(super::grpc::error_response(error))
+            }
+        }
+    } else {
+        result
+    }
 }
 
 async fn handle_request(
@@ -104,7 +145,7 @@ async fn handle_request(
     runtime: Arc<crate::gate::RuntimeSnapshot>,
     policies: Arc<gate::PolicySnapshot>,
     execution: &lifecycle::Execution,
-    admission: Arc<crate::gate::resources::Admission>,
+    deadlines: RequestDeadlines,
     router_name: &mut String,
     service_name: &mut String,
 ) -> Result<Response, ErrorResponse> {
@@ -113,6 +154,11 @@ async fn handle_request(
         pause.pinned.wait().await;
         pause.resume.wait().await;
     }
+    let admission = req
+        .extensions()
+        .get::<Arc<crate::gate::resources::Admission>>()
+        .cloned()
+        .expect("Gateway admission must be acquired before routing");
     let graph = &runtime.core.graph;
 
     let client_ip = req.get_client_ip();
@@ -151,11 +197,32 @@ async fn handle_request(
     tracing::Span::current().record("stargate.service", service_name.as_str());
     tracing::Span::current().record("stargate.config_version", runtime.version);
 
+    let router_deadline = match router.request_timeout {
+        gate::graph::TimeoutOverride::Inherit => deadlines
+            .started
+            .checked_add(runtime.settings.request_timeout),
+        gate::graph::TimeoutOverride::Disabled => None,
+        gate::graph::TimeoutOverride::Duration(timeout) => deadlines.started.checked_add(timeout),
+    };
+    let deadline = match (router_deadline, deadlines.grpc_deadline) {
+        (Some(router), Some(client)) => Some(router.min(client)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    };
+    deadlines.updates.send_replace(deadline);
+
     let method = req.method().clone();
     let mut state = RequestState {
         execution: {
             let mut execution = execution.clone();
             execution.stream = router.response_mode == gate::cfg::ResponseMode::Stream;
+            execution.deadline = deadline;
+            execution.preserve_stream_deadline = execution.grpc
+                || !matches!(
+                    router.request_timeout,
+                    gate::graph::TimeoutOverride::Inherit
+                );
+            execution.upload_idle_override = router.upload_idle_timeout;
             execution
         },
         client_ip: client_ip.clone(),
@@ -234,9 +301,14 @@ async fn handle_request(
         let body = lifecycle::body::guarded_body(
             body,
             state.execution.response(),
-            runtime.settings.response_body_idle_timeout,
+            Some(runtime.settings.response_body_idle_timeout),
             "response_body",
             Some(admission),
+            if state.execution.grpc {
+                lifecycle::body::Termination::GrpcTrailers
+            } else {
+                lifecycle::body::Termination::Error
+            },
         );
         crate::gate::retain_runtime(body, runtime.clone())
     }))

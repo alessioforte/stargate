@@ -435,6 +435,30 @@ fn with_probe(config: gate::cfg::Config) -> gate::cfg::Config {
     serde_json::from_value(value).unwrap()
 }
 
+#[tokio::test]
+async fn http_probe_uses_prepared_upstream_mtls() {
+    let upstream = MtlsUpstream::generation(true, "mtls ready").await;
+    let files = TlsFiles::new();
+    let mut raw = serde_json::to_value(with_probe(files.config(&upstream.url))).unwrap();
+    raw["http"]["upstreams"]["secure"]["load_balancer"]["circuit_breaker"] =
+        serde_json::json!({"fail_threshold":1,"cooldown":"1h"});
+    // Aliases share the balancer and must not configure its probe client twice.
+    raw["http"]["services"]["alias"] =
+        serde_json::json!({"kind":"load_balancer","upstream":"secure"});
+    let gate = crate::gate::test_support::gate(serde_json::from_value(raw).unwrap());
+    let snapshot = gate.snapshot();
+    snapshot.core.stop_probes();
+    snapshot.core.balancers["secure"].health_check().await;
+    assert!(health_count(&upstream) >= 1);
+    let context = lb::RequestContext {
+        client_ip: "127.0.0.1",
+        path: "/",
+        method: "GET",
+        key: None,
+    };
+    assert!(snapshot.core.balancers["secure"].select(&context).is_some());
+}
+
 fn health_count(upstream: &MtlsUpstream) -> usize {
     upstream
         .paths

@@ -10,7 +10,7 @@ mod v1;
 
 pub use ingress::{CompiledIngress, Ingress};
 pub use limit::{Limit, LimitSpec};
-pub use load_balancer::LoadBalancer;
+pub use load_balancer::{LoadBalancer, ProbeProtocol};
 pub use mtls::MtlsConfig;
 pub use runtime::{CompiledRuntimeSettings, ProcessBudgets, ResponseMode, RuntimeSettings};
 pub use v1::{

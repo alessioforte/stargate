@@ -50,6 +50,12 @@ pub enum TransportPreparationError {
     ConnectTimeout { upstream: String },
     #[error("http.services.{service} references an unavailable prepared upstream")]
     MissingUpstream { service: String },
+    #[error("unable to prepare health probe client for upstream {upstream}: {source}")]
+    ProbeClient {
+        upstream: String,
+        #[source]
+        source: reqwest::Error,
+    },
 }
 
 pub(super) struct PreparedTransports {
@@ -59,6 +65,8 @@ pub(super) struct PreparedTransports {
 #[derive(Clone)]
 pub struct PreparedTransport {
     pub http: HyperClient,
+    pub grpc_http: Option<HyperClient>,
+    pub probe_client: Option<reqwest::Client>,
     pub websocket_tls: Arc<ClientConfig>,
     pub connect_timeout: Duration,
     pub http1: bool,
@@ -100,6 +108,42 @@ pub(super) fn prepare(
         let http1 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http1);
         let http2 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http2);
         let http = build_hyper_client(timeout, tls, http1, http2)?;
+        let grpc_http = if http2 {
+            Some(if http1 {
+                build_hyper_client(timeout, tls, false, true)?
+            } else {
+                http.clone()
+            })
+        } else {
+            None
+        };
+        let probe_client = upstream
+            .load_balancer
+            .liveness_probe
+            .as_ref()
+            .map(|probe| {
+                let mut probe_tls = tls.clone();
+                let grpc = probe.protocol == gate::cfg::ProbeProtocol::Grpc;
+                if grpc {
+                    probe_tls.alpn_protocols = vec![b"h2".to_vec()];
+                }
+                let client = reqwest::Client::builder()
+                    .use_preconfigured_tls(probe_tls)
+                    .connect_timeout(Duration::from_secs(2))
+                    .timeout(Duration::from_secs(2));
+                let client = if grpc {
+                    client.http2_prior_knowledge()
+                } else {
+                    client
+                };
+                client
+                    .build()
+                    .map_err(|source| TransportPreparationError::ProbeClient {
+                        upstream: name.clone(),
+                        source,
+                    })
+            })
+            .transpose()?;
         let mut websocket_tls = tls.clone();
         // RFC 6455 section 4: this proxy uses HTTP/1.1 Upgrade, never h2 CONNECT.
         websocket_tls.alpn_protocols = vec![b"http/1.1".to_vec()];
@@ -107,6 +151,8 @@ pub(super) fn prepare(
             name.clone(),
             PreparedTransport {
                 http,
+                grpc_http,
+                probe_client,
                 websocket_tls: Arc::new(websocket_tls),
                 connect_timeout: timeout,
                 http1,

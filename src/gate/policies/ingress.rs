@@ -24,7 +24,7 @@ pub(in crate::gate) async fn apply_ingress_limit(
     let decision = match execution
         .run(
             "ingress",
-            ingress.timeout,
+            Some(ingress.timeout),
             limiter.check(&ingress.limit, &key, None),
         )
         .await

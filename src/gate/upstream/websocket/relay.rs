@@ -11,12 +11,12 @@ pub(super) async fn proxy_websocket(
     handshake: std::time::Duration,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut downstream = execution
-        .run("websocket_handshake", handshake, websocket)
+        .run("websocket_handshake", Some(handshake), websocket)
         .await??;
     let execution = execution.response();
     loop {
         // Both receipt and forwarding must make progress; a blocked sink also expires.
-        let should_close = execution.run("websocket_idle", idle, async {
+        let should_close = execution.run("websocket_idle", Some(idle), async {
             tokio::select! {
                 inbound = downstream.next() => {
                     let Some(message) = inbound else { return Ok::<_, tokio_tungstenite::tungstenite::Error>(true); };

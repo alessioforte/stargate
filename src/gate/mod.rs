@@ -1,5 +1,6 @@
 mod authentication;
 mod execution;
+mod grpc;
 mod lifecycle;
 pub mod limits;
 mod middlewares;

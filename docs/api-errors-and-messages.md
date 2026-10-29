@@ -90,6 +90,7 @@ different condition once clients depend on it.
 | `gateway.request_body_failed` | 400 | The client request body fails during streaming or replay buffering |
 | `gateway.timeout` | 504 | Connection, headers, or absolute finite budget expires |
 | `gateway.cancelled` | 503 | Gateway work is cancelled during shutdown |
+| `gateway.grpc_http2_required` | 502 | Upstream does not allow HTTP/2, which gRPC requires |
 
 Signing overload responses contain `phase=signing` and reason
 `signing_queue_full` or `signing_queue_timeout`; they contact no upstream and do
@@ -112,7 +113,8 @@ errors, including gateway overload, retain their `10`-second delay. See
 Request-body failures and `gateway.request_preparation_failed` (500), including
 invalid upstream URIs and internal-context failures, stop dispatch without
 failover or upstream-health penalties. Eligible operations may fail over on
-`upstream.connection_failed` (502) or configured upstream response statuses;
+`upstream.connection_failed` (502), `gateway.grpc_http2_required` (502), or
+configured upstream response statuses;
 ordinary mutations return the first result. See [replay eligibility](config-v1.md#automatic-replay-and-mutations).
 
 ## IAM limit errors

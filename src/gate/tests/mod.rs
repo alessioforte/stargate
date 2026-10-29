@@ -2,6 +2,8 @@
 mod cluster;
 mod forwarded_headers;
 #[cfg(feature = "memory")]
+mod grpc;
+#[cfg(feature = "memory")]
 mod ingress;
 mod lifecycle;
 mod nested_execution;
@@ -61,4 +63,38 @@ async fn service_wraps_missing_route_error_as_json_response() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["code"], "gateway.route_not_found");
     assert_eq!(json["message"], "Gateway route not found");
+}
+
+#[cfg(feature = "memory")]
+#[tokio::test]
+async fn grpc_missing_route_is_trailers_only_and_grpc_web_stays_json() {
+    let gate = Arc::new(crate::gate::test_support::gate(gate::cfg::Config::default()));
+    for (content_type, status) in [
+        ("application/grpc+proto", StatusCode::OK),
+        ("application/grpc-web+proto", StatusCode::NOT_FOUND),
+    ] {
+        let mut req = Request::builder()
+            .uri("/missing")
+            .header(CONTENT_TYPE, content_type)
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(gate.clone());
+        let response = service(req).await.unwrap();
+        assert_eq!(response.status(), status);
+        if status == StatusCode::OK {
+            assert_eq!(response.headers()["grpc-status"], "12");
+            assert_eq!(response.headers()[CONTENT_TYPE], "application/grpc");
+            assert!(
+                response
+                    .into_body()
+                    .collect()
+                    .await
+                    .unwrap()
+                    .to_bytes()
+                    .is_empty()
+            );
+        } else {
+            assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+        }
+    }
 }

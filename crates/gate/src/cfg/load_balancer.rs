@@ -14,9 +14,22 @@ pub enum LoadBalancerStrategy {
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LivenessProbe {
-    pub path: String,
+    #[serde(default)]
+    pub protocol: ProbeProtocol,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
     pub interval: Option<String>,
     pub timeout: Option<String>,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeProtocol {
+    #[default]
+    Http,
+    Grpc,
 }
 
 /// Per-upstream circuit-breaker tuning. Omitted fields fall back to defaults
@@ -72,12 +85,21 @@ impl LoadBalancer {
         let upstreams = urls
             .iter()
             .map(|base_url| {
-                let health_check_path =
-                    self.liveness_probe.as_ref().map(|probe| probe.path.clone());
+                let health_check = self
+                    .liveness_probe
+                    .as_ref()
+                    .map(|probe| match probe.protocol {
+                        ProbeProtocol::Http => lb::HealthProbe::Http {
+                            path: probe.path.clone().unwrap_or_default(),
+                        },
+                        ProbeProtocol::Grpc => lb::HealthProbe::Grpc {
+                            service: probe.service.clone().unwrap_or_default(),
+                        },
+                    });
 
                 lb::Upstream::with_circuit_breaker(
                     base_url.clone(),
-                    health_check_path,
+                    health_check,
                     fail_threshold,
                     cooldown_secs,
                 )

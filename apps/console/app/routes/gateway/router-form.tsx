@@ -39,6 +39,8 @@ interface FormValues {
   policies: string[];
   quotaCost: number | string;
   responseMode: "finite" | "stream";
+  requestTimeout: string;
+  uploadIdleTimeout: string;
 }
 
 interface BuildContext {
@@ -71,9 +73,14 @@ function routerToFormValues(
       policies: [],
       quotaCost: "",
       responseMode: "finite",
+      requestTimeout: "",
+      uploadIdleTimeout: "",
     };
   }
 
+  const timeouts = isRecord(selectedValue.timeouts)
+    ? selectedValue.timeouts
+    : {};
   return {
     name: selectedName,
     priority:
@@ -85,6 +92,10 @@ function routerToFormValues(
     policies: stringsToForm(selectedValue.policies),
     responseMode:
       selectedValue.response_mode === "stream" ? "stream" : "finite",
+    requestTimeout:
+      typeof timeouts.request === "string" ? timeouts.request : "",
+    uploadIdleTimeout:
+      typeof timeouts.upload_idle === "string" ? timeouts.upload_idle : "",
     quotaCost:
       typeof selectedValue.quota_cost === "number"
         ? selectedValue.quota_cost
@@ -137,6 +148,19 @@ function formValuesToRouter(
 
   const quotaCost = positiveInteger(values.quotaCost);
   if (quotaCost) router.quota_cost = quotaCost;
+
+  const requestTimeout = values.requestTimeout.trim();
+  const uploadIdle = values.uploadIdleTimeout.trim();
+  if (
+    values.responseMode !== "stream" &&
+    (requestTimeout === "none" || uploadIdle === "none")
+  ) {
+    return { errorKey: "timeoutNoneRequiresStream", value: null };
+  }
+  const timeouts: JsonRecord = {};
+  if (requestTimeout) timeouts.request = requestTimeout;
+  if (uploadIdle) timeouts.upload_idle = uploadIdle;
+  if (requestTimeout || uploadIdle) router.timeouts = timeouts;
 
   return { errorKey: null, value: router };
 }
@@ -249,6 +273,24 @@ const RouterForm: React.FC<Props> = ({
           label={t("quotaCost")}
           value={values.quotaCost}
           onChange={(cost) => setField("quotaCost", cost)}
+        />
+        <TextInput
+          variant="filled"
+          label={t("routerRequestTimeout")}
+          description={t("routerTimeoutDescription")}
+          value={values.requestTimeout}
+          onChange={(event) =>
+            setField("requestTimeout", event.currentTarget.value)
+          }
+        />
+        <TextInput
+          variant="filled"
+          label={t("routerUploadIdleTimeout")}
+          description={t("routerTimeoutDescription")}
+          value={values.uploadIdleTimeout}
+          onChange={(event) =>
+            setField("uploadIdleTimeout", event.currentTarget.value)
+          }
         />
         <Select
           searchable

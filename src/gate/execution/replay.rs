@@ -34,12 +34,14 @@ pub(in crate::gate) async fn buffer_request(
 ) -> Result<ReplayRequest, ErrorResponse> {
     let limit = runtime.settings.replay_body_bytes;
     let (mut parts, body) = req.into_parts();
+    let upload_idle = execution.upload_idle(runtime.settings.upload_idle_timeout);
     let mut body = crate::gate::lifecycle::body::guarded_body(
         body,
         execution.clone(),
-        runtime.settings.upload_idle_timeout,
+        upload_idle,
         "upload",
         None,
+        crate::gate::lifecycle::body::Termination::Error,
     );
     // Defense in depth: replay state is always unsigned. A token is minted
     // only after the concrete leaf, dispatch kind, and attempt are known.
@@ -48,10 +50,7 @@ pub(in crate::gate) async fn buffer_request(
 
     loop {
         tokio::task::consume_budget().await;
-        let Some(frame) = execution
-            .run("upload", runtime.settings.upload_idle_timeout, body.frame())
-            .await?
-        else {
+        let Some(frame) = execution.run("upload", upload_idle, body.frame()).await? else {
             break;
         };
         let frame = frame.map_err(|error| {

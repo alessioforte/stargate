@@ -157,6 +157,8 @@ pub enum PolicyNode {
 #[derive(Debug, Clone)]
 pub struct RouterNode {
     pub response_mode: ResponseMode,
+    pub request_timeout: TimeoutOverride,
+    pub upload_idle_timeout: TimeoutOverride,
     pub name: String,
     pub priority: i32,
     pub order: usize,
@@ -167,6 +169,13 @@ pub struct RouterNode {
     /// Quota units one request on this route consumes, charged to every
     /// quota bucket that applies (policy-selected and subject `attrs.quota`).
     pub quota_cost: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutOverride {
+    Inherit,
+    Disabled,
+    Duration(std::time::Duration),
 }
 
 #[derive(Debug, Clone)]

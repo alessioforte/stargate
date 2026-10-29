@@ -70,9 +70,7 @@ pub(super) async fn execute_selected_with_request(
                 .instrument(observation.span.clone())
                 .await
             } else {
-                let client = runtime
-                    .client(service_name)
-                    .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
+                let client = runtime.client_for(service_name, state.execution.grpc)?;
                 http::handler(
                     req,
                     &uri,
@@ -119,9 +117,7 @@ pub(super) async fn execute_selected_from_replay(
             let req = replay.build(&uri)?;
             let internal_dispatch =
                 prepare_internal_dispatch(service_name, internal_context.as_ref(), state, attempt)?;
-            let client = runtime
-                .client(service_name)
-                .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayHttpClientUnavailable))?;
+            let client = runtime.client_for(service_name, state.execution.grpc)?;
 
             // Replay always uses HTTP; timing starts after local preparation.
             let observation = AttemptObservation::start(

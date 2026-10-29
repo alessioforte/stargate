@@ -1,42 +1,42 @@
 use crate::circuit_breaker::CircuitBreaker;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use reqwest::Client;
 
+#[derive(Debug, Clone)]
+pub enum HealthProbe {
+    Http { path: String },
+    Grpc { service: String },
+}
+
 pub struct Upstream {
     pub base_url: String,
-    pub health_check_path: Option<String>,
+    pub health_check: Option<HealthProbe>,
     pub circuit_breaker: Arc<CircuitBreaker>,
 }
 
 impl Upstream {
-    pub fn new(base_url: String, health_check_path: Option<String>) -> Self {
+    pub fn new(base_url: String, health_check: Option<HealthProbe>) -> Self {
         // Defaults: open after 3 consecutive failures, 30s cooldown
-        Self::with_circuit_breaker(base_url, health_check_path, 3, 30)
+        Self::with_circuit_breaker(base_url, health_check, 3, 30)
     }
 
     pub fn with_circuit_breaker(
         base_url: String,
-        health_check_path: Option<String>,
+        health_check: Option<HealthProbe>,
         fail_threshold: usize,
         cooldown_secs: u64,
     ) -> Self {
         Self {
             base_url,
-            health_check_path,
+            health_check,
             circuit_breaker: Arc::new(CircuitBreaker::new(fail_threshold, cooldown_secs)),
         }
     }
 
     pub fn is_available(&self) -> bool {
         self.circuit_breaker.is_available()
-    }
-
-    pub fn health_check_url(&self) -> Option<String> {
-        self.health_check_path
-            .as_ref()
-            .map(|path| format!("{}{}", self.base_url, path))
     }
 }
 
@@ -54,6 +54,7 @@ pub trait LoadBalancer {
     fn name(&self) -> &'static str;
     fn mark_alive(&self, base_url: &str);
     fn mark_dead(&self, base_url: &str);
+    fn set_health_client(&self, client: Client);
 
     async fn health_check(&self);
 }
@@ -73,7 +74,7 @@ pub struct BaseLoadBalancer<S: Strategy> {
     // ahash keyed by base_url: mark_alive/mark_dead hit this per request once
     // live proxy results are wired in, so the lookup stays off the critical path.
     index: HashMap<String, usize, ahash::RandomState>,
-    client: Arc<Client>,
+    client: OnceLock<Client>,
 }
 
 impl<S: Strategy + 'static> BaseLoadBalancer<S> {
@@ -84,23 +85,11 @@ impl<S: Strategy + 'static> BaseLoadBalancer<S> {
             .map(|(i, u)| (u.base_url.clone(), i))
             .collect();
 
-        let client = match Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(2))
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("Failed to build HTTP client for health checks: {}", e);
-                Client::new() // fallback to default client
-            }
-        };
-
         Arc::new(Self {
             strategy,
             upstreams,
             index,
-            client: Arc::new(client),
+            client: OnceLock::new(),
         })
     }
 }
@@ -127,34 +116,91 @@ impl<S: Strategy + 'static> LoadBalancer for BaseLoadBalancer<S> {
         }
     }
 
+    fn set_health_client(&self, client: Client) {
+        self.client
+            .set(client)
+            .expect("Health probe client must be configured only once");
+    }
+
     async fn health_check(&self) {
         let mut set = tokio::task::JoinSet::new();
         for upstream in &self.upstreams {
-            if let Some(url) = upstream.health_check_url() {
-                let client = Arc::clone(&self.client);
+            if let Some(probe) = &upstream.health_check {
+                let Some(client) = self.client.get().cloned() else {
+                    tracing::error!(upstream = %upstream.base_url, "Health probe client has not been configured");
+                    upstream.circuit_breaker.record_failure();
+                    continue;
+                };
                 let cb = Arc::clone(&upstream.circuit_breaker);
                 let base_url = upstream.base_url.clone();
+                let probe = probe.clone();
                 set.spawn(async move {
-                    match client.get(&url).send().await {
-                        Ok(resp) if resp.status().is_success() => {
-                            cb.record_success();
+                    let healthy = match probe {
+                        HealthProbe::Http { path } => match client
+                            .get(format!("{base_url}{path}"))
+                            .send()
+                            .await
+                        {
+                            Ok(response) if response.status().is_success() => true,
+                            Ok(response) => {
+                                tracing::warn!(
+                                    "Health check failed for {}: status {}",
+                                    base_url,
+                                    response.status()
+                                );
+                                false
+                            }
+                            Err(error) => {
+                                tracing::warn!("Health check failed for {}: {}", base_url, error);
+                                false
+                            }
+                        },
+                        HealthProbe::Grpc { service } => {
+                            let healthy =
+                                crate::grpc_health::check(&client, &base_url, &service).await;
+                            if !healthy {
+                                tracing::warn!("gRPC health check failed for {}", base_url);
+                            }
+                            healthy
                         }
-                        Ok(resp) => {
-                            cb.record_failure();
-                            tracing::warn!(
-                                "Health check failed for {}: status {}",
-                                base_url,
-                                resp.status()
-                            );
-                        }
-                        Err(e) => {
-                            cb.record_failure();
-                            tracing::warn!("Health check failed for {}: {}", base_url, e);
-                        }
+                    };
+                    if healthy {
+                        cb.record_success();
+                    } else {
+                        cb.record_failure();
                     }
                 });
             }
         }
         while set.join_next().await.is_some() {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn probes_without_a_prepared_client_mark_targets_unhealthy() {
+        for probe in [
+            HealthProbe::Http {
+                path: "/health".into(),
+            },
+            HealthProbe::Grpc {
+                service: String::new(),
+            },
+        ] {
+            let upstream =
+                Upstream::with_circuit_breaker("https://localhost:1".into(), Some(probe), 1, 3600);
+            let balancer = BaseLoadBalancer::new(crate::RoundRobin::new(), vec![upstream]);
+            balancer.health_check().await;
+            let context = RequestContext {
+                client_ip: "127.0.0.1",
+                path: "/",
+                method: "GET",
+                key: None,
+            };
+            assert!(balancer.select(&context).is_none());
+        }
     }
 }

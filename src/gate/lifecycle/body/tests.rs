@@ -27,9 +27,10 @@ async fn stream_body_uses_idle_policy_and_preserves_trailers() {
     let collected = guarded_body(
         body,
         execution.response(),
-        Duration::from_secs(2),
+        Some(Duration::from_secs(2)),
         "response_body",
         None,
+        Termination::Error,
     )
     .collect()
     .await
@@ -47,9 +48,10 @@ async fn idle_timeout_and_cancellation_release_admission() {
     let mut body = guarded_body(
         body,
         execution.clone(),
-        Duration::from_secs(1),
+        Some(Duration::from_secs(1)),
         "response_body",
         Some(admission),
+        Termination::Error,
     );
     assert!(body.frame().await.unwrap().is_err());
     assert_eq!(
@@ -69,9 +71,10 @@ async fn idle_timeout_and_cancellation_release_admission() {
     let mut body = guarded_body(
         body,
         execution,
-        Duration::from_secs(1),
+        Some(Duration::from_secs(1)),
         "response_body",
         Some(admission),
+        Termination::Error,
     );
     resources.begin_shutdown();
     assert!(body.frame().await.unwrap().is_err());
@@ -79,6 +82,69 @@ async fn idle_timeout_and_cancellation_release_admission() {
         resources.available().0,
         resources.budgets.primary_concurrency
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn grpc_stream_ends_with_timeout_or_cancellation_trailers() {
+    for cancel in [false, true] {
+        let resources =
+            ProcessResources::new(RuntimeSettings::default().compile().unwrap().budgets);
+        let admission = resources.admit_primary().unwrap();
+        let mut execution = Execution::new(Duration::from_secs(60), admission.cancellation.clone());
+        execution.grpc = true;
+        let body = Body::from_stream(stream::pending::<Result<Bytes, Infallible>>());
+        let mut body = guarded_body(
+            body,
+            execution,
+            Some(Duration::from_secs(1)),
+            "response_body",
+            Some(admission),
+            Termination::GrpcTrailers,
+        );
+        if cancel {
+            resources.begin_shutdown();
+        }
+        let trailers = body
+            .frame()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_trailers()
+            .unwrap();
+        assert_eq!(trailers["grpc-status"], if cancel { "1" } else { "4" });
+        assert!(body.is_end_stream());
+        assert_eq!(
+            resources.available().0,
+            resources.budgets.primary_concurrency
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn grpc_termination_is_explicit_and_does_not_require_admission() {
+    for termination in [Termination::Error, Termination::GrpcTrailers] {
+        let execution = Execution {
+            grpc: true,
+            ..Execution::default()
+        };
+        let body = Body::from_stream(stream::pending::<Result<Bytes, Infallible>>());
+        let mut body = guarded_body(
+            body,
+            execution,
+            Some(Duration::from_secs(1)),
+            "response_body",
+            None,
+            termination,
+        );
+        let frame = body.frame().await.unwrap();
+        match termination {
+            Termination::Error => assert!(frame.is_err()),
+            Termination::GrpcTrailers => {
+                assert_eq!(frame.unwrap().into_trailers().unwrap()["grpc-status"], "4")
+            }
+        }
+        assert!(body.frame().await.is_none());
+    }
 }
 
 #[tokio::test]
@@ -90,9 +156,10 @@ async fn dropping_a_response_releases_its_permit_and_cancels_upload() {
     let body = guarded_body(
         body,
         Execution::new(Duration::from_secs(60), cancelled.clone()),
-        Duration::from_secs(1),
+        Some(Duration::from_secs(1)),
         "response_body",
         Some(admission),
+        Termination::Error,
     );
     assert_eq!(
         resources.available().0,
@@ -116,9 +183,10 @@ async fn empty_frames_do_not_extend_upload_idle_time() {
     let body = guarded_body(
         Body::from_stream(frames),
         execution.clone(),
-        Duration::from_secs(1),
+        Some(Duration::from_secs(1)),
         "upload",
         None,
+        Termination::Error,
     );
     assert!(body.collect().await.is_err());
     assert_eq!(
@@ -137,9 +205,10 @@ async fn progress_cannot_extend_finite_body_lifetime() {
     let body = guarded_body(
         Body::from_stream(frames),
         execution.clone(),
-        Duration::from_secs(1),
+        Some(Duration::from_secs(1)),
         "response_body",
         None,
+        Termination::Error,
     );
     assert!(body.collect().await.is_err());
     assert_eq!(execution.failure().unwrap().params["phase"], "total");

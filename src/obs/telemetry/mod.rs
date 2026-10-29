@@ -157,11 +157,12 @@ fn resource() -> Resource {
 #[cfg(all(feature = "postgres", feature = "redis"))]
 pub use metrics::record_audit_relay_batch;
 pub use metrics::{
-    record_config_reload, record_gateway_failover, record_gateway_mirror, record_gateway_policy,
-    record_gateway_rejection, record_gateway_replay_bytes, record_gateway_request,
-    record_gateway_resource, record_gateway_response_disposal, record_gateway_timeout,
-    record_gateway_transfer, record_gateway_upstream_attempt, record_http_server_request,
-    record_internal_context_issue, record_internal_context_queue, record_propagation_draft,
+    record_config_reload, record_gateway_failover, record_gateway_grpc_response,
+    record_gateway_mirror, record_gateway_policy, record_gateway_rejection,
+    record_gateway_replay_bytes, record_gateway_request, record_gateway_resource,
+    record_gateway_response_disposal, record_gateway_timeout, record_gateway_transfer,
+    record_gateway_upstream_attempt, record_http_server_request, record_internal_context_issue,
+    record_internal_context_queue, record_propagation_draft,
 };
 #[cfg(test)]
 pub use propagation::trace_id_from_headers;

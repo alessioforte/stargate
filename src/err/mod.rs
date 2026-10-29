@@ -170,6 +170,19 @@ mod tests {
     }
 
     #[test]
+    fn grpc_http2_required_has_catalog_metadata() {
+        let code = ErrorCode::GatewayGrpcHttp2Required;
+        assert!(ErrorCode::ALL.contains(&code));
+        assert_eq!(code.as_str(), "gateway.grpc_http2_required");
+        assert_eq!(code.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            code.message(),
+            "Upstream does not allow HTTP/2, which gRPC requires"
+        );
+        assert_eq!(code.error_type(), ErrorType::Upstream);
+    }
+
+    #[test]
     fn internal_errors_do_not_expose_the_cause() {
         let response = ErrorResponse::internal("database password leaked")
             .with_message("database password leaked");
