@@ -3,6 +3,19 @@ use crate::cli::{Cli, Command};
 use clap::Parser;
 
 #[test]
+fn invalid_import_errors_include_gateway_paths_and_policy_lines() {
+    let mut config = gate::cfg::Config::default();
+    config.ingress.limit = "unknown-limit".into();
+    let error =
+        validate_document(ConfigKind::Gateway, &config.to_yaml_string().unwrap()).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("ingress.limit"));
+    let error = validate_document(ConfigKind::Policies, "\nALLOW user WHEN invalid;").unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("line 2:"));
+}
+
+#[test]
 fn parses_export_kinds_and_optional_output_without_marking_commands_standalone() {
     for (kind, expected) in [
         ("gateway", DocumentKind::Gateway),

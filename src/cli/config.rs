@@ -101,18 +101,18 @@ async fn active_document(kind: ConfigKind) -> io::Result<ConfigDocument> {
 fn validate_document(kind: ConfigKind, content: &str) -> io::Result<()> {
     match kind {
         ConfigKind::Gateway => {
-            crate::gate::validate_gateway_document(content).map_err(|_| {
+            crate::gate::validate_gateway_document(content).map_err(|error| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "invalid gateway configuration document",
+                    format!("invalid gateway configuration document: {error}"),
                 )
             })?;
         }
         ConfigKind::Policies => {
-            validate_policy_document(content).map_err(|_| {
+            validate_policy_document(content).map_err(|diagnostics| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "invalid access-control policies document",
+                    format!("invalid access-control policies document: {diagnostics}"),
                 )
             })?;
         }
