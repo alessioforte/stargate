@@ -1,9 +1,12 @@
 import { Alert, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { useTranslations } from "@/i18n";
+import { formatDate } from "@/lib/format-date";
 
 type Props = {
   opened: boolean;
   loading: boolean;
+  language: string;
+  actorEmail?: string;
   error?: string;
   latest?: {
     version: number;
@@ -18,6 +21,8 @@ type Props = {
 export default function RevisionConflictDialog({
   opened,
   loading,
+  language,
+  actorEmail,
   error,
   latest,
   onReload,
@@ -42,10 +47,11 @@ export default function RevisionConflictDialog({
               {t("documentVersion")}: {latest.version}
             </Text>
             <Text>
-              {t("updatedBy")}: {latest.updatedBy ?? t("systemActor")}
+              {t("updatedBy")}:{" "}
+              {actorEmail ?? latest.updatedBy ?? t("systemActor")}
             </Text>
             <Text>
-              {t("updatedAt")}: {latest.updatedAt}
+              {t("updatedAt")}: {formatDate(latest.updatedAt, null, language)}
             </Text>
           </Stack>
         )}

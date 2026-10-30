@@ -16,6 +16,8 @@ const GatewayPage = () => {
   const {
     configuration,
     configurationConflict,
+    language,
+    resolveActorEmail,
     getConfigurations,
     updateConfigurations,
     refreshConfigurationConflict,
@@ -55,6 +57,8 @@ const GatewayPage = () => {
       {confirmModal}
       <RevisionConflictDialog
         opened={configurationConflict !== null}
+        language={language}
+        actorEmail={resolveActorEmail(configurationConflict?.data?.updatedBy)}
         loading={
           configuration.isLoading() ||
           configurationConflict?.isLoading() === true

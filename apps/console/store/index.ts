@@ -800,6 +800,13 @@ const store: StateCreator<State & Actions> = (set, get) => ({
     get().getApiKeys();
   },
 
+  resolveActorEmail: (actorId?: string | null) => {
+    if (!actorId) return undefined;
+    const current = get().adminMe?.user;
+    if (current?.id === actorId) return current.email;
+    return get().users.data?.data.find((user) => user.id === actorId)?.email;
+  },
+
   getConfigurations: async () => {
     const configuration = get().configuration;
     set({ configuration: configuration.setLoading() });

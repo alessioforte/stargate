@@ -153,6 +153,7 @@ export interface Actions {
   deleteApiKey: (id: string) => Promise<void>;
 
   getConfigurations: () => Promise<void>;
+  resolveActorEmail: (actorId?: string | null) => string | undefined;
   updateConfigurations: (
     configuration: Configuration,
     revision?: string,

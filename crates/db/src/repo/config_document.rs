@@ -62,11 +62,8 @@ impl ConfigDocumentRepository {
 }
 
 fn parse_revision(kind: &str, revision: String) -> Result<ConfigRevision> {
-    let kind = match kind {
-        "gateway" => ConfigKind::Gateway,
-        "policies" => ConfigKind::Policies,
-        _ => anyhow::bail!("unknown configuration kind: {kind}"),
-    };
+    let kind = ConfigKind::parse(kind)
+        .ok_or_else(|| anyhow::anyhow!("unknown configuration kind: {kind}"))?;
     Ok(ConfigRevision { kind, revision })
 }
 

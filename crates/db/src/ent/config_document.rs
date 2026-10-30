@@ -9,6 +9,14 @@ pub enum ConfigKind {
 }
 
 impl ConfigKind {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "gateway" => Some(Self::Gateway),
+            "policies" => Some(Self::Policies),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Gateway => "gateway",
@@ -71,7 +79,17 @@ pub fn config_revision(content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::config_revision;
+    use super::{ConfigKind, config_revision};
+
+    #[test]
+    fn configuration_kind_names_round_trip_and_reject_unknown_names() {
+        for kind in [ConfigKind::Gateway, ConfigKind::Policies] {
+            assert_eq!(ConfigKind::parse(kind.as_str()), Some(kind));
+        }
+        for value in ["", "unknown", "Gateway"] {
+            assert_eq!(ConfigKind::parse(value), None);
+        }
+    }
 
     #[test]
     fn config_revision_matches_known_sha256_values() {

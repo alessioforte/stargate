@@ -21,6 +21,8 @@ const AccessControlPolicies = () => {
   const {
     accessControlRules,
     accessControlRulesConflict,
+    language,
+    resolveActorEmail,
     refreshAccessControlRulesConflict,
     reloadAccessControlRulesConflict,
     overwriteAccessControlRules,
@@ -132,6 +134,10 @@ const AccessControlPolicies = () => {
       {confirmModal}
       <RevisionConflictDialog
         opened={accessControlRulesConflict !== null}
+        language={language}
+        actorEmail={resolveActorEmail(
+          accessControlRulesConflict?.data?.updatedBy,
+        )}
         loading={
           accessControlRules.isLoading() ||
           accessControlRulesConflict?.isLoading() === true
