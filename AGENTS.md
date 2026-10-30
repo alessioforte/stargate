@@ -254,6 +254,9 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   Probes support HTTP and gRPC health checks; gRPC probes require HTTP/2.
   Both use a client prepared once per upstream with its TLS trust and client
   identity. The load balancer never creates a fallback probe client.
+  `liveness_probe.timeout` defaults to 2s and must be positive and representable;
+  it bounds connection establishment and the total probe request. HTTP probes
+  use HTTP/2 prior knowledge and TLS ALPN `h2` when HTTP/1 is disabled.
   `forward_credentials` defaults to false, removing Authorization, API keys,
   the `jwt` cookie and token query parameters before dispatch. Other cookies
   use tolerant byte-based removal unless internal context requires strict parsing.

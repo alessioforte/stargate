@@ -719,6 +719,7 @@ http:
         liveness_probe:
           path: /health
           interval: 5s          # default 5s
+          timeout: 2s           # default 2s
         circuit_breaker:
           fail_threshold: 3      # default 3 consecutive failures
           cooldown: 30s          # default 30s before a recovery probe
@@ -727,13 +728,20 @@ http:
 Both `liveness_probe` and `circuit_breaker` are optional; omitting
 `circuit_breaker` uses the defaults shown above.
 
+`liveness_probe.timeout` is a positive, representable duration (default `2s`)
+that bounds both connection establishment and the total probe request. It
+applies to HTTP and gRPC probes; invalid or zero durations fail compilation
+with the timeout field's path.
+
 For gRPC, set `protocol: grpc` and optionally `service` to the service name for
 `grpc.health.v1.Health/Check`; the default is the empty service name. The
 upstream must enable HTTP/2. Only a successful gRPC response with status
 `SERVING` marks the target healthy. Both HTTP and gRPC probes use the upstream's
 prepared TLS trust and client identity, including the configured mTLS material.
 HTTP probes require `path` and cannot specify `service`; gRPC probes accept
-`service` and cannot specify `path`.
+`service` and cannot specify `path`. HTTP probes use HTTP/2 prior knowledge
+when the upstream disables HTTP/1, including h2c for cleartext targets and
+ALPN `h2` for TLS targets.
 
 ```yaml
 http:
@@ -743,6 +751,7 @@ http:
       transport:
         protocols: [http2]
       load_balancer:
+        strategy: round_robin
         liveness_probe:
           protocol: grpc
           service: example.Service

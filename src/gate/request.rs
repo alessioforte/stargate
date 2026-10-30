@@ -17,7 +17,7 @@ use super::{
 use crate::{
     ctx::{PropagationDraft, RequestContext, request_id_from, sign::InternalContextRuntime},
     err::{ErrorCode, ErrorResponse},
-    gate::Gate,
+    gate::{Gate, resources::Admission},
     iam::auth::identity::{self, VerifiedIdentity},
     obs::telemetry,
     web::request::RequestExt,
@@ -48,6 +48,11 @@ struct RequestDeadlines {
     updates: tokio::sync::watch::Sender<Option<tokio::time::Instant>>,
 }
 
+struct RouteLabels {
+    router: String,
+    service: String,
+}
+
 #[cfg(all(test, feature = "memory"))]
 #[derive(Clone)]
 pub(crate) struct IngressPause {
@@ -58,8 +63,10 @@ pub(crate) struct IngressPause {
 pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
     let started = Instant::now();
     let grpc_request = super::grpc::is_grpc_request(req.headers());
-    let mut router_name = "unmatched".to_string();
-    let mut service_name = "unmatched".to_string();
+    let mut labels = RouteLabels {
+        router: "unmatched".to_string(),
+        service: "unmatched".to_string(),
+    };
 
     let result: Result<Response, ErrorResponse> = async {
         let grpc_timeout = if grpc_request {
@@ -105,8 +112,8 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
                         grpc_deadline,
                         updates: deadlines,
                     },
-                    &mut router_name,
-                    &mut service_name,
+                    admission,
+                    &mut labels,
                 ),
             )
             .await?
@@ -117,7 +124,7 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
         Ok(response) => response.status().as_u16(),
         Err(error) => error.status.as_u16(),
     };
-    telemetry::record_gateway_request(&router_name, &service_name, status, started.elapsed());
+    telemetry::record_gateway_request(&labels.router, &labels.service, status, started.elapsed());
     if status >= 500 {
         tracing::Span::current().record("otel.status_code", "ERROR");
     }
@@ -126,12 +133,12 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
         match result {
             Ok(response) => Ok(super::grpc::observe_response(
                 response,
-                router_name,
-                service_name,
+                labels.router,
+                labels.service,
             )),
             Err(error) => {
                 let status = super::grpc::status_for_http(error.status);
-                telemetry::record_gateway_grpc_response(&router_name, &service_name, status);
+                telemetry::record_gateway_grpc_response(&labels.router, &labels.service, status);
                 Ok(super::grpc::error_response(error))
             }
         }
@@ -146,19 +153,14 @@ async fn handle_request(
     policies: Arc<gate::PolicySnapshot>,
     execution: &lifecycle::Execution,
     deadlines: RequestDeadlines,
-    router_name: &mut String,
-    service_name: &mut String,
+    admission: Arc<Admission>,
+    labels: &mut RouteLabels,
 ) -> Result<Response, ErrorResponse> {
     #[cfg(all(test, feature = "memory"))]
     if let Some(pause) = req.extensions().get::<IngressPause>().cloned() {
         pause.pinned.wait().await;
         pause.resume.wait().await;
     }
-    let admission = req
-        .extensions()
-        .get::<Arc<crate::gate::resources::Admission>>()
-        .cloned()
-        .expect("Gateway admission must be acquired before routing");
     let graph = &runtime.core.graph;
 
     let client_ip = req.get_client_ip();
@@ -191,10 +193,10 @@ async fn handle_request(
             .find(|router| router_matches(router, &req))
             .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayRouteNotFound))?
     };
-    *router_name = router.name.clone();
-    *service_name = router.service.clone();
-    tracing::Span::current().record("stargate.router", router_name.as_str());
-    tracing::Span::current().record("stargate.service", service_name.as_str());
+    labels.router = router.name.clone();
+    labels.service = router.service.clone();
+    tracing::Span::current().record("stargate.router", labels.router.as_str());
+    tracing::Span::current().record("stargate.service", labels.service.as_str());
     tracing::Span::current().record("stargate.config_version", runtime.version);
 
     let router_deadline = match router.request_timeout {

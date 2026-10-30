@@ -50,6 +50,10 @@ pub enum TransportPreparationError {
     ConnectTimeout { upstream: String },
     #[error("http.services.{service} references an unavailable prepared upstream")]
     MissingUpstream { service: String },
+    #[error(
+        "http.upstreams.{upstream}.load_balancer.liveness_probe.timeout must be a positive, representable duration"
+    )]
+    ProbeTimeout { upstream: String },
     #[error("unable to prepare health probe client for upstream {upstream}: {source}")]
     ProbeClient {
         upstream: String,
@@ -122,16 +126,22 @@ pub(super) fn prepare(
             .liveness_probe
             .as_ref()
             .map(|probe| {
+                let timeout =
+                    probe
+                        .timeout()
+                        .map_err(|_| TransportPreparationError::ProbeTimeout {
+                            upstream: name.clone(),
+                        })?;
                 let mut probe_tls = tls.clone();
-                let grpc = probe.protocol == gate::cfg::ProbeProtocol::Grpc;
-                if grpc {
+                let http2_only = probe.protocol == gate::cfg::ProbeProtocol::Grpc || !http1;
+                if http2_only {
                     probe_tls.alpn_protocols = vec![b"h2".to_vec()];
                 }
                 let client = reqwest::Client::builder()
                     .use_preconfigured_tls(probe_tls)
-                    .connect_timeout(Duration::from_secs(2))
-                    .timeout(Duration::from_secs(2));
-                let client = if grpc {
+                    .connect_timeout(timeout)
+                    .timeout(timeout);
+                let client = if http2_only {
                     client.http2_prior_knowledge()
                 } else {
                     client

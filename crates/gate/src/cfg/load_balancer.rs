@@ -21,7 +21,22 @@ pub struct LivenessProbe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
     pub interval: Option<String>,
+    /// Positive connection and total request timeout; defaults to 2s.
     pub timeout: Option<String>,
+}
+
+impl LivenessProbe {
+    pub fn timeout(&self) -> Result<std::time::Duration, &'static str> {
+        let invalid = "liveness timeout must be a positive, representable duration";
+        let duration = tools::parse_duration(self.timeout.as_deref().unwrap_or("2s"))
+            .map_err(|_| invalid)?
+            .to_std()
+            .map_err(|_| invalid)?;
+        if duration.is_zero() || std::time::Instant::now().checked_add(duration).is_none() {
+            return Err(invalid);
+        }
+        Ok(duration)
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -135,6 +150,22 @@ impl LoadBalancer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_timeout_defaults_to_two_seconds_and_accepts_positive_durations() {
+        assert_eq!(
+            LivenessProbe::default().timeout().unwrap(),
+            std::time::Duration::from_secs(2)
+        );
+        let probe = LivenessProbe {
+            timeout: Some("250ms".into()),
+            ..LivenessProbe::default()
+        };
+        assert_eq!(
+            probe.timeout().unwrap(),
+            std::time::Duration::from_millis(250)
+        );
+    }
 
     fn lb_with(circuit_breaker: Option<CircuitBreakerConfig>) -> LoadBalancer {
         LoadBalancer {

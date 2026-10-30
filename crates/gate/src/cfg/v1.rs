@@ -423,6 +423,12 @@ fn compile_upstreams(
             )
         })?;
         if let Some(probe) = &upstream.load_balancer.liveness_probe {
+            probe.timeout().map_err(|message| {
+                CompileError::new(
+                    format!("http.upstreams.{name}.load_balancer.liveness_probe.timeout"),
+                    message,
+                )
+            })?;
             match probe.protocol {
                 super::load_balancer::ProbeProtocol::Http if probe.service.is_some() => {
                     return Err(CompileError::new(
@@ -1408,6 +1414,39 @@ mod tests {
                 .to_string()
                 .contains("http.upstreams.api.load_balancer.liveness_probe.path")
         );
+    }
+
+    #[test]
+    fn invalid_probe_timeouts_report_the_field_path_even_on_unused_upstreams() {
+        for protocol in ["http", "grpc"] {
+            for timeout in [
+                "",
+                "invalid",
+                "-1s",
+                "0s",
+                "0ms",
+                "9223372036854775807s",
+                "99999999999999999999999d",
+            ] {
+                let mut probe = serde_json::json!({"protocol":protocol, "timeout":timeout});
+                if protocol == "http" {
+                    probe["path"] = "/health".into();
+                }
+                let mut config = serde_json::to_value(Config::default()).unwrap();
+                config["http"] = serde_json::json!({"upstreams":{"api":{
+                    "targets":[{"url":"http://localhost:50051"}],
+                    "load_balancer":{"strategy":"round_robin", "liveness_probe":probe}
+                }}});
+                let error = serde_json::from_value::<Config>(config)
+                    .unwrap()
+                    .compile()
+                    .unwrap_err();
+                assert_eq!(
+                    error.path, "http.upstreams.api.load_balancer.liveness_probe.timeout",
+                    "{protocol}: {timeout}"
+                );
+            }
+        }
     }
 
     #[test]

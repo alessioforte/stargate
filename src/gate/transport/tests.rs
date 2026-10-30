@@ -1,5 +1,5 @@
 use super::*;
-use crate::gate::test_support::{CLIENT_CERT, CLIENT_KEY, SERVER_KEY, TlsFiles};
+use crate::gate::test_support::{CA, CLIENT_CERT, CLIENT_KEY, SERVER_CERT, SERVER_KEY, TlsFiles};
 
 #[test]
 fn valid_mtls_and_default_transports_prepare() {
@@ -219,6 +219,133 @@ async fn http_clients_enforce_configured_protocols_and_share_the_prepared_connec
         drop(prepared);
         // A pooled client may retain an idle connection independently of the
         // request future; protocol assertions have already run on the server.
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn http_probes_use_http2_for_http2_only_upstreams_with_and_without_tls() {
+    async fn serve<I>(stream: I)
+    where
+        I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let service = hyper::service::service_fn(
+            |request: http::Request<hyper::body::Incoming>| async move {
+                assert_eq!(request.version(), http::Version::HTTP_2);
+                assert_eq!(request.uri().path(), "/health");
+                Ok::<_, std::convert::Infallible>(http::Response::new(axum::body::Body::empty()))
+            },
+        );
+        hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
+            .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+            .await
+            .unwrap();
+    }
+
+    for use_tls in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "{}://{}",
+            if use_tls { "https" } else { "http" },
+            listener.local_addr().unwrap()
+        );
+        let acceptor = use_tls.then(|| {
+            let provider = Arc::new(rustls::crypto::ring::default_provider());
+            let mut roots = rustls::RootCertStore::empty();
+            for cert in rustls_pemfile::certs(&mut &CA[..]) {
+                roots.add(cert.unwrap()).unwrap();
+            }
+            let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+                Arc::new(roots),
+                provider.clone(),
+            )
+            .build()
+            .unwrap();
+            let certs = rustls_pemfile::certs(&mut &SERVER_CERT[..])
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let key = rustls_pemfile::private_key(&mut &SERVER_KEY[..])
+                .unwrap()
+                .unwrap();
+            let mut tls = rustls::ServerConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(certs, key)
+                .unwrap();
+            tls.alpn_protocols = vec![b"h2".to_vec()];
+            tokio_rustls::TlsAcceptor::from(Arc::new(tls))
+        });
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            if let Some(acceptor) = acceptor {
+                let stream = acceptor.accept(stream).await.unwrap();
+                assert_eq!(stream.get_ref().1.alpn_protocol(), Some(b"h2".as_slice()));
+                serve(stream).await;
+            } else {
+                serve(stream).await;
+            }
+        });
+        let files = TlsFiles::new();
+        let mut raw = serde_json::to_value(files.config(&url)).unwrap();
+        raw["http"]["upstreams"]["secure"]["transport"] =
+            serde_json::json!({"protocols":["http2"]});
+        raw["http"]["upstreams"]["secure"]["load_balancer"] =
+            serde_json::json!({"strategy":"round_robin", "liveness_probe":{"path":"/health"}});
+        let config = RuntimeConfig::from_raw(serde_json::from_value(raw).unwrap()).unwrap();
+        let prepared = prepare(&config).unwrap();
+        let client = prepared
+            .get("secure")
+            .unwrap()
+            .probe_client
+            .as_ref()
+            .unwrap();
+        let response = tokio::time::timeout(
+            Duration::from_secs(1),
+            client.get(format!("{url}/health")).send(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(response.version(), http::Version::HTTP_2);
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn prepared_http_and_grpc_probes_honor_configured_timeouts() {
+    for protocol in ["http", "grpc"] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let files = TlsFiles::new();
+        let mut raw = serde_json::to_value(files.config(&url)).unwrap();
+        let mut probe = serde_json::json!({"protocol":protocol, "timeout":"50ms"});
+        if protocol == "http" {
+            probe["path"] = "/health".into();
+        }
+        raw["http"]["upstreams"]["secure"]["load_balancer"] =
+            serde_json::json!({"strategy":"round_robin", "liveness_probe":probe});
+        let config = RuntimeConfig::from_raw(serde_json::from_value(raw).unwrap()).unwrap();
+        let prepared = prepare(&config).unwrap();
+        let client = prepared
+            .get("secure")
+            .unwrap()
+            .probe_client
+            .as_ref()
+            .unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            client.get(format!("{url}/health")).send(),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(error.is_timeout(), "{protocol}: {error}");
         server.abort();
     }
 }
