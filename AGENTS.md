@@ -142,8 +142,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   share the same pool; URL credentials cannot be combined with separate fields.
   A configured `REDIS_CA_FILE` requires `rediss://`; a cleartext URL fails startup.
 - `obs/`: logging (`logging/settings.rs` parses the format and sinks), and the
-  telemetry provider (`telemetry/metrics.rs`, `telemetry/propagation.rs`). Logs go
-  to stdout by default; `LOG_FORMAT` defaults to pretty in debug and JSON in
+  telemetry provider (`telemetry/metrics.rs`, `telemetry/propagation.rs`). OTLP
+  HTTP export uses a blocking client because SDK batch workers run outside Tokio.
+  Logs go to stdout by default; `LOG_FORMAT` defaults to pretty in debug and JSON in
   release. Optional files remain JSON. ANSI requires a stdout terminal and a text
   format. The server validates settings before its banner and omits it in JSON
   mode; CLI output keeps its existing behavior. JSON includes the current span

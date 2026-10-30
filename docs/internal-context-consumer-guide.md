@@ -64,6 +64,16 @@ Do not accept audience lists, wildcards, suffix matching, OAuth/OIDC keys, or a
 JWKS URL supplied by the token. The audience is a stable service identity, not
 a URL, hostname, pod name, router name, or environment-specific instance id.
 
+With pattern A, in-cluster consumers fetch the internal-context JWKS through
+Traefik using the public identity hostname, for example
+`https://identity.example.com/.well-known/stargate-context-jwks.json`.
+Resolve that hostname to Traefik using cluster DNS or pod `hostAliases`, while
+retaining it for TLS certificate verification and the HTTP Host header. Trust
+the identity endpoint's CA, including the test CA in local environments.
+Do not point consumers at Stargate's Kubernetes Service or open its
+Traefik-only NetworkPolicy for key discovery: direct Service access would
+bypass the proxy's admin IP allow-list.
+
 The SDK deliberately does not choose an HTTP client. The microservice supplies
 an implementation of `JwksSource::fetch` that returns the complete JWKS body.
 That implementation must enforce TLS, an allowlisted URL, connection and

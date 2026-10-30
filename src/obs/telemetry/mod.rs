@@ -1,6 +1,9 @@
 mod metrics;
 mod propagation;
 
+#[cfg(test)]
+mod tests;
+
 use crate::conf::env::bool_or;
 use opentelemetry::{KeyValue, global, propagation::TextMapCompositePropagator};
 use opentelemetry_sdk::{

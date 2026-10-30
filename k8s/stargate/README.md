@@ -200,7 +200,7 @@ traefik:
   tls:
     secretName: stargate-tls
 trustedProxies:
-  - 10.42.0.0/16  # Replace with the real Traefik peer network.
+  - 10.42.0.0/16 # Replace with the real Traefik peer network.
 runtimeConfig:
   data:
     JWT_ISSUER: https://identity.example.com
@@ -346,6 +346,15 @@ Keep the private key out of values and ConfigMaps. Restart replicas after
 replacing external key material; see [internal-context operations](../../docs/internal-context-operations.md)
 for consumer trust and rotation. Add `internal_context.audience` to selected
 gateway upstreams when they should receive signed context.
+
+In-cluster consumers retrieve the public internal-context JWKS through Traefik
+at `https://identity.example.com/.well-known/stargate-context-jwks.json`, using
+the configured public identity hostname. Resolve it to Traefik with cluster
+DNS or pod `hostAliases`, and trust the endpoint's CA. Retain the hostname for
+TLS verification and the HTTP Host header. Do not use Stargate's Service URL
+or allow backend pods through its Traefik-only NetworkPolicy: that would also
+permit direct access around the admin IP allow-list. See the
+[consumer guide](../../docs/internal-context-consumer-guide.md).
 
 ## JWT signing keys
 
@@ -620,13 +629,13 @@ environment variables ([Features](../../docs/features.md)). Put the switches in
 ```yaml
 runtimeConfig:
   data:
-    SIGNUP_MODE: open                 # open, invite (default), or closed
+    SIGNUP_MODE: open # open, invite (default), or closed
     SIGNUP_ALLOWED_DOMAINS: example.com
     PASSWORDLESS_LOGIN_ENABLED: "true"
-    CONSOLE_ENABLED: "false"          # the admin API stays available
+    CONSOLE_ENABLED: "false" # the admin API stays available
     GITHUB_OAUTH_CLIENT_ID: Iv1.0123456789abcdef
 runtimeSecret:
-  existingSecret: stargate-runtime    # EMAIL_OTP_PEPPER, GITHUB_OAUTH_CLIENT_SECRET
+  existingSecret: stargate-runtime # EMAIL_OTP_PEPPER, GITHUB_OAUTH_CLIENT_SECRET
 ```
 
 An invalid or contradictory value stops the pod at startup with a message
