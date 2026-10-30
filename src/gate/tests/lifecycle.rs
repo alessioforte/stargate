@@ -489,6 +489,12 @@ async fn websocket_session_holds_admission_until_idle_disconnect_or_shutdown() {
             tokio::spawn(async move {
                 let mut socket = websocket.await.unwrap();
                 while let Some(Ok(message)) = socket.next().await {
+                    if message.is_close() {
+                        // Reading Close queues the acknowledgement; send would
+                        // attempt a second Close after the socket started closing.
+                        let _ = socket.flush().await;
+                        break;
+                    }
                     if socket.send(message).await.is_err() {
                         break;
                     }
@@ -525,9 +531,18 @@ async fn websocket_session_holds_admission_until_idle_disconnect_or_shutdown() {
         );
     }
     assert_eq!(gate.resources.available().0, 1);
-    let _ = tokio::time::timeout(Duration::from_secs(1), client.next())
+    let Message::Close(Some(frame)) = tokio::time::timeout(Duration::from_secs(1), client.next())
         .await
-        .unwrap();
+        .unwrap()
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("idle expiry must send Close");
+    };
+    assert_eq!(u16::from(frame.code), 1001);
+    assert_eq!(frame.reason, "idle timeout");
+    assert_eq!(gate.resources.available().0, 1);
+    client.flush().await.unwrap();
     tokio::time::timeout(Duration::from_secs(1), async {
         while gate.resources.available().0 != 2 {
             tokio::task::yield_now().await;
@@ -538,6 +553,18 @@ async fn websocket_session_holds_admission_until_idle_disconnect_or_shutdown() {
 
     let (mut client, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     gate.resources.begin_shutdown();
+    let Message::Close(Some(frame)) = tokio::time::timeout(Duration::from_secs(1), client.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("shutdown must send Close");
+    };
+    assert_eq!(u16::from(frame.code), 1001);
+    assert_eq!(frame.reason, "gateway shutting down");
+    assert_eq!(gate.resources.available().0, 1);
+    client.flush().await.unwrap();
     tokio::time::timeout(Duration::from_secs(1), gate.resources.wait())
         .await
         .unwrap();

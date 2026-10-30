@@ -976,9 +976,18 @@ or `ingress`. `429` `retry-after` is whole seconds rounded up (missing duration
 ## Graceful Shutdown
 
 SIGTERM/SIGINT -> readiness off -> wait `SERVER_DRAIN_DELAY_SECS` -> gateway admission
-closes and active work is cancelled -> listeners close and connections drain
+closes and active work is cancelled (WebSockets send Close `1001`, `gateway shutting down`,
+to both peers in parallel) -> listeners close and connections drain
 (`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop configuration synchronization -> stop
 audit relay -> save in-memory store -> flush telemetry.
+
+WebSocket Close exchanges have a fixed 5s limit, shortened by the remaining server
+shutdown budget, and retain admission until they finish. Idle expiry sends `1001`
+with `idle timeout` (`request timeout` for an explicit router deadline); backend
+loss sends `1011` (`upstream connection lost`) to the client, not `1014`, which
+tungstenite rejects; client loss sends `1001` to the backend. Received Close
+frames are forwarded unchanged. Closing runs outside the cancelled execution
+guard; unresponsive peers log at debug level.
 
 ## Frontend (apps/)
 

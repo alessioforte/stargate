@@ -134,7 +134,8 @@ pub async fn run() -> std::io::Result<()> {
             std::time::Duration::from_secs(shutdown::server_drain_delay_secs()),
         )
         .await;
-        gateway_resources.begin_shutdown();
+        gateway_resources
+            .begin_shutdown_with_timeout(std::time::Duration::from_secs(shutdown_timeout_secs));
     };
 
     info!("Server listening on {}", addr);

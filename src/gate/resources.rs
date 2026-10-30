@@ -3,8 +3,12 @@ use crate::{
     obs::telemetry,
 };
 use gate::cfg::ProcessBudgets;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex, OnceLock},
+    time::Duration,
+};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::time::Instant;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 pub struct ProcessResources {
@@ -13,6 +17,7 @@ pub struct ProcessResources {
     mirror: Arc<Semaphore>,
     replay_memory: Arc<Semaphore>,
     pub shutdown: CancellationToken,
+    shutdown_deadline: OnceLock<Instant>,
     tasks: TaskTracker,
     task_activation: Mutex<()>,
 }
@@ -25,6 +30,7 @@ impl ProcessResources {
             replay_memory: Arc::new(Semaphore::new(budgets.replay_memory_bytes)),
             budgets,
             shutdown: CancellationToken::new(),
+            shutdown_deadline: OnceLock::new(),
             tasks: TaskTracker::new(),
             task_activation: Mutex::new(()),
         })
@@ -81,10 +87,25 @@ impl ProcessResources {
     }
 
     pub fn begin_shutdown(&self) {
+        self.start_shutdown(None);
+    }
+
+    pub fn begin_shutdown_with_timeout(&self, timeout: Duration) {
+        self.start_shutdown(Instant::now().checked_add(timeout));
+    }
+
+    pub fn shutdown_deadline(&self) -> Option<Instant> {
+        self.shutdown_deadline.get().copied()
+    }
+
+    fn start_shutdown(&self, deadline: Option<Instant>) {
         let _activation = self
             .task_activation
             .lock()
             .expect("Task activation lock poisoned");
+        if let Some(deadline) = deadline {
+            let _ = self.shutdown_deadline.set(deadline);
+        }
         self.shutdown.cancel();
         self.tasks.close();
     }

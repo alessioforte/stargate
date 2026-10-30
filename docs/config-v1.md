@@ -972,6 +972,25 @@ task retains its runtime and primary admission until disconnect, idle expiry,
 or shutdown. WebSockets use the first selected upstream and do not replay or
 mirror frames.
 
+When shutdown ends a WebSocket relay, Stargate sends Close `1001` (Going Away)
+with reason `gateway shutting down` to both peers. Idle expiry sends `1001`
+with reason `idle timeout`, and an explicit router `timeouts.request` deadline
+sends `1001` with reason `request timeout`. If the backend drops without Close,
+the client receives `1011` with reason `upstream connection lost`; if the client
+drops, the backend receives `1001`. Stargate does not use the IANA-registered
+`1014` (Bad Gateway): common libraries, tungstenite included, reject it on
+receipt as a protocol violation.
+A Close received from either peer is forwarded with its original code and reason.
+
+The two closing handshakes run in parallel, outside request cancellation, with
+a fixed `WEBSOCKET_CLOSE_TIMEOUT` of 5 seconds for sending Close and receiving
+the peer's reply. The remaining `SERVER_SHUTDOWN_TIMEOUT_SECS` budget can shorten
+this limit, including when shutdown begins during an existing close exchange.
+The task retains its admission until closure completes or the limit expires.
+An unresponsive peer is disconnected and logged at debug level. A data frame
+whose send was interrupted is flushed before Close; the serialized remainder
+stays in the transport's write buffer.
+
 Before headers, deadline expiry returns `504 gateway.timeout` with a bounded
 `phase` parameter, and shutdown cancellation returns `503 gateway.cancelled`.
 After headers, expiry/cancellation terminates the body/session; it cannot replace

@@ -66,6 +66,7 @@ pub async fn handler(
             websocket,
             upstream_ws,
             &execution,
+            &runtime.resources,
             runtime.settings.response_body_idle_timeout,
             runtime.settings.response_header_timeout,
         )
