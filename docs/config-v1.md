@@ -68,7 +68,8 @@ active returns `applied` without replacing the generation or restarting probes;
 a replica that is behind still activates the document. A change to process
 capacity budgets is
 saved with `activation: restart_required`: existing routing stays active until
-restart. The Console reloads after a revision conflict and warns when a restart
+restart. The Console preserves the draft on a revision conflict and offers Reload or
+Overwrite using the latest document revision. It warns when a restart
 is required. Restart always uses the latest database document.
 
 Changes apply immediately to the receiving replica. In cluster deployments each
@@ -583,6 +584,9 @@ including percent-encoded parameter names. Without internal context, cookie
 removal tolerates application values such as JSON or comma-separated consent
 values: only `jwt=` items are removed, preserving other cookie bytes and items
 without `=`. Internal-context dispatch keeps its strict cookie parsing.
+Malformed percent encoding in a query parameter name is retained unchanged
+without internal context; credential parameters are still removed. With internal
+context, malformed names return `400 request.invalid` before dispatch.
 The cleanup runs after request-header middleware, including on failover and
 mirror attempts.
 
@@ -1333,7 +1337,13 @@ invalid document leaves the previous snapshot active.
 
 `PUT` requires the current `sha256:*` revision returned by `GET`, validates the
 whole document strictly, and saves a new database version with its audit event in
-one transaction. A stale revision returns `409 access_control.revision_conflict`.
+one transaction. `GET` and `PUT` include `version`, `updatedAt` and `updatedBy`
+alongside the revision and parsed rules, matching gateway document metadata.
+A stale revision returns `409 access_control.revision_conflict`. Both Console
+editors preserve the draft, fetch the latest document separately and show its
+version, update time and actor. Reload explicitly discards the draft; Overwrite
+saves that draft against the latest revision. A further conflict requires a new
+explicit choice.
 The live ACE snapshot is published immediately on the receiving replica and propagates
 to cluster peers through the same notification and periodic-check mechanism as the gateway document.
 

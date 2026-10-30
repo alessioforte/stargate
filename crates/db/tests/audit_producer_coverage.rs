@@ -115,17 +115,22 @@ fn non_admin_entrypoints_keep_the_frozen_actor_and_scope_construction() {
         (
             "cli_config_import",
             include_str!("../../../src/cli/config.rs"),
-            "TrustedBackgroundActor::system(None)",
+            "TrustedAuditContext::system_control_plane()",
         ),
         (
             "gateway_config_seed",
             include_str!("../../../src/gate/snap/config.rs"),
-            "TrustedBackgroundActor::system(None)",
+            "db::active_or_seed(ConfigKind::Gateway",
         ),
         (
             "policies_seed",
             include_str!("../../../src/iam/authz/storage.rs"),
-            "TrustedBackgroundActor::system(None)",
+            "db::active_or_seed(ConfigKind::Policies",
+        ),
+        (
+            "configuration_seed_persistence",
+            include_str!("../../../src/data/db/config.rs"),
+            "TrustedAuditContext::system_control_plane()",
         ),
         (
             "signup",
@@ -155,7 +160,7 @@ fn non_admin_entrypoints_keep_the_frozen_actor_and_scope_construction() {
         (
             "cli_bootstrap",
             include_str!("../../../src/iam/boot.rs"),
-            "TrustedAuditBoundary::control_plane()",
+            "TrustedAuditContext::system_control_plane()",
         ),
         (
             "oauth_revoke",

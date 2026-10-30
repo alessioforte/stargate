@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Box, Group, Stack, Tabs } from "@mantine/core";
-import { Table, useConfirmModal } from "@/components";
+import { RevisionConflictDialog, Table, useConfirmModal } from "@/components";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 import type {
@@ -20,6 +20,10 @@ const AccessControlPolicies = () => {
 
   const {
     accessControlRules,
+    accessControlRulesConflict,
+    refreshAccessControlRulesConflict,
+    reloadAccessControlRulesConflict,
+    overwriteAccessControlRules,
     accessControlValidation,
     accessControlEvaluation,
     accessControlCapabilitiesEvaluation,
@@ -126,6 +130,33 @@ const AccessControlPolicies = () => {
   return (
     <Box>
       {confirmModal}
+      <RevisionConflictDialog
+        opened={accessControlRulesConflict !== null}
+        loading={
+          accessControlRules.isLoading() ||
+          accessControlRulesConflict?.isLoading() === true
+        }
+        error={
+          accessControlRules.isError()
+            ? (accessControlRules.message ?? t("loadLatestFailed"))
+            : accessControlRulesConflict?.isError()
+              ? (accessControlRulesConflict.message ?? t("loadLatestFailed"))
+              : undefined
+        }
+        latest={accessControlRulesConflict?.data}
+        onReload={() => {
+          const latest = reloadAccessControlRulesConflict();
+          if (latest) {
+            setContent(latest.content);
+            setSyncedRevision(latest.revision);
+            setValidatedContent(latest.content);
+          }
+        }}
+        onOverwrite={() => {
+          void overwriteAccessControlRules(content);
+        }}
+        onRetry={refreshAccessControlRulesConflict}
+      />
       <AccessControlToolbar
         dirty={dirty}
         loading={accessControlRules.isLoading()}

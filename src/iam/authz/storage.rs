@@ -1,8 +1,5 @@
 use crate::data::db;
-use ::db::ent::{
-    ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary,
-    TrustedAuditContext, TrustedBackgroundActor,
-};
+use ::db::ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext};
 
 fn get_policies_path() -> String {
     format!("{}/policies", crate::conf::config_dir())
@@ -13,35 +10,16 @@ pub(crate) async fn load_policies_document() -> anyhow::Result<ConfigDocument> {
 }
 
 async fn load_policies_document_from_path(path: &str) -> anyhow::Result<ConfigDocument> {
-    if let Some(document) = db::get_active_config_document(ConfigKind::Policies).await? {
-        return Ok(document);
-    }
-    let content = match tokio::fs::read_to_string(path).await {
-        Ok(content) => content,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(error.into()),
-    };
-    super::rules::validate_policy_document(&content).map_err(anyhow::Error::msg)?;
-    let context = TrustedAuditContext::background(
-        TrustedAuditBoundary::control_plane(),
-        TrustedBackgroundActor::system(None),
-    );
-    match db::save_config_document(
-        ConfigKind::Policies,
-        content,
-        None,
-        ConfigSource::Seed,
-        context,
-    )
-    .await?
-    {
-        ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => Ok(document),
-        ConfigSaveOutcome::Conflict { .. } => db::get_active_config_document(ConfigKind::Policies)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!("access-control policies disappeared after concurrent seeding")
-            }),
-    }
+    db::active_or_seed(ConfigKind::Policies, || async {
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error.into()),
+        };
+        super::rules::validate_policy_document(&content).map_err(anyhow::Error::msg)?;
+        Ok(content)
+    })
+    .await
 }
 
 pub(super) async fn read_policies_document() -> anyhow::Result<ConfigDocument> {

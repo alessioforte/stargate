@@ -1,5 +1,5 @@
 use crate::ent::{
-    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, ConfigDocument, ConfigKind,
+    AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, ConfigDocument, ConfigKind, ConfigRevision,
     ConfigSaveOutcome, ConfigSource, Credential, CredentialHistory, CredentialType,
     NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
     OrganizationMembershipMutation, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
@@ -20,7 +20,7 @@ pub trait DbStore {
 
     // ── Configuration documents ────────────────────────────────────────────
     async fn get_active_config_document(&self, kind: ConfigKind) -> Result<Option<ConfigDocument>>;
-    async fn get_config_revisions(&self) -> Result<Vec<(String, i64, String)>>;
+    async fn get_config_revisions(&self) -> Result<Vec<ConfigRevision>>;
     /// Append a version only if the active revision matches. `None` requires
     /// an empty history for this kind. Identical content produces no audit event.
     async fn save_config_document(

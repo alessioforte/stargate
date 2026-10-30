@@ -47,7 +47,7 @@ stargate/
 │   ├── pw/            # Passwords: Argon2 (tunable params + pepper), policy engine, generator, API keys
 │   ├── smtp/          # Email delivery (lettre)
 │   ├── store/         # State store (DashMap / Redis)
-│   └── tools/         # Shared utilities
+│   └── tools/         # Shared duration parsing and hostname validation
 ├── apps/              # TypeScript frontends (see "Frontend")
 │   ├── auth/          # Hosted login / auth-flow UI, served at /auth
 │   ├── console/       # Super-admin console, served at /stargate
@@ -127,7 +127,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
   validation, `signing.rs` bounded CPU workers.
 - `data/db/`: SQL pool init, PostgreSQL endpoint/TLS/creation settings (`settings.rs`),
-  and the repository service wrappers (`svc.rs`). PostgreSQL fields go directly into
+  shared active-document/seed persistence (`config.rs`), and the repository service
+  wrappers (`svc.rs`). Seed closures own file and validation rules. Revision queries
+  return typed configuration kinds; unknown database kinds are errors.
+  PostgreSQL fields go directly into
   `PgConnectOptions`, including unencoded credentials. Optional database creation
   uses the same credentials/TLS through the `postgres` maintenance database;
   concurrent-create errors are benign only for `42P04`, or `23505` on
@@ -137,6 +140,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   verified TLS for `rediss://`, public roots by default or `REDIS_CA_FILE`, and
   separate credentials without URL encoding. The store, limiter, and audit relay
   share the same pool; URL credentials cannot be combined with separate fields.
+  A configured `REDIS_CA_FILE` requires `rediss://`; a cleartext URL fails startup.
 - `obs/`: logging (`logging/settings.rs` parses the format and sinks), and the
   telemetry provider (`telemetry/metrics.rs`, `telemetry/propagation.rs`). Logs go
   to stdout by default; `LOG_FORMAT` defaults to pretty in debug and JSON in
@@ -148,6 +152,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `trace_id` stays absent; no synthetic trace id is generated.
 - `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`), profile
   validation, startup banner, shutdown signal and drain (`shutdown.rs`).
+  Listener TLS is validated and cached once at startup; request forwarding and
+  HTTPS detection use the cached setting rather than reading `TLS_ENABLED` again.
   `tls::served_over_https()`: listener TLS or an `https://` public base URL (a proxy
   terminates TLS); it decides the `Secure` cookie attribute, HSTS, and the request's own
   origin scheme.
@@ -155,6 +161,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   trusted-origin middleware), security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
   (`limits.rs`), message envelopes.
+  `cookies::SESSION_COOKIE` is the shared session-cookie name for reading,
+  creation and upstream sanitization.
 - `api/middleware/`: IAM limits (`rate_limit.rs`, see "API Overview") and the feature
   gate (`features.rs`).
 - `conf/features.rs`: capabilities an operator can switch off, read and validated once at
@@ -260,6 +268,9 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   `forward_credentials` defaults to false, removing Authorization, API keys,
   the `jwt` cookie and token query parameters before dispatch. Other cookies
   use tolerant byte-based removal unless internal context requires strict parsing.
+  Malformed query parameter names are retained without internal context; with
+  internal context they are rejected as `400 request.invalid`. Credential
+  forwarding travels with the selected upstream, separately from ingress facts.
   Opt in for a backend that validates the credentials;
   this cannot be combined with internal context. Proxy-Authorization and
   Connection-nominated fields are always removed as hop-by-hop headers.
@@ -308,6 +319,9 @@ in `outbox_events` in the **same transaction** as the mutation. `crates/db`
 mutators take a `TrustedAuditContext` (actor, request facts, scope from
 authenticated/persisted state). All `/admin/*` events are `control_plane`.
 No in-process buffer. Login/logout events are not produced.
+System seeds, configuration imports and bootstrap use
+`TrustedAuditContext::system_control_plane()`; credential rehash keeps its
+application boundary.
 
 - **Edge**: no relay; rows stay pending (`published_at = NULL`).
 - **Cluster**: one relay per process (`src/aud/relay.rs`) claims pending rows in
@@ -373,6 +387,9 @@ with its safe audit event in one transaction. Conflicts return
 replica. Capacity changes are saved with `activation: restart_required` and retain the
 current runtime until restart. Pinned requests, bodies, mirrors, and WebSockets keep
 their generation. Replacing TLS files alone does not reload prepared transports.
+The Console preserves gateway and ACE drafts on conflicts, fetches the latest
+document separately, and offers explicit Reload or Overwrite actions with its
+version, update time and actor. ACE reads and writes expose the same metadata.
 An unchanged save keeps the existing generation when its document revision is already
 active on this replica; it still activates the document when the replica is behind.
 Cluster replicas subscribe to PostgreSQL `stargate_config` notifications emitted in the
@@ -402,7 +419,8 @@ with ingress restricted to Traefik and explicit egress rules. The chart manages
 and the four signer path/issuer/kid variables when `internalContext.enabled`,
 mounting the existing signing Secret read-only. Active managed settings reject
 duplicates in runtimeConfig data and extraEnv. Optional gRPC routes use h2c with
-higher priority; ordinary HTTP and WebSocket routes keep HTTP transport. Guide:
+higher priority only on API hosts; the identity host, ordinary HTTP and WebSocket
+routes keep HTTP transport. Guide:
 `k8s/stargate/README.md`, "Pattern A: Traefik in front".
 
 An optional Traefik IP allow-list protects the identity host's `/admin` and
@@ -415,6 +433,8 @@ An optional cluster-only pre-install/pre-upgrade migration Job uses dedicated
 hook configuration and optional DDL credentials. It sets the chart-managed
 `DB_MIGRATE_ON_START=false` explicitly in the server, bootstrap, and import
 environment so they verify the schema even with external runtime resources.
+Schema verification compares migration versions and checksums and reports a
+modified applied migration when a checksum differs.
 Migration pods use distinct labels and need their own egress
 policy when the namespace denies traffic by default. Old replicas keep serving
 during the migration, so schema changes must remain compatible with them.

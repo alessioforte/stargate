@@ -304,6 +304,27 @@ async fn grpc_probe_uses_prepared_upstream_mtls() {
 
 #[tokio::test]
 async fn grpc_rejects_http1_only_upstream_without_contacting_it() {
+    // This assertion observes a global tracing callsite, just like the JSON
+    // logging test. Other scoped dispatchers must not alter its cached interest.
+    const CHILD: &str = "STARGATE_TEST_GRPC_HTTP1_LOGS_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "gate::tests::grpc::grpc_rejects_http1_only_upstream_without_contacting_it",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tracing_subscriber::{Layer, layer::SubscriberExt};
     struct ErrorCounter(Arc<AtomicUsize>);

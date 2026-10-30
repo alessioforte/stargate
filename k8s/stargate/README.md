@@ -140,7 +140,9 @@ separate CLI Jobs with the CA mounted instead of enabling those hooks.
 Set `REDIS_URL` to a `rediss://` endpoint to verify the server certificate
 and hostname using public CA roots. For a private CA, mount a PEM bundle and
 set `REDIS_CA_FILE` to its path; this bundle replaces the public roots. An
-unreadable or invalid CA file stops startup. TLS verification cannot be disabled.
+unreadable or invalid CA file stops startup. Setting `REDIS_CA_FILE` with a
+`redis://` URL stops startup with `REDIS_CA_FILE requires a rediss:// REDIS_URL`.
+TLS verification cannot be disabled.
 
 Provide ACL credentials as `REDIS_USERNAME` and `REDIS_PASSWORD` in the runtime
 Secret, without URL encoding. Alternatively, put them in the URL; using both
@@ -210,7 +212,8 @@ host. Alternatively clear `secretName` and set `traefik.tls.certResolver` to a
 resolver configured in Traefik. With neither selected, `tls: {}` uses Traefik's
 default certificate configuration. Ordinary routes use HTTP to Stargate; setting
 `traefik.grpc.enabled=true` adds a higher-priority `HeaderRegexp` route for each
-host using h2c. WebSocket upgrades continue through the ordinary HTTP routes.
+API host in `traefik.apiHosts` using h2c. The identity host keeps its ordinary
+HTTP route; IAM errors there use JSON. WebSocket upgrades continue through the ordinary HTTP routes.
 These are [Traefik IngressRoute options](https://doc.traefik.io/traefik/v3.3/reference/routing-configuration/kubernetes/crd/http/ingressroute/).
 For gRPC, enable `traefik.grpc.enabled` and configure Stargate's gRPC upstreams
 with `transport.protocols: [http2]`. See [gRPC routes, deadlines, and health
@@ -519,7 +522,9 @@ Create the optional Secret before installing; its `POSTGRES_USERNAME` and
 `existingSecret` is empty, the Job uses the application credentials. For an
 already provisioned database, set `POSTGRES_CREATE_DATABASE: "false"` to avoid
 requiring database creation privileges. The application role needs read access
-to `_sqlx_migrations` for the schema check. The chart sets
+to `_sqlx_migrations` for the schema check. Each embedded migration must be
+applied with the matching checksum; a mismatch fails startup and identifies the
+modified migration. The chart sets
 `DB_MIGRATE_ON_START=false` explicitly in the Deployment, bootstrap Job, and
 import Job when migrations are enabled; this takes precedence over `envFrom`,
 including external ConfigMaps and Secrets.

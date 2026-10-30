@@ -5,6 +5,28 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn nested_request_logs_keep_request_id_without_an_otel_trace_id() {
+    // Tracing's callsite interest cache and OpenTelemetry providers are global.
+    // A scoped subscriber cannot isolate them from parallel tests' dispatchers.
+    // Run this capture once in its own process, with no retries.
+    const CHILD: &str = "STARGATE_TEST_JSON_LOGS_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "obs::logging::tests::nested_request_logs_keep_request_id_without_an_otel_trace_id",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     use std::{
         io::Write,
         sync::{Arc, Mutex},
@@ -73,7 +95,7 @@ async fn nested_request_logs_keep_request_id_without_an_otel_trace_id() {
     let nested = logs
         .iter()
         .find(|log| log["fields"]["message"] == "nested_request_log")
-        .unwrap();
+        .unwrap_or_else(|| panic!("nested_request_log was not captured: {text}"));
     assert_eq!(nested["span"]["name"], "nested");
     let request_span = nested["spans"]
         .as_array()

@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use ace::{Policy, PolicyAction, PolicyEngine, ResourceAction};
-use db::ent::{ConfigSaveOutcome, TrustedAuditContext};
+use db::ent::{ConfigDocument, ConfigSaveOutcome, TrustedAuditContext};
 use gate::PolicySnapshot;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -37,6 +37,9 @@ pub struct PolicyDiagnostic {
 #[serde(rename_all = "camelCase")]
 pub struct AccessControlRulesResponse {
     pub revision: String,
+    pub version: i64,
+    pub updated_at: String,
+    pub updated_by: Option<String>,
     pub content: String,
     pub valid: bool,
     pub diagnostics: Vec<PolicyDiagnostic>,
@@ -197,14 +200,17 @@ pub async fn read_rules() -> Result<AccessControlRulesResponse, ErrorResponse> {
     let document = super::storage::read_policies_document()
         .await
         .map_err(ErrorResponse::internal)?;
-    Ok(rules_response(document.content, document.revision))
+    Ok(rules_response(document))
 }
 
-fn rules_response(content: String, revision: String) -> AccessControlRulesResponse {
-    let parsed = parse_policy_document(&content);
+fn rules_response(document: ConfigDocument) -> AccessControlRulesResponse {
+    let parsed = parse_policy_document(&document.content);
     AccessControlRulesResponse {
-        revision,
-        content,
+        revision: document.revision,
+        version: document.version,
+        updated_at: document.created_at.to_rfc3339(),
+        updated_by: document.created_by,
+        content: document.content,
         valid: parsed.diagnostics.is_empty(),
         diagnostics: parsed.diagnostics,
         rules: parsed.rules.into_iter().map(|rule| rule.schema).collect(),
@@ -214,22 +220,18 @@ fn rules_response(content: String, revision: String) -> AccessControlRulesRespon
 pub fn validate_rules(
     request: ValidateAccessControlRulesRequest,
 ) -> ValidateAccessControlRulesResponse {
-    let parsed = parse_policy_document(&request.content);
+    let (parsed, error) = validate_document(&request.content);
     ValidateAccessControlRulesResponse {
-        valid: parsed.diagnostics.is_empty(),
+        valid: error.is_none(),
         diagnostics: parsed.diagnostics,
         rules: parsed.rules.into_iter().map(|rule| rule.schema).collect(),
     }
 }
 
 pub(crate) fn validate_policy_document(content: &str) -> Result<(), String> {
-    let validated = validate_rules(ValidateAccessControlRulesRequest {
-        content: content.to_owned(),
-    });
-    if validated.valid {
-        Ok(())
-    } else {
-        Err(format_diagnostics(&validated.diagnostics))
+    match validate_document(content).1 {
+        None => Ok(()),
+        Some(error) => Err(error),
     }
 }
 
@@ -237,17 +239,16 @@ pub async fn update_rules(
     request: UpdateAccessControlRulesRequest,
     context: TrustedAuditContext,
 ) -> Result<AccessControlRulesResponse, ErrorResponse> {
-    let parsed = parse_policy_document(&request.content);
-    if !parsed.diagnostics.is_empty() {
-        return Err(ErrorResponse::new(ErrorCode::AccessControlPoliciesInvalid)
-            .with_param("diagnostics", format_diagnostics(&parsed.diagnostics)));
-    }
+    validate_policy_document(&request.content).map_err(|diagnostics| {
+        ErrorResponse::new(ErrorCode::AccessControlPoliciesInvalid)
+            .with_param("diagnostics", diagnostics)
+    })?;
     match super::storage::save_policies_document(request.content, request.revision, context)
         .await
         .map_err(ErrorResponse::internal)?
     {
         ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => {
-            Ok(rules_response(document.content, document.revision))
+            Ok(rules_response(document))
         }
         ConfigSaveOutcome::Conflict { .. } => {
             Err(ErrorResponse::new(ErrorCode::AccessControlRevisionConflict))
@@ -348,6 +349,12 @@ pub(crate) fn compile_policy_snapshot(content: &str) -> Result<PolicySnapshot, E
     Ok(PolicySnapshot::new(engine, revision_for(content)))
 }
 
+fn validate_document(content: &str) -> (ParsedDocument, Option<String>) {
+    let parsed = parse_policy_document(content);
+    let error = (!parsed.diagnostics.is_empty()).then(|| format_diagnostics(&parsed.diagnostics));
+    (parsed, error)
+}
+
 fn parse_policy_document(content: &str) -> ParsedDocument {
     let parser = PolicyEngine::new();
     let mut pending = PendingMetadata::default();
@@ -400,15 +407,14 @@ fn parse_policy_document(content: &str) -> ParsedDocument {
 }
 
 fn parse_evaluable_document(content: &str) -> Result<ParsedDocument, ErrorResponse> {
-    let parsed = parse_policy_document(content);
-    if parsed.diagnostics.is_empty() {
-        return Ok(parsed);
+    let (parsed, error) = validate_document(content);
+    match error {
+        None => Ok(parsed),
+        Some(diagnostics) => Err(
+            ErrorResponse::new(ErrorCode::AccessControlEvaluationUnavailable)
+                .with_param("diagnostics", diagnostics),
+        ),
     }
-
-    Err(
-        ErrorResponse::new(ErrorCode::AccessControlEvaluationUnavailable)
-            .with_param("diagnostics", format_diagnostics(&parsed.diagnostics)),
-    )
 }
 
 fn apply_metadata_comment(

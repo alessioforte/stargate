@@ -164,8 +164,7 @@ async fn handle_request(
     let graph = &runtime.core.graph;
 
     let client_ip = req.get_client_ip();
-    let upstream_headers =
-        UpstreamHeaders::from_request(&req, crate::srv::tls::enabled().unwrap_or(false));
+    let upstream_headers = UpstreamHeaders::from_request(&req, crate::srv::tls::listener_enabled());
     strip_untrusted_forwarded_headers(req.headers_mut(), upstream_headers.peer);
     ingress::apply_ingress_limit(&runtime, &client_ip, execution)
         .instrument(tracing::debug_span!("gateway.ingress"))

@@ -1,8 +1,15 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::gate) enum QueryMode {
+    Tolerant,
+    Strict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::gate) struct QuerySanitizationError;
 
 pub(in crate::gate) fn sanitize_auth_uri(
     uri: &http::Uri,
+    mode: QueryMode,
 ) -> Result<http::Uri, QuerySanitizationError> {
     let Some(path_and_query) = uri.path_and_query() else {
         return Ok(uri.clone());
@@ -10,7 +17,7 @@ pub(in crate::gate) fn sanitize_auth_uri(
     let Some(query) = path_and_query.query() else {
         return Ok(uri.clone());
     };
-    let query = sanitize_auth_query(query)?;
+    let query = sanitize_auth_query(query, mode)?;
     let next = if query.is_empty() {
         path_and_query.path().to_owned()
     } else {
@@ -25,12 +32,15 @@ pub(in crate::gate) fn sanitize_auth_uri(
     http::Uri::from_parts(parts).map_err(|_| QuerySanitizationError)
 }
 
-fn sanitize_auth_query(query: &str) -> Result<String, QuerySanitizationError> {
+fn sanitize_auth_query(query: &str, mode: QueryMode) -> Result<String, QuerySanitizationError> {
     let mut retained = Vec::new();
     for pair in query.split('&') {
         let key = pair.split_once('=').map_or(pair, |(key, _)| key);
-        if !is_auth_query_key(key)? {
-            retained.push(pair);
+        match is_auth_query_key(key) {
+            Ok(true) => {}
+            Ok(false) => retained.push(pair),
+            Err(_) if mode == QueryMode::Tolerant => retained.push(pair),
+            Err(error) => return Err(error),
         }
     }
     Ok(retained.join("&"))

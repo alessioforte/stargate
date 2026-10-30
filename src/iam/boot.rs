@@ -1,8 +1,6 @@
 use anyhow::{Context, Result, bail, ensure};
 use db::InstanceBootstrapResult;
-use db::ent::{
-    OAuthClient, Profile, TrustedAuditBoundary, TrustedAuditContext, TrustedBackgroundActor,
-};
+use db::ent::{OAuthClient, Profile, TrustedAuditContext};
 use tracing::info;
 use url::Url;
 
@@ -98,10 +96,7 @@ pub async fn bootstrap_instance(
         profile,
         password_hash.as_deref(),
         client,
-        TrustedAuditContext::background(
-            TrustedAuditBoundary::control_plane(),
-            TrustedBackgroundActor::system(None),
-        ),
+        TrustedAuditContext::system_control_plane(),
     )
     .await?;
 

@@ -37,13 +37,16 @@ async fn serialized_host_is_replaced_once_and_connection_nominated_headers_are_r
     source.append(SEC_WEBSOCKET_PROTOCOL, "superchat".parse().unwrap());
     for preserve in [false, true] {
         let request = build_upstream_request(
-            "ws://backend.example:8080/socket",
+            UpstreamRequest {
+                uri: "ws://backend.example:8080/socket",
+                internal_dispatch: None,
+                forward_credentials: false,
+            },
             &source,
             &UpstreamHeaders {
                 preserve_host: preserve,
                 ..Default::default()
             },
-            None,
         )
         .await
         .unwrap();
@@ -87,13 +90,16 @@ async fn serialized_host_is_replaced_once_and_connection_nominated_headers_are_r
     source.append(HOST, "ambiguous.example".parse().unwrap());
     assert!(
         build_upstream_request(
-            "ws://backend.example/socket",
+            UpstreamRequest {
+                uri: "ws://backend.example/socket",
+                internal_dispatch: None,
+                forward_credentials: false
+            },
             &source,
             &UpstreamHeaders {
                 preserve_host: true,
                 ..Default::default()
-            },
-            None
+            }
         )
         .await
         .is_err()
@@ -114,9 +120,12 @@ async fn unsupported_transport_and_invalid_client_handshakes_fail_before_connect
         runtime.clone(),
         runtime.transport("socket").unwrap(),
         valid,
-        &url,
+        UpstreamRequest {
+            uri: &url,
+            internal_dispatch: None,
+            forward_credentials: false,
+        },
         &UpstreamHeaders::default(),
-        None,
         &execution(&runtime),
     )
     .await
@@ -182,9 +191,12 @@ async fn unsupported_transport_and_invalid_client_handshakes_fail_before_connect
             runtime.clone(),
             runtime.transport("socket").unwrap(),
             req,
-            &url,
+            UpstreamRequest {
+                uri: &url,
+                internal_dispatch: None,
+                forward_credentials: false,
+            },
             &UpstreamHeaders::default(),
-            None,
             &execution(&runtime),
         )
         .await
@@ -218,10 +230,13 @@ async fn tls_connect_and_upgrade_have_separate_deadlines_and_use_the_upstream_ov
             std::future::pending::<()>().await;
         });
         let request = build_upstream_request(
-            &url,
+            UpstreamRequest {
+                uri: &url,
+                internal_dispatch: None,
+                forward_credentials: false,
+            },
             &http::HeaderMap::new(),
             &UpstreamHeaders::default(),
-            None,
         )
         .await
         .unwrap();
@@ -255,10 +270,13 @@ async fn tls_connect_and_upgrade_have_separate_deadlines_and_use_the_upstream_ov
         tokio_tungstenite::accept_async(stream).await.unwrap()
     });
     let request = build_upstream_request(
-        &url,
+        UpstreamRequest {
+            uri: &url,
+            internal_dispatch: None,
+            forward_credentials: false,
+        },
         &http::HeaderMap::new(),
         &UpstreamHeaders::default(),
-        None,
     )
     .await
     .unwrap();
@@ -303,9 +321,17 @@ async fn upstream_extensions_and_duplicate_subprotocol_selection_are_rejected() 
         });
         let mut incoming = http::HeaderMap::new();
         incoming.insert(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
-        let request = build_upstream_request(&url, &incoming, &UpstreamHeaders::default(), None)
-            .await
-            .unwrap();
+        let request = build_upstream_request(
+            UpstreamRequest {
+                uri: &url,
+                internal_dispatch: None,
+                forward_credentials: false,
+            },
+            &incoming,
+            &UpstreamHeaders::default(),
+        )
+        .await
+        .unwrap();
         let error = connect_upstream(
             request,
             runtime.transport("socket").unwrap(),

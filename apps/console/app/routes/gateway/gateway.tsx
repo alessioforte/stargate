@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Alert, Box, Stack } from "@mantine/core";
-import { useConfirmModal } from "@/components";
+import { RevisionConflictDialog, useConfirmModal } from "@/components";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 import GatewayEditorDrawer from "./gateway-editor-drawer";
@@ -13,7 +13,15 @@ const GatewayPage = () => {
   const t = useTranslations();
   const { confirm, confirmModal } = useConfirmModal();
 
-  const { configuration, getConfigurations, updateConfigurations } = useStore();
+  const {
+    configuration,
+    configurationConflict,
+    getConfigurations,
+    updateConfigurations,
+    refreshConfigurationConflict,
+    reloadConfigurationConflict,
+    overwriteConfigurations,
+  } = useStore();
 
   const savedConfig = configuration.data?.config;
   const builder = useGatewayConfigBuilder(savedConfig);
@@ -45,6 +53,26 @@ const GatewayPage = () => {
   return (
     <Box>
       {confirmModal}
+      <RevisionConflictDialog
+        opened={configurationConflict !== null}
+        loading={
+          configuration.isLoading() ||
+          configurationConflict?.isLoading() === true
+        }
+        error={
+          configuration.isError()
+            ? (configuration.message ?? t("loadLatestFailed"))
+            : configurationConflict?.isError()
+              ? (configurationConflict.message ?? t("loadLatestFailed"))
+              : undefined
+        }
+        latest={configurationConflict?.data}
+        onReload={reloadConfigurationConflict}
+        onOverwrite={() => {
+          if (builder.config) void overwriteConfigurations(builder.config);
+        }}
+        onRetry={refreshConfigurationConflict}
+      />
       <GatewayToolbar
         dirty={builder.dirty}
         loading={configuration.isLoading()}

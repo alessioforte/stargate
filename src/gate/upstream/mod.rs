@@ -18,6 +18,13 @@ use internal_context::InternalDispatch;
 use std::{sync::Arc, time::Instant};
 use tracing::Instrument;
 
+/// Per-attempt properties of the selected upstream, separate from ingress facts.
+pub(in crate::gate) struct UpstreamRequest<'a> {
+    pub uri: &'a str,
+    pub internal_dispatch: Option<&'a InternalDispatch>,
+    pub forward_credentials: bool,
+}
+
 pub(super) async fn execute_selected_with_request(
     runtime: &Arc<RuntimeSnapshot>,
     selected: &SelectedService,
@@ -37,8 +44,6 @@ pub(super) async fn execute_selected_with_request(
             internal_context,
             forward_credentials,
         } => {
-            let mut upstream_headers = state.upstream_headers.clone();
-            upstream_headers.forward_credentials = *forward_credentials;
             let attempt = DispatchAttempt::primary();
             let protocol = req.get_protocol();
             let uri = upstream_uri(upstream_base_url, state);
@@ -62,9 +67,12 @@ pub(super) async fn execute_selected_with_request(
                     runtime.clone(),
                     transport,
                     req,
-                    &uri,
-                    &upstream_headers,
-                    internal_dispatch.as_ref(),
+                    UpstreamRequest {
+                        uri: &uri,
+                        internal_dispatch: internal_dispatch.as_ref(),
+                        forward_credentials: *forward_credentials,
+                    },
+                    &state.upstream_headers,
                     &state.execution,
                 )
                 .instrument(observation.span.clone())
@@ -73,10 +81,13 @@ pub(super) async fn execute_selected_with_request(
                 let client = runtime.client_for(service_name, state.execution.grpc)?;
                 http::handler(
                     req,
-                    &uri,
+                    UpstreamRequest {
+                        uri: &uri,
+                        internal_dispatch: internal_dispatch.as_ref(),
+                        forward_credentials: *forward_credentials,
+                    },
                     &client,
-                    &upstream_headers,
-                    internal_dispatch.as_ref(),
+                    &state.upstream_headers,
                     &runtime.settings,
                     &state.execution,
                 )
@@ -109,8 +120,6 @@ pub(super) async fn execute_selected_from_replay(
             internal_context,
             forward_credentials,
         } => {
-            let mut upstream_headers = state.upstream_headers.clone();
-            upstream_headers.forward_credentials = *forward_credentials;
             let attempt =
                 dispatch_attempt.ok_or_else(|| attempt_limit_failure(service_name, "unknown"))?;
             let uri = upstream_uri(upstream_base_url, state);
@@ -129,10 +138,13 @@ pub(super) async fn execute_selected_from_replay(
             );
             let result = http::handler(
                 req,
-                &uri,
+                UpstreamRequest {
+                    uri: &uri,
+                    internal_dispatch: internal_dispatch.as_ref(),
+                    forward_credentials: *forward_credentials,
+                },
                 &client,
-                &upstream_headers,
-                internal_dispatch.as_ref(),
+                &state.upstream_headers,
                 &runtime.settings,
                 &state.execution,
             )

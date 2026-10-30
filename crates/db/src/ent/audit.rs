@@ -264,6 +264,13 @@ pub struct TrustedAuditContext {
 }
 
 impl TrustedAuditContext {
+    pub fn system_control_plane() -> Self {
+        Self::background(
+            TrustedAuditBoundary::control_plane(),
+            TrustedBackgroundActor::system(None),
+        )
+    }
+
     pub fn admin_control_plane(actor: TrustedAdminActor, request: TrustedAuditRequest) -> Self {
         Self {
             boundary: TrustedAuditBoundary::control_plane(),
@@ -371,6 +378,18 @@ mod trusted_context_tests {
                 .as_deref(),
             Some("192.0.2.10")
         );
+    }
+
+    #[test]
+    fn system_control_plane_has_the_frozen_background_identity_and_scope() {
+        let context = TrustedAuditContext::system_control_plane();
+        assert_eq!(
+            context.boundary().scope(),
+            &AuditScopeSelector::ControlPlane
+        );
+        assert_eq!(context.actor().actor_type(), "system");
+        assert_eq!(context.actor().id(), None);
+        assert!(context.request().is_none());
     }
 
     #[test]

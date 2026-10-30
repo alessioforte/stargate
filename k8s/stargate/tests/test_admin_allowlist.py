@@ -42,7 +42,7 @@ class AdminAllowListRendering(unittest.TestCase):
         self.assertEqual(rendered.returncode, 0, rendered.stderr)
         self.assertNotIn("kind: Middleware\n", rendered.stdout)
         rules = routes(rendered.stdout)
-        self.assertEqual(len(rules), 4)
+        self.assertEqual(len(rules), 3)
         self.assertIn(("Host(`identity.example.com`)", 10), [(rule, priority) for rule, priority, _ in rules])
         self.assertTrue(all("admin-allowlist" not in block for _, _, block in rules))
 
@@ -59,7 +59,7 @@ class AdminAllowListRendering(unittest.TestCase):
         self.assertIn('      - "::/0"\n', rendered.stdout)
         self.assertIn("      depth: 2\n", rendered.stdout)
         rules = routes(rendered.stdout)
-        self.assertEqual(len(rules), 5)
+        self.assertEqual(len(rules), 4)
         protected = next((rule, block) for rule, priority, block in rules if priority == 30)
         self.assertIn("PathPrefix(`/admin`)", protected[0])
         self.assertIn("PathPrefix(`/stargate`)", protected[0])
@@ -68,11 +68,27 @@ class AdminAllowListRendering(unittest.TestCase):
         predicate = protected[0].split(" && ", 1)[1]
         identity = next(rule for rule, priority, _ in rules if priority == 10 and "identity.example.com" in rule)
         self.assertEqual(identity, f"Host(`identity.example.com`) && !{predicate}")
-        grpc_identity = next(rule for rule, priority, _ in rules if priority == 20 and "identity.example.com" in rule)
-        self.assertIn(f"&& !{predicate}", grpc_identity)
+        self.assertFalse(any(priority == 20 and "identity.example.com" in rule for rule, priority, _ in rules))
         api = [rule for rule, _, _ in rules if "api.example.com" in rule]
         self.assertEqual(len(api), 2)
         self.assertTrue(all("PathRegexp" not in rule for rule in api))
+
+    def test_grpc_routes_only_use_api_hosts_and_the_shared_service(self):
+        for hosts in [[], ["api.example.com", "other.example.com"]]:
+            rendered = render({"traefik": {"apiHosts": hosts, "grpc": {"enabled": True}}})
+            self.assertEqual(rendered.returncode, 0, rendered.stderr)
+            rules = routes(rendered.stdout)
+            grpc = [(rule, block) for rule, priority, block in rules if priority == 20]
+            self.assertEqual(len(grpc), len(hosts))
+            for host, (rule, block) in zip(hosts, grpc):
+                self.assertEqual(rule, f"Host(`{host}`) && HeaderRegexp(`Content-Type`, `^application/grpc`)")
+                self.assertIn("scheme: h2c", block)
+            for _, priority, block in rules:
+                self.assertIn("- name: check-stargate", block)
+                self.assertIn("port: http", block)
+                self.assertIn("passHostHeader: true", block)
+                if priority != 20:
+                    self.assertIn("scheme: http", block)
 
     def test_zero_depth_uses_remote_address_and_long_names_are_valid(self):
         rendered = render({"fullnameOverride": "a" * 63, "traefik": {

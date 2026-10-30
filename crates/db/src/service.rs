@@ -7,11 +7,12 @@ use crate::backend::Pool;
 use crate::db::{DbStore, InstanceBootstrapResult};
 use crate::ent::{
     AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, AuditId, AuditOperation, AuditResource,
-    AuditScopeSelector, ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, Credential,
-    CredentialHistory, CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent,
-    OrgMember, OrgMembership, Organization, OrganizationMembershipMutation, OutboxEventFilter,
-    OutboxEventRow, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
-    ValidatedAuditEvent, canonical_email, canonical_nickname, config_revision,
+    AuditScopeSelector, ConfigDocument, ConfigKind, ConfigRevision, ConfigSaveOutcome,
+    ConfigSource, Credential, CredentialHistory, CredentialType, NewOrganizationMembership,
+    OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
+    OrganizationMembershipMutation, OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount,
+    SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent, canonical_email,
+    canonical_nickname, config_revision,
 };
 use crate::repo::ApiKeyAuditRecord;
 use anyhow::{Context, Result, bail, ensure};
@@ -79,16 +80,26 @@ impl Service {
         if exists == 0 {
             bail!("database schema is behind this binary: run `stargate db migrate`");
         }
-        let applied: Vec<i64> =
-            sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success = true")
-                .fetch_all(&self.pool)
-                .await?;
-        if MIGRATOR
+        let applied: std::collections::HashMap<i64, Vec<u8>> = sqlx::query_as::<_, (i64, Vec<u8>)>(
+            "SELECT version, checksum FROM _sqlx_migrations WHERE success = true",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .collect();
+        for migration in MIGRATOR
             .iter()
             .filter(|migration| !migration.migration_type.is_down_migration())
-            .any(|migration| !applied.contains(&migration.version))
         {
-            bail!("database schema is behind this binary: run `stargate db migrate`");
+            let Some(checksum) = applied.get(&migration.version) else {
+                bail!("database schema is behind this binary: run `stargate db migrate`");
+            };
+            if checksum.as_slice() != migration.checksum.as_ref() {
+                bail!(
+                    "migration {} was previously applied but has been modified (checksum mismatch)",
+                    migration.version
+                );
+            }
         }
         Ok(())
     }
@@ -722,7 +733,7 @@ impl DbStore for Service {
         self.config_document.latest(&self.pool, kind).await
     }
 
-    async fn get_config_revisions(&self) -> Result<Vec<(String, i64, String)>> {
+    async fn get_config_revisions(&self) -> Result<Vec<ConfigRevision>> {
         self.config_document.latest_revisions(&self.pool).await
     }
 
@@ -2392,6 +2403,30 @@ mod sqlite_tests {
         );
     }
 
+    #[tokio::test]
+    async fn schema_verification_rejects_changed_migration_checksums_without_writing() {
+        let service = test_service().await;
+        let version = MIGRATOR.iter().next().unwrap().version;
+        let altered = vec![0_u8];
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+            .bind(&altered)
+            .bind(version)
+            .execute(&service.pool)
+            .await
+            .unwrap();
+        let error = service.verify_schema().await.unwrap_err().to_string();
+        assert!(error.contains(&version.to_string()));
+        assert!(error.contains("has been modified (checksum mismatch)"));
+        assert!(!error.contains("run `stargate db migrate`"));
+        let stored: Vec<u8> =
+            sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
+                .bind(version)
+                .fetch_one(&service.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, altered);
+    }
+
     fn trusted_ctx() -> TrustedAuditContext {
         TrustedAuditContext::admin_control_plane(
             TrustedAdminActor::admin("01JZ000000000000000000000A"),
@@ -2400,10 +2435,7 @@ mod sqlite_tests {
     }
 
     fn bootstrap_ctx() -> TrustedAuditContext {
-        TrustedAuditContext::background(
-            TrustedAuditBoundary::control_plane(),
-            TrustedBackgroundActor::system(None),
-        )
+        TrustedAuditContext::system_control_plane()
     }
 
     fn saved_config(outcome: ConfigSaveOutcome) -> ConfigDocument {
@@ -2715,8 +2747,14 @@ mod sqlite_tests {
         assert_eq!(
             svc.get_config_revisions().await.unwrap(),
             vec![
-                ("gateway".to_string(), 2, gateway.revision),
-                ("policies".to_string(), 1, policies.revision),
+                ConfigRevision {
+                    kind: ConfigKind::Gateway,
+                    revision: gateway.revision
+                },
+                ConfigRevision {
+                    kind: ConfigKind::Policies,
+                    revision: policies.revision
+                },
             ]
         );
         let events = audit_payloads(&svc).await;
@@ -3578,10 +3616,7 @@ mod sqlite_tests {
     #[tokio::test]
     async fn audit_super_admin_bootstrap_writes_two_distinct_events_with_one_timestamp() {
         let svc = test_service().await;
-        let context = TrustedAuditContext::background(
-            crate::ent::TrustedAuditBoundary::control_plane(),
-            crate::ent::TrustedBackgroundActor::system(None),
-        );
+        let context = TrustedAuditContext::system_control_plane();
         let user = svc
             .create_super_admin_user(
                 Profile::new("root@example.com".to_string(), "root".to_string()),

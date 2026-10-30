@@ -17,6 +17,12 @@ impl ConfigKind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRevision {
+    pub kind: ConfigKind,
+    pub revision: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigSource {
     Seed,

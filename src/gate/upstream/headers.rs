@@ -1,4 +1,5 @@
 use crate::ctx::{INTERNAL_CONTEXT_HEADER, REQUEST_ID_HEADER};
+use crate::web::cookies::SESSION_COOKIE;
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::graph::HeaderValueNode;
 use http::header::{AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION};
@@ -11,7 +12,6 @@ pub(in crate::gate) struct UpstreamHeaders {
     pub(in crate::gate) peer: Option<IpAddr>,
     pub(in crate::gate) original_host: Option<HeaderValue>,
     pub(in crate::gate) listener_tls: bool,
-    pub(in crate::gate) forward_credentials: bool,
 }
 
 impl UpstreamHeaders {
@@ -28,7 +28,6 @@ impl UpstreamHeaders {
                     .and_then(|authority| HeaderValue::from_str(authority.as_str()).ok())
             }),
             listener_tls,
-            forward_credentials: false,
         }
     }
 }
@@ -156,7 +155,11 @@ pub(in crate::gate) fn strip_credentials(headers: &mut HeaderMap) {
                 .split(|byte| *byte == b';')
                 // Space and tab are the only ASCII whitespace allowed in a header value.
                 .map(<[u8]>::trim_ascii)
-                .filter(|item| !item.starts_with(b"jwt="))
+                .filter(|item| {
+                    !item
+                        .strip_prefix(SESSION_COOKIE.as_bytes())
+                        .is_some_and(|rest| rest.starts_with(b"="))
+                })
                 .collect::<Vec<_>>()
                 .join(b"; ".as_slice());
             if retained.is_empty() {
@@ -222,7 +225,7 @@ fn sanitize_cookie_field(value: &HeaderValue) -> CookieField {
         if !valid_cookie_name(name) || !valid_cookie_value(value) {
             return CookieField::Ambiguous;
         }
-        if name != "jwt" {
+        if name != SESSION_COOKIE {
             retained.push(pair);
         }
     }

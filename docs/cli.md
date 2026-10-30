@@ -29,8 +29,10 @@ prints the rotation steps. With `--id-token` the key is RS256 and meant for
 By default, startup and database-backed CLI commands apply the embedded
 migrations. Set `DB_MIGRATE_ON_START=false` to require an already migrated
 database instead; if any embedded migration is missing, initialization fails
-with instructions to run `stargate db migrate`. The variable accepts `true`
-or `false` and defaults to `true`.
+with instructions to run `stargate db migrate`. Verification also compares the
+stored migration checksums with this binary. A mismatch reports the modified
+migration instead of suggesting migration as a remedy. The variable accepts
+`true` or `false` and defaults to `true`.
 
 Run migrations explicitly with credentials that can change the schema:
 

@@ -419,3 +419,11 @@ Cross-field validation that JSON Schema cannot express.
   {{- fail "autoscaling.minReplicas must not exceed autoscaling.maxReplicas" -}}
 {{- end -}}
 {{- end -}}
+
+{{/* Backend service for an IngressRoute; the caller selects HTTP or h2c. */}}
+{{- define "stargate.ingressRouteService" -}}
+- name: {{ include "stargate.fullname" .root }}
+  port: http
+  scheme: {{ .scheme }}
+  passHostHeader: true
+{{- end -}}

@@ -100,6 +100,8 @@ const initialState: State = {
   adminKeys: new StoreItem<List<AdminKey>>(null),
   apiKeys: new StoreItem<List<ApiKey>>(null),
   configuration: new StoreItem<ConfigurationDocument>(null),
+  configurationConflict: null,
+  accessControlRulesConflict: null,
   oauthClients: new StoreItem<List<OAuthClient>>(null),
   organizations: new StoreItem<List<Organization>>(null),
   serviceAccounts: new StoreItem<List<ServiceAccount>>(null),
@@ -809,10 +811,13 @@ const store: StateCreator<State & Actions> = (set, get) => ({
       set({ configuration: configuration.setError(message) });
       return;
     }
-    set({ configuration: configuration.setSuccess(data) });
+    set({
+      configuration: configuration.setSuccess(data),
+      configurationConflict: null,
+    });
   },
 
-  updateConfigurations: async (config: Configuration) => {
+  updateConfigurations: async (config: Configuration, revision?: string) => {
     const item = get().configuration;
     const document = item.data;
     if (!document) return false;
@@ -821,18 +826,14 @@ const store: StateCreator<State & Actions> = (set, get) => ({
     const { data, error, message, status } = await localizedApiResponse(
       get().language,
       services.admin.updateConfigurations({
-        revision: document.revision,
+        revision: revision ?? document.revision,
         config,
       }),
     );
     if (error || !data) {
       if (status === 409) {
-        showStoreNotification(
-          get().language,
-          "warning",
-          notificationText(get().language, "gatewayConfigurationConflict"),
-        );
-        await get().getConfigurations();
+        set({ configuration: item.setSuccess(document) });
+        await get().refreshConfigurationConflict();
         return false;
       }
       set({ configuration: item.setError(message) });
@@ -846,7 +847,10 @@ const store: StateCreator<State & Actions> = (set, get) => ({
     }
 
     const { activation, ...savedDocument } = data;
-    set({ configuration: item.setSuccess(savedDocument) });
+    set({
+      configuration: item.setSuccess(savedDocument),
+      configurationConflict: null,
+    });
     showStoreNotification(
       get().language,
       activation === "restart_required" ? "warning" : "success",
@@ -858,6 +862,69 @@ const store: StateCreator<State & Actions> = (set, get) => ({
       ),
     );
     return true;
+  },
+
+  refreshConfigurationConflict: async () => {
+    const latest = new StoreItem<ConfigurationDocument>();
+    set({ configurationConflict: latest.setLoading() });
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      services.admin.getConfigurations(),
+    );
+    set({
+      configurationConflict:
+        error || !data ? latest.setError(message) : latest.setSuccess(data),
+    });
+  },
+
+  reloadConfigurationConflict: () => {
+    const latest = get().configurationConflict?.data;
+    if (latest)
+      set({
+        configuration: get().configuration.setSuccess(latest),
+        configurationConflict: null,
+      });
+  },
+
+  overwriteConfigurations: async (config: Configuration) => {
+    const latest = get().configurationConflict?.data;
+    if (!latest) return false;
+    return get().updateConfigurations(config, latest.revision);
+  },
+
+  refreshAccessControlRulesConflict: async () => {
+    const latest = new StoreItem<AccessControlRulesResponse>();
+    set({ accessControlRulesConflict: latest.setLoading() });
+    const { data, error, message } = await localizedApiResponse(
+      get().language,
+      services.admin.getAccessControlRules(),
+    );
+    set({
+      accessControlRulesConflict:
+        error || !data ? latest.setError(message) : latest.setSuccess(data),
+    });
+  },
+
+  reloadAccessControlRulesConflict: () => {
+    const latest = get().accessControlRulesConflict?.data;
+    if (!latest) return null;
+    set({
+      accessControlRules: get().accessControlRules.setSuccess(latest),
+      accessControlRulesConflict: null,
+      accessControlValidation: get().accessControlValidation.setSuccess(
+        accessControlValidationFromRules(latest),
+      ),
+    });
+    return latest;
+  },
+
+  overwriteAccessControlRules: async (content: string) => {
+    const latest = get().accessControlRulesConflict?.data;
+    if (!latest) return null;
+    return get().updateAccessControlRules({
+      content,
+      revision: latest.revision,
+    });
   },
 
   getAccessControlRules: async () => {
@@ -875,6 +942,7 @@ const store: StateCreator<State & Actions> = (set, get) => ({
 
     set({
       accessControlRules: accessControlRules.setSuccess(data),
+      accessControlRulesConflict: null,
       accessControlValidation: get().accessControlValidation.setSuccess(
         data ? accessControlValidationFromRules(data) : null,
       ),
@@ -887,12 +955,21 @@ const store: StateCreator<State & Actions> = (set, get) => ({
     const accessControlRules = get().accessControlRules;
     set({ accessControlRules: accessControlRules.setLoading() });
 
-    const { data, error, message } = await localizedApiResponse(
+    const { data, error, message, status } = await localizedApiResponse(
       get().language,
       services.admin.updateAccessControlRules(request),
     );
 
-    if (error) {
+    if (error || !data) {
+      if (status === 409) {
+        set({
+          accessControlRules: accessControlRules.setSuccess(
+            accessControlRules.data ?? null,
+          ),
+        });
+        await get().refreshAccessControlRulesConflict();
+        return null;
+      }
       set({ accessControlRules: accessControlRules.setError(message) });
       showStoreNotification(
         get().language,
@@ -904,6 +981,7 @@ const store: StateCreator<State & Actions> = (set, get) => ({
 
     set({
       accessControlRules: accessControlRules.setSuccess(data),
+      accessControlRulesConflict: null,
       accessControlValidation: get().accessControlValidation.setSuccess(
         data ? accessControlValidationFromRules(data) : null,
       ),

@@ -2,10 +2,7 @@ use crate::ctx::sign;
 use crate::data::db;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::transport::{self, PreparedTransports, TransportPreparationError};
-use ::db::ent::{
-    ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary,
-    TrustedAuditContext, TrustedBackgroundActor,
-};
+use ::db::ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext};
 use gate::cfg::{Config, RuntimeConfig};
 use std::{env, sync::Arc};
 
@@ -86,37 +83,18 @@ pub(crate) fn validate_gateway_document(content: &str) -> Result<(), gate::cfg::
 }
 
 async fn load_gateway_document_from_path(path: &str) -> anyhow::Result<ConfigDocument> {
-    if let Some(document) = db::get_active_config_document(ConfigKind::Gateway).await? {
-        return Ok(document);
-    }
-    let content = match tokio::fs::read_to_string(path).await {
-        Ok(content) => content,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            anyhow::bail!("no gateway configuration in the database and no seed file at {path}")
-        }
-        Err(error) => return Err(error.into()),
-    };
-    validate_gateway_document(&content)?;
-    let context = TrustedAuditContext::background(
-        TrustedAuditBoundary::control_plane(),
-        TrustedBackgroundActor::system(None),
-    );
-    match db::save_config_document(
-        ConfigKind::Gateway,
-        content,
-        None,
-        ConfigSource::Seed,
-        context,
-    )
-    .await?
-    {
-        ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => Ok(document),
-        ConfigSaveOutcome::Conflict { .. } => db::get_active_config_document(ConfigKind::Gateway)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!("gateway configuration disappeared after concurrent seeding")
-            }),
-    }
+    db::active_or_seed(ConfigKind::Gateway, || async {
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::bail!("no gateway configuration in the database and no seed file at {path}")
+            }
+            Err(error) => return Err(error.into()),
+        };
+        validate_gateway_document(&content)?;
+        Ok(content)
+    })
+    .await
 }
 
 pub(in crate::gate) fn prepare_gateway_config(

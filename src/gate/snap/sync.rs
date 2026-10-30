@@ -203,19 +203,18 @@ async fn synchronize(
     policies: &mut RevisionState,
     trigger: Trigger,
 ) -> anyhow::Result<()> {
-    for (kind, _, revision) in db::get_config_revisions().await? {
-        let (kind, state, active) = match kind.as_str() {
-            "gateway" => (
+    for ::db::ent::ConfigRevision { kind, revision } in db::get_config_revisions().await? {
+        let (kind, state, active) = match kind {
+            ConfigKind::Gateway => (
                 ConfigKind::Gateway,
                 &mut *gateway,
                 gate.snapshot().config_revision.clone(),
             ),
-            "policies" => (
+            ConfigKind::Policies => (
                 ConfigKind::Policies,
                 &mut *policies,
                 gate.policy_snapshot.load().revision.clone(),
             ),
-            _ => continue,
         };
         if !state.should_apply(&active, &revision, trigger) {
             continue;

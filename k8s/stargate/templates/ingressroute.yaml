@@ -17,10 +17,7 @@ spec:
       middlewares:
         - name: {{ include "stargate.adminAllowListName" . }}
       services:
-        - name: {{ include "stargate.fullname" . }}
-          port: http
-          scheme: http
-          passHostHeader: true
+        {{- include "stargate.ingressRouteService" (dict "root" . "scheme" "http") | nindent 8 }}
     {{- end }}
     - kind: Rule
       {{- if .Values.traefik.adminAllowList.enabled }}
@@ -30,10 +27,7 @@ spec:
       {{- end }}
       priority: 10
       services:
-        - name: {{ include "stargate.fullname" . }}
-          port: http
-          scheme: http
-          passHostHeader: true
+        {{- include "stargate.ingressRouteService" (dict "root" . "scheme" "http") | nindent 8 }}
     {{- if .Values.traefik.apiHosts }}
     {{- $matches := list }}
     {{- range .Values.traefik.apiHosts }}
@@ -43,25 +37,15 @@ spec:
       match: {{ join " || " $matches | quote }}
       priority: 10
       services:
-        - name: {{ include "stargate.fullname" . }}
-          port: http
-          scheme: http
-          passHostHeader: true
+        {{- include "stargate.ingressRouteService" (dict "root" . "scheme" "http") | nindent 8 }}
     {{- end }}
     {{- if .Values.traefik.grpc.enabled }}
-    {{- range prepend .Values.traefik.apiHosts .Values.traefik.identityHost }}
+    {{- range .Values.traefik.apiHosts }}
     - kind: Rule
-      {{- if and $.Values.traefik.adminAllowList.enabled (eq . $.Values.traefik.identityHost) }}
-      match: {{ printf "Host(`%s`) && HeaderRegexp(`Content-Type`, `^application/grpc`) && !%s" . (include "stargate.adminPathRule" $) | quote }}
-      {{- else }}
       match: {{ printf "Host(`%s`) && HeaderRegexp(`Content-Type`, `^application/grpc`)" . | quote }}
-      {{- end }}
       priority: 20
       services:
-        - name: {{ include "stargate.fullname" $ }}
-          port: http
-          scheme: h2c
-          passHostHeader: true
+        {{- include "stargate.ingressRouteService" (dict "root" $ "scheme" "h2c") | nindent 8 }}
     {{- end }}
     {{- end }}
   {{- if or .Values.traefik.tls.secretName .Values.traefik.tls.certResolver }}

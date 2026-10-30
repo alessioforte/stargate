@@ -104,6 +104,8 @@ export interface State {
   adminKeys: StoreItem<List<AdminKey>>;
   apiKeys: StoreItem<List<ApiKey>>;
   configuration: StoreItem<ConfigurationDocument>;
+  configurationConflict: StoreItem<ConfigurationDocument> | null;
+  accessControlRulesConflict: StoreItem<AccessControlRulesResponse> | null;
   oauthClients: StoreItem<List<OAuthClient>>;
   organizations: StoreItem<List<Organization>>;
   serviceAccounts: StoreItem<List<ServiceAccount>>;
@@ -151,7 +153,18 @@ export interface Actions {
   deleteApiKey: (id: string) => Promise<void>;
 
   getConfigurations: () => Promise<void>;
-  updateConfigurations: (configuration: Configuration) => Promise<boolean>;
+  updateConfigurations: (
+    configuration: Configuration,
+    revision?: string,
+  ) => Promise<boolean>;
+  refreshConfigurationConflict: () => Promise<void>;
+  reloadConfigurationConflict: () => void;
+  overwriteConfigurations: (configuration: Configuration) => Promise<boolean>;
+  refreshAccessControlRulesConflict: () => Promise<void>;
+  reloadAccessControlRulesConflict: () => AccessControlRulesResponse | null;
+  overwriteAccessControlRules: (
+    content: string,
+  ) => Promise<AccessControlRulesResponse | null>;
 
   getAccessControlRules: () => Promise<void>;
   updateAccessControlRules: (

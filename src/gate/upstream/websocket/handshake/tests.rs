@@ -1,5 +1,6 @@
 use super::*;
 use crate::ctx::sign::test_support::{PRIVATE_KEY, PUBLIC_KEY};
+use crate::gate::upstream::internal_context::InternalDispatch;
 use crate::{
     ctx::{
         INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
@@ -109,10 +110,13 @@ async fn upstream_request_builds_from_ws_uri() {
     headers.insert("x-trace-id", "trace_1".parse().unwrap());
 
     let request = build_upstream_request(
-        "wss://upstream.example/socket?foo=1",
+        UpstreamRequest {
+            uri: "wss://upstream.example/socket?foo=1",
+            internal_dispatch: None,
+            forward_credentials: false,
+        },
         &headers,
         &UpstreamHeaders::default(),
-        None,
     )
     .await
     .unwrap();
@@ -123,6 +127,35 @@ async fn upstream_request_builds_from_ws_uri() {
         "chat"
     );
     assert_eq!(request.headers().get("x-trace-id").unwrap(), "trace_1");
+}
+
+#[tokio::test]
+async fn malformed_query_names_follow_the_context_policy_in_websocket_handshakes() {
+    let request = build_upstream_request(
+        UpstreamRequest {
+            uri: "ws://orders.test/socket?50%=off&token=x",
+            internal_dispatch: None,
+            forward_credentials: false,
+        },
+        &http::HeaderMap::new(),
+        &UpstreamHeaders::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(request.uri().query(), Some("50%=off"));
+    let error = build_upstream_request(
+        UpstreamRequest {
+            uri: "ws://orders.test/socket?50%=off&token=x",
+            internal_dispatch: Some(&internal_dispatch()),
+            forward_credentials: false,
+        },
+        &http::HeaderMap::new(),
+        &UpstreamHeaders::default(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::RequestInvalid);
+    assert_eq!(error.status, http::StatusCode::BAD_REQUEST);
 }
 
 #[test]
@@ -182,10 +215,13 @@ async fn internal_websocket_handshake_is_sanitized_verified_and_frame_compatible
     incoming.insert(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
     let target = format!("ws://{address}/socket?%6awt=secret&safe=%2Fvalue");
     let request = build_upstream_request(
-        &target,
+        UpstreamRequest {
+            uri: &target,
+            internal_dispatch: Some(&internal_dispatch()),
+            forward_credentials: false,
+        },
         &incoming,
         &UpstreamHeaders::default(),
-        Some(&internal_dispatch()),
     )
     .await
     .unwrap();

@@ -94,21 +94,7 @@ fn parse_endpoint(value: &str) -> Result<(String, u16)> {
         Some((host, port)) => (host, parse_port(port)?),
         None => (value, 5432),
     };
-    let hostname = host.strip_suffix('.').unwrap_or(host);
-    ensure!(
-        !hostname.is_empty()
-            && hostname.len() <= 253
-            && hostname.split('.').all(|label| {
-                !label.is_empty()
-                    && label.len() <= 63
-                    && label.as_bytes()[0].is_ascii_alphanumeric()
-                    && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
-                    && label
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            }),
-        ENDPOINT_ERROR
-    );
+    ensure!(tools::valid_hostname(host), ENDPOINT_ERROR);
     Ok((host.to_string(), port))
 }
 

@@ -1,3 +1,4 @@
+use super::UpstreamRequest;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::{
     lifecycle::{
@@ -9,8 +10,7 @@ use crate::gate::{
         headers::{
             UpstreamHeaders, apply_forwarded_headers, strip_credentials, strip_hop_by_hop_headers,
         },
-        internal_context::InternalDispatch,
-        uri::sanitize_auth_uri,
+        uri::{QueryMode, sanitize_auth_uri},
     },
 };
 use crate::obs::telemetry;
@@ -19,13 +19,17 @@ use http::header::HOST;
 
 pub async fn handler(
     mut req: http::Request<Body>,
-    uri: &str,
+    upstream: UpstreamRequest<'_>,
     client: &crate::gate::HyperClient,
     ingress: &UpstreamHeaders,
-    internal_dispatch: Option<&InternalDispatch>,
     settings: &gate::cfg::CompiledRuntimeSettings,
     execution: &Execution,
 ) -> Result<Response, ErrorResponse> {
+    let UpstreamRequest {
+        uri,
+        internal_dispatch,
+        forward_credentials,
+    } = upstream;
     req.extensions_mut()
         .remove::<std::sync::Arc<crate::gate::resources::Admission>>();
     let upstream_uri = parse_upstream_uri(uri)?;
@@ -52,8 +56,8 @@ pub async fn handler(
     if let Some(dispatch) = internal_dispatch {
         dispatch.prepare(&mut req).await?;
     } else {
-        if !ingress.forward_credentials {
-            *req.uri_mut() = sanitize_auth_uri(req.uri())
+        if !forward_credentials {
+            *req.uri_mut() = sanitize_auth_uri(req.uri(), QueryMode::Tolerant)
                 .map_err(|_| ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed))?;
             strip_credentials(req.headers_mut());
         }

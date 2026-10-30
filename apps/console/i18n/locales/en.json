@@ -323,7 +323,6 @@
     "apiKeyDeleteFailed": "Failed to delete API key",
     "apiKeyDeleted": "API key deleted successfully",
     "gatewayConfigurationUpdateFailed": "Failed to update gateway configuration",
-    "gatewayConfigurationConflict": "The gateway configuration changed. The latest version has been reloaded; review it before saving again.",
     "gatewayConfigurationRestartRequired": "Gateway configuration saved. Restart Stargate to apply the capacity changes.",
     "gatewayConfigurationUpdated": "Gateway configuration updated successfully",
     "oauthClientCreateFailed": "Failed to create OAuth client",
@@ -568,5 +567,13 @@
   "publishedAt": "Published At",
   "payload": "Payload",
   "language": "Language",
-  "settings": "Settings"
+  "settings": "Settings",
+  "revisionConflictTitle": "A newer version is available",
+  "revisionConflictDescription": "Your draft has been preserved. Reload to discard it and use the latest version, or overwrite the latest version with your draft.",
+  "documentVersion": "Version",
+  "updatedBy": "Updated by",
+  "systemActor": "System",
+  "retry": "Retry",
+  "overwrite": "Overwrite",
+  "loadLatestFailed": "Unable to load the latest version."
 }

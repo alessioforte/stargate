@@ -1,7 +1,7 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::upstream::attempt::{DispatchAttempt, dispatch_kind_label};
 use crate::gate::upstream::headers::sanitize_internal_request_headers;
-use crate::gate::upstream::uri::sanitize_auth_uri;
+use crate::gate::upstream::uri::{QueryMode, sanitize_auth_uri};
 use crate::{
     ctx::{
         INTERNAL_CONTEXT_HEADER, PropagationDraft,
@@ -55,8 +55,10 @@ impl InternalDispatch {
         &self,
         req: &mut http::Request<B>,
     ) -> Result<(), ErrorResponse> {
-        let uri = sanitize_auth_uri(req.uri())
-            .map_err(|_| internal_failure(&self.service, self.kind, "sanitization", None, None))?;
+        let uri = sanitize_auth_uri(req.uri(), QueryMode::Strict).map_err(|_| {
+            ErrorResponse::new(ErrorCode::RequestInvalid)
+                .with_message("Invalid percent encoding in a query parameter name")
+        })?;
         *req.uri_mut() = uri;
 
         sanitize_internal_request_headers(req.headers_mut(), self.draft.request_id())

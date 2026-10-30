@@ -5,8 +5,8 @@ use crate::api::admin::access_control_rules::{
 use crate::api::admin::{AdminPrincipal, authorization::AdminAuthorization};
 use crate::data::db::with_test_database;
 use ::db::ent::{
-    ConfigSaveOutcome, ConfigSource, OutboxEventFilter, TrustedAdminActor, TrustedAuditBoundary,
-    TrustedAuditContext, TrustedAuditRequest, TrustedBackgroundActor,
+    ConfigSaveOutcome, ConfigSource, OutboxEventFilter, TrustedAdminActor, TrustedAuditContext,
+    TrustedAuditRequest,
 };
 use axum::{Router, body::Body, routing::get};
 use http::StatusCode;
@@ -71,10 +71,7 @@ async fn seed(kind: ConfigKind, content: String) -> ConfigDocument {
         content,
         None,
         ConfigSource::Seed,
-        TrustedAuditContext::background(
-            TrustedAuditBoundary::control_plane(),
-            TrustedBackgroundActor::system(None),
-        ),
+        TrustedAuditContext::system_control_plane(),
     )
     .await
     .unwrap();
@@ -255,10 +252,7 @@ async fn unchanged_save_still_activates_a_document_missing_from_this_replica() {
             config.to_yaml_string().unwrap(),
             Some(initial.revision),
             ConfigSource::CliImport,
-            TrustedAuditContext::background(
-                TrustedAuditBoundary::control_plane(),
-                TrustedBackgroundActor::system(None),
-            ),
+            TrustedAuditContext::system_control_plane(),
         )
         .await
         .unwrap();
@@ -419,7 +413,11 @@ async fn policy_updates_publish_and_conflicts_leave_the_snapshot_unchanged() {
             .oneshot(request("GET", "/admin/access-control/rules", None))
             .await
             .unwrap();
-        assert_eq!(json_body(response).await["revision"], initial.revision);
+        let read = json_body(response).await;
+        assert_eq!(read["revision"], initial.revision);
+        assert_eq!(read["version"], initial.version);
+        assert_eq!(read["updatedAt"], initial.created_at.to_rfc3339());
+        assert!(read["updatedBy"].is_null());
         let payload =
             json!({"revision": initial.revision, "content": "ALLOW user FOR \"reports:READ\";"});
         let response = app
@@ -433,6 +431,13 @@ async fn policy_updates_publish_and_conflicts_leave_the_snapshot_unchanged() {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let saved = json_body(response).await;
+        let stored = db::get_active_config_document(ConfigKind::Policies)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved["version"], 2);
+        assert_eq!(saved["updatedAt"], stored.created_at.to_rfc3339());
+        assert_eq!(saved["updatedBy"], stored.created_by.unwrap());
         assert_eq!(gate.policy_snapshot.load().revision, saved["revision"]);
         assert!(gate.policy_snapshot.load().engine.evaluate_with_action(
             "user",

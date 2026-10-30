@@ -1,9 +1,6 @@
 use crate::data::db;
 use crate::iam::authz::rules::validate_policy_document;
-use ::db::ent::{
-    ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary,
-    TrustedAuditContext, TrustedBackgroundActor,
-};
+use ::db::ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext};
 use clap::{Args, Subcommand, ValueEnum};
 use std::{
     io::{self, Write},
@@ -127,10 +124,7 @@ async fn import_document(kind: ConfigKind, content: String) -> io::Result<Config
             .await
             .map_err(io::Error::other)?
             .map(|document| document.revision);
-        let context = TrustedAuditContext::background(
-            TrustedAuditBoundary::control_plane(),
-            TrustedBackgroundActor::system(None),
-        );
+        let context = TrustedAuditContext::system_control_plane();
         match db::save_config_document(
             kind,
             content.clone(),

@@ -75,7 +75,10 @@ fn token_from_cookie(headers: &HeaderMap) -> Option<String> {
     let raw = headers.get(COOKIE)?.to_str().ok()?;
     for item in raw.split(';') {
         let item = item.trim();
-        if let Some(rest) = item.strip_prefix("jwt=") {
+        if let Some(rest) = item
+            .strip_prefix(super::cookies::SESSION_COOKIE)
+            .and_then(|rest| rest.strip_prefix('='))
+        {
             let value = rest.trim_matches('"');
             if !value.is_empty() {
                 return Some(value.to_string());

@@ -229,6 +229,9 @@ export interface PolicyDiagnostic {
 }
 
 export interface AccessControlRulesResponse {
+  version: number;
+  updatedAt: string;
+  updatedBy?: string | null;
   content: string;
   diagnostics: PolicyDiagnostic[];
   revision: string;

@@ -1,3 +1,6 @@
+mod config;
+pub(crate) use config::active_or_seed;
+
 #[cfg(feature = "postgres")]
 mod settings;
 mod svc;

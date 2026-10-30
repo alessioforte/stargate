@@ -1,5 +1,6 @@
 use super::*;
 use crate::ctx::sign::test_support::{PRIVATE_KEY, PUBLIC_KEY};
+use crate::gate::upstream::internal_context::InternalDispatch;
 use crate::{
     ctx::{
         INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
@@ -188,10 +189,13 @@ async fn downstream_http2_does_not_override_an_http1_upstream_policy() {
         .unwrap();
     let response = handler(
         req,
-        &url,
+        UpstreamRequest {
+            uri: &url,
+            internal_dispatch: None,
+            forward_credentials: false,
+        },
         &runtime.client("orders").unwrap(),
         &UpstreamHeaders::default(),
-        None,
         &runtime.settings,
         &Execution::default(),
     )
@@ -255,10 +259,13 @@ async fn internal_http_dispatch_is_signed_bound_sanitized_and_not_reflected() {
 
     let response = handler(
         req,
-        &target,
+        UpstreamRequest {
+            uri: &target,
+            internal_dispatch: Some(&dispatch),
+            forward_credentials: false,
+        },
         &test_client(),
         &UpstreamHeaders::default(),
-        Some(&dispatch),
         &gate::cfg::RuntimeSettings::default().compile().unwrap(),
         &Execution::default(),
     )
@@ -351,10 +358,13 @@ async fn issuance_failure_contacts_no_upstream() {
 
     let error = handler(
         req,
-        &format!("{base_url}/v1/orders"),
+        UpstreamRequest {
+            uri: &format!("{base_url}/v1/orders"),
+            internal_dispatch: Some(&dispatch),
+            forward_credentials: false,
+        },
         &test_client(),
         &UpstreamHeaders::default(),
-        Some(&dispatch),
         &gate::cfg::RuntimeSettings::default().compile().unwrap(),
         &Execution::default(),
     )
@@ -383,13 +393,13 @@ async fn opted_in_external_backend_receives_credentials() {
 
     let response = handler(
         req,
-        &format!("{base_url}/external?token=still-forwarded&keep=1"),
-        &test_client(),
-        &UpstreamHeaders {
+        UpstreamRequest {
+            uri: &format!("{base_url}/external?token=still-forwarded&keep=1"),
+            internal_dispatch: None,
             forward_credentials: true,
-            ..Default::default()
         },
-        None,
+        &test_client(),
+        &UpstreamHeaders::default(),
         &gate::cfg::RuntimeSettings::default().compile().unwrap(),
         &Execution::default(),
     )
@@ -404,4 +414,52 @@ async fn opted_in_external_backend_receives_credentials() {
     assert!(captured.headers.get(INTERNAL_CONTEXT_HEADER).is_none());
     assert!(response.headers().get(INTERNAL_CONTEXT_HEADER).is_none());
     server.abort();
+}
+
+#[tokio::test]
+async fn malformed_query_names_are_tolerated_externally_and_rejected_for_internal_context() {
+    for internal in [false, true] {
+        let (base_url, mut captured, server) = mock_upstream().await;
+        let runtime = test_runtime();
+        let draft = anonymous_draft(None);
+        let dispatch = InternalDispatch::new(
+            "orders",
+            AUDIENCE,
+            Some(&draft),
+            Some(&runtime),
+            crate::gate::upstream::attempt::DispatchAttempt::primary(),
+        )
+        .unwrap();
+        let req = http::Request::builder()
+            .method("POST")
+            .uri("/ignored")
+            .body(Body::empty())
+            .unwrap();
+        let result = handler(
+            req,
+            UpstreamRequest {
+                uri: &format!("{base_url}/v1/orders?50%=off&token=x"),
+                internal_dispatch: internal.then_some(&dispatch),
+                forward_credentials: false,
+            },
+            &test_client(),
+            &UpstreamHeaders::default(),
+            &gate::cfg::RuntimeSettings::default().compile().unwrap(),
+            &Execution::default(),
+        )
+        .await;
+        if internal {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, ErrorCode::RequestInvalid);
+            assert_eq!(error.status, http::StatusCode::BAD_REQUEST);
+            assert!(matches!(
+                captured.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            ));
+        } else {
+            assert!(result.is_ok());
+            assert_eq!(captured.await.unwrap().uri.query(), Some("50%=off"));
+        }
+        server.abort();
+    }
 }

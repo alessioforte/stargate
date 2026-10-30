@@ -66,19 +66,13 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
     };
     use ::db::{
         DbStore,
-        ent::{
-            ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary,
-            TrustedAuditContext, TrustedBackgroundActor,
-        },
+        ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext},
     };
     use gate::{PolicySnapshot, cfg::Config};
     use tokio::sync::Notify;
 
     fn system() -> TrustedAuditContext {
-        TrustedAuditContext::background(
-            TrustedAuditBoundary::control_plane(),
-            TrustedBackgroundActor::system(None),
-        )
+        TrustedAuditContext::system_control_plane()
     }
 
     fn configuration(label: &str) -> Config {
@@ -277,10 +271,7 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
     use crate::data::db::with_test_service;
     use ::db::{
         DbStore,
-        ent::{
-            ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditBoundary, TrustedAuditContext,
-            TrustedBackgroundActor,
-        },
+        ent::{ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext},
     };
     use gate::cfg::Config;
     use tokio::sync::Notify;
@@ -305,10 +296,7 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
             .await
             .unwrap()
             .map(|document| document.revision);
-        let context = TrustedAuditContext::background(
-            TrustedAuditBoundary::control_plane(),
-            TrustedBackgroundActor::system(None),
-        );
+        let context = TrustedAuditContext::system_control_plane();
         let saved = writer
             .save_config_document(kind, content, expected, ConfigSource::CliImport, context)
             .await

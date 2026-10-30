@@ -56,6 +56,9 @@ fn client(
     ca: Option<&Path>,
 ) -> Result<redis::Client> {
     let info = connection_info(url, username, password)?;
+    if ca.is_some() && !matches!(info.addr(), ConnectionAddr::TcpTls { .. }) {
+        bail!("REDIS_CA_FILE requires a rediss:// REDIS_URL");
+    }
     match ca {
         Some(path) => {
             let pem = read_ca(path)?;
@@ -95,6 +98,21 @@ pub(super) fn client_from_env() -> Result<redis::Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_private_ca_requires_a_tls_url_before_reading_the_file() {
+        let error = client(
+            "redis://localhost",
+            None,
+            None,
+            Some(Path::new("/missing/redis-ca.pem")),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "REDIS_CA_FILE requires a rediss:// REDIS_URL"
+        );
+    }
 
     #[test]
     fn credentials_are_preserved_and_conflicting_sources_are_rejected() {

@@ -1,6 +1,7 @@
 //! Process-wide host selection for IAM routes.
 
 use std::sync::OnceLock;
+use tools::valid_hostname;
 
 #[derive(Clone, Debug, Default)]
 pub struct IamHosts {
@@ -41,21 +42,6 @@ impl IamHosts {
     pub(crate) fn allows(&self, host: Option<&str>) -> bool {
         self.names.is_empty() || host.is_some_and(|host| self.names.iter().any(|name| name == host))
     }
-}
-
-fn valid_hostname(name: &str) -> bool {
-    let name = name.strip_suffix('.').unwrap_or(name);
-    !name.is_empty()
-        && name.len() <= 253
-        && name.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= 63
-                && label.as_bytes()[0].is_ascii_alphanumeric()
-                && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
-                && label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
 }
 
 static IAM_HOSTS: OnceLock<IamHosts> = OnceLock::new();

@@ -2,11 +2,11 @@ use super::UpstreamSocket;
 use crate::gate::{
     lifecycle::Execution,
     upstream::{
+        UpstreamRequest,
         headers::{
             UpstreamHeaders, apply_forwarded_headers, strip_credentials, strip_hop_by_hop_headers,
         },
-        internal_context::InternalDispatch,
-        uri::sanitize_auth_uri,
+        uri::{QueryMode, sanitize_auth_uri},
     },
 };
 use crate::{
@@ -124,11 +124,15 @@ pub(super) async fn connect_upstream(
 }
 
 pub(super) async fn build_upstream_request(
-    uri: &str,
+    upstream: UpstreamRequest<'_>,
     incoming_headers: &http::HeaderMap,
     ingress: &UpstreamHeaders,
-    internal_dispatch: Option<&InternalDispatch>,
 ) -> Result<http::Request<()>, ErrorResponse> {
+    let UpstreamRequest {
+        uri,
+        internal_dispatch,
+        forward_credentials,
+    } = upstream;
     let mut request = uri.into_client_request().map_err(|error| {
         tracing::error!(%uri, %error, "Invalid WebSocket upstream URI");
         ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
@@ -138,8 +142,8 @@ pub(super) async fn build_upstream_request(
     if let Some(dispatch) = internal_dispatch {
         dispatch.prepare(&mut request).await?;
     } else {
-        if !ingress.forward_credentials {
-            *request.uri_mut() = sanitize_auth_uri(request.uri())
+        if !forward_credentials {
+            *request.uri_mut() = sanitize_auth_uri(request.uri(), QueryMode::Tolerant)
                 .map_err(|_| ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed))?;
             strip_credentials(request.headers_mut());
         }

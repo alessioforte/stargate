@@ -323,7 +323,6 @@
     "apiKeyDeleteFailed": "Impossibile eliminare la chiave API",
     "apiKeyDeleted": "Chiave API eliminata",
     "gatewayConfigurationUpdateFailed": "Impossibile aggiornare la configurazione del gateway",
-    "gatewayConfigurationConflict": "La configurazione del gateway è cambiata. La versione più recente è stata ricaricata: controllala prima di salvare di nuovo.",
     "gatewayConfigurationRestartRequired": "Configurazione del gateway salvata. Riavvia Stargate per applicare le modifiche alle capacità.",
     "gatewayConfigurationUpdated": "Configurazione del gateway aggiornata",
     "oauthClientCreateFailed": "Impossibile creare il client OAuth",
@@ -568,5 +567,13 @@
   "publishedAt": "Pubblicato Il",
   "payload": "Payload",
   "language": "Lingua",
-  "settings": "Impostazioni"
+  "settings": "Impostazioni",
+  "revisionConflictTitle": "È disponibile una versione più recente",
+  "revisionConflictDescription": "La bozza è stata conservata. Ricarica per scartarla e usare la versione più recente, oppure sovrascrivi la versione più recente con la bozza.",
+  "documentVersion": "Versione",
+  "updatedBy": "Modificato da",
+  "systemActor": "Sistema",
+  "retry": "Riprova",
+  "overwrite": "Sovrascrivi",
+  "loadLatestFailed": "Impossibile caricare la versione più recente."
 }
