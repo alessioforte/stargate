@@ -84,7 +84,10 @@ different condition once clients depend on it.
 | --- | --- | --- |
 | `gateway.overloaded` | 503 | Primary admission or internal-context signing capacity is exhausted |
 | `gateway.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its gateway ingress allowance, before authentication or routing |
-| `gateway.ingress_unavailable` | 503 | The ingress limiter is missing, fails, or exceeds its store deadline |
+| `gateway.ingress_unavailable` | 503 | The ingress limiter store fails or exceeds its deadline with `on_store_error: deny` |
+| `gateway.limiter_unavailable` | 503 | A rate/quota policy store fails or exceeds its deadline with `on_store_error: deny` |
+| `gateway.organization_limits_unavailable` | 503 | SQL lookup of organization limit overrides fails; always fail-closed, independently of `on_store_error` |
+| `gateway.limit_configuration_invalid` | 500 | An applied limit is unknown, incompatible or otherwise invalid; never fail-open |
 | `gateway.replay_memory_exhausted` | 503 | Required failover replay cannot reserve storage |
 | `gateway.upload_timeout` | 408 | Upload/replay buffering makes no data progress |
 | `gateway.request_body_failed` | 400 | The client request body fails during streaming or replay buffering |

@@ -1,3 +1,4 @@
+import OnStoreErrorSelect, { type OnStoreError } from "./on-store-error-select";
 import { useEffect, useMemo, useState } from "react";
 import {
   Checkbox,
@@ -50,6 +51,7 @@ interface FormValues {
   quotaLimit: string;
   scope: PolicyScope;
   onMissing: OnMissing;
+  onStoreError: OnStoreError;
 }
 
 interface BuildContext {
@@ -73,6 +75,7 @@ const defaultValues: FormValues = {
   quotaLimit: "",
   scope: "subject",
   onMissing: "skip",
+  onStoreError: "allow",
 };
 
 function policyToFormValues(
@@ -102,6 +105,7 @@ function policyToFormValues(
     scope: isPolicyScope(selectedValue.scope)
       ? selectedValue.scope
       : defaultValues.scope,
+    onStoreError: selectedValue.on_store_error === "deny" ? "deny" : "allow",
     onMissing: isOnMissing(selectedValue.on_missing)
       ? selectedValue.on_missing
       : defaultValues.onMissing,
@@ -162,6 +166,8 @@ function formValuesToPolicy(
         kind: "rate_limit",
         limit,
       };
+      if (values.onStoreError !== "allow")
+        policy.on_store_error = values.onStoreError;
       if (values.scope !== "subject") policy.scope = values.scope;
       if (values.scope === "org" && values.onMissing !== "skip") {
         policy.on_missing = values.onMissing;
@@ -181,6 +187,8 @@ function formValuesToPolicy(
         kind: "quota",
         limit,
       };
+      if (values.onStoreError !== "allow")
+        policy.on_store_error = values.onStoreError;
       if (values.scope !== "subject") policy.scope = values.scope;
       if (values.scope === "org" && values.onMissing !== "skip") {
         policy.on_missing = values.onMissing;
@@ -335,6 +343,13 @@ const PolicyForm: React.FC<Props> = ({
               }
             />
           </Stack>
+        )}
+
+        {(values.kind === "rate_limit" || values.kind === "quota") && (
+          <OnStoreErrorSelect
+            value={values.onStoreError}
+            onChange={(mode) => setField("onStoreError", mode)}
+          />
         )}
 
         {values.kind === "rate_limit" && (

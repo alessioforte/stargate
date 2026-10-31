@@ -186,7 +186,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
    process admission (`503 gateway.overloaded` when exhausted).
 2. Resolve the client IP (trusted proxies only) and charge the mandatory
    `ingress.limit` IP bucket, bounded by `ingress.timeout` (default 250ms):
-   `429` on denial, `503` on store failure, before any credential check or route match.
+   `429` on denial; store errors/timeouts pass by default (`on_store_error: allow`),
+   or return `503` with `deny`, before any credential check or route match.
    Capture the original peer and host and strip `Forwarded`, `X-Real-IP`, and
    every `X-Forwarded-*` field from untrusted or missing peers before routing
    and middleware. Operator middleware may then supply forwarding metadata.
@@ -283,6 +284,14 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
 - `runtime` defaults: primary 1024 / mirror 64 slots, replay 2 MiB per request /
   64 MiB total, upload idle 15s, connect 5s, response headers 30s, body idle 30s,
   mirror 5s, request 60s. Capacity fields require a restart.
+- Ingress and rate/quota policies accept `on_store_error: allow | deny` (default
+  `allow`). Ingress also governs IAM ingress and the admin principal limit.
+  `ingress.timeout` bounds each complete traffic store check, including Redis
+  reconnection waits. Failed-open checks produce no allowance headers; configuration
+  errors remain `500`. `gate/limits/store.rs` shares enforcement and process-lifetime
+  degradation indicators across generations and application points. Organization
+  override SQL failures always return `503 gateway.organization_limits_unavailable`,
+  independently of the traffic store failure policy.
 - Subject `attrs.rate_limit` / `attrs.quota` pick named limits; unknown names fail
   with `500 gateway.limit_configuration_invalid` (no silent fallback).
 
@@ -905,9 +914,11 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
 ## API Overview
 
 - `GET /livez` (process liveness), `GET /readyz` (initialized, not draining, SQL up).
-  Redis does not gate readiness; when it is down, all other requests fail closed
-  at ingress with `503` and `Retry-After: 10`, including `/admin/health` itself.
-  Its handler retains Redis diagnostics. See `docs/health-probes.md`.
+  Redis does not gate readiness. Traffic limits fail open by default on store
+  errors/timeouts; public routes, static pages, JWKS and SQL-verified API/admin keys
+  remain usable. `/admin/health` returns `200` with healthy SQL even when Redis is
+  unhealthy and exposes `limits.storeDegraded`. Login guard, OTP/email throttles,
+  sessions/JWT revocation and OAuth state remain fail-closed. See `docs/health-probes.md`.
 - `GET /docs` (OpenAPI JSON), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
 - `/.well-known/*`: OAuth/OIDC metadata, JWKS, `stargate-context-jwks.json`
 - `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA,
@@ -939,7 +950,9 @@ credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
 `/admin/*` principals then charge their own `default` bucket, keyed
 `lim:admin:user:{id}` / `lim:admin:key:{id}` in `extract_admin_authorization`
 (`429 iam.rate_limit_exceeded`, scope `subject`), so one admin key cannot throttle
-the console or other keys behind the same IP. Limiter failures: `503 iam.limiter_unavailable`.
+the console or other keys behind the same IP. `ingress.on_store_error` governs both IAM checks: store errors/timeouts pass
+without allowance headers by default; `deny` returns `503 iam.limiter_unavailable`
+with `Retry-After: 10`. Invalid limit configuration remains `500`.
 Login brute force is handled separately by `iam/auth/login_guard.rs` and OTP throttles.
 
 ## Error Response Format
@@ -1115,6 +1128,9 @@ a new reusable primitive.
 - Request ID: ULID per request, `x-request-id`, also in audit events.
 - ACE decision caches are version-aware and invalidated on policy change.
 - GeoIP (MaxMind GeoLite2-City) is available but not a v1 route matcher.
+- `stargate.limits.store_errors` counts traffic limit failures by bounded `point`
+  and `outcome` labels. Each point logs warn on degradation and info on recovery,
+  retained across reloads, rather than logging each store failure.
 - Metrics use bounded labels only (no URLs, credentials, request IDs); see
   `docs/config-v1.md` for gateway instruments.
 - Gateway performance workloads are opt-in (`src/gate/performance/`,

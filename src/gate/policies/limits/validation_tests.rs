@@ -39,10 +39,12 @@ fn org_policies(on_missing: OnMissingOrg) -> SelectedLimitPolicies {
         org_rate: Some(OrgScopedLimit {
             limit: "org".into(),
             on_missing,
+            on_store_error: OnStoreError::Allow,
         }),
         org_quota: Some(OrgScopedLimit {
             limit: "org-daily".into(),
             on_missing,
+            on_store_error: OnStoreError::Allow,
         }),
         ..Default::default()
     }
@@ -364,4 +366,33 @@ async fn removing_an_attribute_referenced_limit_fails_new_requests_but_preserves
             .unwrap()
             .is_allowed()
     );
+}
+
+#[tokio::test]
+async fn organization_sql_failure_remains_closed_with_allow_and_has_its_own_availability_code() {
+    use axum::response::IntoResponse;
+    // No migrations: the real organization query fails because its table is absent.
+    let service = db::service::init("sqlite::memory:").await.unwrap();
+    crate::data::db::with_test_service(service, async {
+        let gate = test_support::gate(config());
+        let mut subject = subject(json!({}), true);
+        subject.org_id = Some(ulid::Ulid::generate().to_string());
+        let mut headers = HeaderMap::new();
+        let error = apply_limits(
+            &gate.snapshot(),
+            Some(&subject),
+            IP,
+            &mut headers,
+            org_policies(OnMissingOrg::Deny),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::GatewayOrganizationLimitsUnavailable);
+        let response = error.into_response();
+        assert_eq!(response.status(), http::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()["retry-after"], "10");
+        assert!(headers.is_empty());
+        assert!(!gate.snapshot().limit_store_health.is_degraded());
+    })
+    .await;
 }

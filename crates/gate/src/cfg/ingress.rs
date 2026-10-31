@@ -1,4 +1,8 @@
-use super::{LimitSpec, graph::CompileError};
+use super::{
+    LimitSpec, OnStoreError,
+    graph::CompileError,
+    limit::{default_on_store_error, is_default_on_store_error},
+};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -9,6 +13,11 @@ pub struct Ingress {
     pub limit: String,
     #[serde(default = "default_timeout")]
     pub timeout: String,
+    #[serde(
+        default = "default_on_store_error",
+        skip_serializing_if = "is_default_on_store_error"
+    )]
+    pub on_store_error: String,
 }
 
 fn default_timeout() -> String {
@@ -20,6 +29,7 @@ impl Default for Ingress {
         Self {
             limit: "ingress".into(),
             timeout: default_timeout(),
+            on_store_error: default_on_store_error(),
         }
     }
 }
@@ -28,6 +38,7 @@ impl Default for Ingress {
 pub struct CompiledIngress {
     pub limit: String,
     pub timeout: Duration,
+    pub on_store_error: OnStoreError,
 }
 
 impl Ingress {
@@ -55,6 +66,7 @@ impl Ingress {
         Ok(CompiledIngress {
             limit: self.limit.clone(),
             timeout,
+            on_store_error: OnStoreError::compile(&self.on_store_error, "ingress.on_store_error")?,
         })
     }
 }
@@ -117,5 +129,70 @@ mod tests {
                 .compile()
                 .is_ok()
         );
+    }
+}
+
+#[cfg(test)]
+mod store_error_tests {
+    use super::*;
+    use crate::cfg::{Config, ConfigLoadError, RuntimeConfig};
+    use serde_json::json;
+
+    #[test]
+    fn traffic_store_failure_modes_compile_and_defaults_preserve_serialization() {
+        for kind in ["rate_limit", "quota"] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] =
+                json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"day"}});
+            value["http"]["policies"]["traffic"] =
+                json!({"kind":kind,"limit":if kind == "quota" {"daily"} else {"default"}});
+            let config: Config = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(
+                config.compile().unwrap().ingress.on_store_error,
+                OnStoreError::Allow
+            );
+            let serialized = serde_json::to_value(config).unwrap();
+            assert!(serialized["ingress"].get("on_store_error").is_none());
+            assert!(
+                serialized["http"]["policies"]["traffic"]
+                    .get("on_store_error")
+                    .is_none()
+            );
+            for mode in ["allow", "deny"] {
+                value["ingress"]["on_store_error"] = json!(mode);
+                value["http"]["policies"]["traffic"]["on_store_error"] = json!(mode);
+                let compiled = serde_json::from_value::<Config>(value.clone())
+                    .unwrap()
+                    .compile()
+                    .unwrap();
+                let expected = if mode == "deny" {
+                    OnStoreError::Deny
+                } else {
+                    OnStoreError::Allow
+                };
+                assert_eq!(compiled.ingress.on_store_error, expected);
+                let actual = match &compiled.http.policies["traffic"] {
+                    crate::graph::PolicyNode::RateLimit { on_store_error, .. }
+                    | crate::graph::PolicyNode::Quota { on_store_error, .. } => *on_store_error,
+                    _ => unreachable!(),
+                };
+                assert_eq!(actual, expected);
+            }
+            for path in [vec!["ingress"], vec!["http", "policies", "traffic"]] {
+                let mut invalid = value.clone();
+                let mut target = &mut invalid;
+                for part in &path {
+                    target = &mut target[*part];
+                }
+                target["on_store_error"] = json!("ignore");
+                let yaml = serde_saphyr::to_string(&invalid).unwrap();
+                let ConfigLoadError::Compile(error) =
+                    RuntimeConfig::from_yaml_str(&yaml).unwrap_err()
+                else {
+                    panic!("expected compilation error")
+                };
+                assert_eq!(error.path, format!("{}.on_store_error", path.join(".")));
+            }
+        }
     }
 }

@@ -1,3 +1,4 @@
+import OnStoreErrorSelect from "./on-store-error-select";
 import { Group, Select, TextInput } from "@mantine/core";
 import { useTranslations } from "@/i18n";
 import type { JsonValue } from "@/services/types";
@@ -31,6 +32,15 @@ const GatewayIngressSettings: React.FC<Props> = ({ config, onChange }) => {
         allowDeselect={false}
         required
         onChange={(limit) => limit && onChange({ ...ingress, limit })}
+      />
+      <OnStoreErrorSelect
+        ingress
+        value={
+          typeof ingress.on_store_error === "string"
+            ? ingress.on_store_error
+            : "allow"
+        }
+        onChange={(mode) => onChange({ ...ingress, on_store_error: mode })}
       />
       <TextInput
         label={t("ingressTimeout")}

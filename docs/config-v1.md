@@ -196,7 +196,10 @@ referencing an existing named `gcra` or `token_bucket` rate limit. There is no
 implicit binding or disable switch. Quota trackers, missing/blank references,
 zero token-bucket capacity/refill rate, overflowing bucket lifetimes, and invalid durations reject startup,
 reload, and admin saves. `ingress.timeout` defaults to `250ms` and must be a
-positive, representable duration. Generated configs and the Helm defaults use
+positive, representable duration. It bounds each traffic store check, including
+IAM/admin admission and route rate/quota checks, from start through any Redis
+reconnection wait. Redis also has 5s command-response and connection timeouts;
+these do not replace the complete-check deadline. Generated configs and the Helm defaults use
 burst 100 with one request replenished every `100ms` (10/s); tune these values
 for the gateway and IAM traffic sharing each client IP (NAT, VPN, office egress).
 
@@ -221,12 +224,19 @@ limit because generations share limiter state; each request pins its ingress
 binding and deadline with its runtime snapshot.
 
 Ingress denial returns `429 gateway.ingress_rate_limit_exceeded` with integer
-seconds in `Retry-After` and `X-RateLimit-Scope: ingress`. Missing runtime limits,
-backend failures, or an ingress-store timeout fail closed with
-`503 gateway.ingress_unavailable`; the enclosing total request deadline still
-returns `504 gateway.timeout` if it expires first. Process exhaustion retains
-`503 gateway.overloaded`. Allowed ingress checks do not overwrite resource
-response headers.
+seconds in `Retry-After` and `X-RateLimit-Scope: ingress`.
+`ingress.on_store_error` accepts `allow` (default) or `deny`. Backend errors and
+store-check timeouts allow traffic without a decision or limit headers by default.
+`deny` returns `503 gateway.ingress_unavailable` with `Retry-After: 10`.
+Unknown/incompatible limits and other configuration errors remain
+`500 gateway.limit_configuration_invalid` with either setting. The enclosing total
+request deadline still returns `504 gateway.timeout` if it expires first;
+shutdown cancellation and process exhaustion retain their existing errors.
+Allowed ingress checks do not overwrite resource response headers.
+
+Use a Traefik rate limit as a safety net: `allow` removes the distributed per-IP
+allowance during a store outage. It does not provide a local fallback counter.
+These settings belong to the configuration document and apply on reload.
 
 ### IAM and admin limits
 
@@ -235,26 +245,32 @@ IAM endpoints (`/account/*`, `/oauth/*`, `/signup/*`, `/admin/*`, `/docs`,
 the same per-IP ingress allowance as the gateway, with the same key and before
 any credential is read: one allowance per client address for the whole process.
 IAM denials return `429 iam.ingress_rate_limit_exceeded` with
-`X-RateLimit-Scope: ingress`; a failing or timed-out limiter store returns
-`503 iam.limiter_unavailable`. Allowed IAM ingress checks add no limit headers.
+`X-RateLimit-Scope: ingress`. `ingress.on_store_error` also governs IAM ingress
+and the admin principal check below: store failures/timeouts pass by default,
+or return `503 iam.limiter_unavailable` with `Retry-After: 10` when set to `deny`.
+Allowed IAM ingress checks add no limit headers.
 
 Authenticated `/admin/*` principals then charge their own bucket of the named
 `default` limit, keyed by identity: one per super-admin user (session and OAuth
 access share it) and one per admin key. Automation through an admin key cannot
 exhaust a console user's budget, or another key's, even from the same address.
-Admin responses carry `X-RateLimit-*` headers with `X-RateLimit-Scope: subject`;
+Successful admin principal checks carry `X-RateLimit-*` headers with
+`X-RateLimit-Scope: subject`; failed-open checks add none;
 a denial returns `429 iam.rate_limit_exceeded`. These buckets have their own
 namespace and never share state with gateway subject, org, or ingress buckets.
 Requests without an authenticated admin principal are bounded by ingress only.
 
 Credential brute-force protection is separate from these limits: the login
 guard throttles failed logins per IP and per account, and OTP flows have their
-own request and attempt throttles. Password-reset, signup, and passwordless
+own request and attempt throttles. These security checks remain fail-closed on
+store errors, as do JWT revocation/session checks and OAuth codes, refresh
+families and interactions. Password-reset, signup, and passwordless
 requests are also limited per recipient address, whatever the client IP
 (see [per-recipient email limits](api-errors-and-messages.md#per-recipient-email-limits)).
 
 `/livez` and `/readyz` bypass gateway admission and IAM limits. The console's
-gateway page exposes the mandatory ingress limit and store timeout. Editing
+gateway page exposes the mandatory ingress limit, store-check timeout and
+`on_store_error`, as well as the failure setting for each rate/quota policy. Editing
 named objects preserves this top-level binding; when renaming/removing its
 selected limit, select an existing replacement before saving.
 
@@ -1127,6 +1143,41 @@ Quota is selected independently from rate limiting. A router `quota` policy or
 subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
 limit and quota are selected, both checks run.
 
+`rate_limit` and `quota` policies each accept `on_store_error: allow | deny`
+(default `allow`), independently for subject and organization checks. Attribute
+selections inherit the selected policy's setting; implicit default rate and
+attribute-only quota checks use `allow`. Each check uses `ingress.timeout` as
+its store deadline. Only backend errors and that deadline may fail open; unknown
+or incompatible limits and invalid attributes still return `500`. Other checks
+on the route continue, including authentication and access control. Failed-open
+checks emit no limit headers; successful checks still report their own allowance.
+
+```yaml
+ingress:
+  limit: ingress
+  timeout: 250ms
+  on_store_error: allow
+http:
+  policies:
+    api-rate:
+      kind: rate_limit
+      limit: default
+      on_store_error: allow
+    billing-quota:
+      kind: quota
+      limit: monthly
+      on_store_error: deny
+```
+
+`stargate.limits.store_errors` counts every failed traffic store check with bounded
+labels `point` (`gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`,
+`quota`) and `outcome` (`allowed`, `denied`). Each point emits one warning when
+it becomes degraded and one info log on its next successful store check
+(including a valid limit denial). Repeated failures do not emit per-request
+warnings/errors. The indicators persist across configuration reloads.
+`/admin/health` includes `limits: { storeDegraded: true }` while any point is
+degraded; recovery requires a successful check at that point.
+
 Ingress, resource rate/quota, and IAM/admin `429` responses emit `Retry-After`
 as nonnegative decimal seconds, following
 [RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3).
@@ -1156,7 +1207,8 @@ or incompatible names with `400 request.invalid` and an `attrs.*` field paramete
 Runtime validation still applies to stored/session overrides: after a reload
 removes an attribute-referenced limit, new requests fail while requests already
 in flight keep their valid pinned runtime. Organization cache failures retry the
-DB; a DB failure stops the checks instead of discarding stored overrides and
+DB; a DB failure returns `503 gateway.organization_limits_unavailable` with
+`Retry-After: 10`, even with `on_store_error: allow`, instead of discarding stored overrides and
 using a potentially more permissive route default.
 
 The per-request cost is a property of the **route**, not the policy: routers

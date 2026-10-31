@@ -38,6 +38,7 @@ struct Metrics {
     #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_errors: Counter<u64>,
     config_reloads: Counter<u64>,
+    limit_store_errors: Counter<u64>,
 }
 
 static METRICS: Lazy<Metrics> = Lazy::new(|| {
@@ -158,6 +159,10 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         audit_relay_errors: meter
             .u64_counter("stargate.audit.relay.errors")
             .with_description("Audit relay batch failures")
+            .build(),
+        limit_store_errors: meter
+            .u64_counter("stargate.limits.store_errors")
+            .with_description("Traffic limit store errors by application point and outcome")
             .build(),
         config_reloads: meter
             .u64_counter("stargate.config.reloads")
@@ -375,6 +380,16 @@ pub fn record_gateway_transfer(phase: &'static str, outcome: &'static str, elaps
         &[
             KeyValue::new("phase", phase),
             KeyValue::new("stargate.outcome", outcome),
+        ],
+    );
+}
+
+pub fn record_limit_store_error(point: &'static str, outcome: &'static str) {
+    METRICS.limit_store_errors.add(
+        1,
+        &[
+            KeyValue::new("point", point),
+            KeyValue::new("outcome", outcome),
         ],
     );
 }

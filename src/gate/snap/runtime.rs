@@ -14,6 +14,7 @@ pub struct RuntimeSnapshot {
     pub ingress: gate::cfg::CompiledIngress,
     pub settings: gate::cfg::CompiledRuntimeSettings,
     pub resources: Arc<resources::ProcessResources>,
+    pub(crate) limit_store_health: Arc<crate::gate::limits::LimitStoreHealth>,
     transports: PreparedTransports,
 }
 
@@ -53,6 +54,7 @@ pub struct Gate {
     activation: Mutex<()>,
     pub policy_snapshot: ArcSwap<PolicySnapshot>,
     pub resources: Arc<resources::ProcessResources>,
+    pub(crate) limit_store_health: Arc<crate::gate::limits::LimitStoreHealth>,
 }
 
 pub(crate) struct PreparedActivation {
@@ -71,11 +73,13 @@ impl Gate {
         configure_probes(&core, &prepared.transports);
         let settings = prepared.config.compiled.runtime.clone();
         let resources = resources::ProcessResources::new(settings.budgets);
+        let limit_store_health = Arc::default();
         let runtime = Arc::new(RuntimeSnapshot {
             core,
             ingress: prepared.config.compiled.ingress.clone(),
             settings,
             resources: resources.clone(),
+            limit_store_health: Arc::clone(&limit_store_health),
             transports: prepared.transports,
             version: 0,
             config_revision: prepared.config_revision,
@@ -84,6 +88,7 @@ impl Gate {
         Ok(Self {
             builder,
             resources,
+            limit_store_health,
             runtime: ArcSwap::from(runtime),
             activation: Mutex::new(()),
             policy_snapshot: ArcSwap::from_pointee(policies),
@@ -131,6 +136,7 @@ impl Gate {
             ingress: prepared.config.compiled.ingress.clone(),
             settings: prepared.config.compiled.runtime.clone(),
             resources: self.resources.clone(),
+            limit_store_health: self.limit_store_health.clone(),
             transports: prepared.transports,
             version,
             config_revision: prepared.config_revision,

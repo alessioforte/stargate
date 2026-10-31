@@ -8,6 +8,7 @@ pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super:
     super::configure_probes(&core, &prepared.transports);
     std::sync::Arc::new(super::RuntimeSnapshot {
         core,
+        limit_store_health: std::sync::Arc::default(),
         ingress: prepared.config.compiled.ingress,
         resources: crate::gate::resources::ProcessResources::new(
             prepared.config.compiled.runtime.budgets,
@@ -40,6 +41,7 @@ pub(crate) fn gate_with_limiter(config: Config, limiter: lim::Limiter) -> super:
         ingress: prepared.config.compiled.ingress,
         settings: prepared.config.compiled.runtime,
         resources: gate.resources.clone(),
+        limit_store_health: gate.limit_store_health.clone(),
         transports: prepared.transports,
         version: 0,
         config_revision: prepared.config_revision,

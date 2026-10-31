@@ -175,6 +175,13 @@ Ingress host rules must forward each intended hostname to the Service.
 
 ## Pattern A: Traefik in front
 
+Traffic limits fail open on store errors/timeouts by default. Configure a
+Traefik rate-limit middleware as a safety net for Redis outages: the distributed
+per-IP allowance is then unavailable. `ingress.on_store_error: deny` retains
+fail-closed admission (including IAM and admin principal limits); individual
+rate/quota policies can choose `deny` independently. These are gateway document
+settings, editable through the Console, rather than Helm runtime environment keys.
+
 Traefik terminates public TLS and forwards both identity and API hosts to the
 same Stargate Service. Each replica dispatches identity-host requests through
 IAM and other hosts through gateway routing:
@@ -609,12 +616,14 @@ test use `/readyz`. Readiness checks SQLite in edge mode and PostgreSQL in
 cluster mode, with a one-second SQL timeout; Redis does not gate readiness.
 The public probes bypass authentication and rate limiting.
 
-When Redis is down, ready replicas remain in service, but all requests except
-the probes fail closed at the ingress limiter with Stargate's `503` and
-`Retry-After: 10`, including static pages and gateway direct responses. Traffic
-can recover as soon as Redis returns. `/admin/health` reports Redis health when
-its handler is reached, but its own request is blocked by the IAM ingress
-limiter during a Redis outage. See
+When Redis is down, replicas remain ready while SQL is healthy. Traffic limits
+use `on_store_error: allow` by default: public routes, static pages, direct
+responses, JWKS and SQL-verified API/admin keys remain usable without allowance
+headers. Admin-key requests to `/admin/health` return `200` with Redis unhealthy
+and `limits.storeDegraded: true`. User sessions, login/OTP/email protection and
+OAuth state remain fail-closed. Set `on_store_error: deny` on ingress (also IAM
+and admin principal admission) or a rate/quota policy for `503` with
+`Retry-After: 10`. Checks recover without restarting. See
 [Health and readiness probes](../../docs/health-probes.md) for response contracts
 and shutdown behavior. `SERVER_DRAIN_DELAY_SECS` defaults to 5 seconds;
 allow room in `terminationGracePeriodSeconds` for that delay, connection

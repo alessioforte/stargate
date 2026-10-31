@@ -146,11 +146,13 @@ pub enum PolicyNode {
         limit: String,
         scope: LimitScope,
         on_missing: OnMissingOrg,
+        on_store_error: crate::cfg::OnStoreError,
     },
     Quota {
         limit: String,
         scope: LimitScope,
         on_missing: OnMissingOrg,
+        on_store_error: crate::cfg::OnStoreError,
     },
 }
 

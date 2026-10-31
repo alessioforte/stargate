@@ -303,7 +303,7 @@ async fn extract_authorization_for(
                 Err(error) => Err(error),
             };
             match charged {
-                Ok(decision) => Some(decision),
+                Ok(decision) => decision,
                 Err(error) => return error.into_response(),
             }
         }

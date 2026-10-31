@@ -352,7 +352,9 @@ async fn ingress_backend_failure_and_timeout_fail_closed_and_release_process_adm
                 stall,
             }),
         );
-        let gate = Arc::new(test_support::gate_with_limiter(config(1), limiter));
+        let mut cfg = config(1);
+        cfg.ingress.on_store_error = "deny".into();
+        let gate = Arc::new(test_support::gate_with_limiter(cfg, limiter));
         let calls = Arc::new(AuthenticationCalls::default());
         let auth = calls.boundary(VerifiedIdentity::anonymous());
         let response = tokio::time::timeout(
@@ -379,7 +381,7 @@ async fn ingress_backend_failure_and_timeout_fail_closed_and_release_process_adm
         send(request(&gate, &auth, "/open", "203.0.113.8:1000"))
             .await
             .status(),
-        StatusCode::SERVICE_UNAVAILABLE
+        StatusCode::INTERNAL_SERVER_ERROR
     );
     assert_eq!(calls.counts(), (0, 0));
 }

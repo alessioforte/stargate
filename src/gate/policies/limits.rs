@@ -2,13 +2,13 @@ use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::RuntimeSnapshot;
 use crate::gate::policies::org_limits::OrgLimitOverrides;
 use crate::{
-    gate::limits::{attribute_name, configuration_error, validate_limit},
+    gate::limits::{LimitPoint, TrafficLimit, attribute_name, check_traffic_limit, validate_limit},
     web::limits::{insert_limit_headers, limited_response},
 };
 use crate::{iam::auth::subject::Subject, obs::telemetry};
 use ::http::HeaderMap;
-use gate::cfg::OnMissingOrg;
-use lim::{LimitKind, Limiter, RateLimitDecision};
+use gate::cfg::{OnMissingOrg, OnStoreError};
+use lim::{LimitKind, RateLimitDecision};
 
 const DEFAULT_RATE_LIMIT: &str = "default";
 
@@ -18,8 +18,8 @@ const DEFAULT_RATE_LIMIT: &str = "default";
 /// router — one request costs the same no matter whose bucket it charges.
 #[derive(Debug)]
 pub struct SelectedLimitPolicies {
-    pub subject_rate: Option<String>,
-    pub subject_quota: Option<String>,
+    pub subject_rate: Option<SelectedLimit>,
+    pub subject_quota: Option<SelectedLimit>,
     pub org_rate: Option<OrgScopedLimit>,
     pub org_quota: Option<OrgScopedLimit>,
     pub quota_cost: u64,
@@ -38,9 +38,31 @@ impl Default for SelectedLimitPolicies {
 }
 
 #[derive(Debug)]
+pub struct SelectedLimit {
+    pub name: String,
+    pub on_store_error: OnStoreError,
+}
+
+impl From<String> for SelectedLimit {
+    fn from(name: String) -> Self {
+        Self {
+            name,
+            on_store_error: OnStoreError::Allow,
+        }
+    }
+}
+
+impl From<&str> for SelectedLimit {
+    fn from(name: &str) -> Self {
+        name.to_owned().into()
+    }
+}
+
+#[derive(Debug)]
 pub struct OrgScopedLimit {
     pub limit: String,
     pub on_missing: OnMissingOrg,
+    pub on_store_error: OnStoreError,
 }
 
 struct SelectedLimits {
@@ -90,6 +112,7 @@ struct LimitCheck {
     key: String,
     kind: LimitKind,
     scope: &'static str,
+    on_store_error: OnStoreError,
 }
 
 fn org_check(
@@ -124,6 +147,7 @@ fn org_check(
         key,
         kind,
         scope,
+        on_store_error: policy.on_store_error,
     }))
 }
 
@@ -138,8 +162,14 @@ async fn apply_selected_limits(
     let selected = select_limits(
         subject,
         client_ip,
-        policies.subject_rate.as_deref(),
-        policies.subject_quota.as_deref(),
+        policies
+            .subject_rate
+            .as_ref()
+            .map(|policy| policy.name.as_str()),
+        policies
+            .subject_quota
+            .as_ref()
+            .map(|policy| policy.name.as_str()),
     )?;
     let org_id = subject.and_then(|subject| subject.org_id.as_deref());
     let limiter = &runtime.core.limiter;
@@ -158,6 +188,10 @@ async fn apply_selected_limits(
         key: format!("lim:{}", selected.subject_key),
         kind: LimitKind::Rate,
         scope: "subject",
+        on_store_error: policies
+            .subject_rate
+            .as_ref()
+            .map_or(OnStoreError::Allow, |policy| policy.on_store_error),
     });
     if let Some(check) = org_check(
         org_id,
@@ -174,6 +208,10 @@ async fn apply_selected_limits(
             key: format!("quota:{}", selected.subject_key),
             kind: LimitKind::Quota,
             scope: "subject",
+            on_store_error: policies
+                .subject_quota
+                .as_ref()
+                .map_or(OnStoreError::Allow, |policy| policy.on_store_error),
         });
     }
     // All selected references must be valid before any consuming check runs.
@@ -185,7 +223,9 @@ async fn apply_selected_limits(
     let mut quota_checks = Vec::with_capacity(2);
     for check in checks {
         let cost = (check.kind == LimitKind::Quota).then_some(policies.quota_cost);
-        let decision = run_check(limiter, &check, cost).await?;
+        let Some(decision) = run_check(runtime, &check, cost).await? else {
+            continue;
+        };
         match check.kind {
             LimitKind::Rate => push_rate_check(&mut rate_checks, decision, check.scope)?,
             LimitKind::Quota => push_quota_check(&mut quota_checks, decision, check.scope)?,
@@ -221,25 +261,26 @@ fn org_target<'a>(
 }
 
 async fn run_check(
-    limiter: &Limiter,
+    runtime: &RuntimeSnapshot,
     check: &LimitCheck,
     cost: Option<u64>,
-) -> Result<RateLimitDecision, ErrorResponse> {
-    limiter
-        .check(&check.name, &check.key, cost)
-        .await
-        .map_err(|error| {
-            if matches!(
-                error,
-                lim::RateLimitError::UnknownLimit(_)
-                    | lim::RateLimitError::IncompatibleLimit { .. }
-            ) {
-                return configuration_error(&check.name, check.kind, check.scope, &error);
-            }
-            telemetry::record_gateway_policy(&check.kind.to_string(), "error");
-            tracing::error!(policy_type = %check.kind, "Limiter error: {error}");
-            ErrorResponse::new(ErrorCode::GatewayLimiterUnavailable)
-        })
+) -> Result<Option<RateLimitDecision>, ErrorResponse> {
+    let point = match check.kind {
+        LimitKind::Rate => LimitPoint::RateLimit,
+        LimitKind::Quota => LimitPoint::Quota,
+    };
+    check_traffic_limit(
+        runtime,
+        point,
+        check.on_store_error,
+        TrafficLimit {
+            name: &check.name,
+            key: &check.key,
+            scope: check.scope,
+            cost,
+        },
+    )
+    .await
 }
 
 fn push_rate_check(

@@ -10,7 +10,7 @@ use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::{Gate, RuntimeSnapshot, retain_runtime};
 use crate::web::request::RequestExt;
 use crate::{
-    gate::limits::ingress_key,
+    gate::limits::{LimitPoint, TrafficLimit, check_traffic_limit, ingress_key},
     web::limits::{insert_limit_headers, limited_response},
 };
 use axum::extract::Request;
@@ -44,17 +44,20 @@ pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response 
 async fn check_ingress(runtime: &RuntimeSnapshot, client_ip: &str) -> Result<(), ErrorResponse> {
     let ingress = &runtime.ingress;
     let key = ingress_key(client_ip);
-    let check = runtime.core.limiter.check(&ingress.limit, &key, None);
-    let decision = match tokio::time::timeout(ingress.timeout, check).await {
-        Ok(Ok(decision)) => decision,
-        Ok(Err(error)) => {
-            tracing::error!(%error, "IAM ingress limiter failed");
-            return Err(unavailable("ingress"));
-        }
-        Err(_) => {
-            tracing::warn!("IAM ingress limiter exceeded its store deadline");
-            return Err(unavailable("ingress"));
-        }
+    let Some(decision) = check_traffic_limit(
+        runtime,
+        LimitPoint::IamIngress,
+        ingress.on_store_error,
+        TrafficLimit {
+            name: &ingress.limit,
+            key: &key,
+            scope: "ingress",
+            cost: None,
+        },
+    )
+    .await?
+    else {
+        return Ok(());
     };
     if decision.is_allowed() {
         return Ok(());
@@ -72,18 +75,24 @@ async fn check_ingress(runtime: &RuntimeSnapshot, client_ip: &str) -> Result<(),
 pub async fn charge_admin_principal(
     runtime: &RuntimeSnapshot,
     key: &str,
-) -> Result<RateLimitDecision, ErrorResponse> {
-    let decision = runtime
-        .core
-        .limiter
-        .check(ADMIN_PRINCIPAL_LIMIT, key, None)
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "IAM principal limiter failed");
-            unavailable("subject")
-        })?;
+) -> Result<Option<RateLimitDecision>, ErrorResponse> {
+    let Some(decision) = check_traffic_limit(
+        runtime,
+        LimitPoint::AdminPrincipal,
+        runtime.ingress.on_store_error,
+        TrafficLimit {
+            name: ADMIN_PRINCIPAL_LIMIT,
+            key,
+            scope: "subject",
+            cost: None,
+        },
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
     if decision.is_allowed() {
-        return Ok(decision);
+        return Ok(Some(decision));
     }
     Err(limited_response(
         &decision,
@@ -95,10 +104,6 @@ pub async fn charge_admin_principal(
 
 pub fn insert_principal_limit_headers(headers: &mut HeaderMap, decision: &RateLimitDecision) {
     insert_limit_headers(headers, decision, "subject", "x-ratelimit");
-}
-
-fn unavailable(scope: &'static str) -> ErrorResponse {
-    ErrorResponse::new(ErrorCode::IamLimiterUnavailable).with_param("scope", scope)
 }
 
 #[cfg(all(test, feature = "memory"))]
@@ -166,7 +171,14 @@ mod tests {
     async fn unavailable_ingress_store_rejects_iam_requests() {
         let mut limiter = lim::Limiter::new();
         limiter.add_limit("ingress".into(), Box::new(UnavailableIngress));
-        let gate = Arc::new(test_support::gate_with_limiter(config(1, 1), limiter));
+        let gate = Arc::new(test_support::gate_with_limiter(
+            {
+                let mut cfg = config(1, 1);
+                cfg.ingress.on_store_error = "deny".into();
+                cfg
+            },
+            limiter,
+        ));
         let response = app(gate)
             .oneshot(request("203.0.113.1:1000"))
             .await
@@ -174,6 +186,27 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(response.headers()["retry-after"], "10");
         assert_eq!(error_code(response).await, "iam.limiter_unavailable");
+    }
+
+    #[tokio::test]
+    async fn public_iam_route_survives_a_failed_ingress_check_with_default_allow() {
+        let mut limiter = lim::Limiter::new();
+        limiter.add_limit("ingress".into(), Box::new(UnavailableIngress));
+        let gate = Arc::new(test_support::gate_with_limiter(config(1, 1), limiter));
+        let app = crate::api::server_router(Default::default(), Default::default())
+            .layer(Extension(gate.clone()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/account/features")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(!response.headers().contains_key("x-ratelimit-limit"));
+        assert!(gate.snapshot().limit_store_health.is_degraded());
     }
 
     #[tokio::test]
@@ -277,7 +310,7 @@ mod tests {
             let decision = charge_admin_principal(&runtime, "lim:admin:key:automation")
                 .await
                 .unwrap();
-            assert_eq!(decision.remaining, remaining);
+            assert_eq!(decision.unwrap().remaining, remaining);
         }
         let error = charge_admin_principal(&runtime, "lim:admin:key:automation")
             .await

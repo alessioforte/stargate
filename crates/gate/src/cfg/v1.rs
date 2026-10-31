@@ -1,9 +1,11 @@
+use super::OnStoreError;
 use super::graph::{
     CompileError, CompiledConfig, HeaderValueNode, HttpGraph, InternalContextNode, MatchExprNode,
     MiddlewareNode, MirrorServiceNode, NamedValuePredicate, PathPredicate, PolicyNode,
     ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TimeoutOverride, TransportNode,
     UpstreamNode, UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
 };
+use super::limit::{default_on_store_error, is_default_on_store_error};
 use super::{
     Ingress, Limit, LimitSpec, LoadBalancer, MtlsConfig, ResponseMode, RuntimeSettings, SCHEMA,
 };
@@ -265,6 +267,11 @@ pub enum Policy {
         scope: LimitScope,
         #[serde(default)]
         on_missing: Option<OnMissingOrg>,
+        #[serde(
+            default = "default_on_store_error",
+            skip_serializing_if = "is_default_on_store_error"
+        )]
+        on_store_error: String,
     },
     Quota {
         limit: String,
@@ -272,6 +279,11 @@ pub enum Policy {
         scope: LimitScope,
         #[serde(default)]
         on_missing: Option<OnMissingOrg>,
+        #[serde(
+            default = "default_on_store_error",
+            skip_serializing_if = "is_default_on_store_error"
+        )]
+        on_store_error: String,
     },
 }
 
@@ -692,6 +704,7 @@ fn compile_policies(
                 limit,
                 scope,
                 on_missing,
+                on_store_error,
             } => {
                 validate_policy_limit(name, limit, limits, lim::LimitKind::Rate)?;
                 let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
@@ -699,12 +712,17 @@ fn compile_policies(
                     limit: limit.clone(),
                     scope: *scope,
                     on_missing,
+                    on_store_error: OnStoreError::compile(
+                        on_store_error,
+                        format!("http.policies.{name}.on_store_error"),
+                    )?,
                 }
             }
             Policy::Quota {
                 limit,
                 scope,
                 on_missing,
+                on_store_error,
             } => {
                 validate_policy_limit(name, limit, limits, lim::LimitKind::Quota)?;
                 let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
@@ -712,6 +730,10 @@ fn compile_policies(
                     limit: limit.clone(),
                     scope: *scope,
                     on_missing,
+                    on_store_error: OnStoreError::compile(
+                        on_store_error,
+                        format!("http.policies.{name}.on_store_error"),
+                    )?,
                 }
             }
         };

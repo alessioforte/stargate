@@ -68,7 +68,7 @@ pub async fn limit_overrides(org_id: &str) -> Result<OrgLimitOverrides, crate::e
         Err(error) => {
             tracing::warn!(org_id, "failed to load org for limit overrides: {error}");
             return Err(crate::err::ErrorResponse::new(
-                crate::err::ErrorCode::GatewayLimiterUnavailable,
+                crate::err::ErrorCode::GatewayOrganizationLimitsUnavailable,
             ));
         }
     };

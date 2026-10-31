@@ -239,3 +239,35 @@ impl Strategy {
         }
     }
 }
+
+/// Whether traffic may proceed when its limiter store cannot be checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnStoreError {
+    #[default]
+    Allow,
+    Deny,
+}
+
+impl OnStoreError {
+    pub(super) fn compile(
+        value: &str,
+        path: impl Into<String>,
+    ) -> Result<Self, super::graph::CompileError> {
+        match value {
+            "allow" => Ok(Self::Allow),
+            "deny" => Ok(Self::Deny),
+            _ => Err(super::graph::CompileError::new(
+                path,
+                "must be allow or deny",
+            )),
+        }
+    }
+}
+
+pub(super) fn default_on_store_error() -> String {
+    "allow".into()
+}
+
+pub(super) fn is_default_on_store_error(value: &str) -> bool {
+    value == "allow"
+}

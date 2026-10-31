@@ -1,3 +1,6 @@
+mod store;
+pub(crate) use store::{LimitPoint, LimitStoreHealth, TrafficLimit, check_traffic_limit};
+
 use crate::{
     err::{ErrorCode, ErrorResponse},
     obs::telemetry,

@@ -2,7 +2,7 @@ pub(in crate::gate) mod ingress;
 pub(in crate::gate) mod limits;
 pub(in crate::gate) mod org_limits;
 
-use self::limits::{OrgScopedLimit, SelectedLimitPolicies, apply_limits};
+use self::limits::{OrgScopedLimit, SelectedLimit, SelectedLimitPolicies, apply_limits};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::RuntimeSnapshot;
 use crate::{
@@ -84,17 +84,22 @@ pub async fn apply_policies(
                 limit,
                 scope,
                 on_missing,
+                on_store_error,
             } => {
                 let duplicate = match scope {
                     LimitScope::Subject => selected_limits
                         .subject_rate
-                        .replace(limit.clone())
+                        .replace(SelectedLimit {
+                            name: limit.clone(),
+                            on_store_error: *on_store_error,
+                        })
                         .is_some(),
                     LimitScope::Org => selected_limits
                         .org_rate
                         .replace(OrgScopedLimit {
                             limit: limit.clone(),
                             on_missing: *on_missing,
+                            on_store_error: *on_store_error,
                         })
                         .is_some(),
                 };
@@ -109,17 +114,22 @@ pub async fn apply_policies(
                 limit,
                 scope,
                 on_missing,
+                on_store_error,
             } => {
                 let duplicate = match scope {
                     LimitScope::Subject => selected_limits
                         .subject_quota
-                        .replace(limit.clone())
+                        .replace(SelectedLimit {
+                            name: limit.clone(),
+                            on_store_error: *on_store_error,
+                        })
                         .is_some(),
                     LimitScope::Org => selected_limits
                         .org_quota
                         .replace(OrgScopedLimit {
                             limit: limit.clone(),
                             on_missing: *on_missing,
+                            on_store_error: *on_store_error,
                         })
                         .is_some(),
                 };

@@ -9,16 +9,17 @@ from service traffic without restarting it.
 | --- | --- | --- | --- |
 | `GET /livez` | `200 {"status":"alive"}` | No application-level failure status; an unresponsive server fails the caller's probe | Startup and liveness |
 | `GET /readyz` | `200 {"status":"ready"}` | `503 {"status":"not_ready"}` | Traffic readiness |
-| `GET /admin/health` | `200` with component status, latency, backend kinds, and timestamp | `503` with component diagnostics | Authenticated operator diagnostics |
+| `GET /admin/health` | `200` with component status, latency, backend kinds, and timestamp | `503` when SQL is unhealthy, with component diagnostics | Authenticated operator diagnostics |
 
 The two public endpoints also support `HEAD`, return `Cache-Control: no-store`,
 and bypass authentication, API rate limiting, gateway ingress/process admission,
 and gateway routing policies.
 They use the normal HTTP or HTTPS listener; no extra port is required.
 Dependency errors and latency details appear only in `/admin/health`, which
-retains its super-admin authorization and normal API middleware. A Redis outage
-also prevents requests from reaching this handler through the normal listener,
-because the IAM ingress limiter fails closed before authorization.
+retains its admin authorization and normal API middleware. With default
+`ingress.on_store_error: allow`, an admin key verified through SQL can reach
+the handler during a Redis outage. User sessions still require the store.
+Setting `ingress.on_store_error: deny` blocks the handler at admission with `503`.
 
 ## Readiness conditions
 
@@ -34,7 +35,13 @@ SQL errors, a missing initialized pool, and timeouts produce `503`. Checks
 run on each readiness request; responses are not cached. A later successful
 check restores readiness automatically after a SQL outage.
 `/admin/health` checks SQL and, in cluster mode, Redis concurrently with a
-one-second deadline per check; a failed Redis check is reported as unhealthy.
+one-second deadline per check; a failed Redis check is reported as unhealthy,
+while the HTTP response stays `200` when SQL is healthy. Inspect the body
+instead of treating this status as an all-dependencies-healthy signal. The body
+also includes `limits: { storeDegraded }`, true after any traffic limit store
+error until that application point succeeds again. The overall status is
+`degraded` for failed limit checks with healthy dependencies, or `unhealthy`
+when a dependency fails.
 It also reports
 `config: { gatewayRevision, policiesRevision }`, the exact document revisions
 currently active on the responding replica. A failed activation or a pending
@@ -46,11 +53,17 @@ Edge uses the same interval without a listener, including for CLI imports from a
 process sharing the SQLite database file.
 
 With Redis unavailable after startup, replicas remain ready while SQL is healthy.
-All requests except `/livez` and `/readyz` fail closed at the ingress limiter,
-including static auth and Console pages, `/admin/health`, and gateway direct
-responses. Stargate responds with `503`, `Retry-After: 10`, a request ID, and
-`iam.limiter_unavailable` or `gateway.ingress_unavailable`. Once Redis recovers,
-requests can succeed without waiting for readiness to restore the endpoints.
+Traffic limits default to fail-open: public gateway routes, direct responses,
+static auth/Console pages, discovery/JWKS and API/admin keys verified through SQL
+remain usable. The affected checks emit no allowance headers. Each check is
+bounded by `ingress.timeout` (default 250ms), including rate/quota policies and
+admin principal admission. Set `on_store_error: deny` on ingress or a route's
+rate/quota policy to retain `503` with `Retry-After: 10` for that check.
+Configuration errors stay `500`; login guard, OTP/email throttles, sessions,
+JWT revocation and OAuth state remain fail-closed. User login and the Console's
+user session therefore remain unavailable. Redis recovery restores checks
+without a restart. A Traefik rate limit provides a safety net while the shared
+per-IP allowance is unavailable.
 
 Initialization includes database migrations, state-store setup, signing
 configuration, and the compiled gateway configuration. The listener opens

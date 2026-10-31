@@ -91,7 +91,16 @@ impl axum::response::IntoResponse for ErrorResponse {
     fn into_response(self) -> axum::response::Response {
         use http::header::{CONTENT_TYPE, HeaderName, HeaderValue, RETRY_AFTER};
 
-        if self.status.is_server_error() {
+        // Traffic limiter failures are counted on every check and logged only
+        // on state transitions by the limiter runtime, including fail-closed checks.
+        let limit_store_failure = matches!(
+            self.code,
+            ErrorCode::GatewayIngressUnavailable
+                | ErrorCode::GatewayLimiterUnavailable
+                | ErrorCode::IamLimiterUnavailable
+        );
+        let limit_store_failure = limit_store_failure && self.params.contains_key("point");
+        if self.status.is_server_error() && !limit_store_failure {
             tracing::error!(code = %self.code, message = %self.message, "request failed");
         } else {
             tracing::debug!(code = %self.code, message = %self.message, "request rejected");
@@ -180,6 +189,31 @@ mod tests {
             "Upstream does not allow HTTP/2, which gRPC requires"
         );
         assert_eq!(code.error_type(), ErrorType::Upstream);
+    }
+
+    #[test]
+    fn limit_and_organization_availability_codes_have_distinct_catalog_entries() {
+        for (code, name) in [
+            (
+                ErrorCode::GatewayLimiterUnavailable,
+                "gateway.limiter_unavailable",
+            ),
+            (
+                ErrorCode::GatewayOrganizationLimitsUnavailable,
+                "gateway.organization_limits_unavailable",
+            ),
+        ] {
+            assert_eq!(code.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(code.error_type(), ErrorType::Availability);
+            assert_eq!(code.as_str(), name);
+            assert_eq!(
+                ErrorCode::ALL
+                    .iter()
+                    .filter(|entry| **entry == code)
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]

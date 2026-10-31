@@ -1,52 +1,39 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::{
-    gate::{RuntimeSnapshot, limits::ingress_key},
+    gate::{
+        RuntimeSnapshot,
+        limits::{LimitPoint, TrafficLimit, check_traffic_limit, ingress_key},
+    },
     obs::telemetry,
     web::limits::limited_response,
 };
-use lim::LimitKind;
 
 pub(in crate::gate) async fn apply_ingress_limit(
     runtime: &RuntimeSnapshot,
     client_ip: &str,
     execution: &crate::gate::lifecycle::Execution,
 ) -> Result<(), ErrorResponse> {
-    let limiter = &runtime.core.limiter;
     let ingress = &runtime.ingress;
-    if limiter
-        .validate_limit(&ingress.limit, LimitKind::Rate)
-        .is_err()
-    {
-        telemetry::record_gateway_policy("ingress", "error");
-        return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable));
-    }
     let key = ingress_key(client_ip);
-    let decision = match execution
+    let decision = execution
         .run(
             "ingress",
-            Some(ingress.timeout),
-            limiter.check(&ingress.limit, &key, None),
+            None,
+            check_traffic_limit(
+                runtime,
+                LimitPoint::GatewayIngress,
+                ingress.on_store_error,
+                TrafficLimit {
+                    name: &ingress.limit,
+                    key: &key,
+                    scope: "ingress",
+                    cost: None,
+                },
+            ),
         )
-        .await
-    {
-        Ok(Ok(decision)) => decision,
-        Ok(Err(error)) => {
-            telemetry::record_gateway_policy("ingress", "error");
-            tracing::error!(%error, "Ingress limiter failed");
-            return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable));
-        }
-        Err(error)
-            if error.code == ErrorCode::GatewayTimeout
-                && error
-                    .params
-                    .get("phase")
-                    .is_some_and(|phase| phase == "ingress") =>
-        {
-            telemetry::record_gateway_policy("ingress", "timeout");
-            return Err(ErrorResponse::new(ErrorCode::GatewayIngressUnavailable)
-                .with_param("phase", "ingress"));
-        }
-        Err(error) => return Err(error),
+        .await??;
+    let Some(decision) = decision else {
+        return Ok(());
     };
     if decision.is_allowed() {
         telemetry::record_gateway_policy("ingress", "allowed");

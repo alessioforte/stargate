@@ -8,3 +8,6 @@ pub mod otp;
 pub mod pwd;
 pub mod sess;
 pub mod user;
+
+#[cfg(all(test, feature = "redis"))]
+mod security_store_tests;
