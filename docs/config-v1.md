@@ -1171,12 +1171,37 @@ http:
 
 `stargate.limits.store_errors` counts every failed traffic store check with bounded
 labels `point` (`gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`,
-`quota`) and `outcome` (`allowed`, `denied`). Each point emits one warning when
-it becomes degraded and one info log on its next successful store check
-(including a valid limit denial). Repeated failures do not emit per-request
-warnings/errors. The indicators persist across configuration reloads.
-`/admin/health` includes `limits: { storeDegraded: true }` while any point is
-degraded; recovery requires a successful check at that point.
+`quota`) and `outcome` (`allowed`, `denied`). Each point emits a warning when
+it becomes degraded, with at least 60 seconds between warnings for that point.
+A subsequent successful check (including a valid limit denial) emits one recovery
+info event only if a warning was emitted for that episode. Repeated failures and
+rapid alternation between failures and successes do not flood warning/info logs.
+Backend causes remain available at debug level; they are not returned to clients.
+Clock failures are internal `500 system.internal` errors, never configuration
+errors or fail-open events. The indicators persist across configuration reloads.
+
+`/admin/health` exposes both the aggregate and per-point diagnostic flags:
+
+```json
+{
+  "limits": {
+    "storeDegraded": true,
+    "points": {
+      "gateway_ingress": false,
+      "iam_ingress": false,
+      "admin_principal": false,
+      "rate_limit": false,
+      "quota": true
+    }
+  }
+}
+```
+
+A point is degraded only if its last store error was less than 60 seconds ago
+without a subsequent successful check. A quiet point therefore expires without
+needing another request. These flags describe recent check failures; their expiry
+does not assert Redis is healthy. The separate Redis dependency check still reports
+its current health, even while no traffic exercises a particular limiter point.
 
 Ingress, resource rate/quota, and IAM/admin `429` responses emit `Retry-After`
 as nonnegative decimal seconds, following

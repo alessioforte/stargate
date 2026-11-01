@@ -2,11 +2,11 @@
 use crate::{
     err::{ErrorCode, ErrorResponse},
     gate::RuntimeSnapshot,
-    obs::telemetry,
 };
 use gate::cfg::OnStoreError;
 use lim::{LimitKind, RateLimitDecision, RateLimitError};
-use std::sync::atomic::{AtomicBool, Ordering};
+mod health;
+pub(crate) use health::LimitStoreHealth;
 
 #[derive(Clone, Copy)]
 pub(crate) enum LimitPoint {
@@ -18,6 +18,13 @@ pub(crate) enum LimitPoint {
 }
 
 impl LimitPoint {
+    const ALL: &'static [Self] = &[
+        Self::GatewayIngress,
+        Self::IamIngress,
+        Self::AdminPrincipal,
+        Self::RateLimit,
+        Self::Quota,
+    ];
     fn name(self) -> &'static str {
         match self {
             Self::GatewayIngress => "gateway_ingress",
@@ -40,43 +47,6 @@ impl LimitPoint {
         match self {
             Self::Quota => LimitKind::Quota,
             _ => LimitKind::Rate,
-        }
-    }
-}
-
-/// One indicator per application point, retained across configuration activation.
-#[derive(Default)]
-pub(crate) struct LimitStoreHealth {
-    degraded: [AtomicBool; 5],
-}
-
-impl LimitStoreHealth {
-    pub(crate) fn is_degraded(&self) -> bool {
-        self.degraded
-            .iter()
-            .any(|state| state.load(Ordering::Relaxed))
-    }
-
-    fn success(&self, point: LimitPoint) {
-        if self.degraded[point as usize].swap(false, Ordering::Relaxed) {
-            tracing::info!(point = point.name(), "Limit store recovered");
-        }
-    }
-
-    fn failure(&self, point: LimitPoint, policy: OnStoreError, reason: &'static str) {
-        let outcome = match policy {
-            OnStoreError::Allow => "allowed",
-            OnStoreError::Deny => "denied",
-        };
-        telemetry::record_limit_store_error(point.name(), outcome);
-        if !self.degraded[point as usize].swap(true, Ordering::Relaxed) {
-            // No backend text: connection errors may contain infrastructure details.
-            tracing::warn!(
-                point = point.name(),
-                outcome,
-                reason,
-                "Limit store degraded"
-            );
         }
     }
 }
@@ -110,15 +80,35 @@ pub(crate) async fn check_traffic_limit(
             runtime.limit_store_health.success(point);
             return Ok(Some(decision));
         }
-        Ok(Err(error)) if !is_store_error(&error) => {
-            return Err(super::configuration_error(
-                check.name,
-                point.kind(),
-                check.scope,
-                &error,
-            ));
-        }
-        Ok(Err(_)) => "backend",
+        Ok(Err(error)) => match error {
+            RateLimitError::UnknownLimit(_)
+            | RateLimitError::IncompatibleLimit { .. }
+            | RateLimitError::InvalidConfig(_) => {
+                return Err(super::configuration_error(
+                    check.name,
+                    point.kind(),
+                    check.scope,
+                    &error,
+                ));
+            }
+            RateLimitError::ClockError(_) | RateLimitError::RateLimitExceeded => {
+                return Err(ErrorResponse::internal(error));
+            }
+            RateLimitError::BackendError(_) => {
+                tracing::debug!(point = point.name(), %error, "Limit store check failed");
+                "backend"
+            }
+            #[cfg(feature = "redis")]
+            RateLimitError::RedisError(_) => {
+                tracing::debug!(point = point.name(), %error, "Limit store check failed");
+                "backend"
+            }
+            #[cfg(feature = "memory")]
+            RateLimitError::MemoryError(_) => {
+                tracing::debug!(point = point.name(), %error, "Limit store check failed");
+                "backend"
+            }
+        },
         Err(_) => "timeout",
     };
     runtime.limit_store_health.failure(point, policy, reason);
@@ -127,17 +117,6 @@ pub(crate) async fn check_traffic_limit(
         OnStoreError::Deny => Err(ErrorResponse::new(point.unavailable())
             .with_param("scope", check.scope)
             .with_param("point", point.name())),
-    }
-}
-
-fn is_store_error(error: &RateLimitError) -> bool {
-    match error {
-        RateLimitError::BackendError(_) => true,
-        #[cfg(feature = "redis")]
-        RateLimitError::RedisError(_) => true,
-        #[cfg(feature = "memory")]
-        RateLimitError::MemoryError(_) => true,
-        _ => false,
     }
 }
 

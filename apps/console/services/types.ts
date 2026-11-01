@@ -70,6 +70,10 @@ export interface AdminHealth {
   database: ComponentStatus;
   databaseBackend: string;
   features: AdminFeatures;
+  limits: {
+    storeDegraded: boolean;
+    points: Record<string, boolean>;
+  };
   name: string;
   redis?: ComponentStatus;
   runtimeProfile: string;

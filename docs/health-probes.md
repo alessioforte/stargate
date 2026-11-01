@@ -38,8 +38,13 @@ check restores readiness automatically after a SQL outage.
 one-second deadline per check; a failed Redis check is reported as unhealthy,
 while the HTTP response stays `200` when SQL is healthy. Inspect the body
 instead of treating this status as an all-dependencies-healthy signal. The body
-also includes `limits: { storeDegraded }`, true after any traffic limit store
-error until that application point succeeds again. The overall status is
+also includes `limits: { storeDegraded, points }`. The `points` object maps
+`gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit` and `quota` to
+booleans indicating a store failure within the last 60 seconds without a subsequent
+successful check; `storeDegraded` is true if any point is degraded. An idle point
+expires without new traffic. Expiry describes the absence of recent failures,
+not a successful Redis probe; Redis dependency diagnostics remain independent.
+The overall status is
 `degraded` for failed limit checks with healthy dependencies, or `unhealthy`
 when a dependency fails.
 It also reports

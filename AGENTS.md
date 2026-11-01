@@ -289,8 +289,11 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   `ingress.timeout` bounds each complete traffic store check, including Redis
   reconnection waits. Failed-open checks produce no allowance headers; configuration
   errors remain `500`. `gate/limits/store.rs` shares enforcement and process-lifetime
-  degradation indicators across generations and application points. Organization
-  override SQL failures always return `503 gateway.organization_limits_unavailable`,
+  degradation indicators across generations and application points. Indicators
+  expire 60s after the last store error or clear on a subsequent successful check;
+  `/admin/health` exposes the aggregate and a `limits.points` map. Expiry does not
+  replace Redis diagnostics. Clock failures remain internal 500s, fail-closed.
+  Organization override SQL failures always return `503 gateway.organization_limits_unavailable`,
   independently of the traffic store failure policy.
 - Subject `attrs.rate_limit` / `attrs.quota` pick named limits; unknown names fail
   with `500 gateway.limit_configuration_invalid` (no silent fallback).
@@ -1129,8 +1132,10 @@ a new reusable primitive.
 - ACE decision caches are version-aware and invalidated on policy change.
 - GeoIP (MaxMind GeoLite2-City) is available but not a v1 route matcher.
 - `stargate.limits.store_errors` counts traffic limit failures by bounded `point`
-  and `outcome` labels. Each point logs warn on degradation and info on recovery,
-  retained across reloads, rather than logging each store failure.
+  and `outcome` labels. Each point logs warn on degradation (at most once per 60s)
+  and a paired info on successful recovery; the window persists across reloads.
+  Backend causes are logged at debug. State uses named fields and exhaustive
+  point selection rather than enum-position array indexing.
 - Metrics use bounded labels only (no URLs, credentials, request IDs); see
   `docs/config-v1.md` for gateway instruments.
 - Gateway performance workloads are opt-in (`src/gate/performance/`,

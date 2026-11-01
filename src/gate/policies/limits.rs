@@ -43,6 +43,7 @@ pub struct SelectedLimit {
     pub on_store_error: OnStoreError,
 }
 
+#[cfg(test)]
 impl From<String> for SelectedLimit {
     fn from(name: String) -> Self {
         Self {
@@ -52,6 +53,7 @@ impl From<String> for SelectedLimit {
     }
 }
 
+#[cfg(test)]
 impl From<&str> for SelectedLimit {
     fn from(name: &str) -> Self {
         name.to_owned().into()

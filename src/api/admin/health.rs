@@ -7,7 +7,7 @@ use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use serde::Serialize;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -73,6 +73,7 @@ struct StoreStats {
 #[serde(rename_all = "camelCase")]
 struct LimitsStatus {
     store_degraded: bool,
+    points: BTreeMap<&'static str, bool>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -121,8 +122,10 @@ fn health_response(gate: &Gate, dependencies: DependencyHealth) -> Response {
     let version = env!("CARGO_PKG_VERSION");
     let all_healthy = dependencies.is_healthy();
     let database_healthy = dependencies.database.is_healthy();
+    let points = gate.snapshot().limit_store_health.degraded_points();
     let limits = LimitsStatus {
-        store_degraded: gate.snapshot().limit_store_health.is_degraded(),
+        store_degraded: points.values().any(|degraded| *degraded),
+        points,
     };
 
     #[cfg(feature = "memory")]
@@ -244,14 +247,62 @@ mod fail_open_tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    struct Unavailable;
+    struct Unavailable(lim::LimitKind);
     #[async_trait::async_trait]
     impl lim::RateLimit for Unavailable {
         fn kind(&self) -> lim::LimitKind {
-            lim::LimitKind::Rate
+            self.0
         }
         async fn check(&self, _: &str, _: u64) -> lim::Result<lim::RateLimitDecision> {
             Err(lim::RateLimitError::BackendError("unavailable".into()))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn health_expires_an_idle_quota_without_traffic_or_mutating_other_points() {
+        use crate::gate::limits::{LimitPoint, TrafficLimit, check_traffic_limit};
+        use gate::cfg::OnStoreError;
+        let mut cfg = serde_json::to_value(gate::cfg::Config::default()).unwrap();
+        cfg["limits"]["daily"] =
+            serde_json::json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"day"}});
+        let mut limiter = lim::Limiter::new();
+        limiter.add_limit("daily".into(), Box::new(Unavailable(lim::LimitKind::Quota)));
+        let gate = test_support::gate_with_limiter(serde_json::from_value(cfg).unwrap(), limiter);
+        check_traffic_limit(
+            &gate.snapshot(),
+            LimitPoint::Quota,
+            OnStoreError::Allow,
+            TrafficLimit {
+                name: "daily",
+                key: "test-quota",
+                scope: "subject",
+                cost: None,
+            },
+        )
+        .await
+        .unwrap();
+        for (seconds, degraded) in [(0, true), (59, true), (1, false)] {
+            tokio::time::advance(std::time::Duration::from_secs(seconds)).await;
+            let response = health_response(
+                &gate,
+                DependencyHealth {
+                    database: ComponentHealth {
+                        latency_ms: 0.0,
+                        error: None,
+                    },
+                },
+            );
+            assert_eq!(response.status(), StatusCode::OK);
+            let json: serde_json::Value =
+                serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            assert_eq!(json["limits"]["storeDegraded"], degraded);
+            assert_eq!(json["limits"]["points"]["quota"], degraded);
+            assert_eq!(json["limits"]["points"].as_object().unwrap().len(), 5);
+            assert_eq!(
+                json["status"],
+                if degraded { "degraded" } else { "healthy" }
+            );
         }
     }
 
@@ -277,7 +328,7 @@ mod fail_open_tests {
             .unwrap();
             let mut limiter = lim::Limiter::new();
             for name in ["ingress", "default"] {
-                limiter.add_limit(name.into(), Box::new(Unavailable));
+                limiter.add_limit(name.into(), Box::new(Unavailable(lim::LimitKind::Rate)));
             }
             let gate = Arc::new(test_support::gate_with_limiter(
                 gate::cfg::Config::default(),
@@ -323,6 +374,9 @@ mod fail_open_tests {
                 serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
                     .unwrap();
             assert_eq!(json["limits"]["storeDegraded"], true);
+            assert_eq!(json["limits"]["points"]["iam_ingress"], true);
+            assert_eq!(json["limits"]["points"]["admin_principal"], true);
+            assert_eq!(json["limits"]["points"]["quota"], false);
             assert_eq!(json["status"], "degraded");
         })
         .await;

@@ -1,7 +1,10 @@
 use super::*;
 use crate::gate::test_support;
 use gate::cfg::{Config, RuntimeConfig};
-use std::sync::{Arc, atomic::AtomicU8};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
 
 struct TestLimit {
     kind: LimitKind,
@@ -23,6 +26,7 @@ impl lim::RateLimit for TestLimit {
                 "invalid configuration".into(),
             )),
             4 => Err(RateLimitError::ClockError("clock".into())),
+            6 => Err(RateLimitError::RateLimitExceeded),
             _ => Ok(RateLimitDecision::denied(100, 0, None, None)),
         }
     }
@@ -73,17 +77,11 @@ fn check(point: LimitPoint) -> TrafficLimit<'static> {
     }
 }
 
-const POINTS: [LimitPoint; 5] = [
-    LimitPoint::GatewayIngress,
-    LimitPoint::IamIngress,
-    LimitPoint::AdminPrincipal,
-    LimitPoint::RateLimit,
-    LimitPoint::Quota,
-];
+const POINTS: &[LimitPoint] = LimitPoint::ALL;
 
 #[tokio::test(start_paused = true)]
 async fn traffic_checks_apply_allow_and_deny_to_backend_errors_and_deadlines_at_every_point() {
-    for point in POINTS {
+    for &point in POINTS {
         for state in [1, 2] {
             let state = Arc::new(AtomicU8::new(state));
             let runtime = runtime(&state);
@@ -120,10 +118,10 @@ async fn traffic_checks_apply_allow_and_deny_to_backend_errors_and_deadlines_at_
 }
 
 #[tokio::test]
-async fn configuration_and_clock_errors_never_fail_open_or_mark_the_store_degraded() {
-    for state in [0, 3, 4] {
+async fn configuration_and_internal_errors_are_distinct_and_never_fail_open_or_degrade_the_store() {
+    for state in [0, 3, 4, 6] {
         let runtime = runtime(&Arc::new(AtomicU8::new(state)));
-        for point in POINTS {
+        for &point in POINTS {
             for mode in [OnStoreError::Allow, OnStoreError::Deny] {
                 let cases = [
                     TrafficLimit {
@@ -150,7 +148,15 @@ async fn configuration_and_clock_errors_never_fail_open_or_mark_the_store_degrad
                     let error = check_traffic_limit(&runtime, point, mode, check(point))
                         .await
                         .unwrap_err();
-                    assert_eq!(error.code, ErrorCode::GatewayLimitConfigurationInvalid);
+                    assert_eq!(
+                        error.code,
+                        if state == 3 {
+                            ErrorCode::GatewayLimitConfigurationInvalid
+                        } else {
+                            ErrorCode::SystemInternal
+                        }
+                    );
+                    assert_eq!(error.status, http::StatusCode::INTERNAL_SERVER_ERROR);
                 }
             }
         }
@@ -162,13 +168,13 @@ async fn configuration_and_clock_errors_never_fail_open_or_mark_the_store_degrad
 async fn a_store_denial_is_a_successful_check_and_clears_only_its_own_degraded_point() {
     let state = Arc::new(AtomicU8::new(1));
     let runtime = runtime(&state);
-    for point in POINTS {
+    for &point in POINTS {
         check_traffic_limit(&runtime, point, OnStoreError::Allow, check(point))
             .await
             .unwrap();
     }
     state.store(5, Ordering::Relaxed);
-    for (index, point) in POINTS.into_iter().enumerate() {
+    for (index, point) in POINTS.iter().copied().enumerate() {
         assert!(
             !check_traffic_limit(&runtime, point, OnStoreError::Allow, check(point))
                 .await
@@ -176,7 +182,10 @@ async fn a_store_denial_is_a_successful_check_and_clears_only_its_own_degraded_p
                 .unwrap()
                 .is_allowed()
         );
-        assert_eq!(runtime.limit_store_health.is_degraded(), index < 4);
+        assert_eq!(
+            runtime.limit_store_health.is_degraded(),
+            index + 1 < POINTS.len()
+        );
     }
 }
 
@@ -264,8 +273,8 @@ fn degraded_state_survives_configuration_activation() {
     assert_eq!(gate.snapshot().ingress.on_store_error, OnStoreError::Deny);
 }
 
-#[test]
-fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions() {
+#[tokio::test]
+async fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions() {
     const CHILD: &str = "STARGATE_TEST_LIMIT_OBSERVABILITY";
     if std::env::var_os(CHILD).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -347,13 +356,13 @@ fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions() {
         tracing_subscriber::fmt()
             .json()
             .with_ansi(false)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::DEBUG)
             .with_writer(move || Capture(output.clone()))
             .finish(),
     )
     .unwrap();
     let health = Arc::new(LimitStoreHealth::default());
-    for point in POINTS {
+    for &point in POINTS {
         // Concurrent failures may race on the first transition; exactly one wins.
         std::thread::scope(|scope| {
             for _ in 0..8 {
@@ -368,7 +377,24 @@ fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions() {
         });
         health.success(point);
         health.success(point);
+        for _ in 0..20 {
+            health.failure(point, OnStoreError::Allow, "backend");
+            health.success(point);
+        }
     }
+    // Exercise the real backend-error branch so debug retains the cause while
+    // warning/recovery messages stay throttled independently of request count.
+    let mut runtime = runtime(&Arc::new(AtomicU8::new(1)));
+    Arc::get_mut(&mut runtime).unwrap().limit_store_health = health.clone();
+    check_traffic_limit(
+        &runtime,
+        LimitPoint::RateLimit,
+        OnStoreError::Allow,
+        check(LimitPoint::RateLimit),
+    )
+    .await
+    .unwrap();
+    health.success(LimitPoint::RateLimit);
     for code in [
         ErrorCode::GatewayIngressUnavailable,
         ErrorCode::GatewayLimiterUnavailable,
@@ -382,9 +408,19 @@ fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions() {
     provider.force_flush().unwrap();
     let samples = samples.lock().unwrap();
     assert_eq!(samples.len(), 10);
-    for point in POINTS {
+    for &point in POINTS {
         for outcome in ["allowed", "denied"] {
-            assert_eq!(samples[&(point.name().to_owned(), outcome.to_owned())], 64);
+            let expected = if outcome == "denied" {
+                64
+            } else if matches!(point, LimitPoint::RateLimit) {
+                85
+            } else {
+                84
+            };
+            assert_eq!(
+                samples[&(point.name().to_owned(), outcome.to_owned())],
+                expected
+            );
         }
     }
     let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
@@ -392,9 +428,16 @@ fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(logs.len(), 10, "{logs:?}");
-    for point in POINTS {
-        let entries: Vec<_> = logs
+    assert!(logs.iter().any(|log| log["level"] == "DEBUG"
+        && log["fields"]["message"] == "Limit store check failed"
+        && log["fields"]["error"] == "Backend error: unavailable"));
+    let transitions: Vec<_> = logs
+        .iter()
+        .filter(|log| log["level"] == "WARN" || log["level"] == "INFO")
+        .collect();
+    assert_eq!(transitions.len(), 10, "{transitions:?}");
+    for &point in POINTS {
+        let entries: Vec<_> = transitions
             .iter()
             .filter(|log| log["fields"]["point"] == point.name())
             .collect();
