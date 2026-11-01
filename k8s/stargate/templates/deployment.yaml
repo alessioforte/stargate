@@ -250,5 +250,12 @@ spec:
       {{- end }}
       {{- with .Values.topologySpreadConstraints }}
       topologySpreadConstraints:
-        {{- toYaml . | nindent 8 }}
+        {{- range . }}
+        {{- /* Values cannot name the release, so a constraint without a selector spreads this release's server pods. */}}
+        {{- $constraint := deepCopy . }}
+        {{- if not (hasKey $constraint "labelSelector") }}
+        {{- $_ := set $constraint "labelSelector" (dict "matchLabels" (include "stargate.selectorLabels" $ | fromYaml)) }}
+        {{- end }}
+        - {{- toYaml $constraint | nindent 10 }}
+        {{- end }}
       {{- end }}

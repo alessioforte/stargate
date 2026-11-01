@@ -55,7 +55,7 @@ stargate/
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
 │                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
-│                      #   gateway-performance (opt-in benchmarks and recorded results)
+│                      #   gateway-performance (opt-in benchmarks and recorded results), production-checklist
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
 ```
@@ -451,6 +451,12 @@ modified applied migration when a checksum differs.
 Migration pods use distinct labels and need their own egress
 policy when the namespace denies traffic by default. Old replicas keep serving
 during the migration, so schema changes must remain compatible with them.
+
+`values-production.yaml` is a hardening overlay for `values-traefik.yaml`
+(verified PostgreSQL/Redis TLS, super-admin MFA and step-up, admin allow-list,
+migration Job, node spread, `maxUnavailable: 1`); `docs/production-checklist.md`
+lists the remaining operator steps. Spread constraints without `labelSelector`
+get the release's server pod selector. Chart tests: `k8s/stargate/tests/`.
 
 ### Feature Flags
 

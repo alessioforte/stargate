@@ -1,0 +1,200 @@
+# Production overlay for pattern A. Apply it after the Traefik example:
+#
+#   helm upgrade --install stargate oci://ghcr.io/<owner>/charts/stargate \
+#     -f values-traefik.yaml -f values-production.yaml
+#
+# Maps merge with values-traefik.yaml; lists (networkPolicy rules, volumes)
+# replace it entirely. Replace every example hostname, CIDR, Secret and tag.
+# Checklist and rationale: docs/production-checklist.md.
+
+image:
+  # release.yml publishes the cluster image as ghcr.io/<owner>/stargate:<version>.
+  # Pin a released version; prefer an immutable digest in production.
+  repository: ghcr.io/alessioforte/stargate
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 3
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# One replica per node; spread across zones when the cluster has them. The
+# chart adds this release's pod selector to constraints without labelSelector.
+# DoNotSchedule on hostname needs at least replicaCount schedulable nodes.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+
+# Keep two of three replicas through node drains and upgrades.
+podDisruptionBudget:
+  enabled: true
+  # 0 clears the chart's default minAvailable (helm lint ignores null overrides).
+  minAvailable: 0
+  maxUnavailable: 1
+
+traefik:
+  # Admin API and Console only from operator networks (VPN, office egress).
+  adminAllowList:
+    enabled: true
+    sourceRange:
+      - 203.0.113.0/24
+    ipStrategyDepth: 0
+
+# Schema changes run once per install/upgrade with a DDL role; the runtime role
+# needs DML only. The Secret holds POSTGRES_USERNAME and POSTGRES_PASSWORD.
+migrations:
+  job:
+    enabled: true
+    existingSecret: stargate-migrations
+
+runtimeConfig:
+  data:
+    LOG_FORMAT: json
+    RUST_LOG: info
+
+    # PostgreSQL (CloudNativePG): verify the server certificate and hostname.
+    # CNPG creates the database, so Stargate must not try to.
+    POSTGRES_SSLMODE: verify-full
+    POSTGRES_SSLROOTCERT: /etc/stargate/postgres-ca/ca.crt
+    POSTGRES_CREATE_DATABASE: "false"
+
+    # Redis over TLS. REDIS_URL (rediss://...) and REDIS_PASSWORD go in the
+    # runtime Secret; REDIS_CA_FILE requires a rediss:// URL.
+    REDIS_CA_FILE: /etc/stargate/redis-ca/ca.crt
+
+    # Accounts and administrators.
+    SIGNUP_MODE: invite
+    PASSWORDLESS_LOGIN_ENABLED: "false"
+    MFA_MODE: optional
+    MFA_REQUIRED_FOR_SUPER_ADMIN: "true"
+    MFA_ADMIN_STEP_UP_REQUIRED: "true"
+
+    # Transactional email through an authenticated relay (SPF/DKIM configured
+    # for the sender domain). SMTP_USERNAME/SMTP_PASSWORD go in the Secret.
+    SMTP_HOST: smtp.example.com
+    SMTP_PORT: "587"
+    SMTP_FROM: Stargate <no-reply@example.com>
+
+    # Telemetry to the in-cluster collector (gRPC).
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://opentelemetry-collector.observability.svc.cluster.local:4317
+    OTEL_SERVICE_NAME: stargate
+
+# The existing Secret (from values-traefik.yaml) must contain at least:
+# POSTGRES_PASSWORD, REDIS_URL, REDIS_PASSWORD, PASSWORD_PEPPER,
+# EMAIL_OTP_PEPPER (required by the MFA settings above), SMTP_USERNAME and
+# SMTP_PASSWORD. Peppers are permanent: changing PASSWORD_PEPPER invalidates
+# every stored password hash.
+runtimeSecret:
+  existingSecret: stargate-runtime
+
+# CA bundles for the settings above. The CNPG CA Secret is <cluster>-ca.
+# Both are mounted in the server and in the migration Job.
+extraVolumes:
+  - name: postgres-ca
+    secret:
+      secretName: stargate-db-ca
+      items:
+        - key: ca.crt
+          path: ca.crt
+  - name: redis-ca
+    secret:
+      secretName: stargate-redis-ca
+      items:
+        - key: ca.crt
+          path: ca.crt
+extraVolumeMounts:
+  - name: postgres-ca
+    mountPath: /etc/stargate/postgres-ca
+    readOnly: true
+  - name: redis-ca
+    mountPath: /etc/stargate/redis-ca
+    readOnly: true
+
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 5050
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # CloudNativePG primary (read-write Service pods).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: database
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: stargate-db
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: database
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # External SMTP relay. Replace with the provider's documented ranges.
+    - to:
+        - ipBlock:
+            cidr: 198.51.100.0/24
+      ports:
+        - protocol: TCP
+          port: 587
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: backends
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 443
+    # Add external OAuth providers, client jwks_uri hosts and back-channel
+    # logout endpoints here if they are used.

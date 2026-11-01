@@ -46,7 +46,15 @@ applications will be hidden.
 
 ## Production cluster deployment
 
-Start from [values-cluster.yaml](values-cluster.yaml):
+For pattern A in production, layer [values-production.yaml](values-production.yaml)
+over [values-traefik.yaml](values-traefik.yaml) and work through the
+[production checklist](../../docs/production-checklist.md). The overlay verifies
+PostgreSQL and Redis certificates, requires MFA for super-admins, enables the admin
+allow-list and the migration Job, and spreads three replicas across nodes. A
+`topologySpreadConstraints` entry without `labelSelector` receives this release's
+server pod selector.
+
+For a minimal cluster without Traefik, start from [values-cluster.yaml](values-cluster.yaml):
 
 ```bash
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
@@ -703,6 +711,8 @@ helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --s
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true --set 'traefik.adminAllowList.sourceRange[0]=192.0.2.0/24'
 helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true --set 'traefik.adminAllowList.sourceRange[0]=192.0.2.0/24'
 python3 ./k8s/stargate/tests/test_admin_allowlist.py
+helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml -f ./k8s/stargate/values-production.yaml
+python3 ./k8s/stargate/tests/test_production_values.py
 # Expected failure: an enabled allow-list needs at least one source range.
 helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
