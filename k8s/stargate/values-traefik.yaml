@@ -1,4 +1,4 @@
-# Pattern A example: Traefik v3 in front of three cluster replicas.
+# Example: Traefik v3 in front of three cluster replicas.
 # Replace hostnames, image, Secrets, CIDRs, namespaces, labels, and ports.
 deployment:
   mode: cluster

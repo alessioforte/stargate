@@ -1,4 +1,4 @@
-# Production overlay for pattern A. Apply it after the Traefik example:
+# Production overlay for the Traefik example. Apply it after values-traefik.yaml:
 #
 #   helm upgrade --install stargate oci://ghcr.io/<owner>/charts/stargate \
 #     -f values-traefik.yaml -f values-production.yaml

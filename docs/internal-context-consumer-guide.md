@@ -64,7 +64,7 @@ Do not accept audience lists, wildcards, suffix matching, OAuth/OIDC keys, or a
 JWKS URL supplied by the token. The audience is a stable service identity, not
 a URL, hostname, pod name, router name, or environment-specific instance id.
 
-With pattern A, in-cluster consumers fetch the internal-context JWKS through
+When Traefik fronts Stargate, in-cluster consumers fetch the internal-context JWKS through
 Traefik using the public identity hostname, for example
 `https://identity.example.com/.well-known/stargate-context-jwks.json`.
 Resolve that hostname to Traefik using cluster DNS or pod `hostAliases`, while

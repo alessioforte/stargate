@@ -147,7 +147,7 @@ jobs:
           helm lint "$CHART" -f "$CHART/values-traefik.yaml" -f "$CHART/values-production.yaml"
           helm template edge "$CHART" > /dev/null
           helm template cluster "$CHART" -f "$CHART/values-cluster.yaml" > /dev/null
-          helm template pattern-a "$CHART" -f "$CHART/values-traefik.yaml" --set traefik.grpc.enabled=true > /dev/null
+          helm template traefik "$CHART" -f "$CHART/values-traefik.yaml" --set traefik.grpc.enabled=true > /dev/null
           helm template production "$CHART" -f "$CHART/values-traefik.yaml" -f "$CHART/values-production.yaml" > /dev/null
       - name: Expected rendering failures
         run: |

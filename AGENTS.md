@@ -175,7 +175,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `CONSOLE_ENABLED`, and each social provider (on when its client id and secret are both
   set; one alone stops startup). `GET /account/features` (public) lists the sign-in
   options for the hosted apps; `/admin/health` reports `features`.
-  Guide: `docs/features.md`; plan: `.reports/feature-toggles-plan.md`.
+  Guide: `docs/features.md`.
 
 ### Gateway Runtime (`src/gate/`)
 
@@ -424,9 +424,9 @@ the gateway config version. `# @id` / `# @description` comments above a rule are
 
 ### Kubernetes Deployment
 
-The Helm chart (`k8s/stargate`) optionally deploys pattern A routing through
-Traefik v3 `IngressRoute` resources (`traefik.enabled`, mutually exclusive with
-the standard Ingress). `values-traefik.yaml` is a three-replica cluster example
+The Helm chart (`k8s/stargate`) can route through Traefik v3 `IngressRoute`
+resources (`traefik.enabled`, mutually exclusive with the standard Ingress).
+`values-traefik.yaml` is a three-replica cluster example
 with ingress restricted to Traefik and explicit egress rules. The chart manages
 `IAM_HOSTS` from the identity host, `TRUSTED_PROXIES` from a nonempty peer list,
 and the four signer path/issuer/kid variables when `internalContext.enabled`,
@@ -434,7 +434,7 @@ mounting the existing signing Secret read-only. Active managed settings reject
 duplicates in runtimeConfig data and extraEnv. Optional gRPC routes use h2c with
 higher priority only on API hosts; the identity host, ordinary HTTP and WebSocket
 routes keep HTTP transport. Guide:
-`k8s/stargate/README.md`, "Pattern A: Traefik in front".
+`k8s/stargate/README.md`, "Traefik in front".
 
 An optional Traefik IP allow-list protects the identity host's `/admin` and
 `/stargate` prefixes. Its route takes priority over gRPC, and the public identity

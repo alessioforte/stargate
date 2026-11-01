@@ -1,4 +1,4 @@
-# Production checklist (Kubernetes, pattern A)
+# Production checklist (Kubernetes)
 
 Use this list before exposing a Stargate cluster deployment to real users. It
 assumes Traefik in front of three cluster replicas, CloudNativePG, and Redis,

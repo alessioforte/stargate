@@ -71,7 +71,7 @@ ingress:
           pathType: Prefix
   tls: []
 
-# Pattern A: Traefik v3 terminates TLS and forwards all hosts to Stargate.
+# Traefik v3 terminates TLS and forwards all hosts to Stargate.
 # Mutually exclusive with ingress.enabled. Traefik and its CRDs must exist.
 traefik:
   enabled: false

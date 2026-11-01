@@ -46,7 +46,7 @@ applications will be hidden.
 
 ## Production cluster deployment
 
-For pattern A in production, layer [values-production.yaml](values-production.yaml)
+For a production deployment behind Traefik, layer [values-production.yaml](values-production.yaml)
 over [values-traefik.yaml](values-traefik.yaml) and work through the
 [production checklist](../../docs/production-checklist.md). The overlay verifies
 PostgreSQL and Redis certificates, requires MFA for super-admins, enables the admin
@@ -167,7 +167,7 @@ ingress behavior during an outage.
 ## Multiple public hosts
 
 When an ingress forwards both `identity.example.com` and `api.example.com` to
-Stargate, enable the [Traefik integration](#pattern-a-traefik-in-front) below,
+Stargate, enable the [Traefik integration](#traefik-in-front) below,
 which manages `IAM_HOSTS` from `traefik.identityHost`. With another ingress
 controller, put `IAM_HOSTS: identity.example.com` in `runtimeConfig.data` and set
 `JWT_ISSUER` (or `OAUTH_BASE_URL`) to the public identity URL. The public base URL
@@ -181,7 +181,7 @@ API host go directly to gateway routing, including paths such as `/docs` and
 Leaving `IAM_HOSTS` unset or empty keeps IAM routes available on every host.
 Ingress host rules must forward each intended hostname to the Service.
 
-## Pattern A: Traefik in front
+## Traefik in front
 
 Traffic limits fail open on store errors/timeouts by default. Configure a
 Traefik rate-limit middleware as a safety net for Redis outages: the distributed
@@ -705,18 +705,18 @@ helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
 helm template edge ./k8s/stargate
 helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml
-helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
+helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.grpc.enabled=true
-helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.grpc.enabled=true
+helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.grpc.enabled=true
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true --set 'traefik.adminAllowList.sourceRange[0]=192.0.2.0/24'
-helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true --set 'traefik.adminAllowList.sourceRange[0]=192.0.2.0/24'
+helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true --set 'traefik.adminAllowList.sourceRange[0]=192.0.2.0/24'
 python3 ./k8s/stargate/tests/test_admin_allowlist.py
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml -f ./k8s/stargate/values-production.yaml
 python3 ./k8s/stargate/tests/test_production_values.py
 # Expected failure: an enabled allow-list needs at least one source range.
-helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true
+helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
-helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
+helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
 helm template cluster ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set gatewayConfig.importOnUpgrade=true
 helm lint ./k8s/stargate -f ./k8s/stargate/values-cluster.yaml --set migrations.job.enabled=true
@@ -727,7 +727,7 @@ helm template edge ./k8s/stargate --set migrations.job.enabled=true
 # Expected failure with a kubectl exec alternative:
 helm template edge ./k8s/stargate --set gatewayConfig.importOnUpgrade=true
 # Expected failure: choose one ingress integration.
-helm template pattern-a ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set ingress.enabled=true
+helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set ingress.enabled=true
 # Direct-Service probe for policies allowing the test pod:
 helm test stargate --namespace identity
 ```
