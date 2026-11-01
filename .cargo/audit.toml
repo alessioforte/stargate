@@ -1,0 +1,20 @@
+# cargo-audit configuration, used by `cargo audit` locally and in CI.
+# Every ignored advisory needs a reason and a condition for removing it.
+
+[advisories]
+ignore = [
+    # rsa 0.9 (Marvin attack): timing leaks in RSA *decryption*. Stargate only
+    # parses keys and signs/verifies JWTs (RS256) through rsa and jsonwebtoken;
+    # it never decrypts attacker-supplied RSA ciphertexts. No fixed 0.9 release.
+    # Remove when jsonwebtoken and crates/ctx move to an rsa release with the fix.
+    "RUSTSEC-2023-0071",
+    # crypto-bigint 0.5 timing variability, pulled by jsonwebtoken 11 through
+    # elliptic-curve 0.13 (p256/p384 0.13). It matters for ECDSA *signing* with
+    # an ES256/ES384 active key; RS256 (the default and the production setting
+    # in docs/production-checklist.md) is unaffected, and ECDSA verification uses
+    # only public data. Remove when jsonwebtoken depends on crypto-bigint >= 0.7.6.
+    "RUSTSEC-2026-0387",
+    # False positive: matches the crates.io crate named `jwt`, not the workspace
+    # path crate `crates/jwt`.
+    "RUSTSEC-2016-0007",
+]

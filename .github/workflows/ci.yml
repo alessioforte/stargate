@@ -61,3 +61,118 @@ jobs:
         run: cargo test --workspace --no-default-features --features ${{ matrix.profile }}
       - name: Clippy
         run: cargo clippy --workspace --all-targets --no-default-features --features ${{ matrix.profile }} -- -D warnings
+
+  postgres:
+    name: PostgreSQL integration tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stargate_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: postgres
+      # The repository tests marked #[ignore] that need a real PostgreSQL.
+      - name: Ignored crates/db tests
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/stargate_test
+        run: cargo test -p db --features postgres -- --ignored
+
+  apps:
+    name: app ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [console, auth, mail]
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.18.0
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      # High and critical advisories fail the build; lower ones are reviewed by hand.
+      - run: npm audit --audit-level=high
+      - name: Lint
+        if: matrix.app != 'mail'
+        run: npm run lint
+      - name: Build
+        if: matrix.app != 'mail'
+        # Same-origin API, as in the container image.
+        run: VITE_API_URL= npm run build
+      - name: Export email templates
+        if: matrix.app == 'mail'
+        run: npm run export
+
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CHART: k8s/stargate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.0
+      - name: Lint and render the example values
+        run: |
+          helm lint "$CHART"
+          helm lint "$CHART" -f "$CHART/values-cluster.yaml"
+          helm lint "$CHART" -f "$CHART/values-traefik.yaml"
+          helm lint "$CHART" -f "$CHART/values-traefik.yaml" -f "$CHART/values-production.yaml"
+          helm template edge "$CHART" > /dev/null
+          helm template cluster "$CHART" -f "$CHART/values-cluster.yaml" > /dev/null
+          helm template pattern-a "$CHART" -f "$CHART/values-traefik.yaml" --set traefik.grpc.enabled=true > /dev/null
+          helm template production "$CHART" -f "$CHART/values-traefik.yaml" -f "$CHART/values-production.yaml" > /dev/null
+      - name: Expected rendering failures
+        run: |
+          fails() { if helm template check "$CHART" "$@" > /dev/null 2>&1; then echo "expected failure: $*"; exit 1; fi; }
+          fails -f "$CHART/values-traefik.yaml" --set traefik.adminAllowList.enabled=true
+          fails --set migrations.job.enabled=true
+          fails --set gatewayConfig.importOnUpgrade=true
+          fails -f "$CHART/values-traefik.yaml" --set ingress.enabled=true
+      # test_migrations_job.py uses Ruby, preinstalled on GitHub's Ubuntu runners.
+      - name: Chart tests
+        run: for test in "$CHART"/tests/test_*.py; do python3 -I "$test"; done
+
+  audit:
+    name: Rust dependency audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: audit
+      - run: cargo install cargo-audit --locked
+      # Ignored advisories and their reasons live in .cargo/audit.toml.
+      - run: cargo audit
