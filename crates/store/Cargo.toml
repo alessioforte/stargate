@@ -7,21 +7,31 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-async-trait = "0.1.92"
-chrono = { version = "0.4.45", features = ["serde"] }
-dashmap = { version = "6.2.1", optional = true }
-lz4_flex = { version = "0.14", optional = true }
-portable-atomic = { version = "1.15.0", features = ["require-cas"] }
-redis = { version = "1.6.0", features = ["tokio-rustls-comp", "tls-rustls-webpki-roots", "connection-manager"], optional = true }
-rmp-serde = "1.3.1"
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "time"] }
-tracing = "0.1.44"
+async-trait = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+dashmap = { workspace = true, optional = true }
+lz4_flex = { workspace = true, optional = true }
+portable-atomic = { workspace = true, features = ["require-cas"] }
+redis = { workspace = true, optional = true, features = [
+    "tokio-rustls-comp",
+    "tls-rustls-webpki-roots",
+    "connection-manager",
+] }
+rmp-serde = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = [
+    "fs",
+    "io-util",
+    "macros",
+    "rt-multi-thread",
+    "time",
+] }
+tracing = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.8.2", features = ["async_tokio"] }
-env_logger = "0.11"
+criterion = { workspace = true, features = ["async_tokio"] }
+env_logger = { workspace = true }
 
 [features]
 default = []

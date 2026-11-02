@@ -1,5 +1,6 @@
 use super::*;
 use axum::{body::Body, response::Response};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::{
     convert::Infallible,
     sync::{
@@ -64,12 +65,10 @@ async fn plain_shutdown_deadline_drops_stalled_response_and_preserves_connect_in
 
 #[tokio::test]
 async fn shutdown_cancels_incomplete_inbound_tls_handshake() {
-    let certs = rustls_pemfile::certs(&mut &crate::gate::test_support::SERVER_CERT[..])
+    let certs = CertificateDer::pem_slice_iter(crate::gate::test_support::SERVER_CERT)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let key = rustls_pemfile::private_key(&mut &crate::gate::test_support::SERVER_KEY[..])
-        .unwrap()
-        .unwrap();
+    let key = PrivateKeyDer::from_pem_slice(crate::gate::test_support::SERVER_KEY).unwrap();
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))

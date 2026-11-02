@@ -1,9 +1,7 @@
 use std::sync::OnceLock;
 
-use argon2::{
-    Algorithm, Argon2, Params, Version,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
+use argon2::{Algorithm, Argon2, Params, Version};
+use password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash};
 
 /// Argon2 hashing configuration: cost parameters plus an optional pepper
 /// (applied as the Argon2 `secret`, keyed hashing). Defaults match
@@ -81,11 +79,11 @@ impl Hash {
     ///
     /// assert!(is_valid);
     /// ```
-    pub fn encode(value: &str) -> Result<String, argon2::password_hash::Error> {
+    pub fn encode(value: &str) -> Result<String, password_hash::Error> {
         Self::encode_with(config(), value)
     }
 
-    pub fn verify(value: &str, hash: &str) -> Result<(), argon2::password_hash::Error> {
+    pub fn verify(value: &str, hash: &str) -> Result<(), password_hash::Error> {
         Self::verify_for_login(value, hash).map(|_| ())
     }
 
@@ -93,10 +91,7 @@ impl Hash {
     /// is configured and the peppered check fails, an unpeppered check runs
     /// as a migration fallback for hashes that predate the pepper; a match
     /// there verifies successfully with `needs_rehash: true`.
-    pub fn verify_for_login(
-        value: &str,
-        hash: &str,
-    ) -> Result<Verification, argon2::password_hash::Error> {
+    pub fn verify_for_login(value: &str, hash: &str) -> Result<Verification, password_hash::Error> {
         Self::verify_for_login_with(config(), value, hash)
     }
 
@@ -120,14 +115,11 @@ impl Hash {
             .any(|hash| Self::verify(value, hash).is_ok())
     }
 
-    fn encode_with(
-        config: &HashConfig,
-        value: &str,
-    ) -> Result<String, argon2::password_hash::Error> {
-        let salt = SaltString::generate(&mut OsRng);
-        let hash = hasher(config)?
-            .hash_password(value.as_bytes(), &salt)?
-            .to_string();
+    fn encode_with(config: &HashConfig, value: &str) -> Result<String, password_hash::Error> {
+        // `password-hash` 0.6 generates the salt internally (the `getrandom`
+        // feature that `pw` enables on it) and returns the PHC string on
+        // `Display`.
+        let hash = hasher(config)?.hash_password(value.as_bytes())?.to_string();
         Ok(hash)
     }
 
@@ -135,7 +127,7 @@ impl Hash {
         config: &HashConfig,
         value: &str,
         hash: &str,
-    ) -> Result<Verification, argon2::password_hash::Error> {
+    ) -> Result<Verification, password_hash::Error> {
         let parsed = PasswordHash::new(hash)?;
 
         match hasher(config)?.verify_password(value.as_bytes(), &parsed) {
@@ -170,7 +162,7 @@ impl Hash {
     }
 }
 
-fn hasher(config: &HashConfig) -> Result<Argon2<'_>, argon2::password_hash::Error> {
+fn hasher(config: &HashConfig) -> Result<Argon2<'_>, password_hash::Error> {
     match &config.pepper {
         Some(pepper) => Argon2::new_with_secret(
             pepper.as_bytes(),
@@ -178,7 +170,7 @@ fn hasher(config: &HashConfig) -> Result<Argon2<'_>, argon2::password_hash::Erro
             Version::V0x13,
             config.params.clone(),
         )
-        .map_err(argon2::password_hash::Error::from),
+        .map_err(password_hash::Error::from),
         None => Ok(Argon2::new(
             Algorithm::Argon2id,
             Version::V0x13,
@@ -261,6 +253,25 @@ mod tests {
         let config = weak_config(None);
         assert!(Hash::needs_rehash_with(&config, "not-a-hash"));
         assert!(Hash::verify_for_login_with(&config, "x", "not-a-hash").is_err());
+    }
+
+    #[test]
+    fn hashes_from_argon2_0_5_still_verify() {
+        // Persisted credentials carry these PHC strings; they are re-encoded
+        // only after a successful login, so they must keep verifying across
+        // the argon2/password-hash 0.5 -> 0.6 upgrade.
+        const DEFAULT_PARAMS: &str = "$argon2id$v=19$m=19456,t=2,p=1$IE109ZPGy9fMa9+ZlJF6iw$cLTYS6+OhaWWyB5zTVtXSCFHw012EGu3nsvFXv0anew";
+        const WEAK_PARAMS: &str = "$argon2id$v=19$m=1024,t=1,p=1$GnPVzqtcR21Gyb0h+laY9w$mxwLUHBJhQgcyJXAVdBkzBQF/Onzo47ymVAFq5S1v4s";
+
+        let standard = HashConfig::standard();
+
+        let ok =
+            Hash::verify_for_login_with(&standard, "compat-password-1!", DEFAULT_PARAMS).unwrap();
+        assert!(!ok.needs_rehash);
+        assert!(Hash::verify_for_login_with(&standard, "wrong-password", DEFAULT_PARAMS).is_err());
+
+        let ok = Hash::verify_for_login_with(&standard, "compat-password-1!", WEAK_PARAMS).unwrap();
+        assert!(ok.needs_rehash);
     }
 
     #[test]

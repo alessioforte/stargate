@@ -26,7 +26,7 @@ pub enum TransportPreparationError {
     Pem {
         kind: &'static str,
         #[source]
-        source: std::io::Error,
+        source: rustls::pki_types::pem::Error,
     },
     #[error("{kind} file must contain at least one certificate")]
     EmptyCertificates { kind: &'static str },

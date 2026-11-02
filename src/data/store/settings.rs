@@ -2,7 +2,8 @@
 
 use anyhow::{Context, Result, bail};
 use redis::{ConnectionAddr, ConnectionInfo, IntoConnectionInfo, TlsCertificates};
-use std::{io::Cursor, path::Path};
+use rustls::pki_types::{CertificateDer, pem::PemObject};
+use std::path::Path;
 
 fn connection_info(
     url: &str,
@@ -34,8 +35,8 @@ fn connection_info(
 
 fn read_ca(path: &Path) -> Result<Vec<u8>> {
     let pem = std::fs::read(path).context("cannot read REDIS_CA_FILE")?;
-    let certs = rustls_pemfile::certs(&mut Cursor::new(&pem))
-        .collect::<std::io::Result<Vec<_>>>()
+    let certs = CertificateDer::pem_slice_iter(&pem)
+        .collect::<Result<Vec<_>, _>>()
         .context("REDIS_CA_FILE is not a valid PEM certificate bundle")?;
     if certs.is_empty() {
         bail!("REDIS_CA_FILE must contain at least one PEM certificate");

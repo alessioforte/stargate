@@ -1,5 +1,6 @@
 use super::*;
 use crate::gate::test_support::{CA, CLIENT_CERT, CLIENT_KEY, SERVER_CERT, SERVER_KEY, TlsFiles};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 
 #[test]
 fn valid_mtls_and_default_transports_prepare() {
@@ -252,7 +253,7 @@ async fn http_probes_use_http2_for_http2_only_upstreams_with_and_without_tls() {
         let acceptor = use_tls.then(|| {
             let provider = Arc::new(rustls::crypto::ring::default_provider());
             let mut roots = rustls::RootCertStore::empty();
-            for cert in rustls_pemfile::certs(&mut &CA[..]) {
+            for cert in CertificateDer::pem_slice_iter(CA) {
                 roots.add(cert.unwrap()).unwrap();
             }
             let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
@@ -261,12 +262,10 @@ async fn http_probes_use_http2_for_http2_only_upstreams_with_and_without_tls() {
             )
             .build()
             .unwrap();
-            let certs = rustls_pemfile::certs(&mut &SERVER_CERT[..])
+            let certs = CertificateDer::pem_slice_iter(SERVER_CERT)
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-            let key = rustls_pemfile::private_key(&mut &SERVER_KEY[..])
-                .unwrap()
-                .unwrap();
+            let key = PrivateKeyDer::from_pem_slice(SERVER_KEY).unwrap();
             let mut tls = rustls::ServerConfig::builder_with_provider(provider)
                 .with_safe_default_protocol_versions()
                 .unwrap()

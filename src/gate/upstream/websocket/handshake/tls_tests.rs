@@ -5,7 +5,8 @@ use crate::gate::test_support::{CA, CLIENT_CERT, SERVER_CERT, SERVER_KEY, TlsFil
 use crate::gate::upstream::websocket::test_support::{execution, runtime};
 use futures_util::{SinkExt, StreamExt};
 use http::header::ORIGIN;
-use std::{io::BufReader, sync::Arc, time::Duration};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+use std::{sync::Arc, time::Duration};
 use tokio::{
     net::TcpListener,
     sync::mpsc,
@@ -37,7 +38,7 @@ impl TlsUpstream {
     async fn start() -> Self {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let mut roots = rustls::RootCertStore::empty();
-        for cert in rustls_pemfile::certs(&mut BufReader::new(CA)) {
+        for cert in CertificateDer::pem_slice_iter(CA) {
             roots.add(cert.unwrap()).unwrap();
         }
         let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
@@ -46,12 +47,10 @@ impl TlsUpstream {
         )
         .build()
         .unwrap();
-        let chain = rustls_pemfile::certs(&mut BufReader::new(SERVER_CERT))
+        let chain = CertificateDer::pem_slice_iter(SERVER_CERT)
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let key = rustls_pemfile::private_key(&mut BufReader::new(SERVER_KEY))
-            .unwrap()
-            .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(SERVER_KEY).unwrap();
         let mut tls = rustls::ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
             .unwrap()
@@ -197,9 +196,7 @@ async fn prepared_websocket_tls_uses_private_ca_identity_target_name_and_pinned_
     assert_eq!(captured.alpn.as_deref(), Some(b"http/1.1".as_slice()));
     assert_eq!(
         captured.client_cert,
-        rustls_pemfile::certs(&mut BufReader::new(CLIENT_CERT))
-            .next()
-            .unwrap()
+        CertificateDer::from_pem_slice(CLIENT_CERT)
             .unwrap()
             .to_vec()
     );

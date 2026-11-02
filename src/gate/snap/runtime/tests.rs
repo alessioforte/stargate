@@ -8,9 +8,9 @@ use http::{Request, Response, StatusCode};
 use http_body_util::BodyExt;
 use hyper::{server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::{
     convert::Infallible,
-    io::BufReader,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -33,7 +33,7 @@ impl MtlsUpstream {
     async fn generation(use_tls: bool, label: &'static str) -> Self {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let mut roots = rustls::RootCertStore::empty();
-        for cert in rustls_pemfile::certs(&mut BufReader::new(CA)) {
+        for cert in CertificateDer::pem_slice_iter(CA) {
             roots.add(cert.unwrap()).unwrap();
         }
         let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
@@ -42,12 +42,10 @@ impl MtlsUpstream {
         )
         .build()
         .unwrap();
-        let certificates = rustls_pemfile::certs(&mut BufReader::new(SERVER_CERT))
+        let certificates = CertificateDer::pem_slice_iter(SERVER_CERT)
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let key = rustls_pemfile::private_key(&mut BufReader::new(SERVER_KEY))
-            .unwrap()
-            .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(SERVER_KEY).unwrap();
         let tls = rustls::ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
             .unwrap()

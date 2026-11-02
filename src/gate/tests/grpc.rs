@@ -9,6 +9,7 @@ use hyper_util::{
     rt::TokioExecutor,
 };
 use lb::LoadBalancer;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::{sync::Arc, time::Duration};
 use tokio::{net::TcpListener, task::JoinHandle};
 use tonic_health::{
@@ -196,16 +197,11 @@ async fn grpc_probe_uses_prepared_upstream_mtls() {
         listener.local_addr().unwrap().port()
     );
     let address = listener.local_addr().unwrap();
-    let certificates = rustls_pemfile::certs(&mut &test_support::SERVER_CERT[..])
+    let certificates = CertificateDer::pem_slice_iter(test_support::SERVER_CERT)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let key = rustls_pemfile::private_key(&mut &test_support::SERVER_KEY[..])
-        .unwrap()
-        .unwrap();
-    let ca = rustls_pemfile::certs(&mut &test_support::CA[..])
-        .next()
-        .unwrap()
-        .unwrap();
+    let key = PrivateKeyDer::from_pem_slice(test_support::SERVER_KEY).unwrap();
+    let ca = CertificateDer::from_pem_slice(test_support::CA).unwrap();
     let mut roots = rustls::RootCertStore::empty();
     roots.add(ca).unwrap();
     let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots.clone()))
@@ -254,12 +250,10 @@ async fn grpc_probe_uses_prepared_upstream_mtls() {
         url: url.clone(),
         task,
     };
-    let client_cert = rustls_pemfile::certs(&mut &test_support::CLIENT_CERT[..])
+    let client_cert = CertificateDer::pem_slice_iter(test_support::CLIENT_CERT)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let client_key = rustls_pemfile::private_key(&mut &test_support::CLIENT_KEY[..])
-        .unwrap()
-        .unwrap();
+    let client_key = PrivateKeyDer::from_pem_slice(test_support::CLIENT_KEY).unwrap();
     let client_tls = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))

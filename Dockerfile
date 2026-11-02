@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG RUST_VERSION=1.96.0
-ARG NODE_VERSION=22.18.0
+ARG NODE_VERSION=22.23.4
 ARG CARGO_CHEF_VERSION=0.1.77
 ARG APP_NAME=stargate
 ARG STARGATE_PROFILE=edge
@@ -46,15 +46,15 @@ ARG CARGO_CHEF_VERSION
 WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates \
-        clang \
-        curl \
-        libssl-dev \
-        pkg-config && \
+    ca-certificates \
+    clang \
+    curl \
+    libssl-dev \
+    pkg-config && \
     rm -rf /var/lib/apt/lists/* && \
     cargo install cargo-chef \
-        --locked \
-        --version "${CARGO_CHEF_VERSION}"
+    --locked \
+    --version "${CARGO_CHEF_VERSION}"
 
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
@@ -68,21 +68,21 @@ ARG APP_NAME
 ARG STARGATE_PROFILE
 COPY --from=planner /app/recipe.json ./recipe.json
 RUN case "${STARGATE_PROFILE}" in \
-        edge|cluster) ;; \
-        *) echo "Unsupported STARGATE_PROFILE: ${STARGATE_PROFILE}" >&2; exit 1 ;; \
+    edge|cluster) ;; \
+    *) echo "Unsupported STARGATE_PROFILE: ${STARGATE_PROFILE}" >&2; exit 1 ;; \
     esac && \
     cargo chef cook --release --recipe-path recipe.json \
-        -p "${APP_NAME}" \
-        --no-default-features \
-        --features "${STARGATE_PROFILE}"
+    -p "${APP_NAME}" \
+    --no-default-features \
+    --features "${STARGATE_PROFILE}"
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
 COPY src ./src
 RUN cargo build --release \
-        -p "${APP_NAME}" \
-        --no-default-features \
-        --features "${STARGATE_PROFILE}" && \
+    -p "${APP_NAME}" \
+    --no-default-features \
+    --features "${STARGATE_PROFILE}" && \
     cp "./target/release/${APP_NAME}" /bin/server
 
 FROM debian:bookworm-slim AS final
@@ -92,7 +92,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid 10001 stargate && \
     useradd --uid 10001 --gid 10001 --no-create-home \
-        --home-dir /app --shell /usr/sbin/nologin stargate
+    --home-dir /app --shell /usr/sbin/nologin stargate
 
 WORKDIR /app
 RUN mkdir -p .stargate && chown stargate:stargate .stargate

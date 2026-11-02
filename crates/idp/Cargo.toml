@@ -7,11 +7,22 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2", "charset", "form"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-tracing = "0.1.44"
-url = "2.5.8"
+reqwest = { workspace = true, features = [
+    "rustls",
+    "json",
+    "http2",
+    "charset",
+    "form",
+] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+    "io-util",
+    "macros",
+    "net",
+    "rt-multi-thread",
+] }

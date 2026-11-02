@@ -7,19 +7,26 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-ahash = "0.8"
-async-trait = "0.1.92"
-chrono = "0.4.45"
-dashmap = "6.2.1"
-http = "1"
-http-body-util = "0.1"
-rand = "0.10.2"
-reqwest = "0.13.4"
-tokio = "1.53.1"
-tracing = "0.1.44"
+ahash = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+dashmap = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+rand = { workspace = true }
+# Health probes are plain clients: keep reqwest's own defaults explicit
+# (default-tls resolves to rustls in reqwest 0.13).
+reqwest = { workspace = true, features = [
+    "default-tls",
+    "charset",
+    "http2",
+    "system-proxy",
+] }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-criterion = "0.8.2"
+criterion = { workspace = true }
 
 [[bench]]
 name = "select"

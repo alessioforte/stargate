@@ -7,18 +7,23 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-async-trait = "0.1.92"
-rand = "0.10.2"
-redis = { version = "1.6.0", features = ["tokio-rustls-comp", "tls-rustls-webpki-roots", "connection-manager"] }
-serde = { version = "1.0.229", features = ["derive"] }
-store = { path = "../store" }
-thiserror = "2.0.20"
-tracing = "0.1.44"
+async-trait = { workspace = true }
+rand = { workspace = true }
+# Redis is only used by the `redis` backend; edge builds must not compile it.
+redis = { workspace = true, optional = true, features = [
+    "tokio-rustls-comp",
+    "tls-rustls-webpki-roots",
+    "connection-manager",
+] }
+serde = { workspace = true }
+store = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 default = []
 memory = ["store/memory"]
-redis = ["store/redis"]
+redis = ["dep:redis", "store/redis"]
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

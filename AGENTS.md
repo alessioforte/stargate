@@ -4,6 +4,7 @@
 
 IAM server + API gateway + OAuth 2.0 / OpenID Connect provider in Rust. Single
 binary, two deployment profiles:
+
 - **Edge**: SQLite + in-memory store (single node)
 - **Cluster**: PostgreSQL + Redis (horizontally scalable)
 
@@ -61,6 +62,7 @@ stargate/
 ```
 
 Module boundaries in `src/` (each top-level name is 3-4 characters):
+
 - `main.rs` composes the subsystems; `api` (HTTP) and `cli` invoke them.
 - A function lives with the subsystem whose rules it implements; there are no
   catch-all modules (`utils`, `helpers`, `common`). Prefer private modules and a few
@@ -81,6 +83,7 @@ Module boundaries in `src/` (each top-level name is 3-4 characters):
 ## Key Architecture
 
 ### Stack
+
 - **Runtime**: Tokio (multi-threaded)
 - **HTTP server**: Axum 0.8 on Hyper 1 (hyper-util), one tracked connection loop for plain HTTP and TLS
 - **Middleware**: tower + tower-http (cors, compression-gzip, trace, normalize-path)
@@ -88,7 +91,7 @@ Module boundaries in `src/` (each top-level name is 3-4 characters):
 - **TLS**: rustls + tokio-rustls + hyper-rustls (ring provider)
 - **DB**: sqlx (feature-gated `postgres` or `sqlite`)
 - **Auth**: JWT (jsonwebtoken), Argon2 passwords, RSA/HMAC signing
-- **Serialization**: serde_json, serde_yaml_bw, MessagePack
+- **Serialization**: serde_json, serde-saphyr, MessagePack
 - **OpenAPI**: utoipa
 - **Observability**: tracing + OpenTelemetry (OTLP traces, metrics, logs)
 
@@ -181,6 +184,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 
 `gate::init` builds the runtime; `gate::service` is mounted as the Axum
 `fallback_service`. Request flow:
+
 1. Pin the active `RuntimeSnapshot` (graph, balancers, limiter, prepared clients,
    version) and the independent `PolicySnapshot` (ACE engine + revision); acquire
    process admission (`503 gateway.overloaded` when exhausted).
@@ -473,6 +477,7 @@ Compile-time backend selection, mutually exclusive. No runtime backend branching
 Admin-managed clients only (no dynamic registration).
 
 Source layout:
+
 - `crates/oidc`: pure provider logic (no Axum or DB driver dependency).
 - `src/iam/oidc`: provider state on the selected store (authorization codes + PKCE check
   in `codes.rs`, refresh families in `refresh.rs`, parked requests and their consent/
@@ -490,6 +495,7 @@ Source layout:
 - `src/api/admin/oauth_clients.rs`: client CRUD.
 
 Endpoints:
+
 - `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration`,
   `/.well-known/jwks.json`
 - `GET`/`POST /oauth/authorize`
@@ -502,6 +508,7 @@ Endpoints:
 - `/admin/oauth/clients/*`
 
 Provider login (one login UI, the hosted auth app):
+
 - `/oauth/authorize` without a usable session parks the request under
   `oauth:authorize-interaction:{id}` (10 min) and redirects to
   `/auth/login?return_to=<issuer>/oauth/authorize?interaction={id}` (+ `login_hint`),
@@ -519,6 +526,7 @@ Provider login (one login UI, the hosted auth app):
 - SPA `return_to` is restricted to in-app paths and the page/API origins (`safeReturnTo`).
 
 Consent (`src/api/oidc/consent.rs`, SPA `app/routes/consent.tsx`, JS only):
+
 - Non-first-party clients need an active `oauth_consents` row covering the requested
   scopes/audience. Otherwise (or with `prompt=consent`) the request is re-parked with a
   `ConsentStage` bound to the signed-in user and the browser goes to
@@ -537,6 +545,7 @@ Consent (`src/api/oidc/consent.rs`, SPA `app/routes/consent.tsx`, JS only):
 
 Logout (`src/api/oidc/logout.rs`, RP-Initiated Logout 1.0; `iam/oidc/backchannel_logout.rs`,
 Back-Channel Logout 1.0):
+
 - `/oauth/logout` takes `id_token_hint` (may be expired), `client_id`,
   `post_logout_redirect_uri` (exact match against the client's
   `post_logout_redirect_uris`), and `state`. Invalid hint, unregistered or client-less
@@ -558,6 +567,7 @@ Back-Channel Logout 1.0):
   `post_logout_redirect_uri`.
 
 Authorization request handling:
+
 - Errors after the client and `redirect_uri` are verified are redirected with
   OAuth codes (`invalid_request`, `unsupported_response_type`, `unauthorized_client`,
   `invalid_scope`, `login_required`, `consent_required`, `interaction_required`,
@@ -580,6 +590,7 @@ Authorization request handling:
 - A replayed authorization code revokes the access token and refresh family it issued.
 
 Signing keys (`src/iam/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
+
 - `.stargate/jwks/keys/<kid>/{private.pem,public.pem,alg}`; `JWT_KID` is the active
   key (signs). Every other dir is verification-only: published in the JWKS (active
   first) and accepted for tokens with its `kid`. Verification picks the key by `kid`
@@ -590,7 +601,7 @@ Signing keys (`src/iam/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
   `alg` is inferred from the public key when absent. Tokens without a known `kid` are
   rejected. `JWT_ALGORITHM` mismatch with the active key fails startup.
 - Rotation: generate next key + restart (published), wait JWKS cache, set `JWT_KID`
-  + restart, remove the old dir after `JWT_REFRESH_EXP`. HMAC (`HS*`) is single-key.
+  - restart, remove the old dir after `JWT_REFRESH_EXP`. HMAC (`HS*`) is single-key.
 - ID tokens: `JWT_ID_TOKEN_KID` names an RS256 key (loaded with its private key,
   `JwtConfig::with_id_token_key`) that signs only ID tokens; discovery advertises
   `id_token_algorithm()`. Works with an EC or HMAC active key. Without it a non-RS256
@@ -605,6 +616,7 @@ Grants: `client_credentials`, Authorization Code + PKCE (`S256`), `refresh_token
 with opaque rotating families.
 
 Scopes/claims:
+
 - `openid`: `sub`
 - `email`: `email`, `email_verified` (in userinfo and the ID token)
 - `profile`: `name`, `given_name`, `family_name`, `nickname`, `preferred_username`,
@@ -615,6 +627,7 @@ Scopes/claims:
   `auth_time`; codes and refresh families keep the grant's `Authentication`.
 
 Provider state:
+
 - SQL: `oauth_clients`, `oauth_consents`.
 - Store: `oauth:authorization-code:{code_hash}` (pending/redeemed, TTL),
   `oauth:refresh-family:{family_id}` (CAS rotation), `oauth:authorize-interaction:{id}`,
@@ -622,6 +635,7 @@ Provider state:
   replay, until `exp`), and JWT `jti` revocations until expiry.
 
 Client notes:
+
 - Client secrets are returned only on create/rotate and stored as hashes.
 - Logout metadata are columns (`post_logout_redirect_uris`, same rules as
   `redirect_uris`; `backchannel_logout_uri`, absolute HTTPS or loopback HTTP, no
@@ -662,6 +676,7 @@ Docs: `docs/oauth-oidc-provider-guide.md`, `docs/oidc-conformance.md`.
 ## OTP, Passwordless Login, and MFA
 
 Source layout:
+
 - `crates/otp`: HOTP (RFC 4226), TOTP (RFC 6238), Base32, provisioning URIs,
   short-lived message OTP records for email/SMS.
 - `src/iam/otp`: policy evaluation, challenge persistence, verification, delivery,
@@ -673,6 +688,7 @@ Source layout:
 - `src/api/account/otp`: thin Axum/OpenAPI bindings.
 
 Account endpoints:
+
 - `POST /account/login/otp/email` - start passwordless email OTP (generic response for unknown users).
 - `PUT /account/login/otp/email` - verify and issue a session when MFA policy allows passwordless.
   Both need `PASSWORDLESS_LOGIN_ENABLED=true` (default off: `404 feature.disabled`); turning
@@ -684,11 +700,13 @@ Account endpoints:
   adds the factor to the session (`amr`), which the OIDC step-up relies on.
 
 Login behavior:
+
 - `POST /account/login` verifies the password first; if MFA is required it returns
   `202` with `mfaRequired`, `challengeId`, method, expiry, TTL, max attempts.
 - Passwordless email OTP is disabled when MFA is required (no single-factor downgrade).
 
 MFA policy:
+
 - `MFA_MODE`: `off`, `optional`, `required`. In `optional`, users opt in with
   `users.attrs.mfa.enabled = true`; super-admins need MFA when
   `MFA_REQUIRED_FOR_SUPER_ADMIN=true`.
@@ -730,6 +748,7 @@ resent, bounded by the per-recipient throttle, so a failed delivery can be retri
 
 Account creation (`SIGNUP_MODE`, `src/conf/features.rs`; administrators can always use
 `POST /admin/users`):
+
 - `open`: self-registration (`POST /signup`) and accounts created by a first social
   sign-in, limited to `SIGNUP_ALLOWED_DOMAINS` when set (exact domains; rejected with
   other modes; `403 signup.domain_not_allowed`).
@@ -766,6 +785,7 @@ creates the base schema; later forward migrations extend it.
 
 User identity (`crates/db/src/ent/user.rs`, enforced by the users repository on
 every insert/update):
+
 - `email` and `nickname` are stored canonical (trimmed, lowercased:
   `canonical_email` / `canonical_nickname`) and looked up the same way, so one
   mailbox or handle is one account whatever the casing.
@@ -790,7 +810,7 @@ every insert/update):
   `<login>_2` ... `_9`, then `<login>_<random>`, then the email
   (`iam::user::nicknames::available_nickname`; GitHub usernames have no `_`). A nickname
   taken between the check and the insert is retried (`src/api/social/github.rs`).
-Store keys derived from emails use the canonical form too.
+  Store keys derived from emails use the canonical form too.
 
 IDs are ULIDs stored as text. `outbox_events` holds the immutable JSON payload,
 `seq`, optional `operation_id`, `created_at`, and nullable `published_at`, with
@@ -798,69 +818,69 @@ the same logical columns on PostgreSQL and SQLite.
 
 ## Key Env Vars
 
-| Var | Default | Purpose |
-|-----|---------|---------|
-| `CONFIG_PATH` | `.stargate` | Directory for gateway/policy seed files; also holds other runtime assets |
-| `CONFIG_FILENAME` | `config.yaml` | Gateway seed filename, used only when its database document is absent |
-| `CONFIG_SYNC_INTERVAL_SECS` | 30 | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup |
-| `PORT` | 5050 | HTTP listen port |
-| `STARGATE_RUNTIME_PROFILE` | - | `edge` or `cluster` (validated against the build) |
-| `JWT_ALGORITHM` | active key / `RS256` | Must match the active key when set; picks the first generated key |
-| `JWT_SECRET` | - | HMAC key for HS* algorithms |
-| `JWT_ISSUER` | `http://localhost:$PORT` | JWT and OAuth/OIDC issuer |
-| `JWT_KID` | `stargate-current` | Active signing key (`.stargate/jwks/keys/<kid>/`) |
-| `JWT_ID_TOKEN_KID` | - | Optional RS256 key that signs ID tokens (EC or HMAC active key) |
-| `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP` | 1h / 1d | Token TTLs |
-| `OAUTH_BASE_URL` | issuer | Public base URL (`conf::public_base_url`): provider endpoints, email links, OpenAPI `servers` |
-| `IAM_HOSTS` | all hosts | Comma-separated IAM hostnames, case-insensitive, without schemes, ports, paths, or wildcards; must include the public base URL host |
-| `JWKS_CACHE_MAX_AGE_SECS` | 300 | JWKS cache max-age |
-| `OAUTH_CLIENT_CA_FILE` | - | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`) |
-| `INTERNAL_CONTEXT_*` | see `.env.example` | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue |
-| `POSTGRES_ENDPOINT` | localhost:5432 | Cluster DB endpoint: host, host:port, [ipv6], or [ipv6]:port; invalid endpoints stop startup |
-| `POSTGRES_USERNAME` / `_PASSWORD` / `_DATABASE` | root / root / stargate | PostgreSQL fields passed directly to sqlx; no URL encoding |
-| `POSTGRES_SSLMODE` | prefer | disable, prefer, require, verify-ca, or verify-full; other values stop startup |
-| `POSTGRES_SSLROOTCERT` | - | Private root CA PEM path for PostgreSQL TLS |
-| `POSTGRES_CREATE_DATABASE` | true | true/false; false skips maintenance DB access and CREATE DATABASE |
-| `DB_POOL_MAX` | 20 | Maximum connections in each SQL pool |
-| `DB_MIGRATE_ON_START` | true | true/false; false checks the schema without migrating; run `stargate db migrate` separately |
-| `REDIS_URL` | redis://localhost:6379 | Redis endpoint; `rediss://` verifies the server and hostname |
-| `REDIS_USERNAME` / `REDIS_PASSWORD` | - | Optional ACL credentials, passed without URL encoding; cannot be combined with URL credentials |
-| `REDIS_CA_FILE` | - | Private CA PEM roots for `rediss://`; replace public roots |
-| `RUST_LOG` | - | Tracing/log filter directives |
-| `LOG_FORMAT` | pretty (debug), json (release) | Console format: json, compact, or pretty; invalid values stop logging initialization |
-| `LOG_CONSOLE_ENABLED` | true | Log to stdout; stays enabled if both sinks are disabled |
-| `LOG_FILE_ENABLED` | false | Enable optional JSON log files |
-| `LOG_DIR` | .stargate/logs | Directory used only when file logging is enabled |
-| `OTEL_ENABLED` | auto | OTLP export; on when an endpoint is set |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` / `_PROTOCOL` | - / grpc | OTLP target (per-signal overrides exist) |
-| `AUDIT_RELAY_ENABLED` | true | Run the outbox relay (cluster) |
-| `AUDIT_RELAY_BATCH` / `AUDIT_RELAY_INTERVAL_MS` | 256 / 1000 | Relay batch size / idle poll |
-| `AUDIT_REDIS_STREAM` | audit.raw | Redis stream for raw audit events |
-| `AUDIT_STREAM_MAXLEN` | 100000 | Approx stream cap (`MAXLEN ~`; 0 = unbounded) |
-| `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY` | false | Listener TLS; with it off, an `https://` public base URL still marks the deployment HTTPS |
-| `TRUSTED_PROXIES` | - | Proxy IP/CIDRs allowed to set client IP headers |
-| `CORS_ORIGINS` | - | Allowed CORS origins |
-| `TRUSTED_ORIGINS` | - | Trusted browser origins for sensitive IAM endpoints |
-| `GEOIP_DB_PATH` | - | MaxMind GeoLite2 |
-| `SERVER_DRAIN_DELAY_SECS` | 5 | Readiness-off delay before listeners close |
-| `SERVER_SHUTDOWN_TIMEOUT_SECS` | 25 | Connection drain deadline |
-| `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH` | `.stargate/apps/auth` / `/auth` | Hosted auth app files and mount (empty or `/` = default) |
-| `AUTH_PUBLIC_BASE_URL` | - | Public auth app URL when hosted elsewhere |
-| `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH` | `.stargate/apps/console` / `/stargate` | Console files and mount (empty or `/` = default) |
-| `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS` | invite / - | Who may create accounts (`open`, `invite`, `closed`); domains for `open` |
-| `PASSWORDLESS_LOGIN_ENABLED` | false | Passwordless email-code login (needs `EMAIL_OTP_PEPPER`; not with `MFA_MODE=required`) |
-| `CONSOLE_ENABLED` | true | Serve the Console app (`false`: its path answers `404 feature.disabled`) |
-| `CONSOLE_OAUTH_CLIENT_ID` | stargate_console | Reserved Console OAuth client |
-| `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL` | derived | Console callback / origin |
-| `EMAIL_OTP_PEPPER`, `EMAIL_OTP_LENGTH`, `EMAIL_OTP_TTL_SECS`, `EMAIL_OTP_MAX_ATTEMPTS` | -, 6, 300, 5 | Email OTP |
-| `MFA_MODE` | optional | `off`, `optional`, `required` |
-| `MFA_METHODS` / `MFA_DEFAULT_METHOD` / `MFA_EMAIL_ENABLED` | email / email / true | MFA methods |
-| `MFA_REQUIRED_FOR_SUPER_ADMIN` | false | MFA for super-admins in `optional` mode |
-| `MFA_ADMIN_STEP_UP_REQUIRED` / `MFA_STEP_UP_TTL_SECS` | false / 300 | Admin step-up |
-| `PASSWORD_POLICY_*` | see `.env.example` | Global password policy |
-| `ARGON2_MEMORY_KIB` / `_ITERATIONS` / `_PARALLELISM` | 19456 / 2 / 1 | Argon2id cost |
-| `PASSWORD_PEPPER` | - | Optional Argon2 secret |
-| `SMTP_*`, `GOOGLE_OAUTH_*`, `GITHUB_OAUTH_*` | - | Email delivery, social login |
+| Var                                                                                    | Default                                | Purpose                                                                                                                             |
+| -------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `CONFIG_PATH`                                                                          | `.stargate`                            | Directory for gateway/policy seed files; also holds other runtime assets                                                            |
+| `CONFIG_FILENAME`                                                                      | `config.yaml`                          | Gateway seed filename, used only when its database document is absent                                                               |
+| `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
+| `PORT`                                                                                 | 5050                                   | HTTP listen port                                                                                                                    |
+| `STARGATE_RUNTIME_PROFILE`                                                             | -                                      | `edge` or `cluster` (validated against the build)                                                                                   |
+| `JWT_ALGORITHM`                                                                        | active key / `RS256`                   | Must match the active key when set; picks the first generated key                                                                   |
+| `JWT_SECRET`                                                                           | -                                      | HMAC key for HS* algorithms                                                                                                         |
+| `JWT_ISSUER`                                                                           | `http://localhost:$PORT`               | JWT and OAuth/OIDC issuer                                                                                                           |
+| `JWT_KID`                                                                              | `stargate-current`                     | Active signing key (`.stargate/jwks/keys/<kid>/`)                                                                                   |
+| `JWT_ID_TOKEN_KID`                                                                     | -                                      | Optional RS256 key that signs ID tokens (EC or HMAC active key)                                                                     |
+| `JWT_ACCESS_EXP` / `JWT_REFRESH_EXP`                                                   | 1h / 1d                                | Token TTLs                                                                                                                          |
+| `OAUTH_BASE_URL`                                                                       | issuer                                 | Public base URL (`conf::public_base_url`): provider endpoints, email links, OpenAPI `servers`                                       |
+| `IAM_HOSTS`                                                                            | all hosts                              | Comma-separated IAM hostnames, case-insensitive, without schemes, ports, paths, or wildcards; must include the public base URL host |
+| `JWKS_CACHE_MAX_AGE_SECS`                                                              | 300                                    | JWKS cache max-age                                                                                                                  |
+| `OAUTH_CLIENT_CA_FILE`                                                                 | -                                      | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`)                               |
+| `INTERNAL_CONTEXT_*`                                                                   | see `.env.example`                     | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue                                                      |
+| `POSTGRES_ENDPOINT`                                                                    | localhost:5432                         | Cluster DB endpoint: host, host:port, [ipv6], or [ipv6]:port; invalid endpoints stop startup                                        |
+| `POSTGRES_USERNAME` / `_PASSWORD` / `_DATABASE`                                        | root / root / stargate                 | PostgreSQL fields passed directly to sqlx; no URL encoding                                                                          |
+| `POSTGRES_SSLMODE`                                                                     | prefer                                 | disable, prefer, require, verify-ca, or verify-full; other values stop startup                                                      |
+| `POSTGRES_SSLROOTCERT`                                                                 | -                                      | Private root CA PEM path for PostgreSQL TLS                                                                                         |
+| `POSTGRES_CREATE_DATABASE`                                                             | true                                   | true/false; false skips maintenance DB access and CREATE DATABASE                                                                   |
+| `DB_POOL_MAX`                                                                          | 20                                     | Maximum connections in each SQL pool                                                                                                |
+| `DB_MIGRATE_ON_START`                                                                  | true                                   | true/false; false checks the schema without migrating; run `stargate db migrate` separately                                         |
+| `REDIS_URL`                                                                            | redis://localhost:6379                 | Redis endpoint; `rediss://` verifies the server and hostname                                                                        |
+| `REDIS_USERNAME` / `REDIS_PASSWORD`                                                    | -                                      | Optional ACL credentials, passed without URL encoding; cannot be combined with URL credentials                                      |
+| `REDIS_CA_FILE`                                                                        | -                                      | Private CA PEM roots for `rediss://`; replace public roots                                                                          |
+| `RUST_LOG`                                                                             | -                                      | Tracing/log filter directives                                                                                                       |
+| `LOG_FORMAT`                                                                           | pretty (debug), json (release)         | Console format: json, compact, or pretty; invalid values stop logging initialization                                                |
+| `LOG_CONSOLE_ENABLED`                                                                  | true                                   | Log to stdout; stays enabled if both sinks are disabled                                                                             |
+| `LOG_FILE_ENABLED`                                                                     | false                                  | Enable optional JSON log files                                                                                                      |
+| `LOG_DIR`                                                                              | .stargate/logs                         | Directory used only when file logging is enabled                                                                                    |
+| `OTEL_ENABLED`                                                                         | auto                                   | OTLP export; on when an endpoint is set                                                                                             |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `_PROTOCOL`                                            | - / grpc                               | OTLP target (per-signal overrides exist)                                                                                            |
+| `AUDIT_RELAY_ENABLED`                                                                  | true                                   | Run the outbox relay (cluster)                                                                                                      |
+| `AUDIT_RELAY_BATCH` / `AUDIT_RELAY_INTERVAL_MS`                                        | 256 / 1000                             | Relay batch size / idle poll                                                                                                        |
+| `AUDIT_REDIS_STREAM`                                                                   | audit.raw                              | Redis stream for raw audit events                                                                                                   |
+| `AUDIT_STREAM_MAXLEN`                                                                  | 100000                                 | Approx stream cap (`MAXLEN ~`; 0 = unbounded)                                                                                       |
+| `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | Listener TLS; with it off, an `https://` public base URL still marks the deployment HTTPS                                           |
+| `TRUSTED_PROXIES`                                                                      | -                                      | Proxy IP/CIDRs allowed to set client IP headers                                                                                     |
+| `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins                                                                                                                |
+| `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints                                                                                 |
+| `GEOIP_DB_PATH`                                                                        | -                                      | MaxMind GeoLite2                                                                                                                    |
+| `SERVER_DRAIN_DELAY_SECS`                                                              | 5                                      | Readiness-off delay before listeners close                                                                                          |
+| `SERVER_SHUTDOWN_TIMEOUT_SECS`                                                         | 25                                     | Connection drain deadline                                                                                                           |
+| `AUTH_APP_DIR` / `AUTH_APP_BASE_PATH`                                                  | `.stargate/apps/auth` / `/auth`        | Hosted auth app files and mount (empty or `/` = default)                                                                            |
+| `AUTH_PUBLIC_BASE_URL`                                                                 | -                                      | Public auth app URL when hosted elsewhere                                                                                           |
+| `CONSOLE_APP_DIR` / `CONSOLE_APP_BASE_PATH`                                            | `.stargate/apps/console` / `/stargate` | Console files and mount (empty or `/` = default)                                                                                    |
+| `SIGNUP_MODE` / `SIGNUP_ALLOWED_DOMAINS`                                               | invite / -                             | Who may create accounts (`open`, `invite`, `closed`); domains for `open`                                                            |
+| `PASSWORDLESS_LOGIN_ENABLED`                                                           | false                                  | Passwordless email-code login (needs `EMAIL_OTP_PEPPER`; not with `MFA_MODE=required`)                                              |
+| `CONSOLE_ENABLED`                                                                      | true                                   | Serve the Console app (`false`: its path answers `404 feature.disabled`)                                                            |
+| `CONSOLE_OAUTH_CLIENT_ID`                                                              | stargate_console                       | Reserved Console OAuth client                                                                                                       |
+| `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL`                                     | derived                                | Console callback / origin                                                                                                           |
+| `EMAIL_OTP_PEPPER`, `EMAIL_OTP_LENGTH`, `EMAIL_OTP_TTL_SECS`, `EMAIL_OTP_MAX_ATTEMPTS` | -, 6, 300, 5                           | Email OTP                                                                                                                           |
+| `MFA_MODE`                                                                             | optional                               | `off`, `optional`, `required`                                                                                                       |
+| `MFA_METHODS` / `MFA_DEFAULT_METHOD` / `MFA_EMAIL_ENABLED`                             | email / email / true                   | MFA methods                                                                                                                         |
+| `MFA_REQUIRED_FOR_SUPER_ADMIN`                                                         | false                                  | MFA for super-admins in `optional` mode                                                                                             |
+| `MFA_ADMIN_STEP_UP_REQUIRED` / `MFA_STEP_UP_TTL_SECS`                                  | false / 300                            | Admin step-up                                                                                                                       |
+| `PASSWORD_POLICY_*`                                                                    | see `.env.example`                     | Global password policy                                                                                                              |
+| `ARGON2_MEMORY_KIB` / `_ITERATIONS` / `_PARALLELISM`                                   | 19456 / 2 / 1                          | Argon2id cost                                                                                                                       |
+| `PASSWORD_PEPPER`                                                                      | -                                      | Optional Argon2 secret                                                                                                              |
+| `SMTP_*`, `GOOGLE_OAUTH_*`, `GITHUB_OAUTH_*`                                           | -                                      | Email delivery, social login                                                                                                        |
 
 Full list: `.env.example`.
 
@@ -885,6 +905,13 @@ docker build --build-arg STARGATE_PROFILE=cluster -t stargate:cluster .
 # Hosted auth app (writes .stargate/apps/auth, including the prerendered login.html)
 cd apps/auth && npm ci && npm run build
 ```
+
+Dependency versions live in `[workspace.dependencies]` in the root `Cargo.toml`.
+Member manifests inherit them with `{ workspace = true }` and only add `features`,
+`optional`, or `default-features`; bump a version in that one place. Backends must
+stay feature-gated per crate (`memory`/`redis`, `sqlite`/`postgres`), so a
+`redis` or `sqlx` dependency in a leaf crate is `optional` and enabled by that
+crate's backend feature.
 
 ## CLI
 
@@ -1077,7 +1104,7 @@ wire; components only render.
 - `http.ts`: the `Http` class over axios. `authRequest<T>()` attaches bearer auth
   with proactive/reactive refresh via `TokenManager`; `request<T>()` is for
   unauthenticated calls. Every call returns `Response<T> = { data, error?, message?,
-  status?, headers? }`; HTTP/error outcomes are captured, never thrown.
+status?, headers? }`; HTTP/error outcomes are captured, never thrown.
 - `api.ts`: `AdminApiService`, thin endpoint methods (`getOrganizations`,
   `createOrganization`, ...) returning `Response<T>`.
 - `index.ts`: lazy `services.admin` getter wiring `Http` + `TokenManager` +

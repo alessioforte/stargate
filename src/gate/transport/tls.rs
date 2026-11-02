@@ -2,7 +2,7 @@ use super::TransportPreparationError;
 use hyper_rustls::ConfigBuilderExt;
 use rustls::{
     ClientConfig, ConfigBuilder, RootCertStore, WantsVerifier,
-    pki_types::{CertificateDer, PrivateKeyDer},
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
 use std::{fs::File, io::BufReader, sync::Arc};
 
@@ -30,7 +30,7 @@ fn certificates(
     path: &str,
     kind: &'static str,
 ) -> Result<Vec<CertificateDer<'static>>, TransportPreparationError> {
-    let certificates = rustls_pemfile::certs(&mut reader(path, kind)?)
+    let certificates = CertificateDer::pem_reader_iter(reader(path, kind)?)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| TransportPreparationError::Pem { kind, source })?;
     if certificates.is_empty() {
@@ -40,23 +40,18 @@ fn certificates(
 }
 
 fn private_key(path: &str) -> Result<PrivateKeyDer<'static>, TransportPreparationError> {
-    let mut key = None;
-    for item in rustls_pemfile::read_all(&mut reader(path, "client key")?) {
-        let item = item.map_err(|source| TransportPreparationError::Pem {
+    let keys = PrivateKeyDer::pem_reader_iter(reader(path, "client key")?)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| TransportPreparationError::Pem {
             kind: "client key",
             source,
         })?;
-        let next = match item {
-            rustls_pemfile::Item::Pkcs1Key(key) => key.into(),
-            rustls_pemfile::Item::Pkcs8Key(key) => key.into(),
-            rustls_pemfile::Item::Sec1Key(key) => key.into(),
-            _ => continue,
-        };
-        if key.replace(next).is_some() {
-            return Err(TransportPreparationError::PrivateKeyCount);
-        }
+
+    let mut keys = keys.into_iter();
+    match (keys.next(), keys.next()) {
+        (Some(key), None) => Ok(key),
+        _ => Err(TransportPreparationError::PrivateKeyCount),
     }
-    key.ok_or(TransportPreparationError::PrivateKeyCount)
 }
 
 pub(super) fn build_mtls(

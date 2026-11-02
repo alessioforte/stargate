@@ -7,19 +7,19 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-ace = { path = "../ace" }
-chrono = "0.4.45"
-indexmap = { version = "2.14.0", features = ["serde"] }
-lb = { path = "../lb" }
-lim = { path = "../lim" }
-matchit = "0.9.2"
-regex = "1.13.1"
-serde = { version = "1.0.229", features = ["derive"] }
-serde-saphyr = "1.1.0"
-serde_json = "1.0.151"
-tools = { path = "../tools" }
-tracing = "0.1.44"
-utoipa = { version = "5.5.0", features = ["axum_extras", "yaml"] }
+ace = { workspace = true }
+chrono = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+lb = { workspace = true }
+lim = { workspace = true }
+matchit = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde-saphyr = { workspace = true }
+serde_json = { workspace = true }
+tools = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
 
 [features]
 default = []

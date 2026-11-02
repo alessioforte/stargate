@@ -80,34 +80,27 @@ fn required_path(env_key: &str) -> io::Result<String> {
 
 pub fn rustls_server_config() -> io::Result<std::sync::Arc<rustls::ServerConfig>> {
     use rustls::ServerConfig;
-    use rustls_pemfile::{certs, pkcs8_private_keys};
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject};
     use std::{fs::File, io::BufReader, sync::Arc};
 
     let key_path = required_path("TLS_KEY")?;
     let cert_path = required_path("TLS_CERT")?;
 
-    let cert_chain = {
-        let mut reader = BufReader::new(File::open(&cert_path)?);
-        certs(&mut reader)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(io::Error::other)?
-    };
+    let cert_chain = CertificateDer::pem_reader_iter(BufReader::new(File::open(&cert_path)?))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(io::Error::other)?;
 
-    let private_key = {
-        let mut reader = BufReader::new(File::open(&key_path)?);
-        pkcs8_private_keys(&mut reader)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(io::Error::other)?
-            .into_iter()
-            .next()
-            .map(rustls::pki_types::PrivateKeyDer::Pkcs8)
-            .ok_or_else(|| {
-                io::Error::new(
+    let private_key =
+        match PrivatePkcs8KeyDer::from_pem_reader(BufReader::new(File::open(&key_path)?)) {
+            Ok(key) => PrivateKeyDer::Pkcs8(key),
+            Err(rustls::pki_types::pem::Error::NoItemsFound) => {
+                return Err(io::Error::new(
                     io::ErrorKind::NotFound,
                     "no PKCS8 private key found in TLS_KEY",
-                )
-            })?
-    };
+                ));
+            }
+            Err(error) => return Err(io::Error::other(error)),
+        };
 
     let config = ServerConfig::builder()
         .with_no_client_auth()
