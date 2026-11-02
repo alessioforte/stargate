@@ -3,10 +3,13 @@
 
 [advisories]
 ignore = [
-    # rsa 0.9 (Marvin attack): timing leaks in RSA *decryption*. Stargate only
-    # parses keys and signs/verifies JWTs (RS256) through rsa and jsonwebtoken;
-    # it never decrypts attacker-supplied RSA ciphertexts. No fixed 0.9 release.
-    # Remove when jsonwebtoken and crates/ctx move to an rsa release with the fix.
+    # rsa 0.9 (Marvin attack): non-constant-time private-key operations; no rsa
+    # release is patched, 0.10 release candidates included. Stargate never
+    # decrypts with RSA. It signs only through jsonwebtoken, whose RustCrypto
+    # backend calls sign_with_rng, so every private-key operation is blinded.
+    # Its own rsa calls parse keys, read public components and generate keys in
+    # the CLI. Re-check when jsonwebtoken changes how it signs; remove when a
+    # patched rsa release is the only one in Cargo.lock.
     "RUSTSEC-2023-0071",
     # crypto-bigint 0.5 timing variability, pulled by jsonwebtoken 11 through
     # elliptic-curve 0.13 (p256/p384 0.13). It matters for ECDSA *signing* with

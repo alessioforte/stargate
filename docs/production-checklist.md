@@ -33,7 +33,9 @@ example hostname, CIDR, Secret name and image tag.
       mounted by `extraVolumes`. `POSTGRES_SSLMODE=verify-full` and `REDIS_CA_FILE`
       refuse unverified connections.
 - [ ] **JWT keys**: one Secret per key from `stargate jwt generate-key`, listed in
-      `jwt.keys`, with `jwt.activeKid` set. Keep an offline copy.
+      `jwt.keys`, with `jwt.activeKid` set. Use an RSA (`RS256`) active key; see
+      [Signing keys and rotation](oauth-oidc-provider-guide.md#signing-keys-and-rotation)
+      for ES256/ES384. Keep an offline copy.
 - [ ] **Internal context** (if backends verify `stargate-context`): signing key Secret from
       `stargate internal-context generate-key`; backends fetch the JWKS through the public
       identity host, never the Stargate Service.
