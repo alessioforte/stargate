@@ -1,8 +1,9 @@
 use crate::ent::{
     AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, ConfigDocument, ConfigKind, ConfigRevision,
-    ConfigSaveOutcome, ConfigSource, Credential, CredentialHistory, CredentialType,
-    NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
-    OrganizationMembershipMutation, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
+    ConfigSaveOutcome, ConfigSource, ConfigVersionSummary, Credential, CredentialHistory,
+    CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership,
+    Organization, OrganizationMembershipMutation, Profile, ServiceAccount, SuperAdmin,
+    TrustedAuditContext, User,
 };
 use anyhow::Result;
 use serde_json::Value as JsonValue;
@@ -21,6 +22,18 @@ pub trait DbStore {
     // ── Configuration documents ────────────────────────────────────────────
     async fn get_active_config_document(&self, kind: ConfigKind) -> Result<Option<ConfigDocument>>;
     async fn get_config_revisions(&self) -> Result<Vec<ConfigRevision>>;
+    async fn list_config_versions(
+        &self,
+        kind: ConfigKind,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ConfigVersionSummary>>;
+    async fn get_config_document(
+        &self,
+        kind: ConfigKind,
+        version: i64,
+    ) -> Result<Option<ConfigDocument>>;
+
     /// Append a version only if the active revision matches. `None` requires
     /// an empty history for this kind. Identical content produces no audit event.
     async fn save_config_document(

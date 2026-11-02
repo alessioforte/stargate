@@ -84,6 +84,8 @@ default). Keep a rate limit on Traefik as a safety net during a Redis outage, or
 - [ ] Alerts on 5xx rate, `stargate.limits.store_errors`, failed configuration
       activations, audit relay errors and backlog, open circuit breakers, SQL pool
       saturation and certificate expiry.
-- [ ] A backup of the active gateway configuration and ACE rules
-      (`stargate config export`) after every change you may need to undo.
+- [ ] External backups of gateway configuration and ACE rules with
+      `stargate config export`. Use `stargate config versions` to find a prior
+      version and `config export --version N` to retrieve it. Version history
+      stays in the database; exports provide backups outside that database.
 - [ ] Documented key rotation for JWT and internal-context keys, rehearsed once.

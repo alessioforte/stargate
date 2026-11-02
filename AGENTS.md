@@ -895,7 +895,9 @@ cargo run --features edge -- admin bootstrap \
   --name "Admin User" --nickname admin \
   --oauth-redirect-uri https://identity.example.com/stargate/auth/callback
 
-# Back up or import exact database document content (both profiles)
+# List, back up or import exact database document content (both profiles)
+cargo run --features edge -- config versions --kind gateway --limit 20
+cargo run --features edge -- config export --kind gateway --version 41 --output gateway-v41.yaml
 cargo run --features edge -- config export --kind gateway --output gateway-backup.yaml
 cargo run --features edge -- config export --kind policies --output policies-backup
 cargo run --features edge -- config import --kind gateway --file gateway.yaml
@@ -914,6 +916,10 @@ Bootstrap flags: `--password`, `--password-stdin`, `--generate-password`,
 `--oauth-client-id`, `--oauth-redirect-uri`. `jwt` and `internal-context` commands
 need no database. Configuration commands require the database, keep stdout free of
 banners/logs, and validate syntax/compilation without local TLS or signer material.
+`config versions` lists metadata newest first and marks the database's active version;
+`config export --version N` retrieves that exact historical document. Export/import
+restores earlier content by appending a new audited version; capacity changes still
+require restart. Database history does not replace external backups.
 Imports preserve the submitted text, retry a revision conflict once, and write an
 atomic `cli_import` system audit event for changed content. Runtime replicas do full
 preparation before activation. The Helm ConfigMap is a seed by default; cluster-only

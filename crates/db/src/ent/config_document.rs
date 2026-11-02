@@ -31,7 +31,8 @@ pub struct ConfigRevision {
     pub revision: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ConfigSource {
     Seed,
     AdminApi,
@@ -39,6 +40,15 @@ pub enum ConfigSource {
 }
 
 impl ConfigSource {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "seed" => Some(Self::Seed),
+            "admin_api" => Some(Self::AdminApi),
+            "cli_import" => Some(Self::CliImport),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Seed => "seed",
@@ -46,6 +56,27 @@ impl ConfigSource {
             Self::CliImport => "cli_import",
         }
     }
+}
+
+impl TryFrom<String> for ConfigSource {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value).ok_or_else(|| anyhow::anyhow!("unknown configuration source: {value}"))
+    }
+}
+
+/// Version metadata without fetching the stored configuration content.
+#[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigVersionSummary {
+    pub version: i64,
+    pub revision: String,
+    #[sqlx(try_from = "String")]
+    pub source: ConfigSource,
+    pub created_by: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub size_bytes: i64,
 }
 
 #[derive(sqlx::FromRow, Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +110,7 @@ pub fn config_revision(content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigKind, config_revision};
+    use super::{ConfigKind, ConfigSource, config_revision};
 
     #[test]
     fn configuration_kind_names_round_trip_and_reject_unknown_names() {
@@ -88,6 +119,24 @@ mod tests {
         }
         for value in ["", "unknown", "Gateway"] {
             assert_eq!(ConfigKind::parse(value), None);
+        }
+    }
+
+    #[test]
+    fn configuration_sources_decode_to_typed_values_and_reject_unknown_sources() {
+        for source in [
+            ConfigSource::Seed,
+            ConfigSource::AdminApi,
+            ConfigSource::CliImport,
+        ] {
+            assert_eq!(
+                ConfigSource::try_from(source.as_str().to_owned()).unwrap(),
+                source
+            );
+            assert_eq!(serde_json::to_value(source).unwrap(), source.as_str());
+        }
+        for unknown in ["", "other", "CLI_IMPORT"] {
+            assert!(ConfigSource::try_from(unknown.to_owned()).is_err());
         }
     }
 

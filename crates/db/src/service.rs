@@ -8,8 +8,8 @@ use crate::db::{DbStore, InstanceBootstrapResult};
 use crate::ent::{
     AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, AuditId, AuditOperation, AuditResource,
     AuditScopeSelector, ConfigDocument, ConfigKind, ConfigRevision, ConfigSaveOutcome,
-    ConfigSource, Credential, CredentialHistory, CredentialType, NewOrganizationMembership,
-    OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
+    ConfigSource, ConfigVersionSummary, Credential, CredentialHistory, CredentialType,
+    NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember, OrgMembership, Organization,
     OrganizationMembershipMutation, OutboxEventFilter, OutboxEventRow, Profile, ServiceAccount,
     SuperAdmin, TrustedAuditContext, User, ValidatedAuditEvent, canonical_email,
     canonical_nickname, config_revision,
@@ -731,6 +731,25 @@ pub async fn init(conn: &str) -> Result<Service> {
 impl DbStore for Service {
     async fn get_active_config_document(&self, kind: ConfigKind) -> Result<Option<ConfigDocument>> {
         self.config_document.latest(&self.pool, kind).await
+    }
+
+    async fn list_config_versions(
+        &self,
+        kind: ConfigKind,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ConfigVersionSummary>> {
+        self.config_document
+            .list(&self.pool, kind, limit, offset)
+            .await
+    }
+
+    async fn get_config_document(
+        &self,
+        kind: ConfigKind,
+        version: i64,
+    ) -> Result<Option<ConfigDocument>> {
+        self.config_document.get(&self.pool, kind, version).await
     }
 
     async fn get_config_revisions(&self) -> Result<Vec<ConfigRevision>> {

@@ -8,7 +8,8 @@ Current command tree:
 
 ```text
 stargate admin bootstrap
-stargate config export --kind gateway|policies [--output <file>]
+stargate config versions --kind gateway|policies [--limit <count>]
+stargate config export --kind gateway|policies [--version <number>] [--output <file>]
 stargate config import --kind gateway|policies --file <file>
 stargate db migrate
 stargate internal-context generate-key
@@ -49,7 +50,8 @@ set `POSTGRES_CREATE_DATABASE=false` when the role cannot create databases.
 
 These commands use the selected profile's database without starting the HTTP
 server, the state store, or the configuration synchronizer. Configuration command
-stdout contains only the document or import result, with no banner or application logs.
+stdout contains only the version table, exported document or import result, with no
+banner or application logs.
 
 ```bash
 cargo run --features edge -- config export --kind gateway --output gateway-backup.yaml
@@ -63,6 +65,28 @@ binary (`/bin/server` in the container). Export writes the active document's exa
 stored text to stdout or `--output`, including comments and formatting. It exits
 unsuccessfully if the document is absent. An empty policies document exports as
 empty content.
+
+### List stored versions
+
+```bash
+stargate config versions --kind gateway
+stargate config versions --kind policies --limit 10
+stargate config export --kind gateway --version 41 --output gateway-v41.yaml
+```
+
+`config versions` lists up to 20 versions by default, in descending version order.
+Its columns show active/historical status, version, full revision, source
+(`seed`, `admin_api`, or `cli_import`), author (`-` for the system), RFC 3339
+creation time, and stored size in UTF-8 bytes. The first result is the database's
+active version.
+`--limit` must be a positive integer. Each configuration kind has an independent
+version history, and listing fetches metadata without downloading document contents.
+
+`config export --version N` selects that stored version instead of the active one,
+without modifying it. Both `--output` and stdout preserve the exact bytes. `N` must
+be a positive integer; a missing version exits unsuccessfully with an error such as
+`no gateway document version 41 in the database`. Omitting `--version` keeps the
+active-version behavior. An empty policies document exports as an empty file.
 
 Import requires an explicit `stargate/v1` gateway schema and parses/compiles the
 configuration, or applies the same policy-document analysis as the admin validation
@@ -93,6 +117,32 @@ kubectl exec -n identity deployment/stargate -- /bin/server config import --kind
 
 The chart's optional `gatewayConfig.importOnUpgrade` hook is cluster-only. See
 [Gateway configuration](../k8s/stargate/README.md#gateway-configuration).
+
+## Roll back to an earlier version
+
+List the database history, export the desired document to a file, review it, then
+import that file:
+
+```bash
+stargate config versions --kind gateway --limit 20
+stargate config export --kind gateway --version 41 --output old.yaml
+stargate config import --kind gateway --file old.yaml
+```
+
+Use `--kind policies` for ACE rules. Import appends a new active version with a
+transactional `cli_import` audit event; it never rewinds or deletes history. If the
+bytes already match the active document, the result is `unchanged`, with no new
+version or audit event. Imports retain the existing revision conflict handling.
+
+Servers validate and activate the imported document through their existing
+synchronization. A local transport, signer, or validation failure can leave a
+replica on its previous active revision. Process capacity changes require a
+restart (`activation: restart_required` on the admin save path); the CLI import
+result confirms persistence, not activation on every replica. After a rollback,
+check each replica's active revisions in `/admin/health`, and restart when needed.
+
+Database history is not an external backup. Export important gateway and policy
+versions outside the database and include the database itself in your backup plan.
 
 ## Bootstrap the instance
 

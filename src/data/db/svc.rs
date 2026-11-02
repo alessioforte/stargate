@@ -5,9 +5,9 @@ use db::{
     DbStore, InstanceBootstrapResult,
     ent::{
         AdminKey, AdminOverviewStats, ApiKey, ApiKeyAuth, ConfigDocument, ConfigKind,
-        ConfigRevision, ConfigSaveOutcome, ConfigSource, Credential, CredentialHistory,
-        CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent, OrgMember,
-        OrgMembership, Organization, OrganizationMembershipMutation, OutboxEventFilter,
+        ConfigRevision, ConfigSaveOutcome, ConfigSource, ConfigVersionSummary, Credential,
+        CredentialHistory, CredentialType, NewOrganizationMembership, OAuthClient, OAuthConsent,
+        OrgMember, OrgMembership, Organization, OrganizationMembershipMutation, OutboxEventFilter,
         OutboxEventRow, Profile, ServiceAccount, SuperAdmin, TrustedAuditContext, User,
     },
 };
@@ -18,6 +18,18 @@ pub async fn get_admin_overview_stats() -> Result<AdminOverviewStats> {
 
 pub async fn get_active_config_document(kind: ConfigKind) -> Result<Option<ConfigDocument>> {
     service().get_active_config_document(kind).await
+}
+
+pub async fn list_config_versions(
+    kind: ConfigKind,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<ConfigVersionSummary>> {
+    service().list_config_versions(kind, limit, offset).await
+}
+
+pub async fn get_config_document(kind: ConfigKind, version: i64) -> Result<Option<ConfigDocument>> {
+    service().get_config_document(kind, version).await
 }
 
 pub async fn get_config_revisions() -> Result<Vec<ConfigRevision>> {

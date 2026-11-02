@@ -19,7 +19,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Admin(AdminArgs),
-    /// Export or import database-backed configuration documents.
+    /// List versions, export or import database-backed configuration documents.
     Config(config::ConfigArgs),
     /// Manage the database schema.
     Db(DbArgs),

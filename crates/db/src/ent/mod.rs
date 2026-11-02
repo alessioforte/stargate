@@ -18,7 +18,8 @@ pub use admin_overview::*;
 pub use api_key::*;
 pub use audit::*;
 pub use config_document::{
-    ConfigDocument, ConfigKind, ConfigRevision, ConfigSaveOutcome, ConfigSource, config_revision,
+    ConfigDocument, ConfigKind, ConfigRevision, ConfigSaveOutcome, ConfigSource,
+    ConfigVersionSummary, config_revision,
 };
 pub use credential::*;
 pub use oauth_client::*;

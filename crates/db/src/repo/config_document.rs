@@ -1,5 +1,10 @@
-use crate::ent::{ConfigDocument, ConfigKind, ConfigRevision};
+use crate::ent::{ConfigDocument, ConfigKind, ConfigRevision, ConfigVersionSummary};
 use anyhow::Result;
+
+#[cfg(feature = "postgres")]
+const CONTENT_SIZE_BYTES: &str = "OCTET_LENGTH(content)::bigint";
+#[cfg(feature = "sqlite")]
+const CONTENT_SIZE_BYTES: &str = "LENGTH(CAST(content AS BLOB))";
 
 #[derive(Clone, Default)]
 pub struct ConfigDocumentRepository {}
@@ -17,6 +22,51 @@ impl ConfigDocumentRepository {
             "SELECT * FROM config_documents WHERE kind = $1 ORDER BY version DESC LIMIT 1",
         )
         .bind(kind.as_str())
+        .fetch_optional(ex)
+        .await?)
+    }
+
+    pub async fn list<'c, E>(
+        &self,
+        ex: E,
+        kind: ConfigKind,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ConfigVersionSummary>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let mut query = sqlx::QueryBuilder::<crate::backend::Db>::new(
+            "SELECT version, revision, source, created_by, created_at, ",
+        );
+        query
+            .push(CONTENT_SIZE_BYTES)
+            .push(" AS size_bytes FROM config_documents WHERE kind = ")
+            .push_bind(kind.as_str())
+            .push(" ORDER BY version DESC LIMIT ")
+            .push_bind(limit)
+            .push(" OFFSET ")
+            .push_bind(offset);
+        Ok(query
+            .build_query_as::<ConfigVersionSummary>()
+            .fetch_all(ex)
+            .await?)
+    }
+
+    pub async fn get<'c, E>(
+        &self,
+        ex: E,
+        kind: ConfigKind,
+        version: i64,
+    ) -> Result<Option<ConfigDocument>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        Ok(sqlx::query_as::<_, ConfigDocument>(
+            "SELECT * FROM config_documents WHERE kind = $1 AND version = $2",
+        )
+        .bind(kind.as_str())
+        .bind(version)
         .fetch_optional(ex)
         .await?)
     }
@@ -83,3 +133,6 @@ mod tests {
         assert!(parse_revision("unknown", "r3".into()).is_err());
     }
 }
+
+#[cfg(test)]
+mod history_tests;

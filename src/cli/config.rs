@@ -1,6 +1,9 @@
 use crate::data::db;
 use crate::iam::authz::rules::validate_policy_document;
-use ::db::ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext};
+use ::db::ent::{
+    ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, ConfigVersionSummary,
+    TrustedAuditContext,
+};
 use clap::{Args, Subcommand, ValueEnum};
 use std::{
     io::{self, Write},
@@ -15,7 +18,9 @@ pub struct ConfigArgs {
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
-    /// Export the active document without changing its contents.
+    /// List stored document versions, newest first.
+    Versions(VersionsArgs),
+    /// Export the active document or a stored version without changing its contents.
     Export(ExportArgs),
     /// Validate and import a document into the database.
     Import(ImportArgs),
@@ -42,6 +47,16 @@ struct ExportArgs {
     kind: DocumentKind,
     #[arg(long)]
     output: Option<PathBuf>,
+    #[arg(long, value_parser = clap::value_parser!(i64).range(1..))]
+    version: Option<i64>,
+}
+
+#[derive(Debug, Args)]
+struct VersionsArgs {
+    #[arg(long, value_enum)]
+    kind: DocumentKind,
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(i64).range(1..))]
+    limit: i64,
 }
 
 #[derive(Debug, Args)]
@@ -56,13 +71,13 @@ pub async fn run(args: ConfigArgs) -> io::Result<()> {
     crate::srv::profile::validate_runtime_profile()?;
     db::init().await.map_err(io::Error::other)?;
     match args.command {
-        ConfigCommand::Export(args) => {
-            let document = active_document(args.kind.into()).await?;
-            match args.output {
-                Some(path) => std::fs::write(path, document.content),
-                None => io::stdout().lock().write_all(document.content.as_bytes()),
-            }
+        ConfigCommand::Versions(args) => {
+            let versions = db::list_config_versions(args.kind.into(), args.limit, 0)
+                .await
+                .map_err(io::Error::other)?;
+            write_versions(&versions, &mut io::stdout().lock())
         }
+        ConfigCommand::Export(args) => export_document(args).await,
         ConfigCommand::Import(args) => {
             let content = std::fs::read_to_string(args.file)?;
             match import_document(args.kind.into(), content).await? {
@@ -81,6 +96,51 @@ pub async fn run(args: ConfigArgs) -> io::Result<()> {
             }
         }
     }
+}
+
+async fn export_document(args: ExportArgs) -> io::Result<()> {
+    let kind = args.kind.into();
+    let document = match args.version {
+        Some(version) => db::get_config_document(kind, version)
+            .await
+            .map_err(io::Error::other)?
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "no {} document version {version} in the database",
+                        kind.as_str()
+                    ),
+                )
+            })?,
+        None => active_document(kind).await?,
+    };
+    match args.output {
+        Some(path) => std::fs::write(path, document.content),
+        None => io::stdout().lock().write_all(document.content.as_bytes()),
+    }
+}
+
+fn write_versions(versions: &[ConfigVersionSummary], output: &mut impl Write) -> io::Result<()> {
+    writeln!(
+        output,
+        "{:<10} {:>7} {:<71} {:<10} {:<26} {:<35} {:>10}",
+        "STATUS", "VERSION", "REVISION", "SOURCE", "AUTHOR", "CREATED_AT", "SIZE_BYTES"
+    )?;
+    for (index, version) in versions.iter().enumerate() {
+        writeln!(
+            output,
+            "{:<10} {:>7} {:<71} {:<10} {:<26} {:<35} {:>10}",
+            if index == 0 { "active" } else { "historical" },
+            version.version,
+            version.revision,
+            version.source.as_str(),
+            version.created_by.as_deref().unwrap_or("-"),
+            version.created_at.to_rfc3339(),
+            version.size_bytes
+        )?;
+    }
+    Ok(())
 }
 
 async fn active_document(kind: ConfigKind) -> io::Result<ConfigDocument> {
