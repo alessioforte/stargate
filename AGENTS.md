@@ -57,7 +57,7 @@ stargate/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
 │                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
 │                      #   gateway-performance (opt-in benchmarks and recorded results),
-│                      #   production-checklist, audit-events
+│                      #   production-checklist, audit-events, monitoring
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
 ```
@@ -132,7 +132,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   validation, `signing.rs` bounded CPU workers.
 - `data/db/`: SQL pool init, PostgreSQL endpoint/TLS/creation settings (`settings.rs`),
   shared active-document/seed persistence (`config.rs`), and the repository service
-  wrappers (`svc.rs`). Seed closures own file and validation rules. Revision queries
+  wrappers (`svc.rs`), and SQL pool observables (`metrics.rs`). Seed closures own file and validation rules. Revision queries
   return typed configuration kinds; unknown database kinds are errors.
   PostgreSQL fields go directly into
   `PgConnectOptions`, including unencoded credentials. Optional database creation
@@ -220,7 +220,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 
 Modules: `snap/` (snapshot lifecycle: `config.rs` database documents, seed, preparation and saves,
 `runtime.rs` preparation/publication, `reload.rs` text activation, `body.rs` pinning during streaming),
-`resources.rs` (process admission, memory permits, tracked tasks), `transport/`
+`metrics.rs` (current-snapshot target diagnostics), `resources.rs` (process admission, memory permits, tracked tasks), `transport/`
 (prepared outgoing HTTP/TLS/mTLS clients), `limits.rs` (ingress bucket key, limit
 selection/validation), `request.rs` (orchestration), `authentication.rs`,
 `middlewares.rs`, `routing/`, `policies/` (`ingress.rs`, `limits.rs`, `org_limits.rs`
@@ -475,6 +475,11 @@ during the migration, so schema changes must remain compatible with them.
 migration Job, node spread, `maxUnavailable: 1`); `docs/production-checklist.md`
 lists the remaining operator steps. Spread constraints without `labelSelector`
 get the release's server pod selector. Chart tests: `k8s/stargate/tests/`.
+
+Stargate exports OTLP and ships no backend-specific observability resources.
+`docs/monitoring.md` defines the OpenTelemetry metric contract, recommended views
+and an alert catalog. Operators implement dashboards and alert rules in their
+infrastructure repository and configure the collector's destination.
 
 ### Feature Flags
 
@@ -1195,7 +1200,10 @@ a new reusable primitive.
   point selection rather than enum-position array indexing.
 - OTLP resources identify each replica with `service.instance.id`, preserving
   explicit resource attributes and defaulting to a stable ULID per process.
-- Metrics use bounded labels only (no URLs, credentials, request IDs); see
-  `docs/config-v1.md` for gateway instruments.
+- `docs/monitoring.md` defines OpenTelemetry metrics, aggregation, recommended
+  views and a backend-neutral alert catalog.
+- SQL pool gauges sample the initialized pool; upstream gauges read the current
+  snapshot and never advance circuit state. Metric attributes are bounded;
+  URLs and request identities stay out of metric dimensions.
 - Gateway performance workloads are opt-in (`src/gate/performance/`,
   `benches/scripts/`).

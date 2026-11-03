@@ -3,6 +3,7 @@ mod execution;
 mod grpc;
 mod lifecycle;
 pub mod limits;
+mod metrics;
 mod middlewares;
 #[cfg(all(test, feature = "memory"))]
 mod performance;
@@ -47,18 +48,24 @@ pub async fn init() -> anyhow::Result<Arc<Gate>> {
     let policies = crate::iam::authz::storage::load_policies_document().await?;
     let policies = crate::iam::authz::rules::compile_policy_snapshot(&policies.content)
         .map_err(|error| anyhow::anyhow!("Unable to load access-control policies: {error}"))?;
-    Ok(Arc::new(Gate::new(
+    let gate = Arc::new(Gate::new(
         Arc::new(use_store().clone()),
         prepared,
         policies,
-    )?))
+    )?);
+    metrics::register(&gate);
+    Ok(gate)
 }
 
 pub async fn service(req: Request<Body>) -> Result<Response, Infallible> {
-    match request::handle_hyper(req).await {
-        Ok(response) => Ok(response),
-        Err(error) => Ok(error.into_response()),
-    }
+    let mut response = match request::handle_hyper(req).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    };
+    response
+        .extensions_mut()
+        .insert(crate::obs::telemetry::GatewayResponse);
+    Ok(response)
 }
 
 #[cfg(test)]

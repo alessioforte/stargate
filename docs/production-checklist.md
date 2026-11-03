@@ -85,6 +85,12 @@ default). Keep a rate limit on Traefik as a safety net during a Redis outage, or
       monitor pending age and relay pauses. Review `AUDIT_OUTBOX_RETENTION` (default
       `30d`, published rows only). See [Audit delivery](audit-events.md).
 
+- [ ] Configure the collector's OTLP destination and implement the recommended
+      views and [alert catalog](monitoring.md) in the infrastructure repository.
+      Preserve resource identity, verify notification delivery and monitor
+      collector health separately. No backend-specific monitoring resources
+      are installed by the Stargate chart.
+
 ## Operations
 
 - [ ] PostgreSQL backups to object storage, with a restore tested end to end.

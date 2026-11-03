@@ -1,4 +1,5 @@
 mod config;
+mod metrics;
 pub(crate) use config::active_or_seed;
 
 #[cfg(feature = "postgres")]
@@ -81,6 +82,7 @@ mod postgres {
         super::prepare(&service, migrate).await?;
 
         info!("PostgreSQL service initialized successfully");
+        super::metrics::register(&service);
         DB.set(service)
             .map_err(|_| anyhow::anyhow!("Failed to set the PostgreSQL service instance"))?;
         Ok(())
@@ -133,6 +135,7 @@ mod sqlite {
         super::prepare(&service, migrate).await?;
 
         info!("SQLite service initialized successfully");
+        super::metrics::register(&service);
         DB.set(service)
             .map_err(|_| anyhow::anyhow!("Failed to set the SQLite service instance"))?;
         Ok(())

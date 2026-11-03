@@ -201,3 +201,41 @@ fn resource_identity_is_stable_per_process_and_preserves_environment_attributes(
     );
     assert_eq!(blank["custom.attribute"], "preserved");
 }
+
+/// Reproducible instrument-contract probe for an external OTLP collector.
+/// Run only this test in a dedicated process with OTEL_* pointing to that collector.
+#[tokio::test]
+#[ignore = "requires a dedicated OTLP collector and STARGATE_TEST_MONITORING_EXPORT=1"]
+async fn export_monitoring_instruments_to_a_real_collector() {
+    assert_eq!(
+        std::env::var("STARGATE_TEST_MONITORING_EXPORT").as_deref(),
+        Ok("1")
+    );
+    let guard = super::init();
+    assert!(guard.enabled());
+    use std::time::Duration;
+    super::record_http_server_request(
+        super::HttpRequestKind::Iam,
+        "GET",
+        503,
+        Duration::from_millis(10),
+    );
+    super::record_gateway_request("example", "backend", 503, Duration::from_millis(5));
+    super::record_gateway_upstream_attempt(
+        "backend",
+        "upstream",
+        "http",
+        Some(503),
+        "error",
+        Duration::from_millis(4),
+    );
+    super::record_gateway_failover("status", Some(503));
+    super::record_gateway_rejection("primary");
+    super::record_gateway_resource("primary", 1);
+    super::record_gateway_resource("replay_memory", 1024);
+    super::record_limit_store_error("gateway_ingress", "denied");
+    super::record_config_reload("gateway_config", "transport_error");
+    #[cfg(all(feature = "postgres", feature = "redis"))]
+    super::record_audit_relay_batch("error", 0, Duration::from_millis(1));
+    guard.shutdown();
+}

@@ -238,7 +238,11 @@ async fn local_errors_and_shadow_attempts_preserve_upstream_health() {
                 );
                 assert_eq!(
                     circuit.state(),
-                    u8::from(!signed && kind == DispatchKind::Primary),
+                    if !signed && kind == DispatchKind::Primary {
+                        lb::circuit_breaker::CircuitState::Open
+                    } else {
+                        lb::circuit_breaker::CircuitState::Closed
+                    },
                     "replay={replay}, signed={signed}, kind={kind:?}"
                 );
             }

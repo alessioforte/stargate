@@ -178,8 +178,33 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
     }
 });
 
-pub fn record_http_server_request(method: &str, status: u16, elapsed: Duration) {
+#[derive(Clone, Copy)]
+pub(crate) enum HttpRequestKind {
+    Iam,
+    Gateway,
+}
+
+impl HttpRequestKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Iam => "iam",
+            Self::Gateway => "gateway",
+        }
+    }
+}
+
+/// In-process response marker; never serialized or sent as an HTTP header.
+#[derive(Clone, Copy)]
+pub(crate) struct GatewayResponse;
+
+pub fn record_http_server_request(
+    kind: HttpRequestKind,
+    method: &str,
+    status: u16,
+    elapsed: Duration,
+) {
     let attrs = [
+        KeyValue::new("stargate.request.kind", kind.as_str()),
         KeyValue::new("http.request.method", method.to_string()),
         KeyValue::new("http.response.status_code", i64::from(status)),
     ];

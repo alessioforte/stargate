@@ -292,7 +292,7 @@ async fn unused_fallback_does_not_reserve_a_half_open_circuit_probe() {
         lb::BaseLoadBalancer::new(lb::RoundRobin::new(), vec![upstream]),
     );
     let plan = build_execution_plan(&runtime.core.graph, "root", "request-id").unwrap();
-    assert_eq!(circuit.state(), 1); // Open; cooldown elapsed, probe unreserved.
+    assert_eq!(circuit.state(), lb::circuit_breaker::CircuitState::Open); // Open; cooldown elapsed, probe unreserved.
     assert_eq!(
         execute_plan_from_replay(
             &runtime,
@@ -306,7 +306,7 @@ async fn unused_fallback_does_not_reserve_a_half_open_circuit_probe() {
         .status(),
         200
     );
-    assert_eq!(circuit.state(), 1);
+    assert_eq!(circuit.state(), lb::circuit_breaker::CircuitState::Open);
     assert!(backup.records().is_empty());
 
     make_unavailable(&runtime, "primary", &primary);
@@ -324,7 +324,7 @@ async fn unused_fallback_does_not_reserve_a_half_open_circuit_probe() {
         200
     );
     assert_eq!(backup.records().len(), 1);
-    assert_eq!(circuit.state(), 2); // Entered shadow reserved the probe; no health feedback.
+    assert_eq!(circuit.state(), lb::circuit_breaker::CircuitState::HalfOpen); // Entered shadow reserved the probe; no health feedback.
 }
 
 #[tokio::test]

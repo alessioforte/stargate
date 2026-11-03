@@ -40,6 +40,14 @@ impl Upstream {
     }
 }
 
+/// Mutually exclusive target counts, independent of selection and probe admission.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct TargetCounts {
+    pub healthy: u64,
+    pub unhealthy: u64,
+    pub circuit_open: u64,
+}
+
 pub struct RequestContext<'a> {
     pub client_ip: &'a str,
     pub path: &'a str,
@@ -52,6 +60,7 @@ pub struct RequestContext<'a> {
 pub trait LoadBalancer {
     fn select(&self, context: &RequestContext) -> Option<&Upstream>;
     fn name(&self) -> &'static str;
+    fn target_counts(&self) -> TargetCounts;
     fn mark_alive(&self, base_url: &str);
     fn mark_dead(&self, base_url: &str);
     fn set_health_client(&self, client: Client);
@@ -102,6 +111,19 @@ impl<S: Strategy + 'static> LoadBalancer for BaseLoadBalancer<S> {
 
     fn name(&self) -> &'static str {
         self.strategy.name()
+    }
+
+    fn target_counts(&self) -> TargetCounts {
+        use crate::circuit_breaker::CircuitState;
+        let mut counts = TargetCounts::default();
+        for upstream in &self.upstreams {
+            match upstream.circuit_breaker.state() {
+                CircuitState::Closed => counts.healthy += 1,
+                CircuitState::Open => counts.circuit_open += 1,
+                CircuitState::HalfOpen => counts.unhealthy += 1,
+            }
+        }
+        counts
     }
 
     fn mark_alive(&self, base_url: &str) {
@@ -179,6 +201,33 @@ impl<S: Strategy + 'static> LoadBalancer for BaseLoadBalancer<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_count_states_without_admitting_or_rearming_half_open_probes() {
+        let healthy = Upstream::new("http://healthy".into(), None);
+        let open = Upstream::with_circuit_breaker("http://open".into(), None, 1, 30);
+        open.circuit_breaker.record_failure();
+        let probing = Upstream::with_circuit_breaker("http://probing".into(), None, 1, 0);
+        probing.circuit_breaker.record_failure();
+        assert!(probing.is_available());
+        let circuit = probing.circuit_breaker.clone();
+        let balancer =
+            BaseLoadBalancer::new(crate::RoundRobin::new(), vec![healthy, open, probing]);
+        for _ in 0..3 {
+            assert_eq!(
+                balancer.target_counts(),
+                TargetCounts {
+                    healthy: 1,
+                    unhealthy: 1,
+                    circuit_open: 1
+                }
+            );
+            assert_eq!(
+                circuit.state(),
+                crate::circuit_breaker::CircuitState::HalfOpen
+            );
+        }
+    }
 
     #[tokio::test]
     async fn probes_without_a_prepared_client_mark_targets_unhealthy() {

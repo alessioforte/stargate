@@ -148,3 +148,40 @@ async fn trace_boundary_sanitizes_gateway_owned_headers_before_handler() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(response.headers().get_all("x-request-id").iter().count(), 1);
 }
+
+#[cfg(feature = "memory")]
+#[tokio::test]
+async fn gateway_fallback_failures_keep_their_classification_through_http_middleware() {
+    use axum::{Router, body::Body, middleware, routing::get};
+    use tower::ServiceExt;
+    let app = Router::new()
+        .route("/iam", get(|| async { "iam" }))
+        .fallback(|request: axum::extract::Request| async move {
+            crate::gate::service(request).await.unwrap()
+        })
+        .layer(axum::Extension(std::sync::Arc::new(
+            crate::gate::test_support::gate(gate::cfg::Config::default()),
+        )))
+        .layer(middleware::from_fn(super::trace_middleware));
+    for (path, gateway, status) in [("/iam", false, 200), ("/gateway", true, 404)] {
+        // Even an unmatched gateway route must carry the classification marker.
+        let response = app
+            .clone()
+            .oneshot(
+                http::Request::builder()
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), status);
+        assert_eq!(
+            response
+                .extensions()
+                .get::<crate::obs::telemetry::GatewayResponse>()
+                .is_some(),
+            gateway
+        );
+    }
+}

@@ -217,6 +217,15 @@ pub async fn trace_middleware(
         span.record("otel.status_code", "ERROR");
     }
     telemetry::record_http_server_request(
+        if response
+            .extensions()
+            .get::<telemetry::GatewayResponse>()
+            .is_some()
+        {
+            telemetry::HttpRequestKind::Gateway
+        } else {
+            telemetry::HttpRequestKind::Iam
+        },
         method.as_str(),
         response.status().as_u16(),
         started.elapsed(),

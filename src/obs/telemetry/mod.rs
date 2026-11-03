@@ -192,3 +192,10 @@ pub use propagation::{
 
 #[cfg(all(feature = "postgres", feature = "redis"))]
 pub use metrics::{record_audit_outbox_pruned, register_audit_observers};
+
+/// Subsystem-owned observable instruments share the server's instrumentation scope.
+pub(crate) fn meter() -> opentelemetry::metrics::Meter {
+    global::meter(INSTRUMENTATION_NAME)
+}
+
+pub(crate) use metrics::{GatewayResponse, HttpRequestKind};

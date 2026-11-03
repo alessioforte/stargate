@@ -1022,6 +1022,16 @@ controller rejects new admission and cancels active gateway work. HTTP and TLS
 listeners stop, connections drain within `SERVER_SHUTDOWN_TIMEOUT_SECS`, remaining
 connections are cancelled, and tracked gateway tasks are drained before hooks.
 
+The active upstream snapshot also exposes `stargate.gateway.upstream.targets`,
+with bounded upstream-name and state labels (`healthy`, `unhealthy`,
+`circuit_open`). Observation never advances a circuit or reserves a probe.
+`stargate.db.pool.connections` and `.max` describe the initialized SQL pool.
+HTTP server instruments distinguish `stargate.request.kind=iam|gateway`, so
+non-gateway and gateway latency histograms can be queried separately.
+See [Monitoring](monitoring.md) for OpenTelemetry instrument names, cumulative
+counter identity, histogram buckets, recommended views and the alert catalog.
+No backend-specific monitoring resources are bundled.
+
 `stargate.gateway.resources.active` is an up/down counter with only `kind`:
 `primary` (requests/sessions), `mirror` (reserved slots/tasks), and `replay_memory`
 (reserved bytes). All three return to zero after gateway work drains.

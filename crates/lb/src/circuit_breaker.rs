@@ -21,6 +21,14 @@ const CB_CLOSED: u8 = 0; // healthy — all requests allowed
 const CB_OPEN: u8 = 1; // tripped — requests rejected
 const CB_HALF_OPEN: u8 = 2; // probing — one request allowed to test recovery
 
+/// Read-only circuit state; observing it never admits a half-open probe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
 pub struct CircuitBreaker {
     state: AtomicU8,
     fail_count: AtomicUsize,
@@ -136,8 +144,12 @@ impl CircuitBreaker {
         }
     }
 
-    pub fn state(&self) -> u8 {
-        self.state.load(Ordering::Acquire)
+    pub fn state(&self) -> CircuitState {
+        match self.state.load(Ordering::Acquire) {
+            CB_CLOSED => CircuitState::Closed,
+            CB_OPEN => CircuitState::Open,
+            _ => CircuitState::HalfOpen,
+        }
     }
 
     pub fn fail_count(&self) -> usize {
@@ -154,10 +166,10 @@ mod tests {
         let cb = CircuitBreaker::new(3, 60);
         cb.record_failure_at(100);
         cb.record_failure_at(100);
-        assert_eq!(cb.state(), CB_CLOSED);
+        assert_eq!(cb.state(), CircuitState::Closed);
         assert!(cb.is_available_at(100));
         cb.record_failure_at(100); // 3rd consecutive → open
-        assert_eq!(cb.state(), CB_OPEN);
+        assert_eq!(cb.state(), CircuitState::Open);
         assert!(!cb.is_available_at(100));
     }
 
@@ -168,7 +180,7 @@ mod tests {
         assert!(!cb.is_available_at(105)); // 5s < 10s cooldown
         // cooldown elapsed: first caller is admitted and transitions to half-open
         assert!(cb.is_available_at(110));
-        assert_eq!(cb.state(), CB_HALF_OPEN);
+        assert_eq!(cb.state(), CircuitState::HalfOpen);
         // concurrent callers rejected while the probe is in flight
         assert!(!cb.is_available_at(111));
         assert!(!cb.is_available_at(115));
@@ -180,7 +192,7 @@ mod tests {
         cb.record_failure_at(100);
         assert!(cb.is_available_at(110)); // → half-open probe admitted
         cb.record_success();
-        assert_eq!(cb.state(), CB_CLOSED);
+        assert_eq!(cb.state(), CircuitState::Closed);
         assert_eq!(cb.fail_count(), 0);
         assert!(cb.is_available_at(111));
     }
@@ -191,7 +203,7 @@ mod tests {
         cb.record_failure_at(100);
         assert!(cb.is_available_at(110)); // half-open
         cb.record_failure_at(110); // probe failed → reopen immediately
-        assert_eq!(cb.state(), CB_OPEN);
+        assert_eq!(cb.state(), CircuitState::Open);
         assert!(!cb.is_available_at(115)); // fresh cooldown
         assert!(cb.is_available_at(120)); // cooldown elapsed → probe again
     }
@@ -217,6 +229,6 @@ mod tests {
         assert_eq!(cb.fail_count(), 2);
         cb.record_success();
         assert_eq!(cb.fail_count(), 0);
-        assert_eq!(cb.state(), CB_CLOSED);
+        assert_eq!(cb.state(), CircuitState::Closed);
     }
 }

@@ -26,6 +26,14 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/post
 #[cfg(feature = "sqlite")]
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/sqlite");
 
+/// A non-transactional diagnostic sample of the connection pool.
+#[derive(Debug, Clone, Copy)]
+pub struct PoolStats {
+    pub idle: u32,
+    pub in_use: u32,
+    pub max: u32,
+}
+
 #[derive(Clone)]
 pub struct Service {
     pool: Pool,
@@ -59,6 +67,18 @@ impl Service {
             service_account: ServiceAccountRepository::new(),
             organization: OrganizationRepository::new(),
             super_admin: SuperAdminRepository::new(),
+        }
+    }
+
+    pub fn pool_stats(&self) -> PoolStats {
+        let size = self.pool.size();
+        // Pool operations can race these independent atomic reads. Clamp idle
+        // to the sampled size so diagnostic arithmetic cannot underflow.
+        let idle = self.pool.num_idle().min(size as usize) as u32;
+        PoolStats {
+            idle,
+            in_use: size - idle,
+            max: self.pool.options().get_max_connections(),
         }
     }
 
@@ -5339,5 +5359,28 @@ mod tests {
         // Clean up: mark both batches published so they don't linger.
         claim1.commit_published().await.ok();
         claim2.commit_published().await.ok();
+    }
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod pool_stats_tests {
+    #[tokio::test]
+    async fn pool_samples_follow_acquisition_and_release() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(3)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let service = super::Service::new(pool.clone());
+        let connection = pool.acquire().await.unwrap();
+        let busy = service.pool_stats();
+        assert_eq!(busy.max, 3);
+        assert_eq!(busy.in_use, 1);
+        drop(connection);
+        // sqlx returns connections to the idle queue asynchronously.
+        pool.acquire().await.unwrap().close().await.unwrap();
+        let stats = service.pool_stats();
+        assert_eq!(stats.in_use, 0);
+        assert!(stats.idle + stats.in_use <= stats.max);
     }
 }
