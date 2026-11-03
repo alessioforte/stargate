@@ -23,7 +23,7 @@ pub use error::{
     ClaimValidationError, ConfigError, IssueError, KeyMaterialError, KeyResolutionError,
     PresentationError, VerificationError, VerificationFailure,
 };
-pub use keys::{KeyResolver, StaticKeyResolver, VerificationKey};
+pub use keys::{KeyResolver, RsaPublicComponents, StaticKeyResolver, VerificationKey};
 pub use signer::{ContextSigner, IssuedContext, JOSE_TYPE, SignerConfig};
 pub use source::{Clock, DispatchIdSource, SystemClock, UlidDispatchIdSource};
 pub use verifier::{ContextVerifier, ExpectedRequest, VerifierConfig, require_single_token};

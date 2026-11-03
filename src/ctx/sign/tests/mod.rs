@@ -11,15 +11,15 @@ fn jwks(jwk: Value) -> Vec<u8> {
 }
 
 fn public_jwk(private_key_pem: &[u8], key_id: &str) -> Value {
-    let private_key = parse_private_key(private_key_pem).unwrap();
+    let public_key = ctx::RsaPublicComponents::from_private_key_pem(private_key_pem).unwrap();
     serde_json::json!({
         "kty": "RSA",
         "use": "sig",
         "key_ops": ["verify"],
         "alg": "RS256",
         "kid": key_id,
-        "n": URL_SAFE_NO_PAD.encode(private_key.n().to_bytes_be()),
-        "e": URL_SAFE_NO_PAD.encode(private_key.e().to_bytes_be()),
+        "n": URL_SAFE_NO_PAD.encode(public_key.modulus()),
+        "e": URL_SAFE_NO_PAD.encode(public_key.exponent()),
     })
 }
 

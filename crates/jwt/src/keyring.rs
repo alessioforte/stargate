@@ -151,7 +151,7 @@ pub fn validate_key_id(key_id: &str) -> Result<(), KeyError> {
 }
 
 enum PublicKey {
-    Rsa(rsa::RsaPublicKey),
+    Rsa(aws_lc_rs::rsa::PublicKey),
     P256(p256::PublicKey),
     P384(p384::PublicKey),
 }
@@ -161,8 +161,7 @@ impl PublicKey {
         let text =
             std::str::from_utf8(pem).map_err(|_| KeyError::new("public key is not PEM text"))?;
         use p256::pkcs8::DecodePublicKey as _;
-        use rsa::pkcs8::DecodePublicKey as _;
-        if let Ok(key) = rsa::RsaPublicKey::from_public_key_pem(text) {
+        if let Some(key) = rsa_public_key(text) {
             return Ok(Self::Rsa(key));
         }
         if let Ok(key) = p256::PublicKey::from_public_key_pem(text) {
@@ -197,7 +196,6 @@ impl PublicKey {
 
     fn jwk(&self, key_id: &str, algorithm: Algorithm) -> Result<Jwk, KeyError> {
         use p256::elliptic_curve::sec1::ToSec1Point as _;
-        use rsa::traits::PublicKeyParts as _;
 
         let alg = format!("{algorithm:?}");
         let value = match self {
@@ -206,8 +204,8 @@ impl PublicKey {
                 "use": "sig",
                 "alg": alg,
                 "kid": key_id,
-                "n": URL_SAFE_NO_PAD.encode(key.n().to_bytes_be()),
-                "e": URL_SAFE_NO_PAD.encode(key.e().to_bytes_be()),
+                "n": URL_SAFE_NO_PAD.encode(key.modulus().big_endian_without_leading_zero()),
+                "e": URL_SAFE_NO_PAD.encode(key.exponent().big_endian_without_leading_zero()),
             }),
             Self::P256(key) => ec_jwk(key_id, &alg, "P-256", key.to_sec1_point(false).as_bytes()),
             Self::P384(key) => ec_jwk(key_id, &alg, "P-384", key.to_sec1_point(false).as_bytes()),
@@ -215,6 +213,15 @@ impl PublicKey {
         serde_json::from_value(value)
             .map_err(|error| KeyError::new(format!("key '{key_id}' JWK: {error}")))
     }
+}
+
+/// An RSA key in SubjectPublicKeyInfo (`PUBLIC KEY`) PEM. EC keys use the same
+/// label and are rejected here by aws-lc-rs.
+fn rsa_public_key(text: &str) -> Option<aws_lc_rs::rsa::PublicKey> {
+    let block = pem::parse(text)
+        .ok()
+        .filter(|block| block.tag() == "PUBLIC KEY")?;
+    aws_lc_rs::rsa::PublicKey::from_der(block.contents()).ok()
 }
 
 /// JWK of an uncompressed SEC1 point (`0x04 || X || Y`).

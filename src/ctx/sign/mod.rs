@@ -6,8 +6,7 @@ use ctx::{ContextSigner, IssueRequest, MAX_CLOCK_SKEW_SECS, MAX_KEY_ID_BYTES, Si
 #[cfg(test)]
 use ctx::{IssueError, IssuedContext};
 use gate::cfg::RuntimeConfig;
-use material::{parse_private_key, validate_and_sanitize_jwks};
-use rsa::traits::PublicKeyParts;
+use material::validate_and_sanitize_jwks;
 use serde_json::Value;
 use settings::{ALGORITHM_ENV, CLOCK_SKEW_ENV, RuntimeSettings, load_from_env};
 #[cfg(test)]
@@ -121,13 +120,8 @@ impl InternalContextRuntime {
                 .map_err(InternalContextError::Signer)?;
         let signer = ContextSigner::from_rsa_pem(signer_config, private_key_pem)
             .map_err(InternalContextError::Signer)?;
-        let private_key = parse_private_key(private_key_pem)?;
-        let public_jwks = validate_and_sanitize_jwks(
-            jwks_json,
-            &settings.key_id,
-            private_key.n(),
-            private_key.e(),
-        )?;
+        let public_jwks =
+            validate_and_sanitize_jwks(jwks_json, &settings.key_id, signer.public_components())?;
 
         Ok(Self {
             signer: Arc::new(signer),

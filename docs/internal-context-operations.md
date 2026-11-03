@@ -47,7 +47,8 @@ cargo run --features edge -- internal-context generate-key \
 The command uses operating-system randomness and creates a 2,048-bit RSA
 private key in PKCS#8 PEM plus a public-only RS256 `jwks.json`. It refuses to
 overwrite either output. Use `--bits 3072` or `--bits 4096` when the deployment
-policy requires a larger modulus; accepted values are 2,048 through 8,192.
+policy requires a larger modulus; accepted values are 2,048, 3,072, 4,096, and
+8,192.
 
 The command prints the matching `INTERNAL_CONTEXT_*` paths but never prints the
 private key. Server startup only loads and validates provisioned material; it

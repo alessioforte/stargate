@@ -676,7 +676,7 @@ cargo run --features edge -- internal-context generate-key \
 
 The command creates `private.pem` and a matching public-only `jwks.json`, sets
 restrictive Unix permissions, and refuses to overwrite either file. RSA keys
-default to 2,048 bits; `--bits` accepts values from 2,048 through 8,192.
+default to 2,048 bits; `--bits` accepts 2,048, 3,072, 4,096, or 8,192.
 
 ```dotenv
 INTERNAL_CONTEXT_ALGORITHM=RS256

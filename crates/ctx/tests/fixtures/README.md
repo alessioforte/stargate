@@ -8,6 +8,11 @@ These files freeze the language-neutral version 1 interoperability vectors.
 - `private.pem` and `rotation-next-private.pem` are test-only fixture material
   and must never be used outside tests. The latter is used only by the
   Stargate key-rotation drill.
+- `private.pkcs1.pem` and `public.pkcs1.pem` hold the same key pair in PKCS#1
+  (`RSA PRIVATE KEY`, `RSA PUBLIC KEY`); they must sign and verify the same
+  tokens.
+- `weak-1024-private.pem` is a test-only 1,024-bit key that must be rejected as
+  too small.
 
 All vectors use:
 

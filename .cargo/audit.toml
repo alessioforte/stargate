@@ -3,14 +3,6 @@
 
 [advisories]
 ignore = [
-    # rsa 0.9 (Marvin attack): non-constant-time private-key operations; no rsa
-    # release is patched, 0.10 release candidates included. jsonwebtoken signs
-    # and verifies with aws-lc-rs, so no token signature goes through this
-    # crate. Stargate's own rsa calls parse keys when they are loaded, read
-    # public components for JWKS documents and generate keys in the CLI; none
-    # handles attacker-controlled input. Remove when those calls leave the rsa
-    # crate or a patched release is available.
-    "RUSTSEC-2023-0071",
     # False positive: matches the crates.io crate named `jwt`, not the workspace
     # path crate `crates/jwt`.
     "RUSTSEC-2016-0007",

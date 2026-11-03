@@ -545,6 +545,27 @@ fn presentation_and_configuration_fail_closed() {
 }
 
 #[test]
+fn rejects_weak_private_keys() {
+    const WEAK_PRIVATE_KEY: &[u8] = include_bytes!("fixtures/weak-1024-private.pem");
+
+    assert_eq!(
+        ctx::RsaPublicComponents::from_private_key_pem(WEAK_PRIVATE_KEY).unwrap_err(),
+        KeyMaterialError::RsaTooSmall
+    );
+    assert!(matches!(
+        ctx::ContextSigner::from_rsa_pem(
+            SignerConfig::new(ISSUER, KEY_ID, 30).unwrap(),
+            WEAK_PRIVATE_KEY
+        ),
+        Err(ConfigError::Key(KeyMaterialError::RsaTooSmall))
+    ));
+    assert_eq!(
+        ctx::RsaPublicComponents::from_private_key_pem(PUBLIC_KEY).unwrap_err(),
+        KeyMaterialError::InvalidRsa
+    );
+}
+
+#[test]
 fn rejects_weak_or_incompatible_jwks() {
     let weak_modulus = URL_SAFE_NO_PAD.encode([0x80; 128]);
     let weak = serde_json::json!({

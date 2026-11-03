@@ -8,7 +8,7 @@ use crate::claims::{
     WireClaims, validate_claims,
 };
 use crate::error::{ConfigError, IssueError};
-use crate::keys::parse_private_key;
+use crate::keys::{RsaPublicComponents, parse_private_key};
 use crate::source::{Clock, DispatchIdSource, SystemClock, UlidDispatchIdSource};
 
 pub const JOSE_TYPE: &str = "stargate-context+jwt";
@@ -86,6 +86,7 @@ impl fmt::Debug for IssuedContext {
 pub struct ContextSigner {
     config: SignerConfig,
     encoding_key: jsonwebtoken::EncodingKey,
+    public_components: RsaPublicComponents,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn DispatchIdSource>,
 }
@@ -106,13 +107,21 @@ impl ContextSigner {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn DispatchIdSource>,
     ) -> Result<Self, ConfigError> {
-        let encoding_key = parse_private_key(private_key_pem)?;
+        let key = parse_private_key(private_key_pem)?;
         Ok(Self {
             config,
-            encoding_key,
+            encoding_key: key.encoding_key,
+            public_components: key.public_components,
             clock,
             ids,
         })
+    }
+
+    /// The public components of the signing key, for matching it against a
+    /// published JWKS.
+    #[must_use]
+    pub fn public_components(&self) -> &RsaPublicComponents {
+        &self.public_components
     }
 
     pub fn issue(&self, request: &IssueRequest) -> Result<IssuedContext, IssueError> {

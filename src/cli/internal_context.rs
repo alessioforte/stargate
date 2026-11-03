@@ -1,9 +1,6 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use clap::{Args, Subcommand};
-use rsa::RsaPrivateKey;
-use rsa::pkcs8::DecodePrivateKey;
-use rsa::traits::PublicKeyParts;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -11,8 +8,6 @@ use std::path::{Path, PathBuf};
 const DEFAULT_OUTPUT_DIR: &str = ".stargate/internal-context";
 const DEFAULT_KEY_ID: &str = "stargate-internal-current";
 const DEFAULT_RSA_BITS: usize = 2048;
-const MIN_RSA_BITS: usize = 2048;
-const MAX_RSA_BITS: usize = 8192;
 
 #[derive(Debug, Args)]
 pub struct InternalContextArgs {
@@ -36,7 +31,7 @@ struct GenerateKeyArgs {
     #[arg(long, default_value = DEFAULT_KEY_ID)]
     kid: String,
 
-    /// RSA modulus size in bits.
+    /// RSA modulus size in bits: 2048, 3072, 4096, or 8192.
     #[arg(long, default_value_t = DEFAULT_RSA_BITS)]
     bits: usize,
 }
@@ -88,7 +83,7 @@ fn generate_key_files(
 
     let (private_pem, _) =
         ::jwt::generate_rsa_keys(bits).map_err(|error| io::Error::other(error.to_string()))?;
-    let private_key = RsaPrivateKey::from_pkcs8_pem(&private_pem)
+    let public_key = ctx::RsaPublicComponents::from_private_key_pem(private_pem.as_bytes())
         .map_err(|error| io::Error::other(format!("generated private key is invalid: {error}")))?;
     let public_jwk = serde_json::json!({
         "kty": "RSA",
@@ -96,8 +91,8 @@ fn generate_key_files(
         "key_ops": ["verify"],
         "alg": "RS256",
         "kid": key_id,
-        "n": URL_SAFE_NO_PAD.encode(private_key.n().to_bytes_be()),
-        "e": URL_SAFE_NO_PAD.encode(private_key.e().to_bytes_be()),
+        "n": URL_SAFE_NO_PAD.encode(public_key.modulus()),
+        "e": URL_SAFE_NO_PAD.encode(public_key.exponent()),
     });
     let public_jwk_bytes =
         serde_json::to_vec(&public_jwk).map_err(|error| io::Error::other(error.to_string()))?;
@@ -136,10 +131,10 @@ fn validate_generation_input(key_id: &str, bits: usize) -> io::Result<()> {
             ),
         ));
     }
-    if !(MIN_RSA_BITS..=MAX_RSA_BITS).contains(&bits) {
+    if !::jwt::RSA_KEY_SIZES.contains(&bits) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("--bits must be between {MIN_RSA_BITS} and {MAX_RSA_BITS}"),
+            "--bits must be 2048, 3072, 4096, or 8192",
         ));
     }
     Ok(())
@@ -217,7 +212,6 @@ fn set_directory_permissions(_path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rsa::BigUint;
 
     fn temporary_output_dir(test_name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("stargate-{test_name}-{}", ulid::Ulid::generate()))
@@ -229,20 +223,18 @@ mod tests {
         let generated =
             generate_key_files(&output_dir, "stargate-internal-test", DEFAULT_RSA_BITS).unwrap();
 
-        let private_pem = fs::read_to_string(&generated.private_key_path).unwrap();
-        let private_key = RsaPrivateKey::from_pkcs8_pem(&private_pem).unwrap();
+        let private_pem = fs::read(&generated.private_key_path).unwrap();
+        let private_key = ctx::RsaPublicComponents::from_private_key_pem(&private_pem).unwrap();
         let jwks: serde_json::Value =
             serde_json::from_slice(&fs::read(&generated.jwks_path).unwrap()).unwrap();
         let jwk = &jwks["keys"][0];
         let jwk_bytes = serde_json::to_vec(jwk).unwrap();
         ctx::VerificationKey::from_jwk_json(&jwk_bytes).unwrap();
-        let decode_part = |name: &str| {
-            BigUint::from_bytes_be(&URL_SAFE_NO_PAD.decode(jwk[name].as_str().unwrap()).unwrap())
-        };
+        let decode_part = |name: &str| URL_SAFE_NO_PAD.decode(jwk[name].as_str().unwrap()).unwrap();
 
         assert_eq!(jwk["kid"], "stargate-internal-test");
-        assert_eq!(decode_part("n"), *private_key.n());
-        assert_eq!(decode_part("e"), *private_key.e());
+        assert_eq!(decode_part("n"), private_key.modulus());
+        assert_eq!(decode_part("e"), private_key.exponent());
 
         #[cfg(unix)]
         {
@@ -291,12 +283,14 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidInput
         );
-        assert_eq!(
-            validate_generation_input("valid-key", MIN_RSA_BITS - 1)
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::InvalidInput
-        );
+        for bits in [2047, 3000, 16384] {
+            assert_eq!(
+                validate_generation_input("valid-key", bits)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
 
         fs::remove_dir_all(output_dir).unwrap();
     }

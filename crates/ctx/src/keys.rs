@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use aws_lc_rs::error::KeyRejected;
+use aws_lc_rs::rsa::{KeyPair, PublicKey, PublicKeyComponents};
+use aws_lc_rs::signature::KeyPair as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::jwk::{AlgorithmParameters, Jwk, KeyAlgorithm, KeyOperations, PublicKeyUse};
-use rsa::pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey};
-use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey};
-use rsa::traits::PublicKeyParts;
-use rsa::{RsaPrivateKey, RsaPublicKey};
 
 use crate::error::{KeyMaterialError, KeyResolutionError};
 use crate::strict_json;
@@ -25,11 +24,15 @@ impl VerificationKey {
     /// Parses an RSA public key from PKCS#8/SPKI or PKCS#1 PEM and enforces the
     /// version 1 minimum key strength.
     pub fn from_rsa_pem(pem: &[u8]) -> Result<Self, KeyMaterialError> {
-        let text = std::str::from_utf8(pem).map_err(|_| KeyMaterialError::InvalidRsa)?;
-        let key = RsaPublicKey::from_public_key_pem(text)
-            .or_else(|_| RsaPublicKey::from_pkcs1_pem(text))
-            .map_err(|_| KeyMaterialError::InvalidRsa)?;
-        require_rsa_strength(key.n().bits())?;
+        let block = pem::parse(pem).map_err(|_| KeyMaterialError::InvalidRsa)?;
+        if !matches!(block.tag(), "PUBLIC KEY" | "RSA PUBLIC KEY") {
+            return Err(KeyMaterialError::InvalidRsa);
+        }
+        // aws-lc-rs reads both SubjectPublicKeyInfo and PKCS#1 `RSAPublicKey`.
+        let key = PublicKey::from_der(block.contents()).map_err(rejected)?;
+        require_rsa_strength(modulus_bits(
+            key.modulus().big_endian_without_leading_zero(),
+        ))?;
         let decoding_key =
             DecodingKey::from_rsa_pem(pem).map_err(|_| KeyMaterialError::InvalidRsa)?;
         Ok(Self { decoding_key })
@@ -114,13 +117,73 @@ impl KeyResolver for StaticKeyResolver {
     }
 }
 
-pub(crate) fn parse_private_key(pem: &[u8]) -> Result<jsonwebtoken::EncodingKey, KeyMaterialError> {
-    let text = std::str::from_utf8(pem).map_err(|_| KeyMaterialError::InvalidRsa)?;
-    let key = RsaPrivateKey::from_pkcs8_pem(text)
-        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(text))
-        .map_err(|_| KeyMaterialError::InvalidRsa)?;
-    require_rsa_strength(key.n().bits())?;
-    jsonwebtoken::EncodingKey::from_rsa_pem(pem).map_err(|_| KeyMaterialError::InvalidRsa)
+/// The public half of an RSA key as a JWK carries it: big-endian `n` and `e`
+/// without leading zero octets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RsaPublicComponents {
+    modulus: Vec<u8>,
+    exponent: Vec<u8>,
+}
+
+impl RsaPublicComponents {
+    /// Reads the public components of an RSA private key in PKCS#8
+    /// (`PRIVATE KEY`) or PKCS#1 (`RSA PRIVATE KEY`) PEM.
+    pub fn from_private_key_pem(pem: &[u8]) -> Result<Self, KeyMaterialError> {
+        Ok(Self::of(&parse_rsa_private_key(pem)?))
+    }
+
+    #[must_use]
+    pub fn modulus(&self) -> &[u8] {
+        &self.modulus
+    }
+
+    #[must_use]
+    pub fn exponent(&self) -> &[u8] {
+        &self.exponent
+    }
+
+    fn of(key: &KeyPair) -> Self {
+        let PublicKeyComponents { n, e } = PublicKeyComponents::<Vec<u8>>::from(key.public_key());
+        Self {
+            modulus: n,
+            exponent: e,
+        }
+    }
+}
+
+/// A validated RS256 signing key with its public components.
+pub(crate) struct SigningKey {
+    pub(crate) encoding_key: jsonwebtoken::EncodingKey,
+    pub(crate) public_components: RsaPublicComponents,
+}
+
+pub(crate) fn parse_private_key(pem: &[u8]) -> Result<SigningKey, KeyMaterialError> {
+    let key = parse_rsa_private_key(pem)?;
+    let encoding_key =
+        jsonwebtoken::EncodingKey::from_rsa_pem(pem).map_err(|_| KeyMaterialError::InvalidRsa)?;
+    Ok(SigningKey {
+        encoding_key,
+        public_components: RsaPublicComponents::of(&key),
+    })
+}
+
+fn parse_rsa_private_key(pem: &[u8]) -> Result<KeyPair, KeyMaterialError> {
+    let block = pem::parse(pem).map_err(|_| KeyMaterialError::InvalidRsa)?;
+    match block.tag() {
+        "PRIVATE KEY" => KeyPair::from_pkcs8(block.contents()),
+        "RSA PRIVATE KEY" => KeyPair::from_der(block.contents()),
+        _ => return Err(KeyMaterialError::InvalidRsa),
+    }
+    .map_err(rejected)
+}
+
+/// aws-lc-rs accepts 2048- to 8192-bit RSA keys and names a smaller one
+/// `TooSmall`.
+fn rejected(error: KeyRejected) -> KeyMaterialError {
+    match error.description_() {
+        "TooSmall" => KeyMaterialError::RsaTooSmall,
+        _ => KeyMaterialError::InvalidRsa,
+    }
 }
 
 fn validate_jwk(jwk: &Jwk) -> Result<(), KeyMaterialError> {

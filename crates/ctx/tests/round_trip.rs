@@ -5,8 +5,8 @@ use std::sync::Arc;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ctx::{
-    ActorType, AuthenticationKind, DispatchKind, StaticKeyResolver, VerificationError,
-    VerifierConfig,
+    ActorType, AuthenticationKind, ContextSigner, ContextVerifier, DispatchKind,
+    RsaPublicComponents, SignerConfig, StaticKeyResolver, VerificationError, VerifierConfig,
 };
 
 use common::*;
@@ -62,6 +62,55 @@ fn anonymous_organizationless_round_trip() {
         AuthenticationKind::None
     );
     assert!(trusted.context().organization.is_none());
+}
+
+#[test]
+fn pkcs1_keys_sign_and_verify_like_their_pkcs8_forms() {
+    const PKCS1_PRIVATE_KEY: &[u8] = include_bytes!("fixtures/private.pkcs1.pem");
+    const PKCS1_PUBLIC_KEY: &[u8] = include_bytes!("fixtures/public.pkcs1.pem");
+
+    let pkcs1_signer = ContextSigner::with_sources(
+        SignerConfig::new(ISSUER, KEY_ID, 30).unwrap(),
+        PKCS1_PRIVATE_KEY,
+        Arc::new(FixedClock(NOW)),
+        Arc::new(FixedId(DISPATCH_ID)),
+    )
+    .unwrap();
+    // RS256 signatures are deterministic, so both encodings issue the same token.
+    let issued = pkcs1_signer.issue(&user_request()).unwrap();
+    assert_eq!(
+        issued.compact(),
+        signer().issue(&user_request()).unwrap().compact()
+    );
+    assert_eq!(
+        pkcs1_signer.public_components(),
+        signer().public_components()
+    );
+
+    let resolver = StaticKeyResolver::from_rsa_pem(KEY_ID, PKCS1_PUBLIC_KEY).unwrap();
+    let verifier = ContextVerifier::with_clock(
+        VerifierConfig::new(ISSUER, AUDIENCE, 5).unwrap(),
+        Arc::new(resolver),
+        Arc::new(FixedClock(NOW)),
+    );
+    verifier.verify(issued.compact(), expected()).unwrap();
+}
+
+#[test]
+fn public_components_match_the_published_jwk() {
+    let jwk: serde_json::Value =
+        serde_json::from_slice(include_bytes!("fixtures/public.jwk.json")).unwrap();
+    let components = RsaPublicComponents::from_private_key_pem(PRIVATE_KEY).unwrap();
+
+    assert_eq!(
+        URL_SAFE_NO_PAD.encode(components.modulus()),
+        jwk["n"].as_str().unwrap()
+    );
+    assert_eq!(
+        URL_SAFE_NO_PAD.encode(components.exponent()),
+        jwk["e"].as_str().unwrap()
+    );
+    assert_eq!(signer().public_components(), &components);
 }
 
 #[test]

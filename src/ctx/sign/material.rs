@@ -1,28 +1,13 @@
 use super::InternalContextError;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use ctx::{MAX_KEY_ID_BYTES, VerificationKey};
-use rsa::{BigUint, RsaPrivateKey, pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey};
+use ctx::{MAX_KEY_ID_BYTES, RsaPublicComponents, VerificationKey};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-
-pub(super) fn parse_private_key(
-    private_key_pem: &[u8],
-) -> Result<RsaPrivateKey, InternalContextError> {
-    let text = std::str::from_utf8(private_key_pem).map_err(|_| {
-        InternalContextError::Signer(ctx::ConfigError::Key(ctx::KeyMaterialError::InvalidRsa))
-    })?;
-    RsaPrivateKey::from_pkcs8_pem(text)
-        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(text))
-        .map_err(|_| {
-            InternalContextError::Signer(ctx::ConfigError::Key(ctx::KeyMaterialError::InvalidRsa))
-        })
-}
 
 pub(super) fn validate_and_sanitize_jwks(
     input: &[u8],
     active_key_id: &str,
-    private_modulus: &BigUint,
-    private_exponent: &BigUint,
+    signing_key: &RsaPublicComponents,
 ) -> Result<Value, InternalContextError> {
     let value: Value =
         serde_json::from_slice(input).map_err(|_| InternalContextError::InvalidJwksShape)?;
@@ -59,7 +44,8 @@ pub(super) fn validate_and_sanitize_jwks(
             .map_err(|_| InternalContextError::InvalidJwk { index })?;
         let (modulus, exponent) = jwk_public_parts(object, index)?;
         if key_id == active_key_id {
-            active_matches = Some(modulus == *private_modulus && exponent == *private_exponent);
+            active_matches =
+                Some(modulus == signing_key.modulus() && exponent == signing_key.exponent());
         }
 
         sanitized.push(Value::Object(sanitize_public_jwk(object)));
@@ -98,21 +84,23 @@ fn validate_key_id(key_id: &str) -> Result<(), InternalContextError> {
     Ok(())
 }
 
+/// The JWK's `n` and `e` as big-endian integers without leading zero octets,
+/// the form `RsaPublicComponents` uses.
 fn jwk_public_parts(
     object: &Map<String, Value>,
     index: usize,
-) -> Result<(BigUint, BigUint), InternalContextError> {
-    let decode = |name: &str| {
-        object
+) -> Result<(Vec<u8>, Vec<u8>), InternalContextError> {
+    let decode = |name: &str| -> Result<Vec<u8>, InternalContextError> {
+        let bytes = object
             .get(name)
             .and_then(Value::as_str)
-            .ok_or(InternalContextError::InvalidJwk { index })
-            .and_then(|value| {
-                URL_SAFE_NO_PAD
-                    .decode(value)
-                    .map(|bytes| BigUint::from_bytes_be(&bytes))
-                    .map_err(|_| InternalContextError::InvalidJwk { index })
-            })
+            .and_then(|value| URL_SAFE_NO_PAD.decode(value).ok())
+            .ok_or(InternalContextError::InvalidJwk { index })?;
+        let first = bytes
+            .iter()
+            .position(|byte| *byte != 0)
+            .unwrap_or(bytes.len());
+        Ok(bytes[first..].to_vec())
     };
     Ok((decode("n")?, decode("e")?))
 }
