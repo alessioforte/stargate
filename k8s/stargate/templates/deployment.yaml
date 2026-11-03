@@ -112,6 +112,16 @@ spec:
               containerPort: {{ .Values.containerPort }}
               protocol: TCP
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.instance.id=$(POD_NAME),k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE)"
             - name: STARGATE_RUNTIME_PROFILE
               value: {{ .Values.deployment.mode | quote }}
             - name: PORT

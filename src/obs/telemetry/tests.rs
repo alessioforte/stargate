@@ -63,6 +63,7 @@ async fn http_export_workers_deliver_traces_and_logs_without_a_tokio_runtime() {
             .env("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
             .env("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
             .env("OTEL_TRACES_SAMPLER", "always_on")
+            .env("OTEL_RESOURCE_ATTRIBUTES", "service.instance.id=http-export-test-replica,custom.test.attribute=preserved")
             .env("OTEL_EXPORTER_OTLP_TIMEOUT", "3000")
             .env("LOG_FORMAT", "json")
             .env("LOG_FILE_ENABLED", "false")
@@ -85,6 +86,25 @@ async fn http_export_workers_deliver_traces_and_logs_without_a_tokio_runtime() {
     );
     assert!(!stderr.contains("panicked"), "{stderr}");
     let exports = exports.lock().unwrap();
+    for signal in ["traces", "metrics", "logs"] {
+        let path = format!("/v1/{signal}");
+        assert!(
+            exports.iter().any(|export| export.path == path
+                && export
+                    .body
+                    .windows(b"service.instance.id".len())
+                    .any(|value| value == b"service.instance.id")
+                && export
+                    .body
+                    .windows(b"http-export-test-replica".len())
+                    .any(|value| value == b"http-export-test-replica")
+                && export
+                    .body
+                    .windows(b"custom.test.attribute".len())
+                    .any(|value| value == b"custom.test.attribute")),
+            "Missing resource identity in {signal}"
+        );
+    }
     let trace_id = [
         0x4b, 0xf9, 0x2f, 0x35, 0x77, 0xb3, 0x4d, 0xa6, 0xa3, 0xce, 0x92, 0x9d, 0x0e, 0x0e, 0x47,
         0x36,
@@ -105,4 +125,79 @@ async fn http_export_workers_deliver_traces_and_logs_without_a_tokio_runtime() {
             .iter()
             .any(|e| e.path == "/v1/metrics" && !e.body.is_empty())
     );
+}
+
+#[test]
+fn resource_identity_is_stable_per_process_and_preserves_environment_attributes() {
+    const CHILD: &str = "STARGATE_TEST_RESOURCE_IDENTITY_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let resource = super::resource();
+        let key = opentelemetry::Key::from_static_str("service.instance.id");
+        let id = resource.get(&key).unwrap().to_string();
+        assert_eq!(super::resource().get(&key).unwrap().to_string(), id);
+        let attributes: std::collections::BTreeMap<_, _> = resource
+            .iter()
+            .map(|(key, value)| (key.as_str().to_string(), value.to_string()))
+            .collect();
+        println!(
+            "RESOURCE_IDENTITY={}",
+            serde_json::to_string(&attributes).unwrap()
+        );
+        return;
+    }
+    fn child(attributes: Option<&str>) -> serde_json::Value {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", "obs::telemetry::tests::resource_identity_is_stable_per_process_and_preserves_environment_attributes", "--nocapture"])
+            .env(CHILD, "1").env_remove("OTEL_RESOURCE_ATTRIBUTES").env_remove("OTEL_SERVICE_NAME");
+        if let Some(attributes) = attributes {
+            command.env("OTEL_RESOURCE_ATTRIBUTES", attributes);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let json = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("RESOURCE_IDENTITY="))
+            .unwrap();
+        serde_json::from_str(json).unwrap()
+    }
+    let first = child(None);
+    let second = child(None);
+    for resource in [&first, &second] {
+        assert!(
+            resource["service.instance.id"]
+                .as_str()
+                .unwrap()
+                .parse::<ulid::Ulid>()
+                .is_ok()
+        );
+        assert_eq!(resource["service.name"], "stargate");
+        assert_eq!(resource["service.version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            resource["deployment.profile"],
+            crate::srv::profile::COMPILED_PROFILE
+        );
+        assert!(resource["telemetry.sdk.name"].is_string());
+    }
+    assert_ne!(first["service.instance.id"], second["service.instance.id"]);
+    let explicit = child(Some(
+        "service.instance.id=replica-1,k8s.namespace.name=identity,custom.attribute=preserved",
+    ));
+    assert_eq!(explicit["service.instance.id"], "replica-1");
+    assert_eq!(explicit["k8s.namespace.name"], "identity");
+    assert_eq!(explicit["custom.attribute"], "preserved");
+    let blank = child(Some("service.instance.id=,custom.attribute=preserved"));
+    assert!(
+        blank["service.instance.id"]
+            .as_str()
+            .unwrap()
+            .parse::<ulid::Ulid>()
+            .is_ok()
+    );
+    assert_eq!(blank["custom.attribute"], "preserved");
 }

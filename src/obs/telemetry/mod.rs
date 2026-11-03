@@ -13,8 +13,10 @@ use opentelemetry_sdk::{
     propagation::{BaggagePropagator, TraceContextPropagator},
     trace::SdkTracerProvider,
 };
+use std::sync::LazyLock;
 
 const INSTRUMENTATION_NAME: &str = "stargate";
+static INSTANCE_ID: LazyLock<String> = LazyLock::new(|| ulid::Ulid::generate().to_string());
 
 pub struct TelemetryGuard {
     tracer_provider: Option<SdkTracerProvider>,
@@ -143,7 +145,8 @@ fn resource() -> Resource {
     let service_name =
         std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "stargate".to_string());
 
-    Resource::builder()
+    // The SDK's default detectors include OTEL_RESOURCE_ATTRIBUTES.
+    let resource = Resource::builder()
         .with_service_name(service_name)
         .with_attributes([
             KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
@@ -154,6 +157,20 @@ fn resource() -> Resource {
                 crate::srv::profile::COMPILED_STATE_BACKEND,
             ),
         ])
+        .build();
+    if resource
+        .get(&opentelemetry::Key::from_static_str("service.instance.id"))
+        .is_some_and(|value| !value.as_str().trim().is_empty())
+    {
+        return resource;
+    }
+    Resource::builder_empty()
+        .with_attributes(
+            resource
+                .iter()
+                .map(|(key, value)| KeyValue::new(key.clone(), value.clone())),
+        )
+        .with_attribute(KeyValue::new("service.instance.id", INSTANCE_ID.clone()))
         .build()
 }
 

@@ -154,7 +154,12 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   mode; CLI output keeps its existing behavior. JSON includes the current span
   and span list: request logs retain `request_id`, including in nested spans, and
   record the valid SDK `trace_id` when OpenTelemetry is active. With it disabled,
-  `trace_id` stays absent; no synthetic trace id is generated.
+  `trace_id` stays absent; no synthetic trace id is generated. All three OTLP signals
+  share resource attributes read by the SDK from `OTEL_RESOURCE_ATTRIBUTES`.
+  `service.instance.id` defaults to a process-lifetime ULID when not explicitly set;
+  the chart sets it to the pod name and also supplies pod/namespace attributes
+  through ordered downward-API environment entries. The chart rejects duplicate
+  `POD_NAME`, `POD_NAMESPACE` and `OTEL_RESOURCE_ATTRIBUTES` settings.
 - `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`), profile
   validation, startup banner, shutdown signal and drain (`shutdown.rs`).
   Listener TLS is validated and cached once at startup; request forwarding and
@@ -860,6 +865,8 @@ the same logical columns on PostgreSQL and SQLite.
 | `LOG_CONSOLE_ENABLED`                                                                  | true                                   | Log to stdout; stays enabled if both sinks are disabled                                                                             |
 | `LOG_FILE_ENABLED`                                                                     | false                                  | Enable optional JSON log files                                                                                                      |
 | `LOG_DIR`                                                                              | .stargate/logs                         | Directory used only when file logging is enabled                                                                                    |
+| `OTEL_RESOURCE_ATTRIBUTES` | SDK environment attributes | Comma-separated resource attributes; optional explicit `service.instance.id`, otherwise a per-process ULID. Chart-managed from pod identity. |
+| `POD_NAME` / `POD_NAMESPACE` | downward API (chart) | Used by Kubernetes to expand the chart-managed telemetry resource attributes. |
 | `OTEL_ENABLED`                                                                         | auto                                   | OTLP export; on when an endpoint is set                                                                                             |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` / `_PROTOCOL`                                            | - / grpc                               | OTLP target (per-signal overrides exist)                                                                                            |
 | `AUDIT_RELAY_ENABLED`                                                                  | true                                   | Run the outbox relay (cluster)                                                                                                      |
@@ -1186,6 +1193,8 @@ a new reusable primitive.
   and a paired info on successful recovery; the window persists across reloads.
   Backend causes are logged at debug. State uses named fields and exhaustive
   point selection rather than enum-position array indexing.
+- OTLP resources identify each replica with `service.instance.id`, preserving
+  explicit resource attributes and defaulting to a stable ULID per process.
 - Metrics use bounded labels only (no URLs, credentials, request IDs); see
   `docs/config-v1.md` for gateway instruments.
 - Gateway performance workloads are opt-in (`src/gate/performance/`,

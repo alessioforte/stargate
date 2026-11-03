@@ -244,7 +244,7 @@ Cross-field validation that JSON Schema cannot express.
 {{- end -}}
 
 {{- $runtimeData := default (dict) .Values.runtimeConfig.data -}}
-{{- $managed := dict -}}
+{{- $managed := dict "POD_NAME" "Deployment pod identity" "POD_NAMESPACE" "Deployment pod identity" "OTEL_RESOURCE_ATTRIBUTES" "Deployment pod identity" -}}
 {{- if .Values.migrations.job.enabled -}}
   {{- if eq $mode "edge" -}}
     {{- fail "migrations.job.enabled is cluster-only: edge runs SQLite migrations on startup" -}}

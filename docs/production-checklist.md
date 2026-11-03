@@ -73,6 +73,10 @@ default). Keep a rate limit on Traefik as a safety net during a Redis outage, or
 - [ ] From outside the allow-list, `/admin/me` and `/stargate` return Traefik `403`.
 - [ ] A password reset email arrives with a link on the public identity host.
 - [ ] Traces and metrics reach the collector; logs are JSON with `request_id`.
+      Confirm a distinct `service.instance.id` on each replica's telemetry. The
+      chart sets it from the pod name together with pod/namespace attributes.
+      Outside Kubernetes, keep the generated per-process ULID or configure a
+      distinct ID per instance in `OTEL_RESOURCE_ATTRIBUTES`.
 - [ ] The audit outbox drains: `GET /admin/outbox-events` shows published events, and the
       consumer of `AUDIT_REDIS_STREAM` is running. Create `audit-archiver` with
       `XGROUP CREATE audit.raw audit-archiver 0 MKSTREAM`, set
