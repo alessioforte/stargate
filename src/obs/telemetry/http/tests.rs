@@ -1,4 +1,5 @@
 use super::*;
+use crate::obs::telemetry;
 use axum::{Router, body::Body, middleware::from_fn, routing::any};
 use http::{Request, StatusCode};
 use opentelemetry::trace::TracerProvider;
@@ -31,13 +32,47 @@ struct Sample {
     bounds: Vec<f64>,
     sum: f64,
 }
+type InstrumentAttributes = BTreeMap<String, Vec<BTreeMap<String, String>>>;
+
 #[derive(Debug, Clone, Default)]
-struct MetricCapture(Arc<Mutex<Vec<Sample>>>);
+struct MetricCapture(Arc<Mutex<Vec<Sample>>>, Arc<Mutex<InstrumentAttributes>>);
+
+fn attribute_sets<T>(data: &MetricData<T>) -> Vec<BTreeMap<String, String>> {
+    match data {
+        MetricData::Gauge(gauge) => gauge
+            .data_points()
+            .map(|p| attributes(p.attributes()))
+            .collect(),
+        MetricData::Sum(sum) => sum
+            .data_points()
+            .map(|p| attributes(p.attributes()))
+            .collect(),
+        MetricData::Histogram(histogram) => histogram
+            .data_points()
+            .map(|p| attributes(p.attributes()))
+            .collect(),
+        MetricData::ExponentialHistogram(histogram) => histogram
+            .data_points()
+            .map(|p| attributes(p.attributes()))
+            .collect(),
+    }
+}
 impl PushMetricExporter for MetricCapture {
     async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
         let mut samples = self.0.lock().unwrap();
         for scope in metrics.scope_metrics() {
             for metric in scope.metrics() {
+                let attrs = match metric.data() {
+                    AggregatedMetrics::F64(data) => attribute_sets(data),
+                    AggregatedMetrics::U64(data) => attribute_sets(data),
+                    AggregatedMetrics::I64(data) => attribute_sets(data),
+                };
+                self.1
+                    .lock()
+                    .unwrap()
+                    .entry(metric.name().to_owned())
+                    .or_default()
+                    .extend(attrs);
                 if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() {
                     for point in histogram.data_points() {
                         samples.push(Sample {
@@ -91,6 +126,122 @@ async fn send(app: &Router, method: &str, path: &str) {
         "203.0.113.9:4444".parse::<std::net::SocketAddr>().unwrap(),
     ));
     app.clone().oneshot(req).await.unwrap();
+}
+
+fn emit_metric_samples() {
+    // Exercise each duration instrument with a known conversion, including sub-ms signing.
+    use crate::obs::telemetry;
+    telemetry::record_gateway_request("test", "test", 200, Duration::from_millis(250));
+    telemetry::record_gateway_upstream_attempt(
+        "test",
+        "upstream",
+        "http",
+        Some(200),
+        "success",
+        Duration::from_millis(250),
+    );
+    telemetry::record_gateway_transfer("total", "success", Duration::from_millis(250));
+    telemetry::record_gateway_response_disposal("test", "success", 0, Duration::from_millis(250));
+    telemetry::record_internal_context_issue(
+        "test",
+        "primary",
+        "success",
+        "none",
+        Some(Duration::from_micros(10)),
+        Some(1),
+    );
+    telemetry::record_internal_context_queue("test", "primary", Duration::from_micros(10));
+    #[cfg(all(feature = "postgres", feature = "redis"))]
+    telemetry::record_audit_relay_batch("success", 0, Duration::from_millis(250));
+
+    telemetry::record_gateway_grpc_response("test", "test", 14);
+    telemetry::record_gateway_resource("primary", 1);
+    telemetry::record_gateway_rejection("primary");
+    telemetry::record_gateway_timeout("total");
+    telemetry::record_limit_store_error("quota", "denied");
+    telemetry::record_config_reload("gateway_config", "success");
+    telemetry::record_gateway_failover("status", Some(503));
+    telemetry::record_gateway_mirror("success");
+    telemetry::record_gateway_replay_bytes(1);
+    telemetry::record_gateway_policy("auth", "allowed");
+    telemetry::record_propagation_draft("success", "user");
+}
+
+#[test]
+fn all_metric_attribute_keys_follow_the_semantic_namespace_contract() {
+    const CHILD: &str = "STARGATE_TEST_METRIC_NAMESPACE_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "obs::telemetry::http::tests::all_metric_attribute_keys_follow_the_semantic_namespace_contract", "--nocapture"])
+            .env(CHILD, "1").output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let capture = MetricCapture::default();
+    let provider = SdkMeterProvider::builder()
+        .with_periodic_exporter(capture.clone())
+        .build();
+    opentelemetry::global::set_meter_provider(provider.clone());
+    emit_metric_samples();
+    let request = HttpRequestTelemetry::new(tracing::Span::none(), normalized_method("GET"));
+    request.record_route("/metric/{id}");
+    crate::obs::telemetry::record_http_server_request(
+        crate::obs::telemetry::HttpRequestKind::Iam,
+        &request,
+        200,
+        "http",
+        Duration::from_millis(1),
+    );
+    provider.force_flush().unwrap();
+    let instruments = capture.1.lock().unwrap();
+    assert!(instruments.len() >= 20);
+    let standard = [
+        "http.request.method",
+        "http.response.status_code",
+        "http.route",
+        "url.scheme",
+        "error.type",
+        "network.protocol.name",
+        "rpc.status_code",
+    ];
+    for (name, sets) in instruments.iter() {
+        for attrs in sets {
+            for key in attrs.keys() {
+                assert!(
+                    key.starts_with("stargate.") || standard.contains(&key.as_str()),
+                    "{name}: {key}"
+                );
+            }
+        }
+    }
+    for (instrument, key) in [
+        ("stargate.limits.store_errors", "stargate.point"),
+        ("stargate.limits.store_errors", "stargate.outcome"),
+        ("stargate.gateway.grpc.responses", "stargate.router"),
+        ("stargate.gateway.grpc.responses", "stargate.service"),
+        ("stargate.gateway.grpc.responses", "rpc.status_code"),
+        ("stargate.gateway.resources.active", "stargate.kind"),
+        ("stargate.gateway.rejections", "stargate.kind"),
+        ("stargate.gateway.timeouts", "stargate.phase"),
+        ("stargate.gateway.transfer.duration", "stargate.phase"),
+    ] {
+        assert!(
+            instruments[instrument]
+                .iter()
+                .any(|attrs| attrs.contains_key(key)),
+            "{instrument}: {key}"
+        );
+    }
+    assert!(
+        instruments["stargate.gateway.grpc.responses"]
+            .iter()
+            .any(|attrs| attrs["rpc.status_code"] == "UNAVAILABLE")
+    );
 }
 
 #[tokio::test]
@@ -187,30 +338,7 @@ async fn server_spans_and_metrics_follow_http_conventions_without_query_values()
             send(&app, "GET", path).await;
         }
     }
-    // Exercise each duration instrument with a known conversion, including sub-ms signing.
-    use crate::obs::telemetry;
-    telemetry::record_gateway_request("test", "test", 200, Duration::from_millis(250));
-    telemetry::record_gateway_upstream_attempt(
-        "test",
-        "upstream",
-        "http",
-        Some(200),
-        "success",
-        Duration::from_millis(250),
-    );
-    telemetry::record_gateway_transfer("total", "success", Duration::from_millis(250));
-    telemetry::record_gateway_response_disposal("test", "success", 0, Duration::from_millis(250));
-    telemetry::record_internal_context_issue(
-        "test",
-        "primary",
-        "success",
-        "none",
-        Some(Duration::from_micros(10)),
-        Some(1),
-    );
-    telemetry::record_internal_context_queue("test", "primary", Duration::from_micros(10));
-    #[cfg(all(feature = "postgres", feature = "redis"))]
-    telemetry::record_audit_relay_batch("success", 0, Duration::from_millis(250));
+    emit_metric_samples();
     let manual = HttpRequestTelemetry::new(
         tracing::Span::none(),
         normalized_method("ANOTHER_UNKNOWN_METHOD"),

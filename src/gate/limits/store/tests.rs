@@ -317,7 +317,10 @@ async fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions
                         .collect();
                     assert_eq!(attrs.len(), 2);
                     self.0.lock().unwrap().insert(
-                        (attrs["point"].clone(), attrs["outcome"].clone()),
+                        (
+                            attrs["stargate.point"].clone(),
+                            attrs["stargate.outcome"].clone(),
+                        ),
                         sample.value(),
                     );
                 }

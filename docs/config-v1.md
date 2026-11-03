@@ -1033,12 +1033,12 @@ counter identity, histogram buckets, recommended views and the alert catalog.
 All duration histograms use seconds (`s`); no backend-specific monitoring
 resources are bundled.
 
-`stargate.gateway.resources.active` is an up/down counter with only `kind`:
+`stargate.gateway.resources.active` is an up/down counter with only `stargate.kind`:
 `primary` (requests/sessions), `mirror` (reserved slots/tasks), and `replay_memory`
 (reserved bytes). All three return to zero after gateway work drains.
-`stargate.gateway.rejections` uses bounded `kind` labels: `primary`,
+`stargate.gateway.rejections` uses bounded `stargate.kind` labels: `primary`,
 `replay_memory`, `ingress`, and `signing`.
-`stargate.gateway.timeouts` uses bounded phase labels (`total`, `upload`, `ingress`,
+`stargate.gateway.timeouts` uses bounded `stargate.phase` labels (`total`, `upload`, `ingress`,
 `connect`, `response_headers`, `response_body`, `disposal`,
 `websocket_handshake`, `websocket_idle`). None contain URLs, credentials, or
 request IDs.
@@ -1047,7 +1047,7 @@ request IDs.
 response headers. The upstream instrument includes dispatch preparation and
 signing. `stargate.gateway.transfer.duration` records seconds until each
 upload, downstream body, or accepted WebSocket completes or terminates. Its only
-labels are `phase` (`upload`, `response_body`, `websocket`) and
+labels are `stargate.phase` (`upload`, `response_body`, `websocket`) and
 `stargate.outcome` (`complete`, `error`, `timeout`, `cancelled`, `dropped`). Each
 guarded downstream body is recorded once, including empty bodies; a dropped client body
 and process cancellation are separate outcomes. Body lifetime starts when the
@@ -1181,8 +1181,8 @@ http:
 ```
 
 `stargate.limits.store_errors` counts every failed traffic store check with bounded
-labels `point` (`gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`,
-`quota`) and `outcome` (`allowed`, `denied`). Each point emits a warning when
+labels `stargate.point` (`gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`,
+`quota`) and `stargate.outcome` (`allowed`, `denied`). Each point emits a warning when
 it becomes degraded, with at least 60 seconds between warnings for that point.
 A subsequent successful check (including a valid limit denial) emits one recovery
 info event only if a warning was emitted for that episode. Repeated failures and

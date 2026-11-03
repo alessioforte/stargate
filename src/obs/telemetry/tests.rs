@@ -179,9 +179,15 @@ fn resource_identity_is_stable_per_process_and_preserves_environment_attributes(
         assert_eq!(resource["service.name"], "stargate");
         assert_eq!(resource["service.version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(
-            resource["deployment.profile"],
+            resource["stargate.profile"],
             crate::srv::profile::COMPILED_PROFILE
         );
+        assert_eq!(
+            resource["stargate.database_backend"],
+            crate::srv::profile::COMPILED_DB_BACKEND
+        );
+        assert!(resource.get("deployment.profile").is_none());
+        assert!(resource.get("db.system").is_none());
         assert!(resource["telemetry.sdk.name"].is_string());
     }
     assert_ne!(first["service.instance.id"], second["service.instance.id"]);

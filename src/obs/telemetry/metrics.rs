@@ -243,13 +243,38 @@ pub fn record_gateway_request(router: &str, service: &str, status: u16, elapsed:
         .record(elapsed.as_secs_f64(), &attrs);
 }
 
+// Stable gRPC semantic conventions v1.45.0: rpc.status_code is the
+// canonical string representation, rather than the wire-format numeric code.
+fn grpc_status_name(status: u8) -> &'static str {
+    match status {
+        0 => "OK",
+        1 => "CANCELLED",
+        2 => "UNKNOWN",
+        3 => "INVALID_ARGUMENT",
+        4 => "DEADLINE_EXCEEDED",
+        5 => "NOT_FOUND",
+        6 => "ALREADY_EXISTS",
+        7 => "PERMISSION_DENIED",
+        8 => "RESOURCE_EXHAUSTED",
+        9 => "FAILED_PRECONDITION",
+        10 => "ABORTED",
+        11 => "OUT_OF_RANGE",
+        12 => "UNIMPLEMENTED",
+        13 => "INTERNAL",
+        14 => "UNAVAILABLE",
+        15 => "DATA_LOSS",
+        16 => "UNAUTHENTICATED",
+        _ => "UNKNOWN",
+    }
+}
+
 pub fn record_gateway_grpc_response(router: &str, service: &str, status: u8) {
     METRICS.gateway_grpc_responses.add(
         1,
         &[
-            KeyValue::new("router", router.to_string()),
-            KeyValue::new("service", service.to_string()),
-            KeyValue::new("grpc_status", i64::from(status)),
+            KeyValue::new("stargate.router", router.to_string()),
+            KeyValue::new("stargate.service", service.to_string()),
+            KeyValue::new("rpc.status_code", grpc_status_name(status)),
         ],
     );
 }
@@ -406,24 +431,24 @@ pub fn record_config_reload(kind: &str, outcome: &str) {
 pub fn record_gateway_resource(kind: &'static str, delta: i64) {
     METRICS
         .gateway_resources
-        .add(delta, &[KeyValue::new("kind", kind)]);
+        .add(delta, &[KeyValue::new("stargate.kind", kind)]);
 }
 pub fn record_gateway_rejection(kind: &'static str) {
     METRICS
         .gateway_rejections
-        .add(1, &[KeyValue::new("kind", kind)]);
+        .add(1, &[KeyValue::new("stargate.kind", kind)]);
 }
 pub fn record_gateway_timeout(phase: &'static str) {
     METRICS
         .gateway_timeouts
-        .add(1, &[KeyValue::new("phase", phase)]);
+        .add(1, &[KeyValue::new("stargate.phase", phase)]);
 }
 
 pub fn record_gateway_transfer(phase: &'static str, outcome: &'static str, elapsed: Duration) {
     METRICS.gateway_transfer_duration.record(
         elapsed.as_secs_f64(),
         &[
-            KeyValue::new("phase", phase),
+            KeyValue::new("stargate.phase", phase),
             KeyValue::new("stargate.outcome", outcome),
         ],
     );
@@ -433,8 +458,8 @@ pub fn record_limit_store_error(point: &'static str, outcome: &'static str) {
     METRICS.limit_store_errors.add(
         1,
         &[
-            KeyValue::new("point", point),
-            KeyValue::new("outcome", outcome),
+            KeyValue::new("stargate.point", point),
+            KeyValue::new("stargate.outcome", outcome),
         ],
     );
 }

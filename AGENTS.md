@@ -1196,13 +1196,17 @@ a new reusable primitive.
 - Request ID: ULID per request, `x-request-id`, also in audit events.
 - ACE decision caches are version-aware and invalidated on policy change.
 - GeoIP (MaxMind GeoLite2-City) is available but not a v1 route matcher.
-- `stargate.limits.store_errors` counts traffic limit failures by bounded `point`
-  and `outcome` labels. Each point logs warn on degradation (at most once per 60s)
+- `stargate.limits.store_errors` counts traffic limit failures by bounded `stargate.point`
+  and `stargate.outcome` attributes. Each point logs warn on degradation (at most once per 60s)
   and a paired info on successful recovery; the window persists across reloads.
   Backend causes are logged at debug. State uses named fields and exhaustive
   point selection rather than enum-position array indexing.
 - OTLP resources identify each replica with `service.instance.id`, preserving
   explicit resource attributes and defaulting to a stable ULID per process.
+- Application-owned metric attributes use the `stargate.` namespace (`point`,
+  `outcome`, `router`, `service`, `kind`, `phase`). RPC status uses stable
+  `rpc.status_code` with canonical gRPC status names. Resource attributes use
+  `stargate.profile`, `stargate.database_backend` and `stargate.state_backend`.
 - Telemetry follows OpenTelemetry HTTP semantic conventions: server operations
   use matched routes, no query strings are recorded, and unknown methods become
   `_OTHER` in attributes. `http.server.request.duration` and custom duration

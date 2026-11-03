@@ -57,6 +57,9 @@ separately from application telemetry.
 | `service.name` | `OTEL_SERVICE_NAME`, default `stargate` |
 | `service.version` | Binary version |
 | `service.instance.id` | Distinct process identity; chart uses pod name, otherwise an explicit value or a process-lifetime ULID |
+| `stargate.profile` | Compiled runtime profile: `edge` or `cluster` |
+| `stargate.database_backend` | Compiled database backend: `sqlite` or `postgres` |
+| `stargate.state_backend` | Compiled state store: `memory` or `redis` |
 | `deployment.environment.name` | Operator-defined environment, e.g. `production`, through `OTEL_RESOURCE_ATTRIBUTES` |
 
 For example, outside the chart:
@@ -69,7 +72,12 @@ The chart manages resource attributes from downward-API pod/namespace fields.
 Add environment identity in the collector's resource processing when the chart
 owns the variable. Keep identity through ingestion: compute rates of cumulative
 counters **per instance before aggregating**. Do not merge cumulative streams
-from different processes. Instrument dimensions are bounded states and names
+from different processes. Application-owned attributes have the `stargate.` prefix. Standard attributes
+retain their semantic-convention names. gRPC responses use the stable
+[RPC/gRPC v1.45.0](https://github.com/open-telemetry/semantic-conventions/blob/v1.45.0/docs/rpc/grpc.md)
+`rpc.status_code` with canonical strings (`OK`, `DEADLINE_EXCEEDED`, `UNAVAILABLE`,
+and the other defined gRPC statuses), rather than numeric wire codes.
+Instrument dimensions are bounded states and names
 from configuration; no URL, user ID or request ID becomes a metric dimension.
 Keep these out of operator-supplied resource attributes as well.
 
@@ -131,16 +139,16 @@ custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 | `http.server.request.duration` | H / s | `http.request.method` normalized as above; numeric `http.response.status_code`; `http.route` when known; `url.scheme=http` or `https`; `error.type` on failures; `stargate.request.kind=iam` or `gateway` | All inbound requests; count requests from histogram observations, separately by kind |
 | `stargate.gateway.requests` | C / requests | Configured `stargate.router`, `stargate.service` or `unmatched`; response status | Gateway-only subset; do not add it to the HTTP histogram count |
 | `stargate.gateway.duration` | H / s | Same as gateway requests | Through gateway response headers |
-| `stargate.gateway.transfer.duration` | H / s | Bounded `phase`; `stargate.outcome` from transfer completion/cancellation/error handling | Body/WebSocket lifetime |
+| `stargate.gateway.transfer.duration` | H / s | Bounded `stargate.phase`; `stargate.outcome` from transfer completion/cancellation/error handling | Body/WebSocket lifetime |
 | `stargate.gateway.upstream.requests` | C / attempts | Configured `stargate.service`; `stargate.target_kind=upstream` or `direct_response`; `network.protocol.name=http` or `ws`; status; `stargate.outcome=success` or `error` | Dispatch attempts |
 | `stargate.gateway.upstream.duration` | H / s | Same as upstream requests | Dispatch through response headers |
 | `stargate.gateway.upstream.targets` | G / targets | Configured `stargate.upstream`; `stargate.state=healthy`, `unhealthy`, `circuit_open` | Active-generation targets, per replica |
 | `stargate.gateway.failovers` | C / transitions | `stargate.reason=status`, `transport`, or `protocol`; response status | Failover transitions |
 | `stargate.gateway.mirrors` | C / dispatches/outcomes | Bounded `stargate.outcome` | Mirror activity |
-| `stargate.gateway.grpc.responses` | C / responses | Configured `router`, `service`; numeric `grpc_status` | Completed RPC statuses |
-| `stargate.gateway.resources.active` | Up/down / slots or bytes | `kind=primary`, `mirror`, `replay_memory` | Active requests/mirrors or reserved replay bytes |
-| `stargate.gateway.rejections` | C / rejections | `kind=primary`, `replay_memory`, `ingress`, `signing` | Capacity rejections |
-| `stargate.gateway.timeouts` | C / timeouts | Bounded `phase` (`total`, `upload`, `ingress`, `connect`, `response_headers`, `response_body`, `disposal`, `websocket_handshake`, `websocket_idle`) | Timeout phases |
+| `stargate.gateway.grpc.responses` | C / responses | Configured `stargate.router`, `stargate.service`; `rpc.status_code` (canonical status names, e.g. `OK`, `UNAVAILABLE`) | Completed RPC statuses |
+| `stargate.gateway.resources.active` | Up/down / slots or bytes | `stargate.kind=primary`, `mirror`, `replay_memory` | Active requests/mirrors or reserved replay bytes |
+| `stargate.gateway.rejections` | C / rejections | `stargate.kind=primary`, `replay_memory`, `ingress`, `signing` | Capacity rejections |
+| `stargate.gateway.timeouts` | C / timeouts | Bounded `stargate.phase` (`total`, `upload`, `ingress`, `connect`, `response_headers`, `response_body`, `disposal`, `websocket_handshake`, `websocket_idle`) | Timeout phases |
 | `stargate.gateway.replay.bytes` | H / By | none | Replay-buffered body size |
 | `stargate.gateway.response.disposals` | C / bodies | `stargate.disposal.kind`; `stargate.outcome` from bounded disposal results | Discarded response outcomes |
 | `stargate.gateway.response.disposal.bytes` | H / By | Same as disposals | Observed discarded data bytes |
@@ -151,7 +159,7 @@ custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 | `stargate.gateway.internal_context.signing.duration` | H / s | Same as issues | CPU signing duration, including sub-millisecond work |
 | `stargate.gateway.internal_context.queue.duration` | H / s | Configured service and dispatch kind | Signing queue wait |
 | `stargate.gateway.internal_context.token.size` | H / By | Same as issues | Compact signed token size |
-| `stargate.limits.store_errors` | C / failures | `point=gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`, `quota`; `outcome=allowed` or `denied` | Traffic store errors/timeouts, per replica |
+| `stargate.limits.store_errors` | C / failures | `stargate.point=gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`, `quota`; `stargate.outcome=allowed` or `denied` | Traffic store errors/timeouts, per replica |
 | `stargate.config.reloads` | C / activations | `stargate.config_kind=gateway_config` or `policies`; `stargate.outcome=success`, `error`, `transport_error`, `internal_context_error` | Activation outcomes |
 | `stargate.db.pool.connections` | G / connections | `stargate.state=idle` or `in_use` | Actual initialized SQL pool sample |
 | `stargate.db.pool.max` | G / connections | none | Configured maximum of that pool |
@@ -199,7 +207,7 @@ not additional readiness conditions.
 | --- | --- | --- | --- | --- | --- |
 | High HTTP error rate | `http.server.request.duration`, status ≥ 500, grouped by `stargate.request.kind` | Error observation rate / all observation rate, separately for IAM and gateway | > 2% / 10m | critical | Inspect dependency health and status distribution; `high-http-error-rate` |
 | Limit store degraded | `stargate.limits.store_errors` | Sum of per-instance rates | Increasing / 5m | warning | Check Redis connectivity/latency; `redis-unavailable` |
-| Limit store denying | Same instrument, `outcome=denied` | Sum of rates | Increasing / 5m | critical | Restore Redis or review failure policy; `redis-unavailable` |
+| Limit store denying | Same instrument, `stargate.outcome=denied` | Sum of rates | Increasing / 5m | critical | Restore Redis or review failure policy; `redis-unavailable` |
 | Configuration activation failed | `stargate.config.reloads`, `stargate.outcome` not `success` | Sum of increments over 15m | > 0 / — | warning | Inspect failed revision and retained snapshot; `configuration-activation-failed` |
 | Audit relay errors | `stargate.audit.relay.errors` | Sum of rates | Increasing / 10m | warning | Inspect SQL/Redis errors, never delete pending events; `audit-delivery-delayed` |
 | Old unpublished audit event | `stargate.audit.outbox.oldest_pending_age` | Max across replicas | > 300s warning; > 1800s critical / — | warning / critical | Restore relay/consumer; `audit-delivery-delayed` |
