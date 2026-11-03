@@ -631,6 +631,18 @@ fn service_account_changed_fields(
 }
 
 impl Service {
+    pub async fn outbox_backlog(&self) -> Result<crate::ent::OutboxBacklog> {
+        self.outbox.backlog(&self.pool).await
+    }
+
+    #[cfg(feature = "postgres")]
+    pub async fn prune_published_outbox(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64> {
+        self.outbox.prune_published(&self.pool, before).await
+    }
+
     pub async fn get_outbox_event_by_id(&self, event_id: &str) -> Result<Option<OutboxEventRow>> {
         self.outbox.get_by_event_id(&self.pool, event_id).await
     }

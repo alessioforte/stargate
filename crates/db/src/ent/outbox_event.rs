@@ -16,3 +16,10 @@ pub struct OutboxEventFilter {
     pub operation_id: Option<String>,
     pub published: Option<bool>,
 }
+
+/// Global unpublished outbox backlog, without loading event payloads.
+#[derive(sqlx::FromRow, Debug, Clone, PartialEq, Eq)]
+pub struct OutboxBacklog {
+    pub pending_events: i64,
+    pub oldest_pending: Option<DateTime<Utc>>,
+}

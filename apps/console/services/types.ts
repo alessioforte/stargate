@@ -65,7 +65,18 @@ export interface AdminFeatures {
   socialProviders: string[];
 }
 
+export interface AuditStatus {
+  relay: "running" | "paused" | "failing" | "disabled";
+  pauseReason?: "consumer_backlog" | "group_missing";
+  pendingEvents: number;
+  oldestPendingAgeSecs: number;
+  streamLength?: number;
+  oldestUnconfirmedAgeSecs?: number;
+  updatedAt: string;
+}
+
 export interface AdminHealth {
+  audit?: AuditStatus;
   checkedAt: string;
   database: ComponentStatus;
   databaseBackend: string;

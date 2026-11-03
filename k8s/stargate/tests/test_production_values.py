@@ -47,6 +47,7 @@ class ProductionOverlay(unittest.TestCase):
             'MFA_ADMIN_STEP_UP_REQUIRED: "true"',
             'SIGNUP_MODE: "invite"',
             'LOG_FORMAT: "json"',
+            'AUDIT_STREAM_CONSUMER_GROUPS: "audit-archiver"',
         ]:
             self.assertIn(line, config)
 

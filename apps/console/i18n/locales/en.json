@@ -173,6 +173,22 @@
   "registeredIdentities": "Registered identities",
   "managedOrganizations": "Managed organizations",
   "machineIdentities": "Machine identities",
+  "auditDelivery": {
+    "title": "Audit delivery",
+    "states": {
+      "running": "Running",
+      "paused": "Paused",
+      "failing": "Failing",
+      "disabled": "Disabled"
+    },
+    "reasons": {
+      "consumer_backlog": "Waiting for consumer acknowledgements",
+      "group_missing": "Stream or consumer group missing"
+    },
+    "pending": "Outbox: {{count}} pending · oldest {{age}} s",
+    "stream": "Stream: {{count}} entries",
+    "unconfirmed": "Oldest unconfirmed: {{age}} s"
+  },
   "systemHealth": "System health",
   "database": "Database",
   "stateStore": "State store",

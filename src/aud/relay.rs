@@ -7,6 +7,10 @@
 //! `published_at` commit re-ships the byte-identical payload, so consumers must
 //! deduplicate on the `event_id` inside it.
 
+use super::{
+    backpressure::{at_capacity, trim_boundary},
+    status::{self, AuditStatus, PauseReason},
+};
 use crate::obs::telemetry;
 use db::ent::OutboxEventRow;
 use db::service::Service;
@@ -37,11 +41,13 @@ struct RelayHandle {
 static RELAY: OnceCell<RelayHandle> = OnceCell::new();
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct RelayConfig {
-    stream: String,
-    maxlen: Option<usize>,
-    batch: i64,
-    idle: Duration,
+pub(super) struct RelayConfig {
+    pub(super) stream: String,
+    pub(super) maxlen: Option<usize>,
+    pub(super) batch: i64,
+    pub(super) idle: Duration,
+    pub(super) groups: Vec<String>,
+    pub(super) retention: Option<chrono::Duration>,
 }
 
 impl RelayConfig {
@@ -67,7 +73,35 @@ impl RelayConfig {
             None => Some(DEFAULT_STREAM_MAXLEN),
         };
 
+        let groups = parse_groups(
+            lookup("AUDIT_STREAM_CONSUMER_GROUPS")?
+                .as_deref()
+                .unwrap_or(""),
+        )?;
+        let retention_value = lookup("AUDIT_OUTBOX_RETENTION")?.unwrap_or_else(|| "30d".into());
+        let retention = if retention_value == "none" {
+            None
+        } else {
+            let duration = tools::parse_duration(&retention_value).map_err(|_| {
+                invalid_config(
+                    "AUDIT_OUTBOX_RETENTION",
+                    &retention_value,
+                    "a duration or none",
+                )
+            })?;
+            // Ensure subtracting the configured retention cannot overflow UTC.
+            if chrono::Utc::now().checked_sub_signed(duration).is_none() {
+                return Err(invalid_config(
+                    "AUDIT_OUTBOX_RETENTION",
+                    &retention_value,
+                    "a representable retention duration",
+                ));
+            }
+            Some(duration)
+        };
         Ok(Self {
+            groups,
+            retention,
             stream,
             maxlen,
             batch,
@@ -78,6 +112,8 @@ impl RelayConfig {
 
 /// Start the relay task, unless disabled via `AUDIT_RELAY_ENABLED=false`.
 pub fn spawn() -> io::Result<()> {
+    let config = RelayConfig::from_env()?;
+    telemetry::register_audit_observers();
     if !relay_enabled()? {
         tracing::info!("Audit relay disabled (AUDIT_RELAY_ENABLED=false)");
         return Ok(());
@@ -89,7 +125,6 @@ pub fn spawn() -> io::Result<()> {
         ));
     }
 
-    let config = RelayConfig::from_env()?;
     let shutdown = Arc::new(Notify::new());
     let handle = tokio::spawn(run(shutdown.clone(), config));
     let relay = RelayHandle {
@@ -142,6 +177,14 @@ async fn run(shutdown: Arc<Notify>, config: RelayConfig) {
     // first every iteration, so even a continuous backlog never starves it.
     let mut delay = Duration::ZERO;
     let mut backoff = BACKOFF_BASE;
+    let mut state = AuditStatus {
+        relay: "running",
+        ..AuditStatus::default()
+    };
+    status::update(&state);
+    let mut last_backlog = None;
+    let mut last_prune = None;
+    let mut previous_pause = None;
 
     loop {
         tokio::select! {
@@ -151,16 +194,48 @@ async fn run(shutdown: Arc<Notify>, config: RelayConfig) {
         }
 
         let started = Instant::now();
-        let result = relay_once(&svc, store, &config.stream, config.maxlen, config.batch)
-            .instrument(tracing::debug_span!(
-                "audit.relay.batch",
-                stream = %config.stream,
-                batch = config.batch,
-            ))
-            .await;
+        let result = async {
+            if last_backlog.is_none_or(|last: Instant| last.elapsed() >= config.idle) {
+                let backlog = svc.outbox_backlog().await?;
+                state.pending_events = backlog.pending_events as u64;
+                state.oldest_pending_age_secs = backlog.oldest_pending.map_or(0.0, |oldest|
+                    (chrono::Utc::now() - oldest).num_milliseconds().max(0) as f64 / 1000.0);
+                last_backlog = Some(Instant::now());
+            }
+            if let Some(retention) = config.retention
+                && last_prune.is_none_or(|last: Instant| last.elapsed() >= Duration::from_secs(600)) {
+                let before = chrono::Utc::now().checked_sub_signed(retention)
+                    .ok_or_else(|| anyhow::anyhow!("Audit retention is outside the UTC range"))?;
+                let mut total = 0;
+                loop {
+                    let count = tokio::select! {
+                        biased;
+                        _ = shutdown.notified() => { shutdown.notify_one(); return Ok(None); },
+                        result = svc.prune_published_outbox(before) => result?,
+                    };
+                    total += count;
+                    telemetry::record_audit_outbox_pruned(count);
+                    if count < 1000 { break; }
+                }
+                last_prune = Some(Instant::now());
+                if total > 0 { tracing::info!(count = total, "Published audit outbox rows pruned"); }
+            }
+            let result = relay_checked_once(&svc, store, &config, &mut state).await;
+            let pause = state.pause_reason;
+            if pause != previous_pause {
+                if let Some(reason) = pause { tracing::warn!(reason = reason.as_str(), "Audit relay paused"); }
+                else if previous_pause.is_some() { tracing::info!("Audit relay resumed"); }
+                previous_pause = pause;
+            }
+            result
+        }.instrument(tracing::debug_span!("audit.relay.batch", stream = %config.stream, batch = config.batch)).await;
 
         match result {
-            Ok(count) => {
+            Ok(None) => {
+                delay = config.idle;
+                backoff = BACKOFF_BASE;
+            }
+            Ok(Some(count)) => {
                 telemetry::record_audit_relay_batch("success", count, started.elapsed());
                 backoff = BACKOFF_BASE;
                 delay = if count as i64 >= config.batch {
@@ -170,6 +245,8 @@ async fn run(shutdown: Arc<Notify>, config: RelayConfig) {
                 };
             }
             Err(error) => {
+                state.relay = "failing";
+                state.pause_reason = None;
                 telemetry::record_audit_relay_batch("error", 0, started.elapsed());
                 tracing::warn!(
                     %error,
@@ -180,14 +257,100 @@ async fn run(shutdown: Arc<Notify>, config: RelayConfig) {
                 backoff = (backoff * 2).min(BACKOFF_MAX);
             }
         }
+        status::update(&state);
     }
 
     tracing::info!("Audit relay stopped");
 }
 
+/// Do not claim SQL rows until all configured groups permit publication.
+pub(super) async fn relay_checked_once(
+    svc: &Service,
+    store: &RedisStore,
+    config: &RelayConfig,
+    state: &mut AuditStatus,
+) -> anyhow::Result<Option<usize>> {
+    let pause = check_stream(store, config, state).await?;
+    state.pause_reason = pause;
+    state.relay = if pause.is_some() { "paused" } else { "running" };
+    if pause.is_some() {
+        return Ok(None);
+    }
+    let maxlen = if config.groups.is_empty() {
+        config.maxlen
+    } else {
+        None
+    };
+    relay_once(svc, store, &config.stream, maxlen, config.batch)
+        .await
+        .map(Some)
+}
+
+/// Refresh the safe trim boundary even while paused, so acknowledgements allow recovery.
+pub(super) async fn check_stream(
+    store: &RedisStore,
+    config: &RelayConfig,
+    state: &mut AuditStatus,
+) -> anyhow::Result<Option<PauseReason>> {
+    state.oldest_unconfirmed_age_secs = None;
+    if !config.groups.is_empty() {
+        let groups = store.stream_groups(&config.stream, &config.groups).await?;
+        let boundary = match trim_boundary(groups.as_deref(), &config.groups) {
+            Ok(Some(boundary)) => boundary,
+            Err(reason) => {
+                state.stream_length = Some(store.stream_length(&config.stream).await?);
+                return Ok(Some(reason));
+            }
+            Ok(None) => unreachable!("configured groups always have a boundary"),
+        };
+        store.trim_stream_before(&config.stream, boundary).await?;
+        let mut oldest = None;
+        for group in groups.as_deref().unwrap_or_default() {
+            let candidate = match group.oldest_pending {
+                Some(id) => Some(id),
+                None => {
+                    store
+                        .first_stream_id_after(&config.stream, group.last_delivered)
+                        .await?
+                }
+            };
+            if let Some(id) = candidate {
+                oldest = Some(oldest.map_or(id, |old: store::StreamId| old.min(id)));
+            }
+        }
+        let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        state.oldest_unconfirmed_age_secs =
+            Some(oldest.map_or(0.0, |id| now.saturating_sub(id.millis) as f64 / 1000.0));
+    }
+    let length = store.stream_length(&config.stream).await?;
+    state.stream_length = Some(length);
+    Ok(
+        (!config.groups.is_empty() && at_capacity(length, config.maxlen, config.batch))
+            .then_some(PauseReason::ConsumerBacklog),
+    )
+}
+
+fn parse_groups(value: &str) -> io::Result<Vec<String>> {
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut groups = Vec::new();
+    for name in value.split(',').map(str::trim) {
+        if name.is_empty() || groups.iter().any(|group| group == name) {
+            return Err(invalid_config(
+                "AUDIT_STREAM_CONSUMER_GROUPS",
+                value,
+                "distinct non-empty comma-separated group names",
+            ));
+        }
+        groups.push(name.to_owned());
+    }
+    Ok(groups)
+}
+
 /// Claim one batch, ship it, and mark it published. Returns the number of rows
 /// relayed (`0` when the backlog is empty).
-async fn relay_once(
+pub(super) async fn relay_once(
     svc: &Service,
     store: &RedisStore,
     stream: &str,
@@ -330,6 +493,40 @@ mod tests {
     }
 
     #[test]
+    fn groups_and_retention_are_validated_at_startup() {
+        assert_eq!(
+            config(&[("AUDIT_STREAM_CONSUMER_GROUPS", "archive, search")])
+                .unwrap()
+                .groups,
+            ["archive", "search"]
+        );
+        for groups in [",", "archive,", ",archive", "archive, archive", "  "] {
+            assert!(config(&[("AUDIT_STREAM_CONSUMER_GROUPS", groups)]).is_err());
+        }
+        assert_eq!(
+            config(&[("AUDIT_OUTBOX_RETENTION", "none")])
+                .unwrap()
+                .retention,
+            None
+        );
+        assert_eq!(
+            config(&[("AUDIT_OUTBOX_RETENTION", "2h")])
+                .unwrap()
+                .retention,
+            Some(chrono::Duration::hours(2))
+        );
+        for value in [
+            "",
+            "forever",
+            "-1d",
+            "9223372036854775807w",
+            "9223372036854775807ms",
+        ] {
+            assert!(config(&[("AUDIT_OUTBOX_RETENTION", value)]).is_err());
+        }
+    }
+
+    #[test]
     fn audit_relay_config_defaults_to_the_shared_stream_contract() {
         assert_eq!(
             config(&[]).unwrap(),
@@ -338,6 +535,8 @@ mod tests {
                 maxlen: Some(100_000),
                 batch: 256,
                 idle: Duration::from_millis(1000),
+                groups: Vec::new(),
+                retention: Some(chrono::Duration::days(30)),
             }
         );
     }

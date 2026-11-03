@@ -55,3 +55,13 @@ mod tests {
         super::shutdown().await;
     }
 }
+
+#[cfg(all(feature = "postgres", feature = "redis"))]
+mod backpressure;
+#[cfg(all(feature = "postgres", feature = "redis"))]
+mod status;
+#[cfg(all(feature = "postgres", feature = "redis"))]
+pub use status::{AuditStatus, snapshot as status};
+
+#[cfg(all(test, feature = "postgres", feature = "redis"))]
+mod delivery_tests;

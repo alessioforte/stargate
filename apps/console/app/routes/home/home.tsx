@@ -214,6 +214,25 @@ export default function AdminHomePage() {
                 status={stateStatus}
                 detail={stateLatency}
               />
+              {health.audit && (
+                <>
+                  <Divider />
+                  <StatusRow
+                    label={t("auditDelivery.title")}
+                    status={t(`auditDelivery.states.${health.audit.relay}`)}
+                    color={health.audit.relay === "running" ? "teal" : health.audit.relay === "disabled" ? "gray" : "orange"}
+                    detail={health.audit.pauseReason ? t(`auditDelivery.reasons.${health.audit.pauseReason}`) : undefined}
+                  />
+                  <Text size="xs">{t("auditDelivery.pending", { count: health.audit.pendingEvents, age: health.audit.oldestPendingAgeSecs.toFixed(1) })}</Text>
+                  {health.audit.streamLength !== undefined && (
+                    <Text size="xs">{t("auditDelivery.stream", { count: health.audit.streamLength })}</Text>
+                  )}
+                  {health.audit.oldestUnconfirmedAgeSecs !== undefined && (
+                    <Text size="xs">{t("auditDelivery.unconfirmed", { age: health.audit.oldestUnconfirmedAgeSecs.toFixed(1) })}</Text>
+                  )}
+                  <Text size="xs" c="dimmed">{formatDate(health.audit.updatedAt, null, language)}</Text>
+                </>
+              )}
               {features && (
                 <>
                   <Divider />

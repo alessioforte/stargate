@@ -173,6 +173,22 @@
   "registeredIdentities": "Identità registrate",
   "managedOrganizations": "Organizzazioni gestite",
   "machineIdentities": "Identità macchina",
+  "auditDelivery": {
+    "title": "Consegna audit",
+    "states": {
+      "running": "In esecuzione",
+      "paused": "In pausa",
+      "failing": "In errore",
+      "disabled": "Disabilitata"
+    },
+    "reasons": {
+      "consumer_backlog": "In attesa delle conferme del consumatore",
+      "group_missing": "Stream o gruppo di consumatori assente"
+    },
+    "pending": "Outbox: {{count}} in attesa · più vecchio {{age}} s",
+    "stream": "Stream: {{count}} voci",
+    "unconfirmed": "Più vecchio non confermato: {{age}} s"
+  },
   "systemHealth": "Stato del sistema",
   "database": "Database",
   "stateStore": "Archivio di stato",

@@ -62,6 +62,9 @@ runtimeConfig:
     LOG_FORMAT: json
     RUST_LOG: info
 
+    # Create this consumer group before publication; see docs/audit-events.md.
+    AUDIT_STREAM_CONSUMER_GROUPS: audit-archiver
+
     # PostgreSQL (CloudNativePG): verify the server certificate and hostname.
     # CNPG creates the database, so Stargate must not try to.
     POSTGRES_SSLMODE: verify-full

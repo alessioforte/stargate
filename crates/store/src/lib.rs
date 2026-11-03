@@ -21,3 +21,6 @@ pub use redis::RedisStore;
 pub use redis::StreamEntry;
 #[cfg(feature = "redis")]
 pub use redis::{Compression, CompressionConfig};
+
+#[cfg(feature = "redis")]
+pub use redis::{StreamGroupState, StreamId};

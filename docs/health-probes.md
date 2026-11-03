@@ -117,3 +117,14 @@ the Helm connection test. Custom `probes.*` overrides are supported.
 The default three-second probe timeout exceeds the one-second SQL
 deadline. Probe intervals and failure thresholds determine how quickly
 Kubernetes reacts to failures.
+
+## Audit diagnostics
+
+Cluster `/admin/health` includes a cached `audit` object with `relay`
+(`running`, `paused`, `failing`, `disabled`), optional `pauseReason`,
+`pendingEvents`, `oldestPendingAgeSecs`, optional `streamLength` and
+`oldestUnconfirmedAgeSecs`, and RFC 3339 `updatedAt`. Unknown optional
+measurements are omitted. No audit queries run in the health handler.
+A paused or failing audit relay does not change overall health or readiness;
+alert on backlog and unconfirmed age separately. Edge omits this section.
+See [Audit event delivery](audit-events.md) for consumer setup and metrics.

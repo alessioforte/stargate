@@ -450,6 +450,10 @@ impl RedisStore {
         })
     }
 
+    pub(super) fn stream_connection(&self) -> ConnectionManager {
+        self.pool.get()
+    }
+
     /// Append a batch of entries to a Redis stream in a single pipelined round
     /// trip (one `XADD` per entry).
     ///

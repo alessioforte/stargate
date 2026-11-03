@@ -19,6 +19,18 @@ impl OutboxRepository {
         Self
     }
 
+    pub async fn backlog<'c, E>(&self, ex: E) -> Result<crate::ent::OutboxBacklog>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        Ok(sqlx::query_as::<_, crate::ent::OutboxBacklog>(
+            "SELECT COUNT(*) AS pending_events, MIN(created_at) AS oldest_pending
+             FROM outbox_events WHERE published_at IS NULL",
+        )
+        .fetch_one(ex)
+        .await?)
+    }
+
     pub async fn insert(
         &self,
         tx: &mut crate::backend::Tx<'_>,
@@ -162,6 +174,28 @@ impl OutboxRepository {
 
 #[cfg(feature = "postgres")]
 impl OutboxRepository {
+    /// Delete only published rows, without waiting on another maintenance task.
+    pub async fn prune_published<'c, E>(
+        &self,
+        ex: E,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        Ok(sqlx::query(
+            "DELETE FROM outbox_events WHERE seq IN (
+                SELECT seq FROM outbox_events
+                WHERE published_at IS NOT NULL AND published_at < $1
+                ORDER BY published_at LIMIT 1000 FOR UPDATE SKIP LOCKED
+             )",
+        )
+        .bind(before)
+        .execute(ex)
+        .await?
+        .rows_affected())
+    }
+
     pub async fn claim_unpublished(
         &self,
         tx: &mut crate::backend::Tx<'_>,
@@ -360,6 +394,39 @@ mod sqlite_tests {
             .await
             .expect("SQLite migrations must apply");
         pool
+    }
+
+    #[tokio::test]
+    async fn backlog_counts_only_unpublished_rows_and_their_oldest_creation() {
+        let pool = migrated_pool().await;
+        let repo = OutboxRepository::new();
+        assert_eq!(repo.backlog(&pool).await.unwrap().pending_events, 0);
+        assert_eq!(repo.backlog(&pool).await.unwrap().oldest_pending, None);
+        let mut tx = pool.begin().await.unwrap();
+        for id in [
+            "01JZ0000000000000000000001",
+            "01JZ0000000000000000000002",
+            "01JZ0000000000000000000003",
+        ] {
+            repo.insert(&mut tx, &validated_event(id, None))
+                .await
+                .unwrap();
+        }
+        tx.commit().await.unwrap();
+        sqlx::query("UPDATE outbox_events SET created_at = '2026-01-01T00:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE outbox_events SET published_at = created_at WHERE seq = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let backlog = repo.backlog(&pool).await.unwrap();
+        assert_eq!(backlog.pending_events, 2);
+        assert_eq!(
+            backlog.oldest_pending.unwrap().to_rfc3339(),
+            "2026-01-01T00:00:00+00:00"
+        );
     }
 
     #[tokio::test]
@@ -731,6 +798,83 @@ mod postgres_tests {
         .execute(connection)
         .await
         .expect("isolated PostgreSQL schema must be removed");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a live PostgreSQL test database"]
+    async fn backlog_and_retention_are_bounded_and_skip_locked_published_rows() {
+        let (mut connection, schema) = isolated_connection().await;
+        POSTGRES_MIGRATOR
+            .run_direct(None, &mut connection, false)
+            .await
+            .unwrap();
+        let repo = OutboxRepository::new();
+        assert_eq!(
+            repo.backlog(&mut connection).await.unwrap().pending_events,
+            0
+        );
+        assert_eq!(
+            repo.backlog(&mut connection).await.unwrap().oldest_pending,
+            None
+        );
+        let event = validated_event("01JZ0000000000000000000001");
+        sqlx::query(
+            "INSERT INTO outbox_events (event_id, payload, created_at, published_at)
+            SELECT lpad(i::text, 26, '0'),
+                jsonb_set($1::jsonb, '{event_id}', to_jsonb(lpad(i::text, 26, '0')))::text,
+                '2026-01-01'::timestamptz,
+                CASE WHEN i <= 1002 THEN '2026-01-02'::timestamptz
+                     WHEN i = 1003 THEN '2026-11-01'::timestamptz ELSE NULL END
+            FROM generate_series(1, 1004) i",
+        )
+        .bind(event.payload())
+        .execute(&mut connection)
+        .await
+        .unwrap();
+        let backlog = repo.backlog(&mut connection).await.unwrap();
+        assert_eq!(backlog.pending_events, 1);
+        assert_eq!(
+            backlog.oldest_pending.unwrap().to_rfc3339(),
+            "2026-01-01T00:00:00+00:00"
+        );
+        let mut locker = sqlx::PgConnection::connect(&database_url()).await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SET search_path TO \"{schema}\", public"
+        )))
+        .execute(&mut locker)
+        .await
+        .unwrap();
+        let mut lock = locker.begin().await.unwrap();
+        sqlx::query("SELECT seq FROM outbox_events WHERE seq = 1 FOR UPDATE")
+            .fetch_one(&mut *lock)
+            .await
+            .unwrap();
+        let before = "2026-10-01T00:00:00Z".parse().unwrap();
+        assert_eq!(
+            repo.prune_published(&mut connection, before).await.unwrap(),
+            1000
+        );
+        assert_eq!(
+            repo.prune_published(&mut connection, before).await.unwrap(),
+            1
+        );
+        assert_eq!(
+            repo.prune_published(&mut connection, before).await.unwrap(),
+            0
+        );
+        lock.rollback().await.unwrap();
+        assert_eq!(
+            repo.prune_published(&mut connection, before).await.unwrap(),
+            1
+        );
+        assert_eq!(repo.backlog(&mut connection).await.unwrap(), backlog);
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox_events")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 2);
+        drop(locker);
+        drop_isolated_schema(&mut connection, &schema).await;
     }
 
     #[tokio::test]

@@ -74,7 +74,12 @@ default). Keep a rate limit on Traefik as a safety net during a Redis outage, or
 - [ ] A password reset email arrives with a link on the public identity host.
 - [ ] Traces and metrics reach the collector; logs are JSON with `request_id`.
 - [ ] The audit outbox drains: `GET /admin/outbox-events` shows published events, and the
-      consumer of `AUDIT_REDIS_STREAM` is running.
+      consumer of `AUDIT_REDIS_STREAM` is running. Create `audit-archiver` with
+      `XGROUP CREATE audit.raw audit-archiver 0 MKSTREAM`, set
+      `AUDIT_STREAM_CONSUMER_GROUPS=audit-archiver` consistently on all replicas,
+      and confirm the archive is durable before `XACK`. Require Redis/Valkey >= 6.2;
+      monitor pending age and relay pauses. Review `AUDIT_OUTBOX_RETENTION` (default
+      `30d`, published rows only). See [Audit delivery](audit-events.md).
 
 ## Operations
 

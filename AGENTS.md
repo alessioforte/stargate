@@ -56,7 +56,8 @@ stargate/
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
 │                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
-│                      #   gateway-performance (opt-in benchmarks and recorded results), production-checklist
+│                      #   gateway-performance (opt-in benchmarks and recorded results),
+│                      #   production-checklist, audit-events
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
 ```
@@ -345,6 +346,14 @@ application boundary.
   `seq` order with `FOR UPDATE SKIP LOCKED`, publishes to `AUDIT_REDIS_STREAM`
   (default `audit.raw`) as a single `payload` field, then marks them published and
   commits. At-least-once: consumers dedupe on `event_id`. Errors roll back and back off.
+  With `AUDIT_STREAM_CONSUMER_GROUPS`, Redis/Valkey >= 6.2 is required: the relay
+  trims only below the oldest protected ID across groups (pending first, otherwise
+  last delivered), including while paused. XADD never trims in this mode; stream
+  capacity pauses new claims, retaining the backlog in SQL. Without groups, MAXLEN
+  can discard unarchived events. Cluster maintenance prunes only published outbox
+  rows older than `AUDIT_OUTBOX_RETENTION` (default 30d), in batches with SKIP LOCKED.
+  Cached audit diagnostics feed observable metrics, `/admin/health` and the Console,
+  without changing readiness. Contract and consumer setup: `docs/audit-events.md`.
 
 Super-admins read delivery state via `GET /admin/outbox-events[/{event_id}]` (read-only).
 
@@ -856,7 +865,9 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_RELAY_ENABLED`                                                                  | true                                   | Run the outbox relay (cluster)                                                                                                      |
 | `AUDIT_RELAY_BATCH` / `AUDIT_RELAY_INTERVAL_MS`                                        | 256 / 1000                             | Relay batch size / idle poll                                                                                                        |
 | `AUDIT_REDIS_STREAM`                                                                   | audit.raw                              | Redis stream for raw audit events                                                                                                   |
-| `AUDIT_STREAM_MAXLEN`                                                                  | 100000                                 | Approx stream cap (`MAXLEN ~`; 0 = unbounded)                                                                                       |
+| `AUDIT_STREAM_MAXLEN`                                                                  | 100000                                 | Stream capacity target (protected trimming with groups; 0 = unbounded)                                                                                       |
+| `AUDIT_STREAM_CONSUMER_GROUPS` | empty | Distinct comma-separated consumer groups; protect unacknowledged stream entries |
+| `AUDIT_OUTBOX_RETENTION` | 30d | Cluster published-row retention (duration or `none`); never prunes pending rows |
 | `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | Listener TLS; with it off, an `https://` public base URL still marks the deployment HTTPS                                           |
 | `TRUSTED_PROXIES`                                                                      | -                                      | Proxy IP/CIDRs allowed to set client IP headers                                                                                     |
 | `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins                                                                                                                |

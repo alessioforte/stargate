@@ -172,3 +172,6 @@ pub use propagation::trace_id_from_headers;
 pub use propagation::{
     inject_context, inject_trace_context, set_span_parent_from_headers, trace_id_from_span,
 };
+
+#[cfg(all(feature = "postgres", feature = "redis"))]
+pub use metrics::{record_audit_outbox_pruned, register_audit_observers};

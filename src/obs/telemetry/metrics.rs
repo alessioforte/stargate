@@ -37,6 +37,8 @@ struct Metrics {
     audit_relay_duration: Histogram<f64>,
     #[cfg(all(feature = "postgres", feature = "redis"))]
     audit_relay_errors: Counter<u64>,
+    #[cfg(all(feature = "postgres", feature = "redis"))]
+    audit_outbox_pruned: Counter<u64>,
     config_reloads: Counter<u64>,
     limit_store_errors: Counter<u64>,
 }
@@ -159,6 +161,11 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         audit_relay_errors: meter
             .u64_counter("stargate.audit.relay.errors")
             .with_description("Audit relay batch failures")
+            .build(),
+        #[cfg(all(feature = "postgres", feature = "redis"))]
+        audit_outbox_pruned: meter
+            .u64_counter("stargate.audit.outbox.pruned")
+            .with_description("Published audit outbox rows removed by retention")
             .build(),
         limit_store_errors: meter
             .u64_counter("stargate.limits.store_errors")
@@ -392,4 +399,62 @@ pub fn record_limit_store_error(point: &'static str, outcome: &'static str) {
             KeyValue::new("outcome", outcome),
         ],
     );
+}
+
+#[cfg(all(feature = "postgres", feature = "redis"))]
+pub fn register_audit_observers() {
+    let meter = global::meter(INSTRUMENTATION_NAME);
+    meter
+        .u64_observable_gauge("stargate.audit.outbox.pending")
+        .with_callback(|observer| {
+            observer.observe(crate::aud::status().pending_events, &[]);
+        })
+        .build();
+    meter
+        .f64_observable_gauge("stargate.audit.outbox.oldest_pending_age")
+        .with_unit("s")
+        .with_callback(|observer| {
+            observer.observe(crate::aud::status().oldest_pending_age_secs, &[]);
+        })
+        .build();
+    meter
+        .u64_observable_gauge("stargate.audit.stream.length")
+        .with_callback(|observer| {
+            if let Some(length) = crate::aud::status().stream_length {
+                observer.observe(length, &[]);
+            }
+        })
+        .build();
+    meter
+        .f64_observable_gauge("stargate.audit.stream.oldest_unconfirmed_age")
+        .with_unit("s")
+        .with_callback(|observer| {
+            if let Some(age) = crate::aud::status().oldest_unconfirmed_age_secs {
+                observer.observe(age, &[]);
+            }
+        })
+        .build();
+    meter
+        .u64_observable_gauge("stargate.audit.relay.paused")
+        .with_callback(|observer| {
+            let status = crate::aud::status();
+            // Publish zeros for both bounded reasons so old series clear on recovery.
+            for reason in ["consumer_backlog", "group_missing"] {
+                observer.observe(
+                    u64::from(
+                        status.relay == "paused"
+                            && status
+                                .pause_reason
+                                .is_some_and(|current| current.as_str() == reason),
+                    ),
+                    &[KeyValue::new("stargate.reason", reason)],
+                );
+            }
+        })
+        .build();
+}
+
+#[cfg(all(feature = "postgres", feature = "redis"))]
+pub fn record_audit_outbox_pruned(count: u64) {
+    METRICS.audit_outbox_pruned.add(count, &[]);
 }

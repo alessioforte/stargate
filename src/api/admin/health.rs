@@ -89,6 +89,8 @@ pub struct AdminHealth {
     features: FeatureStatus,
     config: ConfigStatus,
     limits: LimitsStatus,
+    #[cfg(all(feature = "postgres", feature = "redis"))]
+    audit: crate::aud::AuditStatus,
     database: ComponentStatus,
     #[cfg(feature = "redis")]
     redis: ComponentStatus,
@@ -165,6 +167,8 @@ fn health_response(gate: &Gate, dependencies: DependencyHealth) -> Response {
         },
         config: ConfigStatus::from_gate(gate),
         limits,
+        #[cfg(all(feature = "postgres", feature = "redis"))]
+        audit: crate::aud::status(),
         database: dependencies.database.into(),
         #[cfg(feature = "redis")]
         redis: dependencies.redis.into(),
@@ -188,6 +192,49 @@ mod tests {
     use crate::gate::{apply_policy_document, prepare_config, test_support};
     #[cfg(feature = "memory")]
     use gate::cfg::Config;
+
+    #[cfg(all(feature = "postgres", feature = "redis"))]
+    #[tokio::test]
+    #[ignore = "requires dedicated AUDIT_RELAY_TEST_REDIS_URL"]
+    async fn health_includes_cached_audit_without_changing_overall_status() {
+        let store = store::RedisStore::new(&std::env::var("AUDIT_RELAY_TEST_REDIS_URL").unwrap())
+            .await
+            .unwrap();
+        let gate = Gate::new(
+            Arc::new(store),
+            crate::gate::prepare_config(gate::cfg::Config::default()).unwrap(),
+            gate::PolicySnapshot::default(),
+        )
+        .unwrap();
+        let response = health_response(
+            &gate,
+            DependencyHealth {
+                database: ComponentHealth {
+                    latency_ms: 0.0,
+                    error: None,
+                },
+                redis: ComponentHealth {
+                    latency_ms: 0.0,
+                    error: None,
+                },
+            },
+        );
+        assert_eq!(response.status(), StatusCode::OK);
+        use http_body_util::BodyExt;
+        let json: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(json["status"], "healthy");
+        assert_eq!(json["audit"]["relay"], "disabled");
+        assert!(json["audit"]["pendingEvents"].is_number());
+        assert!(
+            json["audit"]["updatedAt"]
+                .as_str()
+                .unwrap()
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .is_ok()
+        );
+    }
 
     #[cfg(feature = "redis")]
     #[test]
@@ -296,6 +343,7 @@ mod fail_open_tests {
             let json: serde_json::Value =
                 serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
                     .unwrap();
+            assert!(json.get("audit").is_none());
             assert_eq!(json["limits"]["storeDegraded"], degraded);
             assert_eq!(json["limits"]["points"]["quota"], degraded);
             assert_eq!(json["limits"]["points"].as_object().unwrap().len(), 5);
