@@ -142,6 +142,9 @@ pub fn server_router(
         .layer(axum::middleware::from_fn(
             crate::api::middleware::rate_limit::ingress_limit_middleware,
         ))
+        .layer(axum::middleware::from_fn(
+            middleware::telemetry::record_route,
+        ))
         .fallback_service(tower::service_fn(crate::gate::service));
     health::router(lifecycle).fallback_service(dispatch::HostDispatch::new(hosts, iam))
 }

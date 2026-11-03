@@ -79,24 +79,61 @@ not sum. Counters such as audit publication/pruning represent work performed by
 each replica, so their rates can be summed. Aggregate histogram buckets before
 computing quantiles; do not average per-replica quantiles.
 
+## HTTP server spans
+
+Names and attributes follow the stable HTTP conventions in
+[OpenTelemetry semantic conventions v1.45.0](https://github.com/open-telemetry/semantic-conventions/tree/v1.45.0/docs/http).
+The initial operation name is the known method; unknown methods use `HTTP` as
+the operation name and `_OTHER` as the method attribute. Once known, the name
+becomes `METHOD route` (or `HTTP route` for an unknown method).
+
+IAM routes use Axum's `MatchedPath`, including parameter placeholders such as
+`/admin/users/{id}`. Probes retain `/livez` and `/readyz`; filter them in the
+collector if desired. Gateway operations record the configured `stargate.router`;
+`http.route` is set only from a positive configured exact or template path.
+Prefix/regex matchers and unmatched requests do not copy the actual path into
+the operation name or route attribute. Router names remain bounded by configuration.
+
+| Span attribute | Value |
+| --- | --- |
+| `http.request.method` | `CONNECT`, `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT`, `QUERY`, `TRACE`, or `_OTHER` (case-sensitive) |
+| `http.request.method_original` | Original method only when normalized; span only |
+| `http.route` | Matched low-cardinality template/exact path, when known |
+| `url.path` | Actual path; span only |
+| `url.scheme` | `http` or `https` from listener/public HTTPS settings |
+| `server.address`, `server.port` | Original request authority/Host, before gateway middleware; scheme's default port if omitted |
+| `client.address` | Client IP resolved through configured trusted proxies |
+| `network.peer.address` | Immediate connection peer IP, without port |
+| `user_agent.original` | User-Agent when present |
+| `http.response.status_code` | Response status number |
+| `error.type` | HTTP 5xx status as a string, or a bounded gateway error code for an internal/transport failure |
+| `request_id` | Stargate request ULID; also used in JSON logs |
+| `trace_id` | Valid SDK trace ID when telemetry is active |
+
+Optional unavailable attributes are omitted. No query string is recorded on
+request spans or JSON logs: neither `url.query` nor a legacy query attribute is
+emitted, including OAuth callbacks. Only server failures set span status ERROR;
+4xx responses keep server span status unset. gRPC may represent an internal or
+transport failure in RPC status while HTTP is 200; its bounded error code still
+identifies that server failure.
+
 ## Metric catalog
 
 `C` means monotonic counter, `H` histogram and `G` observable gauge, except the
-active gateway resource up/down counter which is gauge-like. Request/transfer histograms use **milliseconds (`ms`)**; audit age
-gauges use seconds (`s`). Count/gauge quantities in the unit column describe their
+active gateway resource up/down counter which is gauge-like. Durations are
+**seconds (`s`)**. Count/gauge quantities in the unit column describe their
 meaning; unless `s` or `By` is shown, their OTLP unit field is unset.
 Request latency measures handler/response-header completion;
 custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 
 | OpenTelemetry instrument | Type / unit | Attributes and allowed values | Meaning / scope |
 | --- | --- | --- | --- |
-| `stargate.http.server.requests` | C / requests | `http.request.method`; numeric `http.response.status_code`; `stargate.request.kind=iam` or `gateway` | All inbound requests, separately by kind |
-| `stargate.http.server.duration` | H / ms | Same as HTTP requests | Handler/response-header completion |
+| `http.server.request.duration` | H / s | `http.request.method` normalized as above; numeric `http.response.status_code`; `http.route` when known; `url.scheme=http` or `https`; `error.type` on failures; `stargate.request.kind=iam` or `gateway` | All inbound requests; count requests from histogram observations, separately by kind |
 | `stargate.gateway.requests` | C / requests | Configured `stargate.router`, `stargate.service` or `unmatched`; response status | Gateway-only subset; do not add it to the HTTP histogram count |
-| `stargate.gateway.duration` | H / ms | Same as gateway requests | Through gateway response headers |
-| `stargate.gateway.transfer.duration` | H / ms | Bounded `phase`; `stargate.outcome` from transfer completion/cancellation/error handling | Body/WebSocket lifetime |
+| `stargate.gateway.duration` | H / s | Same as gateway requests | Through gateway response headers |
+| `stargate.gateway.transfer.duration` | H / s | Bounded `phase`; `stargate.outcome` from transfer completion/cancellation/error handling | Body/WebSocket lifetime |
 | `stargate.gateway.upstream.requests` | C / attempts | Configured `stargate.service`; `stargate.target_kind=upstream` or `direct_response`; `network.protocol.name=http` or `ws`; status; `stargate.outcome=success` or `error` | Dispatch attempts |
-| `stargate.gateway.upstream.duration` | H / ms | Same as upstream requests | Dispatch through response headers |
+| `stargate.gateway.upstream.duration` | H / s | Same as upstream requests | Dispatch through response headers |
 | `stargate.gateway.upstream.targets` | G / targets | Configured `stargate.upstream`; `stargate.state=healthy`, `unhealthy`, `circuit_open` | Active-generation targets, per replica |
 | `stargate.gateway.failovers` | C / transitions | `stargate.reason=status`, `transport`, or `protocol`; response status | Failover transitions |
 | `stargate.gateway.mirrors` | C / dispatches/outcomes | Bounded `stargate.outcome` | Mirror activity |
@@ -107,12 +144,12 @@ custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 | `stargate.gateway.replay.bytes` | H / By | none | Replay-buffered body size |
 | `stargate.gateway.response.disposals` | C / bodies | `stargate.disposal.kind`; `stargate.outcome` from bounded disposal results | Discarded response outcomes |
 | `stargate.gateway.response.disposal.bytes` | H / By | Same as disposals | Observed discarded data bytes |
-| `stargate.gateway.response.disposal.duration` | H / ms | Same as disposals | Bounded body disposal time |
+| `stargate.gateway.response.disposal.duration` | H / s | Same as disposals | Bounded body disposal time |
 | `stargate.gateway.policy.decisions` | C / decisions | `stargate.policy_kind=auth`, `access_control`, `ingress`, `rate_limit`, `quota`; `stargate.outcome=allowed`, `denied`, `error` | Policy decisions |
 | `stargate.gateway.propagation.drafts` | C / drafts | Bounded `stargate.outcome` and `stargate.kind` | Internal-context draft outcomes |
 | `stargate.gateway.internal_context.issues` | C / issues | Configured service; `stargate.dispatch.kind=primary` or `mirror`; bounded outcome/reason | Internal-context signing outcomes |
-| `stargate.gateway.internal_context.signing.duration` | H / ms | Same as issues | CPU signing duration, including sub-millisecond work |
-| `stargate.gateway.internal_context.queue.duration` | H / ms | Configured service and dispatch kind | Signing queue wait |
+| `stargate.gateway.internal_context.signing.duration` | H / s | Same as issues | CPU signing duration, including sub-millisecond work |
+| `stargate.gateway.internal_context.queue.duration` | H / s | Configured service and dispatch kind | Signing queue wait |
 | `stargate.gateway.internal_context.token.size` | H / By | Same as issues | Compact signed token size |
 | `stargate.limits.store_errors` | C / failures | `point=gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`, `quota`; `outcome=allowed` or `denied` | Traffic store errors/timeouts, per replica |
 | `stargate.config.reloads` | C / activations | `stargate.config_kind=gateway_config` or `policies`; `stargate.outcome=success`, `error`, `transport_error`, `internal_context_error` | Activation outcomes |
@@ -124,7 +161,7 @@ custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 | `stargate.audit.stream.oldest_unconfirmed_age` | G / s | none | Global oldest pending/undelivered age; max; absent without groups |
 | `stargate.audit.relay.paused` | G / 0 or 1 | `stargate.reason=consumer_backlog` or `group_missing` | Per-replica pause state; max detects any pause |
 | `stargate.audit.relay.records` | C / events | `stargate.outcome=success` or `error` | Publications by this replica |
-| `stargate.audit.relay.duration` | H / ms | Same as relay records | Relay batch duration |
+| `stargate.audit.relay.duration` | H / s | Same as relay records | Relay batch duration |
 | `stargate.audit.relay.errors` | C / errors | `stargate.outcome=error` | Failed relay batches |
 | `stargate.audit.outbox.pruned` | C / rows | none | Retention work by this replica |
 
@@ -141,6 +178,16 @@ target. Used upstreams shared by several leaf services are counted once. Every
 collection reads the active snapshot; unused upstreams without a balancer are
 omitted, and pinned old requests do not keep obsolete generations in the gauge.
 
+Duration histogram boundaries are explicit, in seconds:
+
+- HTTP server: `[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]`, as recommended by the HTTP conventions.
+- Gateway request/upstream/disposal and audit relay: `[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120]`.
+- Transfer: `[0.01, 0.1, 0.5, 1, 5, 10, 30, 60, 300, 900, 3600]`.
+- Signing: `[0.000001, 0.000005, 0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1]`.
+- Signing queue: `[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2.5, 5]`.
+
+An overflow bucket captures larger values. Byte histograms remain in `By`.
+
 ## Alert catalog
 
 Implement these conditions in the chosen backend. Rates are per-instance before
@@ -150,7 +197,7 @@ not additional readiness conditions.
 
 | Alert | Instrument / attributes | Aggregation | Threshold / duration | Severity | First action / planned runbook section |
 | --- | --- | --- | --- | --- | --- |
-| High HTTP error rate | `stargate.http.server.requests`, status ≥ 500, grouped by `stargate.request.kind` | Error request rate / all request rate, separately for IAM and gateway | > 2% / 10m | critical | Inspect dependency health and status distribution; `high-http-error-rate` |
+| High HTTP error rate | `http.server.request.duration`, status ≥ 500, grouped by `stargate.request.kind` | Error observation rate / all observation rate, separately for IAM and gateway | > 2% / 10m | critical | Inspect dependency health and status distribution; `high-http-error-rate` |
 | Limit store degraded | `stargate.limits.store_errors` | Sum of per-instance rates | Increasing / 5m | warning | Check Redis connectivity/latency; `redis-unavailable` |
 | Limit store denying | Same instrument, `outcome=denied` | Sum of rates | Increasing / 5m | critical | Restore Redis or review failure policy; `redis-unavailable` |
 | Configuration activation failed | `stargate.config.reloads`, `stargate.outcome` not `success` | Sum of increments over 15m | > 0 / — | warning | Inspect failed revision and retained snapshot; `configuration-activation-failed` |
@@ -177,7 +224,7 @@ These are not Stargate instruments and are not installed by its chart.
 
 Build views in the operator's backend using the OTLP catalog:
 
-- HTTP request counts, latency p50/p95/p99 and error ratio, separately for IAM and gateway, using `stargate.http.server.requests`, `stargate.http.server.duration` and `stargate.request.kind`.
+- HTTP request counts, latency p50/p95/p99 and error ratio, separately for IAM and gateway, using `http.server.request.duration` and `stargate.request.kind`.
 - Upstream attempts, failover, response latency and target states by configured upstream and replica.
 - Traffic limit store error rates by point and outcome.
 - Global audit backlog, oldest unpublished/unconfirmed ages, stream length and relay pause/error rates; see [Audit delivery](audit-events.md).

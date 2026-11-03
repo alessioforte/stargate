@@ -1,3 +1,4 @@
+mod http;
 mod metrics;
 mod propagation;
 
@@ -199,3 +200,5 @@ pub(crate) fn meter() -> opentelemetry::metrics::Meter {
 }
 
 pub(crate) use metrics::{GatewayResponse, HttpRequestKind};
+
+pub(crate) use http::{HttpRequestTelemetry, normalized_method, operation_method};

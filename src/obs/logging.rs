@@ -130,27 +130,6 @@ pub fn init(settings: Settings) -> LogGuard {
     }
 }
 
-const SENSITIVE_PARAMS: &[&str] = &["token", "code", "secret", "key", "password", "state"];
-
-fn sanitize_query(query: &str) -> String {
-    if query.is_empty() {
-        return String::new();
-    }
-    query
-        .split('&')
-        .map(|pair| {
-            if let Some((key, _)) = pair.split_once('=') {
-                let lower = key.to_lowercase();
-                if SENSITIVE_PARAMS.iter().any(|s| lower.contains(s)) {
-                    return format!("{}=[REDACTED]", key);
-                }
-            }
-            pair.to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
 pub async fn trace_middleware(
     mut req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -160,36 +139,60 @@ pub async fn trace_middleware(
     let request_id = Ulid::generate().to_string();
     let now = Utc::now();
     let started = Instant::now();
-    let method = req.method().clone();
+    let method = telemetry::normalized_method(req.method().as_str());
+    let original_method =
+        (method != req.method().as_str()).then(|| req.method().as_str().to_owned());
     let path = req.uri().path().to_string();
-    let query = sanitize_query(req.uri().query().unwrap_or(""));
+    let scheme = if crate::srv::tls::served_over_https() {
+        "https"
+    } else {
+        "http"
+    };
+    let authority = req.uri().authority().cloned().or_else(|| {
+        req.headers()
+            .get(http::header::HOST)?
+            .to_str()
+            .ok()?
+            .parse::<http::uri::Authority>()
+            .ok()
+    });
+    let server_address = authority
+        .as_ref()
+        .map(|authority| authority.host().trim_matches(['[', ']']).to_owned());
+    let server_port = authority.as_ref().map(|authority| {
+        authority
+            .port_u16()
+            .unwrap_or(if scheme == "https" { 443 } else { 80 })
+    });
     let user_agent = req.get_user_agent();
     sanitize_ingress_headers(req.headers_mut(), &request_id)
         .expect("generated request id must be a valid header value");
     let peer_ip = req
         .extensions()
         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|ci| ci.0.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map(|ci| ci.0.ip().to_string());
     let client_ip_addr = req.get_client_ip_addr();
-    let ip_address = client_ip_addr
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+    let ip_address = client_ip_addr.map(|ip| ip.to_string());
 
     let span = tracing::info_span!(
         "http_request",
         request_id = %request_id,
         trace_id = tracing::field::Empty,
-        http.method = %method,
-        http.path = %path,
-        http.query = %query,
-        http.user_agent = %user_agent.as_deref().unwrap_or("unknown"),
-        http.peer_ip = %peer_ip,
-        http.client_ip = %ip_address,
-        http.status_code = tracing::field::Empty,
+        // OpenTelemetry HTTP semantic conventions v1.45.0; query strings are omitted.
+        http.request.method = method,
+        http.request.method_original = original_method.as_deref(),
+        http.route = tracing::field::Empty,
+        url.path = %path,
+        url.scheme = scheme,
+        server.address = server_address.as_deref(),
+        server.port = server_port.map(i64::from),
+        user_agent.original = user_agent.as_deref(),
+        network.peer.address = peer_ip.as_deref(),
+        client.address = ip_address.as_deref(),
         http.response.status_code = tracing::field::Empty,
+        error.type = tracing::field::Empty,
         otel.kind = "server",
-        otel.name = %format!("{} {}", method, path),
+        otel.name = telemetry::operation_method(method),
         otel.status_code = tracing::field::Empty,
         stargate.router = tracing::field::Empty,
         stargate.service = tracing::field::Empty,
@@ -210,11 +213,12 @@ pub async fn trace_middleware(
         trace_id,
     ));
 
+    let request_telemetry = telemetry::HttpRequestTelemetry::new(span.clone(), method);
+    req.extensions_mut().insert(request_telemetry.clone());
     let mut response = next.run(req).instrument(span.clone()).await;
-    span.record("http.status_code", response.status().as_u16());
     span.record("http.response.status_code", response.status().as_u16());
     if response.status().is_server_error() {
-        span.record("otel.status_code", "ERROR");
+        request_telemetry.record_error(&response.status().as_u16().to_string());
     }
     telemetry::record_http_server_request(
         if response
@@ -226,8 +230,9 @@ pub async fn trace_middleware(
         } else {
             telemetry::HttpRequestKind::Iam
         },
-        method.as_str(),
+        &request_telemetry,
         response.status().as_u16(),
+        scheme,
         started.elapsed(),
     );
     response.headers_mut().insert(

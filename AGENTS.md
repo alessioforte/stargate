@@ -151,7 +151,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   Logs go to stdout by default; `LOG_FORMAT` defaults to pretty in debug and JSON in
   release. Optional files remain JSON. ANSI requires a stdout terminal and a text
   format. The server validates settings before its banner and omits it in JSON
-  mode; CLI output keeps its existing behavior. JSON includes the current span
+  mode; CLI output keeps its existing behavior. Server spans follow HTTP semantic
+  conventions with matched route names and standard attributes; they omit query
+  strings entirely. Duration histograms use seconds and explicit boundaries.
+  JSON includes the current span
   and span list: request logs retain `request_id`, including in nested spans, and
   record the valid SDK `trace_id` when OpenTelemetry is active. With it disabled,
   `trace_id` stays absent; no synthetic trace id is generated. All three OTLP signals
@@ -1200,8 +1203,11 @@ a new reusable primitive.
   point selection rather than enum-position array indexing.
 - OTLP resources identify each replica with `service.instance.id`, preserving
   explicit resource attributes and defaulting to a stable ULID per process.
-- `docs/monitoring.md` defines OpenTelemetry metrics, aggregation, recommended
-  views and a backend-neutral alert catalog.
+- Telemetry follows OpenTelemetry HTTP semantic conventions: server operations
+  use matched routes, no query strings are recorded, and unknown methods become
+  `_OTHER` in attributes. `http.server.request.duration` and custom duration
+  histograms use seconds with explicit buckets. `docs/monitoring.md` defines
+  metrics, attributes, aggregation and a backend-neutral alert catalog.
 - SQL pool gauges sample the initialized pool; upstream gauges read the current
   snapshot and never advance circuit state. Metric attributes are bounded;
   URLs and request identities stay out of metric dimensions.

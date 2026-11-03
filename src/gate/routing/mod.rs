@@ -46,6 +46,22 @@ pub(super) fn matches_expr(expr: &MatchExprNode, req: &Request<Body>) -> bool {
     }
 }
 
+/// Only configured positive exact/template paths can identify an operation.
+pub(super) fn route_template<'a>(expr: &'a MatchExprNode, req: &Request<Body>) -> Option<&'a str> {
+    use gate::graph::PathPredicate;
+    match expr {
+        MatchExprNode::Path(PathPredicate::Exact(path) | PathPredicate::Template(path)) => {
+            Some(path)
+        }
+        MatchExprNode::All(values) => values.iter().find_map(|value| route_template(value, req)),
+        MatchExprNode::Any(values) => values
+            .iter()
+            .filter(|value| matches_expr(value, req))
+            .find_map(|value| route_template(value, req)),
+        _ => None,
+    }
+}
+
 fn named_value_matches<S: AsRef<str>>(
     predicate: &NamedValuePredicate,
     values: impl IntoIterator<Item = S>,

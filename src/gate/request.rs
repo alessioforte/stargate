@@ -62,6 +62,10 @@ pub(crate) struct IngressPause {
 
 pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, ErrorResponse> {
     let started = Instant::now();
+    let request_telemetry = req
+        .extensions()
+        .get::<telemetry::HttpRequestTelemetry>()
+        .cloned();
     let grpc_request = super::grpc::is_grpc_request(req.headers());
     let mut labels = RouteLabels {
         router: "unmatched".to_string(),
@@ -125,8 +129,15 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
         Err(error) => error.status.as_u16(),
     };
     telemetry::record_gateway_request(&labels.router, &labels.service, status, started.elapsed());
-    if status >= 500 {
-        tracing::Span::current().record("otel.status_code", "ERROR");
+    if status >= 500
+        && let Some(telemetry) = &request_telemetry
+    {
+        let error = result
+            .as_ref()
+            .err()
+            .map(|error| error.code.as_str().to_owned())
+            .unwrap_or_else(|| status.to_string());
+        telemetry.record_error(&error);
     }
 
     if grpc_request {
@@ -192,6 +203,12 @@ async fn handle_request(
             .find(|router| router_matches(router, &req))
             .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayRouteNotFound))?
     };
+    if let Some(telemetry) = req.extensions().get::<telemetry::HttpRequestTelemetry>() {
+        telemetry.record_gateway(&router.name, &router.service, runtime.version);
+        if let Some(route) = super::routing::route_template(&router.matcher, &req) {
+            telemetry.record_route(route);
+        }
+    }
     labels.router = router.name.clone();
     labels.service = router.service.clone();
     tracing::Span::current().record("stargate.router", labels.router.as_str());

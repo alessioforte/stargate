@@ -1030,7 +1030,8 @@ HTTP server instruments distinguish `stargate.request.kind=iam|gateway`, so
 non-gateway and gateway latency histograms can be queried separately.
 See [Monitoring](monitoring.md) for OpenTelemetry instrument names, cumulative
 counter identity, histogram buckets, recommended views and the alert catalog.
-No backend-specific monitoring resources are bundled.
+All duration histograms use seconds (`s`); no backend-specific monitoring
+resources are bundled.
 
 `stargate.gateway.resources.active` is an up/down counter with only `kind`:
 `primary` (requests/sessions), `mirror` (reserved slots/tasks), and `replay_memory`
@@ -1044,7 +1045,7 @@ request IDs.
 
 `stargate.gateway.duration` and `stargate.gateway.upstream.duration` end at
 response headers. The upstream instrument includes dispatch preparation and
-signing. `stargate.gateway.transfer.duration` records milliseconds until each
+signing. `stargate.gateway.transfer.duration` records seconds until each
 upload, downstream body, or accepted WebSocket completes or terminates. Its only
 labels are `phase` (`upload`, `response_body`, `websocket`) and
 `stargate.outcome` (`complete`, `error`, `timeout`, `cancelled`, `dropped`). Each
@@ -1063,7 +1064,7 @@ label contains a file path, target URL, token, or request ID.
 `stargate.gateway.response.disposals` counts completed disposal outcomes;
 `stargate.gateway.response.disposal.bytes` and
 `stargate.gateway.response.disposal.duration` record observed data bytes and
-elapsed milliseconds. Their only dimensions are `stargate.disposal.kind`
+elapsed seconds. Their only dimensions are `stargate.disposal.kind`
 (`failover`, `mirror`) and `stargate.outcome` (`drained`, `byte_limit`, `timeout`,
 `body_error`, `cancelled`). They contain no target URLs, credentials, or body contents.
 `stargate.gateway.mirrors` records `dispatched` at task creation and a final

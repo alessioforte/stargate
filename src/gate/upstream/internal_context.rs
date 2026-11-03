@@ -149,8 +149,8 @@ impl InternalDispatch {
             stargate.dispatch.kind = dispatch_kind_label(self.kind),
             stargate.outcome = "success",
             stargate.reason = "none",
-            stargate.internal_context.signing.duration_ms = signing_elapsed.as_secs_f64() * 1_000.0,
-            stargate.internal_context.queue.duration_ms = signed.queue_duration.as_secs_f64() * 1_000.0,
+            stargate.internal_context.signing.duration = signing_elapsed.as_secs_f64(),
+            stargate.internal_context.queue.duration = signed.queue_duration.as_secs_f64(),
             stargate.internal_context.token.size = token_bytes as u64,
             "Internal-context issuance completed"
         );
@@ -194,7 +194,7 @@ fn internal_failure(
             stargate.dispatch.kind = dispatch_kind_label(kind),
             stargate.outcome = "failure",
             stargate.reason = reason,
-            stargate.internal_context.signing.duration_ms = signing_elapsed.as_secs_f64() * 1_000.0,
+            stargate.internal_context.signing.duration = signing_elapsed.as_secs_f64(),
             stargate.internal_context.token.size = token_bytes as u64,
             "Internal upstream request preparation failed"
         );
@@ -204,7 +204,7 @@ fn internal_failure(
             stargate.dispatch.kind = dispatch_kind_label(kind),
             stargate.outcome = "failure",
             stargate.reason = reason,
-            stargate.internal_context.signing.duration_ms = signing_elapsed.as_secs_f64() * 1_000.0,
+            stargate.internal_context.signing.duration = signing_elapsed.as_secs_f64(),
             "Internal upstream request preparation failed"
         );
     } else {

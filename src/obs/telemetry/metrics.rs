@@ -6,8 +6,25 @@ use opentelemetry::{
 };
 use std::time::Duration;
 
+// OpenTelemetry HTTP semantic conventions v1.45.0, http.server.request.duration.
+pub(super) const HTTP_DURATION_BUCKETS: &[f64] = &[
+    0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+];
+const REQUEST_DURATION_BUCKETS: &[f64] = &[
+    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0,
+];
+const TRANSFER_DURATION_BUCKETS: &[f64] = &[
+    0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 900.0, 3600.0,
+];
+const SIGNING_DURATION_BUCKETS: &[f64] = &[
+    0.000001, 0.000005, 0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
+    0.01, 0.025, 0.05, 0.1, 0.25, 1.0,
+];
+const QUEUE_DURATION_BUCKETS: &[f64] = &[
+    0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0,
+];
+
 struct Metrics {
-    http_server_requests: Counter<u64>,
     http_server_duration: Histogram<f64>,
     gateway_requests: Counter<u64>,
     gateway_grpc_responses: Counter<u64>,
@@ -46,14 +63,11 @@ struct Metrics {
 static METRICS: Lazy<Metrics> = Lazy::new(|| {
     let meter = global::meter(INSTRUMENTATION_NAME);
     Metrics {
-        http_server_requests: meter
-            .u64_counter("stargate.http.server.requests")
-            .with_description("Inbound HTTP requests handled by Stargate")
-            .build(),
         http_server_duration: meter
-            .f64_histogram("stargate.http.server.duration")
+            .f64_histogram("http.server.request.duration")
             .with_description("Inbound HTTP request duration")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(HTTP_DURATION_BUCKETS.to_vec())
             .build(),
         gateway_requests: meter
             .u64_counter("stargate.gateway.requests")
@@ -66,12 +80,14 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         gateway_duration: meter
             .f64_histogram("stargate.gateway.duration")
             .with_description("Gateway request duration through response headers")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(REQUEST_DURATION_BUCKETS.to_vec())
             .build(),
         gateway_transfer_duration: meter
             .f64_histogram("stargate.gateway.transfer.duration")
             .with_description("Gateway upload, downstream body, or WebSocket lifetime")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(TRANSFER_DURATION_BUCKETS.to_vec())
             .build(),
         gateway_upstream_requests: meter
             .u64_counter("stargate.gateway.upstream.requests")
@@ -82,7 +98,8 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
             .with_description(
                 "Gateway upstream or direct-response attempt through response headers",
             )
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(REQUEST_DURATION_BUCKETS.to_vec())
             .build(),
         gateway_failovers: meter
             .u64_counter("stargate.gateway.failovers")
@@ -104,7 +121,8 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         gateway_response_disposal_duration: meter
             .f64_histogram("stargate.gateway.response.disposal.duration")
             .with_description("Discarded response body disposal duration")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(REQUEST_DURATION_BUCKETS.to_vec())
             .build(),
         gateway_resources: meter
             .i64_up_down_counter("stargate.gateway.resources.active")
@@ -134,12 +152,14 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         gateway_internal_context_signing_duration: meter
             .f64_histogram("stargate.gateway.internal_context.signing.duration")
             .with_description("Internal-context RS256 signing duration")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(SIGNING_DURATION_BUCKETS.to_vec())
             .build(),
         gateway_internal_context_queue_duration: meter
             .f64_histogram("stargate.gateway.internal_context.queue.duration")
             .with_description("Internal-context signing queue wait")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(QUEUE_DURATION_BUCKETS.to_vec())
             .build(),
         gateway_internal_context_token_size: meter
             .u64_histogram("stargate.gateway.internal_context.token.size")
@@ -155,7 +175,8 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         audit_relay_duration: meter
             .f64_histogram("stargate.audit.relay.duration")
             .with_description("Audit relay batch duration")
-            .with_unit("ms")
+            .with_unit("s")
+            .with_boundaries(REQUEST_DURATION_BUCKETS.to_vec())
             .build(),
         #[cfg(all(feature = "postgres", feature = "redis"))]
         audit_relay_errors: meter
@@ -199,19 +220,15 @@ pub(crate) struct GatewayResponse;
 
 pub fn record_http_server_request(
     kind: HttpRequestKind,
-    method: &str,
+    request: &super::HttpRequestTelemetry,
     status: u16,
+    scheme: &'static str,
     elapsed: Duration,
 ) {
-    let attrs = [
-        KeyValue::new("stargate.request.kind", kind.as_str()),
-        KeyValue::new("http.request.method", method.to_string()),
-        KeyValue::new("http.response.status_code", i64::from(status)),
-    ];
-    METRICS.http_server_requests.add(1, &attrs);
-    METRICS
-        .http_server_duration
-        .record(duration_ms(elapsed), &attrs);
+    METRICS.http_server_duration.record(
+        elapsed.as_secs_f64(),
+        &request.metric_attributes(kind, status, scheme),
+    );
 }
 
 pub fn record_gateway_request(router: &str, service: &str, status: u16, elapsed: Duration) {
@@ -223,7 +240,7 @@ pub fn record_gateway_request(router: &str, service: &str, status: u16, elapsed:
     METRICS.gateway_requests.add(1, &attrs);
     METRICS
         .gateway_duration
-        .record(duration_ms(elapsed), &attrs);
+        .record(elapsed.as_secs_f64(), &attrs);
 }
 
 pub fn record_gateway_grpc_response(router: &str, service: &str, status: u8) {
@@ -258,7 +275,7 @@ pub fn record_gateway_upstream_attempt(
     METRICS.gateway_upstream_requests.add(1, &attrs);
     METRICS
         .gateway_upstream_duration
-        .record(duration_ms(elapsed), &attrs);
+        .record(elapsed.as_secs_f64(), &attrs);
 }
 
 pub fn record_gateway_failover(reason: &str, status: Option<u16>) {
@@ -296,7 +313,7 @@ pub fn record_gateway_response_disposal(
         .record(bytes as u64, &attrs);
     METRICS
         .gateway_response_disposal_duration
-        .record(duration_ms(elapsed), &attrs);
+        .record(elapsed.as_secs_f64(), &attrs);
 }
 
 pub fn record_gateway_replay_bytes(bytes: usize) {
@@ -329,7 +346,7 @@ pub fn record_internal_context_queue(
     elapsed: Duration,
 ) {
     METRICS.gateway_internal_context_queue_duration.record(
-        duration_ms(elapsed),
+        elapsed.as_secs_f64(),
         &[
             KeyValue::new("stargate.service", service.to_owned()),
             KeyValue::new("stargate.dispatch.kind", dispatch_kind),
@@ -355,7 +372,7 @@ pub fn record_internal_context_issue(
     if let Some(elapsed) = signing_elapsed {
         METRICS
             .gateway_internal_context_signing_duration
-            .record(duration_ms(elapsed), &attrs);
+            .record(elapsed.as_secs_f64(), &attrs);
     }
     if let Some(bytes) = token_bytes {
         METRICS
@@ -370,7 +387,7 @@ pub fn record_audit_relay_batch(outcome: &str, records: usize, elapsed: Duration
     METRICS.audit_relay_records.add(records as u64, &attrs);
     METRICS
         .audit_relay_duration
-        .record(duration_ms(elapsed), &attrs);
+        .record(elapsed.as_secs_f64(), &attrs);
     if outcome == "error" {
         METRICS.audit_relay_errors.add(1, &attrs);
     }
@@ -384,10 +401,6 @@ pub fn record_config_reload(kind: &str, outcome: &str) {
             KeyValue::new("stargate.outcome", outcome.to_string()),
         ],
     );
-}
-
-fn duration_ms(duration: Duration) -> f64 {
-    duration.as_secs_f64() * 1000.0
 }
 
 pub fn record_gateway_resource(kind: &'static str, delta: i64) {
@@ -408,7 +421,7 @@ pub fn record_gateway_timeout(phase: &'static str) {
 
 pub fn record_gateway_transfer(phase: &'static str, outcome: &'static str, elapsed: Duration) {
     METRICS.gateway_transfer_duration.record(
-        duration_ms(elapsed),
+        elapsed.as_secs_f64(),
         &[
             KeyValue::new("phase", phase),
             KeyValue::new("stargate.outcome", outcome),

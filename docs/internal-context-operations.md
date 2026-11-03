@@ -79,8 +79,8 @@ path, audience, key id, and all decoded claims.
 | Instrument | Type | Purpose |
 | --- | --- | --- |
 | `stargate.gateway.internal_context.issues` | Counter | Issuance/preparation outcomes |
-| `stargate.gateway.internal_context.signing.duration` | Histogram in milliseconds | RS256 worker execution time, excluding queue wait |
-| `stargate.gateway.internal_context.queue.duration` | Histogram in milliseconds | Queue wait for jobs that started, labeled by service and dispatch kind |
+| `stargate.gateway.internal_context.signing.duration` | Histogram in seconds | RS256 worker execution time, excluding queue wait |
+| `stargate.gateway.internal_context.queue.duration` | Histogram in seconds | Queue wait for jobs that started, labeled by service and dispatch kind |
 | `stargate.gateway.internal_context.token.size` | Histogram in bytes | Compact token size when a token was produced |
 | `stargate.config.reloads` | Counter | Gateway configuration reload outcome, including preflight rejection |
 

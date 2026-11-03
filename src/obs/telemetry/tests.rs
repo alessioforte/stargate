@@ -214,10 +214,14 @@ async fn export_monitoring_instruments_to_a_real_collector() {
     let guard = super::init();
     assert!(guard.enabled());
     use std::time::Duration;
+    let request = super::HttpRequestTelemetry::new(tracing::Span::none(), "GET");
+    request.record_route("/example");
+    request.record_error("503");
     super::record_http_server_request(
         super::HttpRequestKind::Iam,
-        "GET",
+        &request,
         503,
+        "http",
         Duration::from_millis(10),
     );
     super::record_gateway_request("example", "backend", 503, Duration::from_millis(5));

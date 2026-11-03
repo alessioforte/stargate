@@ -19,6 +19,9 @@ pub fn router(lifecycle: Lifecycle) -> Router {
     Router::new()
         .route("/livez", get(get_livez))
         .route("/readyz", get(get_readyz))
+        .route_layer(axum::middleware::from_fn(
+            super::middleware::telemetry::record_route,
+        ))
         .with_state(lifecycle)
 }
 
