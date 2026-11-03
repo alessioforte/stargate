@@ -4,19 +4,13 @@
 [advisories]
 ignore = [
     # rsa 0.9 (Marvin attack): non-constant-time private-key operations; no rsa
-    # release is patched, 0.10 release candidates included. Stargate never
-    # decrypts with RSA. It signs only through jsonwebtoken, whose RustCrypto
-    # backend calls sign_with_rng, so every private-key operation is blinded.
-    # Its own rsa calls parse keys, read public components and generate keys in
-    # the CLI. Re-check when jsonwebtoken changes how it signs; remove when a
-    # patched rsa release is the only one in Cargo.lock.
+    # release is patched, 0.10 release candidates included. jsonwebtoken signs
+    # and verifies with aws-lc-rs, so no token signature goes through this
+    # crate. Stargate's own rsa calls parse keys when they are loaded, read
+    # public components for JWKS documents and generate keys in the CLI; none
+    # handles attacker-controlled input. Remove when those calls leave the rsa
+    # crate or a patched release is available.
     "RUSTSEC-2023-0071",
-    # crypto-bigint 0.5 timing variability, pulled by jsonwebtoken 11 through
-    # elliptic-curve 0.13 (p256/p384 0.13). It matters for ECDSA *signing* with
-    # an ES256/ES384 active key; RS256 (the default and the production setting
-    # in docs/production-checklist.md) is unaffected, and ECDSA verification uses
-    # only public data. Remove when jsonwebtoken depends on crypto-bigint >= 0.7.6.
-    "RUSTSEC-2026-0387",
     # False positive: matches the crates.io crate named `jwt`, not the workspace
     # path crate `crates/jwt`.
     "RUSTSEC-2016-0007",

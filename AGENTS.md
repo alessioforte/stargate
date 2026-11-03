@@ -90,7 +90,7 @@ Module boundaries in `src/` (each top-level name is 3-4 characters):
 - **WebSocket**: hyper-tungstenite + tokio-tungstenite for upstream proxying
 - **TLS**: rustls + tokio-rustls + hyper-rustls (ring provider)
 - **DB**: sqlx (feature-gated `postgres` or `sqlite`)
-- **Auth**: JWT (jsonwebtoken), Argon2 passwords, RSA/HMAC signing
+- **Auth**: JWT (jsonwebtoken on its aws-lc-rs backend), Argon2 passwords, RSA/EC/HMAC signing
 - **Serialization**: serde_json, serde-saphyr, MessagePack
 - **OpenAPI**: utoipa
 - **Observability**: tracing + OpenTelemetry (OTLP traces, metrics, logs)

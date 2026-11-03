@@ -98,12 +98,6 @@ missing key fails startup instead of silently minting an unpublished key.
 `JWT_ALGORITHM` may be left unset; when set it must match the active key, or
 startup fails.
 
-Prefer an RSA active key (`RS256`, the default). ES256 and ES384 signing goes
-through the RustCrypto P-256/P-384 implementation used by `jsonwebtoken`, which
-still depends on a `crypto-bigint` release with a timing advisory
-([RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387)). EC keys
-remain supported, and verifying EC-signed tokens handles only public data.
-
 Rotate without logging anyone out:
 
 1. Create the next key: `stargate jwt generate-key --kid stargate-2026-11`

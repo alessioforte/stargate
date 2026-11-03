@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 base64 = { workspace = true }
 chrono = { workspace = true }
-jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 p256 = { workspace = true, features = ["pem"] }
 p384 = { workspace = true, features = ["pem"] }
 pkcs8 = { workspace = true }
