@@ -4,7 +4,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 pub async fn init_with_options(options: PgConnectOptions) -> Result<Service> {
     let pool = PgPoolOptions::new()
-        .max_connections(pool_max_connections())
+        .max_connections(pool_max_connections()?)
         .connect_with(options)
         .await?;
     Ok(Service::new(pool))

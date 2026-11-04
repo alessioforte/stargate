@@ -8,10 +8,7 @@ pub async fn init() -> anyhow::Result<&'static RedisStore> {
         .get_or_try_init(|| async {
             let client = super::settings::client_from_env()?;
 
-            let pool_size: usize = std::env::var("REDIS_POOL_SIZE")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(4);
+            let pool_size = pool_size()?;
 
             let config = RedisPoolConfig::new(pool_size);
             #[cfg(feature = "redis-compression")]
@@ -48,4 +45,53 @@ pub async fn ping() -> anyhow::Result<()> {
 pub async fn save() {
     // Redis is persistent; nothing to do on shutdown
     tracing::info!("Redis store: no shutdown save needed");
+}
+
+fn pool_size() -> Result<usize, crate::conf::env::EnvError> {
+    crate::conf::env::parse_or::<std::num::NonZeroUsize>(
+        "REDIS_POOL_SIZE",
+        std::num::NonZeroUsize::new(4).unwrap(),
+    )
+    .map(std::num::NonZeroUsize::get)
+}
+
+#[cfg(test)]
+mod pool_tests {
+    #[test]
+    fn invalid_pool_sizes_fail_with_the_variable_name() {
+        const CHILD: &str = "STARGATE_TEST_REDIS_POOL_SIZE";
+        if let Ok(expected) = std::env::var(CHILD) {
+            match super::pool_size() {
+                Ok(actual) => assert_eq!(actual.to_string(), expected),
+                Err(error) => {
+                    assert_eq!(expected, "error");
+                    assert!(error.to_string().contains("REDIS_POOL_SIZE"));
+                }
+            }
+            return;
+        }
+        for (value, expected) in [
+            (None, "4"),
+            (Some("3"), "3"),
+            (Some("0"), "error"),
+            (Some("-1"), "error"),
+            (Some(""), "error"),
+            (Some("invalid"), "error"),
+        ] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "data::store::redis::pool_tests::invalid_pool_sizes_fail_with_the_variable_name", "--nocapture"]).env(CHILD, expected);
+            if let Some(value) = value {
+                child.env("REDIS_POOL_SIZE", value);
+            } else {
+                child.env_remove("REDIS_POOL_SIZE");
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{value:?}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }

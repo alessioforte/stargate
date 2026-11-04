@@ -737,11 +737,15 @@ mod postgres;
 #[cfg(feature = "postgres")]
 pub use postgres::{ensure_database, init_with_options};
 
-fn pool_max_connections() -> u32 {
-    std::env::var("DB_POOL_MAX")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(20)
+fn pool_max_connections() -> Result<u32> {
+    match std::env::var("DB_POOL_MAX") {
+        Ok(value) => value
+            .parse::<std::num::NonZeroU32>()
+            .map(std::num::NonZeroU32::get)
+            .context("DB_POOL_MAX must be an integer >= 1"),
+        Err(std::env::VarError::NotPresent) => Ok(20),
+        Err(error) => Err(error).context("Cannot read DB_POOL_MAX"),
+    }
 }
 
 /// Connect to a database identified by a URL without running migrations.
@@ -753,7 +757,7 @@ pub async fn init(conn: &str) -> Result<Service> {
 #[cfg(feature = "sqlite")]
 pub async fn init(conn: &str) -> Result<Service> {
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(pool_max_connections())
+        .max_connections(pool_max_connections()?)
         .connect(conn)
         .await?;
     Ok(Service::new(pool))
@@ -5382,5 +5386,47 @@ mod pool_stats_tests {
         let stats = service.pool_stats();
         assert_eq!(stats.in_use, 0);
         assert!(stats.idle + stats.in_use <= stats.max);
+    }
+}
+
+#[cfg(test)]
+mod pool_settings_tests {
+    #[test]
+    fn pool_size_defaults_and_invalid_values_are_not_silently_ignored() {
+        const CHILD: &str = "STARGATE_TEST_DB_POOL_SIZE";
+        if let Ok(expected) = std::env::var(CHILD) {
+            match super::pool_max_connections() {
+                Ok(actual) => assert_eq!(actual.to_string(), expected),
+                Err(error) => {
+                    assert_eq!(expected, "error");
+                    assert!(error.to_string().contains("DB_POOL_MAX"));
+                }
+            }
+            return;
+        }
+        for (value, expected) in [
+            (None, "20"),
+            (Some("3"), "3"),
+            (Some("0"), "error"),
+            (Some("-1"), "error"),
+            (Some(""), "error"),
+            (Some("invalid"), "error"),
+            (Some("4294967296"), "error"),
+        ] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "service::pool_settings_tests::pool_size_defaults_and_invalid_values_are_not_silently_ignored", "--nocapture"]).env(CHILD, expected);
+            if let Some(value) = value {
+                child.env("DB_POOL_MAX", value);
+            } else {
+                child.env_remove("DB_POOL_MAX");
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{value:?}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }
