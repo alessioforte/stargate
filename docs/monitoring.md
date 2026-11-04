@@ -161,6 +161,8 @@ custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 | `stargate.gateway.internal_context.token.size` | H / By | Same as issues | Compact signed token size |
 | `stargate.limits.store_errors` | C / failures | `stargate.point=gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`, `quota`; `stargate.outcome=allowed` or `denied` | Traffic store errors/timeouts, per replica |
 | `stargate.config.reloads` | C / activations | `stargate.config_kind=gateway_config` or `policies`; `stargate.outcome=success`, `error`, `transport_error`, `internal_context_error` | Activation outcomes |
+| `stargate.iam.password_hashing.active` | G / jobs | none | Argon2 jobs executing on the blocking pool |
+| `stargate.iam.password_hashing.rejections` | C / rejections | `stargate.operation=verify`, `hash`, `history`, `rehash_skipped` | Foreground admission timeouts or immediately skipped background upgrades |
 | `stargate.db.pool.connections` | G / connections | `stargate.state=idle` or `in_use` | Actual initialized SQL pool sample |
 | `stargate.db.pool.max` | G / connections | none | Configured maximum of that pool |
 | `stargate.audit.outbox.pending` | G / events | none | Global unpublished SQL backlog; max across replicas |
@@ -216,6 +218,7 @@ not additional readiness conditions.
 | Upstream circuit open | `stargate.gateway.upstream.targets`, `stargate.state=circuit_open` | Per upstream and replica | > 0 / 5m | warning | Inspect backend, probes and TLS; `upstream-unavailable` |
 | Upstream unavailable | Same instrument, `stargate.state=healthy` | Per upstream/replica, with configured target count > 0 | = 0 / 2m | critical | Restore a usable backend; `upstream-unavailable` |
 | Gateway rejecting work | `stargate.gateway.rejections` | Sum of rates | Increasing / 5m | warning | Inspect rejection kind and resource limits; `gateway-overloaded` |
+| Password hashing overloaded | `stargate.iam.password_hashing.rejections`, `stargate.operation` in `verify`, `hash`, `history` | Sum of per-instance rates, excluding `rehash_skipped` | Increasing / 5m | warning | Review CPU/memory and hashing concurrency; `password-hashing-overloaded` |
 | SQL pool saturated | `stargate.db.pool.connections`, `stargate.state=in_use`; `stargate.db.pool.max` | In-use / max, per replica | > 0.9 / 5m | warning | Check slow transactions and connection capacity; `postgresql-unavailable` |
 
 Runbook names refer to planned sections of [Operations runbook](operations-runbook.md).

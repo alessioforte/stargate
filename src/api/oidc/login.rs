@@ -154,6 +154,10 @@ mod tests {
         let mut throttled = ErrorResponse::new(ErrorCode::AuthInvalidCredentials);
         throttled.status = StatusCode::TOO_MANY_REQUESTS;
 
+        assert_eq!(
+            login_error_code(&ErrorResponse::new(ErrorCode::IamOverloaded)),
+            "server_error"
+        );
         assert_eq!(login_error_code(&invalid), "invalid_credentials");
         assert_eq!(login_error_code(&throttled), "too_many_attempts");
         assert_eq!(

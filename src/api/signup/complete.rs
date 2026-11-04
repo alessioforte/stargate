@@ -107,9 +107,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         .picture(signup.picture)
         .attrs(signup.attrs);
 
-    let password = pwd::hash::hash_password(body.password.clone())
-        .await
-        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
+    let password = pwd::hash::hash_password(body.password.clone()).await?;
 
     let audit_context =
         TrustedAuditContext::application(TrustedAuditActor::anonymous(), audit_request);

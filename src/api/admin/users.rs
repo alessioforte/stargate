@@ -393,9 +393,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
         ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
     })?;
 
-    let hashed = crate::iam::pwd::hash::hash_password(payload.password.clone())
-        .await
-        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
+    let hashed = crate::iam::pwd::hash::hash_password(payload.password.clone()).await?;
     let profile = Profile::new(payload.email.clone(), nickname)
         .given_name(payload.given_name.clone())
         .family_name(payload.family_name.clone())

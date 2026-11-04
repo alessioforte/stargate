@@ -759,7 +759,14 @@ Admin invitations reuse `send_signup_request` without this throttle.
 Argon2id with tunable params and optional pepper (hash upgrades on login), global
 password policy from `PASSWORD_POLICY_*` with per-org override in
 `organizations.attrs.password_policy`, history in `credential_history`.
-Guide: `docs/password-policies-guide.md`.
+Guide: `docs/password-policies-guide.md`. Process-wide `PASSWORD_HASH_CONCURRENCY`
+(default available CPUs, positive integer) bounds all Argon2 work. Foreground
+hash/verify/history admission waits at most 5s and returns `503 iam.overloaded`
+(`Retry-After: 10`) without recording a failed login. Background rehash never
+waits: it skips when busy and retries on a later login. The blocking closure owns
+its permit even after client cancellation. Startup precomputes the dummy hash.
+Metrics: `stargate.iam.password_hashing.active` and `.rejections`, with rejection
+attribute `stargate.operation=verify|hash|history|rehash_skipped`.
 
 Forgot password (`POST /account/credentials`): always `200 password.reset_requested`,
 whether or not an account uses the address (only exact email matches get a link,
@@ -905,6 +912,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `MFA_ADMIN_STEP_UP_REQUIRED` / `MFA_STEP_UP_TTL_SECS`                                  | false / 300                            | Admin step-up                                                                                                                       |
 | `PASSWORD_POLICY_*`                                                                    | see `.env.example`                     | Global password policy                                                                                                              |
 | `ARGON2_MEMORY_KIB` / `_ITERATIONS` / `_PARALLELISM`                                   | 19456 / 2 / 1                          | Argon2id cost                                                                                                                       |
+| `PASSWORD_HASH_CONCURRENCY` | available CPUs (at least 1) | Positive process-wide Argon2 concurrency; invalid values stop startup |
 | `PASSWORD_PEPPER`                                                                      | -                                      | Optional Argon2 secret                                                                                                              |
 | `SMTP_*`, `GOOGLE_OAUTH_*`, `GITHUB_OAUTH_*`                                           | -                                      | Email delivery, social login                                                                                                        |
 

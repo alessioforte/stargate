@@ -16,6 +16,24 @@ use pw::{BannedPasswords, PasswordPolicySet, PolicyContext, PolicyViolation};
 
 use crate::conf::env;
 
+#[derive(Debug, thiserror::Error)]
+pub enum ValidationError {
+    #[error("{0}")]
+    Policy(String),
+    #[error(transparent)]
+    Hash(#[from] super::hash::HashError),
+}
+impl From<ValidationError> for crate::err::ErrorResponse {
+    fn from(error: ValidationError) -> Self {
+        match error {
+            ValidationError::Policy(message) => {
+                Self::new(crate::err::ErrorCode::PasswordPolicyViolation).with_message(message)
+            }
+            ValidationError::Hash(error) => error.into(),
+        }
+    }
+}
+
 pub struct GlobalPasswordPolicy {
     pub set: PasswordPolicySet,
     banned: BannedPasswords,
@@ -89,7 +107,7 @@ pub fn validate_for_organization(
 /// Validate a candidate password for an existing user. Organizations the
 /// user belongs to replace the global policy via `attrs.password_policy`;
 /// the password must satisfy every applicable organization policy.
-pub async fn validate_for_user(user: &User, password: &str) -> Result<(), String> {
+pub async fn validate_for_user(user: &User, password: &str) -> Result<(), ValidationError> {
     let global = global();
     let ctx = PolicyContext {
         username: Some(&user.nickname),
@@ -117,18 +135,22 @@ pub async fn validate_for_user(user: &User, password: &str) -> Result<(), String
     // acceptable: each comparison is a full Argon2 verification.
     if violations.is_empty() {
         let depth = sets.iter().filter_map(|set| set.history).max().unwrap_or(0);
-        if depth > 0 && recently_used(&user.id, password, depth).await {
+        if depth > 0 && recently_used(&user.id, password, depth).await? {
             violations.push(PolicyViolation::RecentlyUsed);
         }
     }
 
-    to_result(violations)
+    to_result(violations).map_err(ValidationError::Policy)
 }
 
 /// Whether `password` matches the user's current password or any of their
 /// last `depth - 1` previous ones. DB errors fail towards "not used" with a
 /// warning — the change itself will surface persistent DB failures.
-async fn recently_used(user_id: &str, password: &str, depth: usize) -> bool {
+async fn recently_used(
+    user_id: &str,
+    password: &str,
+    depth: usize,
+) -> Result<bool, super::hash::HashError> {
     let mut hashes: Vec<String> = Vec::with_capacity(depth);
 
     match crate::data::db::get_credential(user_id, CredentialType::Password).await {
@@ -147,21 +169,11 @@ async fn recently_used(user_id: &str, password: &str, depth: usize) -> bool {
         }
     }
     if hashes.is_empty() {
-        return false;
+        return Ok(false);
     }
 
     let password = password.to_string();
-    match tokio::task::spawn_blocking(move || {
-        pw::Hash::matches_any(&password, hashes.iter().map(String::as_str))
-    })
-    .await
-    {
-        Ok(matched) => matched,
-        Err(error) => {
-            tracing::error!("password history check task failed: {error}");
-            false
-        }
-    }
+    super::hash::matches_history(password, hashes).await
 }
 
 /// Whether the user's password is older than the effective `max_age_days`.
@@ -298,5 +310,65 @@ fn optional_usize(name: &str, default: Option<usize>) -> Option<usize> {
             Ok(value) => Some(value),
             Err(error) => panic!("invalid {name} `{raw}`: {error}"),
         },
+    }
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod admission_tests {
+    use super::*;
+    #[tokio::test]
+    async fn occupied_history_is_an_error_instead_of_accepting_a_reused_password() {
+        crate::data::db::with_test_database(async {
+            let organization = crate::data::db::create_organization(
+                "History",
+                None,
+                Some(&serde_json::json!({"password_policy":{"history":2}})),
+                db::ent::TrustedAuditContext::admin_control_plane(
+                    db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
+                    db::ent::TrustedAuditRequest::from_http(
+                        ulid::Ulid::generate().to_string(),
+                        None,
+                        None,
+                        None,
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+            let user = crate::data::db::create_user(
+                db::ent::Profile::new("history@example.com".into(), "history".into()),
+                CredentialType::Password,
+                "stored-hash",
+                Some(db::ent::NewOrganizationMembership {
+                    organization_id: organization.id,
+                    role: "member".into(),
+                }),
+                db::ent::TrustedAuditContext::admin_control_plane(
+                    db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
+                    db::ent::TrustedAuditRequest::from_http(
+                        ulid::Ulid::generate().to_string(),
+                        None,
+                        None,
+                        None,
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+            let result = super::super::hash::with_exhausted_budget(validate_for_user(
+                &user,
+                "NewSecurePassword!72",
+            ))
+            .await;
+            assert!(matches!(
+                result,
+                Err(ValidationError::Hash(
+                    super::super::hash::HashError::Overloaded
+                ))
+            ));
+            let response: crate::err::ErrorResponse = result.unwrap_err().into();
+            assert_eq!(response.code, crate::err::ErrorCode::IamOverloaded);
+        })
+        .await;
     }
 }

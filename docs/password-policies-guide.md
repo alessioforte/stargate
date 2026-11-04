@@ -301,3 +301,24 @@ organization:
 ```env
 PASSWORD_POLICY_REGEX=^[\x20-\x7E]+$
 ```
+
+## Hashing capacity
+
+`PASSWORD_HASH_CONCURRENCY` is a positive integer, defaulting to available CPUs.
+It is read once at startup and bounds hashing, verification and sequential
+history checks across all requests. The blocking worker keeps its permit until
+completion even if the client disconnects. Foreground admission waits at most
+5 seconds, then returns `503 iam.overloaded` with `Retry-After: 10`; overload
+never counts as an incorrect password. The no-JavaScript login displays its
+generic server error. Startup precomputes the unknown-user timing hash.
+
+Background login rehash does not wait: if no permit is free, it skips the upgrade
+and retries on a later login. Login success never depends on this work.
+
+Budget at least `PASSWORD_HASH_CONCURRENCY × ARGON2_MEMORY_KIB` KiB for concurrent
+Argon2 allocations, with additional room for runtime memory, connections and
+request buffers. For example, two workers at 19,456 KiB require about 38 MiB of
+Argon2 memory. Stored hashes can specify higher historical costs; account for
+them when changing parameters. CPU availability alone is not a memory budget.
+
+See [Monitoring](monitoring.md) for active-work and rejection instruments.

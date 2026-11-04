@@ -57,15 +57,9 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
 
-    pwd::policy::validate_for_user(&user, &body.password)
-        .await
-        .map_err(|message| {
-            ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
-        })?;
+    pwd::policy::validate_for_user(&user, &body.password).await?;
 
-    let password = pwd::hash::hash_password(body.password.clone())
-        .await
-        .ok_or_else(|| ErrorResponse::internal("failed to hash password"))?;
+    let password = pwd::hash::hash_password(body.password.clone()).await?;
 
     let audit_context = db::ent::TrustedAuditContext::application(
         db::ent::TrustedAuditActor::user(&user.id),

@@ -99,11 +99,11 @@ pub(crate) async fn verify_login_password(
         // Verify against a dummy hash so the unknown-user path takes about as
         // long as the valid-user path, preventing username enumeration via
         // response timing.
-        let _ = crate::iam::pwd::hash::verify_password(
+        crate::iam::pwd::hash::verify_password(
             password.to_string(),
             crate::iam::pwd::hash::dummy_hash(),
         )
-        .await;
+        .await?;
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
@@ -115,11 +115,11 @@ pub(crate) async fn verify_login_password(
         .map_err(ErrorResponse::internal)?;
 
     let Some(user_credential) = user_credential else {
-        let _ = crate::iam::pwd::hash::verify_password(
+        crate::iam::pwd::hash::verify_password(
             password.to_string(),
             crate::iam::pwd::hash::dummy_hash(),
         )
-        .await;
+        .await?;
         login_guard::record_failed_attempt(&throttle)
             .await
             .map_err(login_guard_unavailable)?;
@@ -128,7 +128,7 @@ pub(crate) async fn verify_login_password(
 
     let password_check =
         crate::iam::pwd::hash::check_password(password.to_string(), user_credential.value.clone())
-            .await;
+            .await?;
     if !password_check.valid {
         login_guard::record_failed_attempt(&throttle)
             .await
@@ -160,9 +160,13 @@ pub(crate) async fn verify_login_password(
 /// concurrent logins race-safe.
 fn spawn_credential_rehash(user_id: String, password: String, old_hash: String) {
     tokio::spawn(async move {
-        let Some(new_hash) = crate::iam::pwd::hash::hash_password(password).await else {
-            tracing::warn!("credential rehash skipped: hashing failed");
-            return;
+        let new_hash = match crate::iam::pwd::hash::try_rehash_password(password).await {
+            Ok(Some(hash)) => hash,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::warn!(%error, "credential rehash skipped");
+                return;
+            }
         };
         let audit_context = db::ent::TrustedAuditContext::background(
             db::ent::TrustedAuditBoundary::application(),
@@ -183,4 +187,65 @@ fn spawn_credential_rehash(user_id: String, password: String, old_hash: String) 
 fn login_guard_unavailable(error: store::StoreError) -> ErrorResponse {
     tracing::error!("Login guard unavailable: {}", error);
     ErrorResponse::new(ErrorCode::AuthLoginUnavailable)
+}
+
+#[cfg(all(test, feature = "sqlite", feature = "memory"))]
+mod tests {
+    use super::*;
+    use crate::iam::pwd::hash::with_exhausted_budget;
+    use ::db::ent::{Profile, TrustedAuditContext};
+    use axum::response::IntoResponse;
+    use store::AtomicStore;
+
+    #[tokio::test]
+    async fn overload_is_identical_for_known_missing_and_passwordless_users_without_failed_attempts()
+     {
+        crate::data::db::with_test_database(async {
+            let suffix = ulid::Ulid::generate().to_string();
+            let mut usernames = vec![format!("missing-{suffix}")];
+            for (nickname, kind) in [
+                (format!("known-{suffix}"), CredentialType::Password),
+                (format!("federated-{suffix}"), CredentialType::Oauth),
+            ] {
+                crate::data::db::create_user(
+                    Profile::new(format!("{nickname}@example.com"), nickname.clone()),
+                    kind,
+                    "irrelevant",
+                    None,
+                    TrustedAuditContext::admin_control_plane(
+                        db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
+                        db::ent::TrustedAuditRequest::from_http(
+                            ulid::Ulid::generate().to_string(),
+                            None,
+                            None,
+                            None,
+                        ),
+                    ),
+                )
+                .await
+                .unwrap();
+                usernames.push(nickname);
+            }
+            let ip = "203.0.113.248";
+            for username in usernames {
+                let error = with_exhausted_budget(verify_login_password(ip, &username, "password"))
+                    .await
+                    .err()
+                    .unwrap();
+                assert_eq!(error.code, ErrorCode::IamOverloaded);
+                let response = error.into_response();
+                assert_eq!(response.status(), 503);
+                assert_eq!(response.headers().get_all("retry-after").iter().count(), 1);
+                assert_eq!(response.headers()["retry-after"], "10");
+            }
+            assert_eq!(
+                crate::data::store::use_store()
+                    .get_i64(&format!("login_attempts:v2:ip:{ip}"))
+                    .await
+                    .unwrap(),
+                None
+            );
+        })
+        .await;
+    }
 }

@@ -130,6 +130,7 @@ IAM endpoints share the gateway's per-IP ingress allowance; authenticated
 | --- | --- | --- |
 | `iam.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its ingress allowance on an IAM endpoint, before authentication (`X-RateLimit-Scope: ingress`) |
 | `iam.rate_limit_exceeded` | 429 | An authenticated admin user or admin key exhausted its own `/admin/*` budget (`X-RateLimit-Scope: subject`) |
+| `iam.overloaded` | 503 | Foreground password hashing, verification or history admission exceeded 5s; not a failed login attempt. `Retry-After: 10` |
 | `iam.limiter_unavailable` | 503 | The IAM limiter store fails, or the ingress check exceeds `ingress.timeout`; `params.scope` is `ingress` or `subject` |
 
 ## Per-recipient email limits

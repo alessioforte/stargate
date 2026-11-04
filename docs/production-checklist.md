@@ -22,6 +22,9 @@ example hostname, CIDR, Secret name and image tag.
 - [ ] **Issuer**: `JWT_ISSUER`, `OAUTH_BASE_URL` and `CONSOLE_PUBLIC_URL` use the public
       `https://` identity URL. It decides `Secure` cookies and HSTS behind Traefik.
 - [ ] **Trusted proxies**: `trustedProxies` lists only Traefik's pod network.
+- [ ] Set `PASSWORD_HASH_CONCURRENCY` for the pod's CPU/memory budget. Its product
+      with `ARGON2_MEMORY_KIB` must fit with room for the process, buffers and stores;
+      foreground work waits at most 5s before `503 iam.overloaded`.
 - [ ] **Runtime Secret** (`runtimeSecret.existingSecret`) with `POSTGRES_PASSWORD`,
       `REDIS_URL` (`rediss://...`), `REDIS_PASSWORD`, `PASSWORD_PEPPER`,
       `EMAIL_OTP_PEPPER`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and the client secrets of any
