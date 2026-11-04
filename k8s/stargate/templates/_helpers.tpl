@@ -146,6 +146,23 @@ Referenced resource names.
 (PathPrefix(`/admin`) || PathPrefix(`/stargate`) || PathRegexp(`(?i)(//|%|(^|/)[.]{1,2}(/|$)|^/(admin|stargate))`))
 {{- end -}}
 
+{{- define "stargate.rateLimitName" -}}
+{{- printf "%s-rate-limit" (include "stargate.fullname" . | trunc 52 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/* Apply the independent IP limit to all public/admin/gRPC routes. */}}
+{{- define "stargate.ingressRouteMiddlewares" -}}
+{{- if or .root.Values.traefik.rateLimit.enabled .admin -}}
+middlewares:
+  {{- if .root.Values.traefik.rateLimit.enabled }}
+  - name: {{ include "stargate.rateLimitName" .root }}
+  {{- end }}
+  {{- if .admin }}
+  - name: {{ include "stargate.adminAllowListName" .root }}
+  {{- end }}
+{{- end -}}
+{{- end -}}
+
 {{- define "stargate.adminAllowListName" -}}
 {{- printf "%s-admin-allowlist" (include "stargate.fullname" . | trunc 47 | trimSuffix "-") -}}
 {{- end -}}
@@ -253,6 +270,17 @@ Cross-field validation that JSON Schema cannot express.
     {{- fail "runtimeSecret.stringData.DB_MIGRATE_ON_START is chart-managed; set migrations.job.enabled instead" -}}
   {{- end -}}
   {{- $_ := set $managed "DB_MIGRATE_ON_START" "migrations.job.enabled" -}}
+{{- end -}}
+{{- if .Values.traefik.rateLimit.enabled -}}
+  {{- if not .Values.traefik.enabled -}}
+    {{- fail "traefik.rateLimit.enabled=true requires traefik.enabled=true" -}}
+  {{- end -}}
+  {{- range $key := list "average" "burst" -}}
+    {{- $value := index $.Values.traefik.rateLimit $key -}}
+    {{- if or (not (or (kindIs "float64" $value) (kindIs "int64" $value) (kindIs "int" $value))) (not (regexMatch "^[1-9][0-9]*$" (toString $value))) -}}
+      {{- fail (printf "traefik.rateLimit.%s must be an integer > 0 when enabled" $key) -}}
+    {{- end -}}
+  {{- end -}}
 {{- end -}}
 {{- if .Values.traefik.adminAllowList.enabled -}}
   {{- if not .Values.traefik.enabled -}}

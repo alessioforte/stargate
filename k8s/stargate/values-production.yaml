@@ -16,6 +16,8 @@ image:
 
 replicaCount: 3
 
+# Reference workload measurements and pool/HPA budgets: docs/sizing.md.
+# Keep runtime/telemetry/allocator headroom beyond the active Argon2 allocations.
 resources:
   requests:
     cpu: 250m
@@ -43,6 +45,12 @@ podDisruptionBudget:
   maxUnavailable: 1
 
 traefik:
+  # Independent per-IP safety net, above the example's Stargate ingress limit.
+  rateLimit:
+    enabled: true
+    average: 20
+    period: 1s
+    burst: 200
   # Admin API and Console only from operator networks (VPN, office egress).
   adminAllowList:
     enabled: true
@@ -61,6 +69,10 @@ runtimeConfig:
   data:
     LOG_FORMAT: json
     RUST_LOG: info
+    # 2 × 19456 KiB of hashing memory, with headroom inside the 1Gi pod limit.
+    PASSWORD_HASH_CONCURRENCY: "2"
+    DB_POOL_MAX: "20"
+    REDIS_POOL_SIZE: "4"
 
     # Create this consumer group before publication; see docs/audit-events.md.
     AUDIT_STREAM_CONSUMER_GROUPS: audit-archiver

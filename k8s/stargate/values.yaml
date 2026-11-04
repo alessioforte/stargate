@@ -84,6 +84,14 @@ traefik:
   apiHosts: []
   grpc:
     enabled: false
+  # Per Traefik instance and source IP; remains independent of Redis.
+  rateLimit:
+    enabled: false
+    average: 20
+    period: 1s
+    burst: 200
+    # null inherits adminAllowList.ipStrategyDepth; 0 explicitly uses the peer.
+    ipStrategyDepth: null
   adminAllowList:
     enabled: false
     sourceRange: []

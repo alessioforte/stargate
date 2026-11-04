@@ -725,6 +725,7 @@ python3 ./k8s/stargate/tests/test_admin_allowlist.py
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml -f ./k8s/stargate/values-production.yaml
 python3 ./k8s/stargate/tests/test_production_values.py
 python3 -I ./k8s/stargate/tests/test_telemetry_identity.py
+python3 -I ./k8s/stargate/tests/test_rate_limit.py
 # Expected failure: an enabled allow-list needs at least one source range.
 helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
@@ -753,3 +754,45 @@ curl --fail https://identity.example.com/livez
 curl --fail https://identity.example.com/readyz
 curl --fail https://api.example.com/readyz
 ```
+
+### Independent IP rate limit
+
+`traefik.rateLimit.enabled` adds the same `rateLimit` Middleware configuration to every identity,
+API, admin and gRPC route, before the admin allow-list. It uses Traefik's in-memory
+bucket and stays effective while Stargate traffic limits fail open on store errors.
+Defaults are disabled, `average: 20`, `period: 1s`, `burst: 200`; set them above
+Stargate's ingress allowance (the example permits a burst of 100 and 10/s).
+
+Buckets are per source IP, router and Traefik instance. Referencing the same
+Middleware from multiple routes does not share its in-memory state. For N
+instances and R routers the aggregate can multiply accordingly; it is not an
+aggregate cluster IP limit.
+
+The chart creates R routers as follows:
+
+- Identity: 1.
+- Ordinary API: 1 when `apiHosts` is nonempty, combining all API hosts.
+- Admin: 1 when `adminAllowList.enabled` is true.
+- gRPC: 1 per API host when `grpc.enabled` is true.
+
+The admin allow-list still rejects outside IPs with `403`: its router contributes
+only to the theoretical maximum for those IPs and never grants admin access.
+For N Traefik instances, one IP can reach **average × N × R** in total, but only
+**average × N** for a group of endpoints on one router (for example login and
+token endpoints on the identity router). Rates are per configured `period`;
+aggregate burst bounds similarly multiply `burst` by N and R.
+
+Keep both `average / period` and `burst` above Stargate's ingress rate and burst.
+When increasing Stargate's ingress allowance, increase these backstop values as
+well. These are per-IP safeguards: an attack from many IPs can exceed any such
+limit and requires network-level or CDN protection.
+
+A new WebSocket handshake consumes allowance; frames on an established
+connection do not.
+
+`ipStrategyDepth: null` inherits `adminAllowList.ipStrategyDepth`. Explicit zero
+uses the immediate peer; positive depth selects from X-Forwarded-For from the
+right. Set Traefik's trusted forwarded-header sources correctly before relying
+on that header. NAT shares a bucket across users. See the upstream
+[rate-limit reference](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
+and the [sizing guide](../../docs/sizing.md) before tuning the production overlay.

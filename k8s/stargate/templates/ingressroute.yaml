@@ -14,8 +14,7 @@ spec:
     - kind: Rule
       match: {{ printf "Host(`%s`) && %s" .Values.traefik.identityHost (include "stargate.adminPathRule" .) | quote }}
       priority: 30
-      middlewares:
-        - name: {{ include "stargate.adminAllowListName" . }}
+      {{- include "stargate.ingressRouteMiddlewares" (dict "root" . "admin" true) | nindent 6 }}
       services:
         {{- include "stargate.ingressRouteService" (dict "root" . "scheme" "http") | nindent 8 }}
     {{- end }}
@@ -26,6 +25,7 @@ spec:
       match: {{ printf "Host(`%s`)" .Values.traefik.identityHost | quote }}
       {{- end }}
       priority: 10
+      {{- include "stargate.ingressRouteMiddlewares" (dict "root" . "admin" false) | nindent 6 }}
       services:
         {{- include "stargate.ingressRouteService" (dict "root" . "scheme" "http") | nindent 8 }}
     {{- if .Values.traefik.apiHosts }}
@@ -36,6 +36,7 @@ spec:
     - kind: Rule
       match: {{ join " || " $matches | quote }}
       priority: 10
+      {{- include "stargate.ingressRouteMiddlewares" (dict "root" . "admin" false) | nindent 6 }}
       services:
         {{- include "stargate.ingressRouteService" (dict "root" . "scheme" "http") | nindent 8 }}
     {{- end }}
@@ -44,6 +45,7 @@ spec:
     - kind: Rule
       match: {{ printf "Host(`%s`) && HeaderRegexp(`Content-Type`, `^application/grpc`)" . | quote }}
       priority: 20
+      {{- include "stargate.ingressRouteMiddlewares" (dict "root" $ "admin" false) | nindent 6 }}
       services:
         {{- include "stargate.ingressRouteService" (dict "root" $ "scheme" "h2c") | nindent 8 }}
     {{- end }}

@@ -201,6 +201,22 @@
           "required": ["enabled"],
           "properties": { "enabled": { "type": "boolean" } }
         },
+        "rateLimit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "average", "period", "burst"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "average": { "type": "integer" },
+            "period": { "type": "string", "minLength": 1 },
+            "burst": { "type": "integer" },
+            "ipStrategyDepth": { "type": ["integer", "null"], "minimum": 0 }
+          },
+          "allOf": [{
+            "if": { "properties": { "enabled": { "const": true } } },
+            "then": { "properties": { "average": { "minimum": 1 }, "burst": { "minimum": 1 } } }
+          }]
+        },
         "adminAllowList": {
           "type": "object",
           "additionalProperties": false,

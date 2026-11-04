@@ -457,6 +457,11 @@ higher priority only on API hosts; the identity host, ordinary HTTP and WebSocke
 routes keep HTTP transport. Guide:
 `k8s/stargate/README.md`, "Traefik in front".
 
+An optional `traefik.rateLimit` middleware precedes every IngressRoute, including
+admin and gRPC routes. Its in-memory IP buckets survive Redis outages independently
+of Stargate. Allowances multiply with Traefik replicas and router instances; depth defaults to the
+admin allow-list's IP strategy. The production overlay enables the backstop.
+
 An optional Traefik IP allow-list protects the identity host's `/admin` and
 `/stargate` prefixes. Its route takes priority over gRPC, and the public identity
 routes exclude protected and ambiguous paths to prevent fallback around the

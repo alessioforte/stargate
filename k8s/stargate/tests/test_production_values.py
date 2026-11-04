@@ -51,6 +51,11 @@ class ProductionOverlay(unittest.TestCase):
         ]:
             self.assertIn(line, config)
 
+    def test_independent_rate_limit_is_enabled_on_every_route(self):
+        self.assertIn("  rateLimit:\n    average: 20", self.manifest)
+        ingress = document(self.manifest, "IngressRoute")
+        self.assertEqual(ingress.count("- name: check-stargate-rate-limit"), ingress.count("- kind: Rule"))
+
     def test_image_is_the_released_cluster_image(self):
         # release.yml tags the cluster image with the bare version.
         deployment = document(self.manifest, "Deployment")

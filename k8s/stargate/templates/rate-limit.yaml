@@ -1,0 +1,21 @@
+{{- if and .Values.traefik.enabled .Values.traefik.rateLimit.enabled }}
+{{- include "stargate.validateValues" . -}}
+{{- $depth := .Values.traefik.adminAllowList.ipStrategyDepth -}}
+{{- if ne .Values.traefik.rateLimit.ipStrategyDepth nil -}}
+{{- $depth = .Values.traefik.rateLimit.ipStrategyDepth -}}
+{{- end }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "stargate.rateLimitName" . }}
+  labels:
+    {{- include "stargate.labels" . | nindent 4 }}
+spec:
+  rateLimit:
+    average: {{ .Values.traefik.rateLimit.average }}
+    period: {{ .Values.traefik.rateLimit.period | quote }}
+    burst: {{ .Values.traefik.rateLimit.burst }}
+    sourceCriterion:
+      ipStrategy:
+        depth: {{ $depth }}
+{{- end }}
