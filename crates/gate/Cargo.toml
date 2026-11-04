@@ -8,7 +8,7 @@ license.workspace = true
 
 [dependencies]
 ace = { workspace = true }
-chrono = { workspace = true }
+chrono = { workspace = true, default-features = true }
 indexmap = { workspace = true, features = ["serde"] }
 lb = { workspace = true }
 lim = { workspace = true }

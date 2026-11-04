@@ -28,9 +28,11 @@ samples, SQL pool usage, hashing activity, error counts and Redis latency sample
 | Generator | One external Docker client/IP; open-loop arrivals, 15-second stages, at most 512 in-flight operations |
 | Capacity-test admission | Stargate ingress burst 10,000, refill 1/ms; Traefik backstop disabled; policy ceilings raised |
 
-The local image build explicitly selected Rust 1.99.1. The repository's pinned
-1.96.0 build encounters the existing workspace `chrono` feature-declaration issue
-before compilation; that default build was not used for these results.
+The sizing image explicitly selected Rust 1.99.1 because Cargo 1.96.0 rejected
+the workspace's inherited `chrono` feature declaration before compilation.
+The workspace declarations have since been corrected, and the `cluster` image
+builds with the Dockerfile's default Rust 1.96.0. These measurements still describe
+the original Rust 1.99.1 build.
 
 CPU comes from metrics-server averaging windows, typically 10–20 seconds; adjacent
 stages can overlap in those samples. SQL/activity gauges are sampled at one second,

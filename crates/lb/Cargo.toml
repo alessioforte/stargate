@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 ahash = { workspace = true }
 async-trait = { workspace = true }
-chrono = { workspace = true }
+chrono = { workspace = true, default-features = true }
 dashmap = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
