@@ -57,7 +57,7 @@ stargate/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
 │                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
 │                      #   gateway-performance (opt-in benchmarks and recorded results),
-│                      #   production-checklist, audit-events, monitoring
+│                      #   production-checklist, audit-events, monitoring, sizing
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
 ```
@@ -1231,3 +1231,6 @@ a new reusable primitive.
   URLs and request identities stay out of metric dimensions.
 - Gateway performance workloads are opt-in (`src/gate/performance/`,
   `benches/scripts/`).
+
+Cluster workload measurements and connection/memory calculations are in
+`docs/sizing.md`; the external driver is `benches/scripts/benchmark_cluster.mjs`.

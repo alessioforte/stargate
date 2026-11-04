@@ -22,6 +22,9 @@ example hostname, CIDR, Secret name and image tag.
 - [ ] **Issuer**: `JWT_ISSUER`, `OAUTH_BASE_URL` and `CONSOLE_PUBLIC_URL` use the public
       `https://` identity URL. It decides `Secure` cookies and HSTS behind Traefik.
 - [ ] **Trusted proxies**: `trustedProxies` lists only Traefik's pod network.
+- [ ] Recalculate SQL connections for replicas, rollout surge and overlapping Job
+      pools; the notification listener is already inside each server pool. See
+      [Cluster sizing](sizing.md) for examples, load results and NAT/backstop scope.
 - [ ] Set `PASSWORD_HASH_CONCURRENCY` for the pod's CPU/memory budget. Its product
       with `ARGON2_MEMORY_KIB` must fit with room for the process, buffers and stores;
       foreground work waits at most 5s before `503 iam.overloaded`.

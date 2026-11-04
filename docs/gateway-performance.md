@@ -306,3 +306,6 @@ request/response size distribution, live connection count, mirror coverage, stor
 topology, and latency/error targets. Repeat the workloads under those conditions
 with external load generation, exported telemetry, and realistic upstream tails.
 The local two-worker baseline is not a deployment SLA.
+
+For three-replica cluster workload results, pool/memory budgets and the ingress
+safety net, see [Cluster sizing](sizing.md).

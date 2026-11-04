@@ -1,0 +1,5913 @@
+{
+  "date": "2026-11-03",
+  "sourceBase": "bf62a08",
+  "changedRustSourcesSha256": "7ce6412f888719c95481676d0367607d5f01ab24fb3de622f022d063defab597",
+  "environment": {
+    "hardware": "Apple M1 Pro",
+    "architecture": "aarch64",
+    "docker": "29.9.2",
+    "vmVcpus": 10,
+    "vmMemoryBytes": 8214851584,
+    "rust": "1.99.1",
+    "kubernetes": "k3s v1.34.3+k3s1",
+    "traefik": "3.5.1",
+    "postgres": "17.6",
+    "redis": "7.4.2",
+    "collector": "0.111.0",
+    "node": "22.18.0",
+    "topology": "one control-plane and three worker nodes; three gateway replicas; singleton SQL, Redis, collector and backend fixtures",
+    "gatewayResources": {
+      "cpuRequest": "250m",
+      "cpuLimit": "2",
+      "memoryRequest": "512Mi",
+      "memoryLimit": "1Gi"
+    },
+    "passwordHashConcurrency": 2,
+    "argon2MemoryKiB": 19456,
+    "dbPoolMax": 20,
+    "redisPoolSize": 4,
+    "metricExportIntervalMs": 1000,
+    "durationSecondsPerStage": 15,
+    "httpLatencyThresholdMs": 200,
+    "loginOAuthLatencyThresholdMs": 1500,
+    "ingress": {
+      "maxBurst": 10000,
+      "replenishOnePer": "1ms"
+    },
+    "backstopEnabledDuringCapacityRamps": false,
+    "traffic": "one external Docker client and one source IP; TLS to Traefik, mTLS/signed context to the backend; telemetry enabled",
+    "nativeLogin": "password only, no MFA; correct password; fresh native session per operation",
+    "oauth": "first-party public PKCE S256 client: authorize, code exchange and refresh",
+    "windows": "CPU samples use metrics-server averaging windows; SQL gauges sampled at 1s and read from the final 25s; adjacent stages can overlap in these samples"
+  },
+  "scenarios": {
+    "gateway": [
+      {
+        "scenario": "gateway",
+        "offered": 5,
+        "durationSeconds": 14.806933715000001,
+        "completed": 75,
+        "completedPerSecond": 5.0651945530101266,
+        "p50Ms": 9.818999999999505,
+        "p95Ms": 14.475917000000038,
+        "p99Ms": 61.043166,
+        "errors": {},
+        "maxScheduleLagMs": 5.078713999999309,
+        "cpuCoresMax": {
+          "replica-1": 0.007675891,
+          "replica-2": 0.010420804,
+          "replica-3": 0.010311553
+        },
+        "memoryMiBMax": {
+          "replica-1": 10.48828125,
+          "replica-2": 29.59765625,
+          "replica-3": 33.45703125
+        },
+        "cpuMeasurementWindows": [
+          "10.101s",
+          "10.373s",
+          "10.522s",
+          "18.79s",
+          "19.599s",
+          "31.245s"
+        ],
+        "sampledUnixSeconds": [
+          1793742811.1553721,
+          1793742825.76098
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 75
+      },
+      {
+        "scenario": "gateway",
+        "offered": 25,
+        "durationSeconds": 14.969456672999998,
+        "completed": 375,
+        "completedPerSecond": 25.051009411475654,
+        "p50Ms": 6.301625000000058,
+        "p95Ms": 8.699541999999838,
+        "p99Ms": 19.402000000000044,
+        "errors": {},
+        "maxScheduleLagMs": 4.951922000000195,
+        "cpuCoresMax": {
+          "replica-1": 0.012183728,
+          "replica-2": 0.018056413,
+          "replica-3": 0.01342753
+        },
+        "memoryMiBMax": {
+          "replica-1": 10.48828125,
+          "replica-2": 30.99609375,
+          "replica-3": 33.45703125
+        },
+        "cpuMeasurementWindows": [
+          "10.101s",
+          "10.373s",
+          "10.839s",
+          "11.087s",
+          "18.79s",
+          "27.387s"
+        ],
+        "sampledUnixSeconds": [
+          1793742828.010543,
+          1793742842.631799
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 375
+      },
+      {
+        "scenario": "gateway",
+        "offered": 100,
+        "durationSeconds": 14.997924339999999,
+        "completed": 1500,
+        "completedPerSecond": 100.01383964842698,
+        "p50Ms": 5.003999999998996,
+        "p95Ms": 7.439750000000004,
+        "p99Ms": 11.289541999999997,
+        "errors": {},
+        "maxScheduleLagMs": 20.969083000000005,
+        "cpuCoresMax": {
+          "replica-1": 0.036017471,
+          "replica-2": 0.059946169,
+          "replica-3": 0.050409973
+        },
+        "memoryMiBMax": {
+          "replica-1": 11.8203125,
+          "replica-2": 32.94140625,
+          "replica-3": 35.828125
+        },
+        "cpuMeasurementWindows": [
+          "10.839s",
+          "11.087s",
+          "13.877s",
+          "17.686s",
+          "24.165s",
+          "27.387s"
+        ],
+        "sampledUnixSeconds": [
+          1793742844.753205,
+          1793742859.275394
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 1500
+      },
+      {
+        "scenario": "gateway",
+        "offered": 250,
+        "durationSeconds": 14.999814130999999,
+        "completed": 3750,
+        "completedPerSecond": 250.00309785505303,
+        "p50Ms": 4.420374999999694,
+        "p95Ms": 6.77191700000003,
+        "p99Ms": 14.462458999999996,
+        "errors": {},
+        "maxScheduleLagMs": 32.414041,
+        "cpuCoresMax": {
+          "replica-1": 0.093251875,
+          "replica-2": 0.139856479,
+          "replica-3": 0.138499248
+        },
+        "memoryMiBMax": {
+          "replica-1": 12.8671875,
+          "replica-2": 33.1328125,
+          "replica-3": 36.14453125
+        },
+        "cpuMeasurementWindows": [
+          "13.877s",
+          "14.632s",
+          "16.262s",
+          "17.454s",
+          "17.686s",
+          "24.165s"
+        ],
+        "sampledUnixSeconds": [
+          1793742861.659489,
+          1793742876.2338712
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 3750
+      },
+      {
+        "scenario": "gateway",
+        "offered": 500,
+        "durationSeconds": 15.002756673999999,
+        "completed": 7500,
+        "completedPerSecond": 499.90812775078945,
+        "p50Ms": 4.4870000000009895,
+        "p95Ms": 12.310750000000553,
+        "p99Ms": 29.324041999999963,
+        "errors": {},
+        "maxScheduleLagMs": 29.071459000000004,
+        "cpuCoresMax": {
+          "replica-1": 0.212498557,
+          "replica-2": 0.139856479,
+          "replica-3": 0.168602747
+        },
+        "memoryMiBMax": {
+          "replica-1": 15.26953125,
+          "replica-2": 33.1328125,
+          "replica-3": 36.71875
+        },
+        "cpuMeasurementWindows": [
+          "12.827s",
+          "14.632s",
+          "15.65s",
+          "16.262s",
+          "17.454s"
+        ],
+        "sampledUnixSeconds": [
+          1793742882.0206861,
+          1793742896.657931
+        ],
+        "sqlPoolInUseMax": {},
+        "passwordHashingActiveMax": {},
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 7500
+      },
+      {
+        "scenario": "gateway",
+        "offered": 1000,
+        "durationSeconds": 15.004497548000002,
+        "completed": 14806,
+        "completedPerSecond": 986.7707967317799,
+        "p50Ms": 6.623708000000988,
+        "p95Ms": 436.8910840000001,
+        "p99Ms": 767.8900840000001,
+        "errors": {
+          "generator.capacity": 194,
+          "503:gateway.overloaded": 68
+        },
+        "maxScheduleLagMs": 129.29475000000002,
+        "cpuCoresMax": {
+          "replica-1": 0.004344223,
+          "replica-2": 0.005226286,
+          "replica-3": 0.110335615
+        },
+        "memoryMiBMax": {
+          "replica-1": 206.08203125,
+          "replica-2": 144.27734375,
+          "replica-3": 147.0390625
+        },
+        "cpuMeasurementWindows": [
+          "11.142s",
+          "12.672s",
+          "14.552s",
+          "17.659s",
+          "22.222s",
+          "30.961s"
+        ],
+        "sampledUnixSeconds": [
+          1793743765.003381,
+          1793743779.3937438
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 194,
+        "successfulOperations": 14738
+      }
+    ],
+    "policies": [
+      {
+        "scenario": "policies",
+        "offered": 5,
+        "durationSeconds": 14.807016507,
+        "completed": 75,
+        "completedPerSecond": 5.065166231464916,
+        "p50Ms": 9.037707999999839,
+        "p95Ms": 13.731124999998428,
+        "p99Ms": 47.201583,
+        "errors": {},
+        "maxScheduleLagMs": 3.776839000000109,
+        "cpuCoresMax": {
+          "replica-1": 0.644832024,
+          "replica-2": 0.625778356,
+          "replica-3": 0.704673575
+        },
+        "memoryMiBMax": {
+          "replica-1": 16.80078125,
+          "replica-2": 34.04296875,
+          "replica-3": 36.9375
+        },
+        "cpuMeasurementWindows": [
+          "14.074s",
+          "15.122s",
+          "15.663s",
+          "16.405s",
+          "17.474s"
+        ],
+        "sampledUnixSeconds": [
+          1793742929.915854,
+          1793742944.5637288
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 2,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 75
+      },
+      {
+        "scenario": "policies",
+        "offered": 25,
+        "durationSeconds": 14.967946923000001,
+        "completed": 375,
+        "completedPerSecond": 25.05353619498534,
+        "p50Ms": 6.50879199999963,
+        "p95Ms": 9.093208000000232,
+        "p99Ms": 11.26366600000074,
+        "errors": {},
+        "maxScheduleLagMs": 10.030460000000403,
+        "cpuCoresMax": {
+          "replica-1": 0.020122398,
+          "replica-2": 0.008226605,
+          "replica-3": 0.037087334
+        },
+        "memoryMiBMax": {
+          "replica-1": 37.1328125,
+          "replica-2": 34.2578125,
+          "replica-3": 36.703125
+        },
+        "cpuMeasurementWindows": [
+          "10.858s",
+          "16.243s",
+          "25.326s",
+          "30.137s"
+        ],
+        "sampledUnixSeconds": [
+          1793742947.379838,
+          1793742961.909516
+        ],
+        "sqlPoolInUseMax": {
+          "replica-2": 2,
+          "replica-3": 1,
+          "replica-1": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-2": 0,
+          "replica-3": 0,
+          "replica-1": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 375
+      },
+      {
+        "scenario": "policies",
+        "offered": 100,
+        "durationSeconds": 14.993784466,
+        "completed": 1500,
+        "completedPerSecond": 100.04145407061236,
+        "p50Ms": 4.7862499999992,
+        "p95Ms": 6.376166000000012,
+        "p99Ms": 10.061707999999996,
+        "errors": {},
+        "maxScheduleLagMs": 17.520374999999994,
+        "cpuCoresMax": {
+          "replica-1": 0.053006298,
+          "replica-2": 0.023746315,
+          "replica-3": 0.045637969
+        },
+        "memoryMiBMax": {
+          "replica-1": 37.1328125,
+          "replica-2": 34.2578125,
+          "replica-3": 37.19921875
+        },
+        "cpuMeasurementWindows": [
+          "10.858s",
+          "17.624s",
+          "19.745s",
+          "25.326s",
+          "29.097s",
+          "30.137s"
+        ],
+        "sampledUnixSeconds": [
+          1793742964.004629,
+          1793742978.5557919
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 1500
+      },
+      {
+        "scenario": "policies",
+        "offered": 250,
+        "durationSeconds": 14.999000215,
+        "completed": 3750,
+        "completedPerSecond": 250.01666419404074,
+        "p50Ms": 4.662124999999833,
+        "p95Ms": 8.153999999999996,
+        "p99Ms": 14.516166999999768,
+        "errors": {},
+        "maxScheduleLagMs": 23.093917,
+        "cpuCoresMax": {
+          "replica-1": 0.053006298,
+          "replica-2": 0.085550235,
+          "replica-3": 0.045637969
+        },
+        "memoryMiBMax": {
+          "replica-1": 37.12890625,
+          "replica-2": 33.62109375,
+          "replica-3": 37.19921875
+        },
+        "cpuMeasurementWindows": [
+          "17.624s",
+          "18.025s",
+          "19.745s",
+          "29.097s"
+        ],
+        "sampledUnixSeconds": [
+          1793742980.520122,
+          1793742995.0066261
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 3750
+      },
+      {
+        "scenario": "policies",
+        "offered": 500,
+        "durationSeconds": 15.635291881999999,
+        "completed": 6315,
+        "completedPerSecond": 403.8939629435439,
+        "p50Ms": 5.3833749999994325,
+        "p95Ms": 2472.1257929999992,
+        "p99Ms": 3532.64596,
+        "errors": {
+          "generator.capacity": 1185,
+          "503:gateway.overloaded": 145
+        },
+        "maxScheduleLagMs": 616.6257969999988,
+        "cpuCoresMax": {
+          "replica-1": 0.156402332,
+          "replica-2": 0.176333204,
+          "replica-3": 0.175937822
+        },
+        "memoryMiBMax": {
+          "replica-1": 37.66796875,
+          "replica-2": 33.62109375,
+          "replica-3": 37.546875
+        },
+        "cpuMeasurementWindows": [
+          "17.624s",
+          "18.025s",
+          "18.061s",
+          "19.976s",
+          "29.097s",
+          "30.188s"
+        ],
+        "sampledUnixSeconds": [
+          1793743000.329956,
+          1793743015.370205
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 2,
+          "replica-2": 1,
+          "replica-3": 2
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 1185,
+        "successfulOperations": 6170
+      }
+    ],
+    "login": [
+      {
+        "scenario": "login",
+        "offered": 2,
+        "durationSeconds": 14.583021965,
+        "completed": 30,
+        "completedPerSecond": 2.057186780079022,
+        "p50Ms": 81.53891599999997,
+        "p95Ms": 121.90875000000051,
+        "p99Ms": 128.2195419999989,
+        "errors": {},
+        "maxScheduleLagMs": 2.433669000000009,
+        "cpuCoresMax": {
+          "replica-1": 0.348119357,
+          "replica-2": 0.482219812,
+          "replica-3": 0.330227403
+        },
+        "memoryMiBMax": {
+          "replica-1": 110.75390625,
+          "replica-2": 104.01171875,
+          "replica-3": 51.24609375
+        },
+        "cpuMeasurementWindows": [
+          "11.979s",
+          "15.031s",
+          "16.019s",
+          "19.45s",
+          "26.76s",
+          "30.188s"
+        ],
+        "sampledUnixSeconds": [
+          1793743025.72155,
+          1793743040.255137
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 1
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 30
+      },
+      {
+        "scenario": "login",
+        "offered": 10,
+        "durationSeconds": 14.963610673,
+        "completed": 150,
+        "completedPerSecond": 10.024318547037353,
+        "p50Ms": 63.87595799999872,
+        "p95Ms": 69.41191700000002,
+        "p99Ms": 94.05424999999923,
+        "errors": {},
+        "maxScheduleLagMs": 4.098419999998441,
+        "cpuCoresMax": {
+          "replica-1": 0.102297466,
+          "replica-2": 0.108501779,
+          "replica-3": 0.330227403
+        },
+        "memoryMiBMax": {
+          "replica-1": 110.75390625,
+          "replica-2": 104.26171875,
+          "replica-3": 109.67578125
+        },
+        "cpuMeasurementWindows": [
+          "11.13s",
+          "11.979s",
+          "14.028s",
+          "16.019s",
+          "19.145s",
+          "19.45s"
+        ],
+        "sampledUnixSeconds": [
+          1793743042.8510988,
+          1793743057.3880022
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 150
+      },
+      {
+        "scenario": "login",
+        "offered": 25,
+        "durationSeconds": 15.023776131999998,
+        "completed": 375,
+        "completedPerSecond": 24.96043582553564,
+        "p50Ms": 62.7592910000003,
+        "p95Ms": 88.72874999999999,
+        "p99Ms": 138.83829199999997,
+        "errors": {},
+        "maxScheduleLagMs": 54.10162500000001,
+        "cpuCoresMax": {
+          "replica-1": 0.102297466,
+          "replica-2": 0.278227689,
+          "replica-3": 0.159051692
+        },
+        "memoryMiBMax": {
+          "replica-1": 110.3125,
+          "replica-2": 178.40625,
+          "replica-3": 109.73828125
+        },
+        "cpuMeasurementWindows": [
+          "11.13s",
+          "14.028s",
+          "19.145s",
+          "19.945s",
+          "23.229s"
+        ],
+        "sampledUnixSeconds": [
+          1793743059.168836,
+          1793743073.4982882
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 2,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 375
+      },
+      {
+        "scenario": "login",
+        "offered": 50,
+        "durationSeconds": 15.037193924,
+        "completed": 750,
+        "completedPerSecond": 49.8763269124945,
+        "p50Ms": 61.421084000000064,
+        "p95Ms": 92.54050000000007,
+        "p99Ms": 146.53279199999997,
+        "errors": {},
+        "maxScheduleLagMs": 14.406252000000222,
+        "cpuCoresMax": {
+          "replica-1": 0.356406295,
+          "replica-2": 0.47137037,
+          "replica-3": 0.46306343
+        },
+        "memoryMiBMax": {
+          "replica-1": 224.796875,
+          "replica-2": 178.40625,
+          "replica-3": 243.48828125
+        },
+        "cpuMeasurementWindows": [
+          "10.395s",
+          "13.369s",
+          "19.145s",
+          "19.412s",
+          "19.945s",
+          "23.229s"
+        ],
+        "sampledUnixSeconds": [
+          1793743076.4925618,
+          1793743090.9188108
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 2,
+          "replica-2": 1,
+          "replica-3": 2
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 1,
+          "replica-2": 2,
+          "replica-3": 1
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 750
+      },
+      {
+        "scenario": "login",
+        "offered": 100,
+        "durationSeconds": 16.191695964999997,
+        "completed": 1500,
+        "completedPerSecond": 92.6400794112243,
+        "p50Ms": 129.4663330000003,
+        "p95Ms": 1024.1027919999997,
+        "p99Ms": 1209.6434170000011,
+        "errors": {},
+        "maxScheduleLagMs": 18.228915999999998,
+        "cpuCoresMax": {
+          "replica-1": 0.698599196,
+          "replica-2": 0.948198753,
+          "replica-3": 0.744144698
+        },
+        "memoryMiBMax": {
+          "replica-1": 339.36328125,
+          "replica-2": 180.95703125,
+          "replica-3": 243.48828125
+        },
+        "cpuMeasurementWindows": [
+          "10.395s",
+          "10.591s",
+          "13.369s",
+          "15.978s",
+          "16.18s",
+          "19.412s"
+        ],
+        "sampledUnixSeconds": [
+          1793743093.190807,
+          1793743107.655018
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 5
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 2,
+          "replica-2": 2,
+          "replica-3": 1
+        },
+        "passwordHashingRejectionsCumulative": {},
+        "notDispatched": 0,
+        "successfulOperations": 1500
+      },
+      {
+        "scenario": "login",
+        "offered": 200,
+        "durationSeconds": 20.034377884,
+        "completed": 2022,
+        "completedPerSecond": 100.92651799359462,
+        "p50Ms": 4748.4325020000015,
+        "p95Ms": 5061.220252000001,
+        "p99Ms": 5078.317544000001,
+        "errors": {
+          "generator.capacity": 978,
+          "503:iam.overloaded": 55
+        },
+        "maxScheduleLagMs": 20.913625,
+        "cpuCoresMax": {
+          "replica-1": 1.443945918,
+          "replica-2": 1.799614252,
+          "replica-3": 1.650484306
+        },
+        "memoryMiBMax": {
+          "replica-1": 334.19921875,
+          "replica-2": 255.79296875,
+          "replica-3": 466.16796875
+        },
+        "cpuMeasurementWindows": [
+          "10.283s",
+          "14.337s",
+          "16.886s",
+          "17.667s",
+          "24.907s"
+        ],
+        "sampledUnixSeconds": [
+          1793743110.932616,
+          1793743129.631897
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 2,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 2,
+          "replica-2": 2,
+          "replica-3": 2
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-2": {
+            "verify": 51
+          },
+          "replica-1": {
+            "verify": 2
+          }
+        },
+        "notDispatched": 978,
+        "successfulOperations": 1967
+      }
+    ],
+    "oauth": [
+      {
+        "scenario": "oauth",
+        "offered": 2,
+        "durationSeconds": 14.515252006,
+        "completed": 30,
+        "completedPerSecond": 2.066791536764174,
+        "p50Ms": 22.842334000000392,
+        "p95Ms": 37.971166999999696,
+        "p99Ms": 59.29775000000001,
+        "errors": {},
+        "maxScheduleLagMs": 2.3162520000005316,
+        "cpuCoresMax": {
+          "replica-1": 1.881459282,
+          "replica-2": 1.799614252,
+          "replica-3": 1.650484306
+        },
+        "memoryMiBMax": {
+          "replica-1": 354.81640625,
+          "replica-2": 255.79296875,
+          "replica-3": 448.625
+        },
+        "cpuMeasurementWindows": [
+          "16.886s",
+          "17.667s",
+          "18.96s",
+          "19.11s",
+          "24.266s",
+          "24.907s"
+        ],
+        "sampledUnixSeconds": [
+          1793743133.525336,
+          1793743148.045047
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 2,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 2,
+          "replica-2": 2,
+          "replica-3": 2
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-2": {
+            "verify": 53
+          },
+          "replica-1": {
+            "verify": 2
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 30
+      },
+      {
+        "scenario": "oauth",
+        "offered": 10,
+        "durationSeconds": 14.915383882,
+        "completed": 150,
+        "completedPerSecond": 10.056730767822955,
+        "p50Ms": 15.579666999999972,
+        "p95Ms": 19.582124999999905,
+        "p99Ms": 28.665874999998778,
+        "errors": {},
+        "maxScheduleLagMs": 2.285419999999249,
+        "cpuCoresMax": {
+          "replica-1": 1.881459282,
+          "replica-2": 1.421641514,
+          "replica-3": 1.352882522
+        },
+        "memoryMiBMax": {
+          "replica-1": 354.81640625,
+          "replica-2": 221.7734375,
+          "replica-3": 448.625
+        },
+        "cpuMeasurementWindows": [
+          "12.883s",
+          "18.96s",
+          "19.11s",
+          "24.266s",
+          "25.262s"
+        ],
+        "sampledUnixSeconds": [
+          1793743150.720929,
+          1793743165.13538
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 2,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 150
+      },
+      {
+        "scenario": "oauth",
+        "offered": 25,
+        "durationSeconds": 14.974160299000001,
+        "completed": 375,
+        "completedPerSecond": 25.043140484147422,
+        "p50Ms": 13.300250000000233,
+        "p95Ms": 17.38691700000072,
+        "p99Ms": 24.783374999999978,
+        "errors": {},
+        "maxScheduleLagMs": 4.71588200000042,
+        "cpuCoresMax": {
+          "replica-1": 0.179231929,
+          "replica-2": 0.036232509,
+          "replica-3": 1.352882522
+        },
+        "memoryMiBMax": {
+          "replica-1": 341.9609375,
+          "replica-2": 165.40234375,
+          "replica-3": 448.625
+        },
+        "cpuMeasurementWindows": [
+          "12.502s",
+          "12.55s",
+          "12.883s",
+          "19.11s",
+          "19.71s",
+          "25.262s"
+        ],
+        "sampledUnixSeconds": [
+          1793743167.5125608,
+          1793743181.888882
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 375
+      },
+      {
+        "scenario": "oauth",
+        "offered": 50,
+        "durationSeconds": 14.998753215,
+        "completed": 750,
+        "completedPerSecond": 50.00415629546712,
+        "p50Ms": 12.302707999999257,
+        "p95Ms": 16.60450000000037,
+        "p99Ms": 26.43541600000026,
+        "errors": {},
+        "maxScheduleLagMs": 5.978665999999997,
+        "cpuCoresMax": {
+          "replica-1": 0.075631354,
+          "replica-2": 0.064724219,
+          "replica-3": 0.046073567
+        },
+        "memoryMiBMax": {
+          "replica-1": 342.21484375,
+          "replica-2": 164.640625,
+          "replica-3": 392.2109375
+        },
+        "cpuMeasurementWindows": [
+          "12.502s",
+          "12.55s",
+          "15.462s",
+          "15.496s",
+          "15.574s",
+          "19.71s"
+        ],
+        "sampledUnixSeconds": [
+          1793743184.302389,
+          1793743198.6995368
+        ],
+        "sqlPoolInUseMax": {
+          "replica-3": 2,
+          "replica-1": 1,
+          "replica-2": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-3": 0,
+          "replica-1": 0,
+          "replica-2": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 750
+      },
+      {
+        "scenario": "oauth",
+        "offered": 100,
+        "durationSeconds": 15.00110734,
+        "completed": 1500,
+        "completedPerSecond": 99.9926182782717,
+        "p50Ms": 12.38904199999979,
+        "p95Ms": 16.750500000000102,
+        "p99Ms": 30.598958999999013,
+        "errors": {},
+        "maxScheduleLagMs": 18.57575,
+        "cpuCoresMax": {
+          "replica-1": 0.219468374,
+          "replica-2": 0.226000381,
+          "replica-3": 0.164329488
+        },
+        "memoryMiBMax": {
+          "replica-1": 342.25390625,
+          "replica-2": 165.59765625,
+          "replica-3": 392.44921875
+        },
+        "cpuMeasurementWindows": [
+          "12.314s",
+          "13.102s",
+          "14.284s",
+          "16.237s",
+          "17.702s",
+          "18.641s"
+        ],
+        "sampledUnixSeconds": [
+          1793743200.838099,
+          1793743215.227916
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 2,
+          "replica-2": 2,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 1500
+      },
+      {
+        "scenario": "oauth",
+        "offered": 200,
+        "durationSeconds": 15.009173298,
+        "completed": 3000,
+        "completedPerSecond": 199.8777641137474,
+        "p50Ms": 16.035208999999895,
+        "p95Ms": 189.0448749999996,
+        "p99Ms": 454.3301670000001,
+        "errors": {},
+        "maxScheduleLagMs": 54.33546099999876,
+        "cpuCoresMax": {
+          "replica-1": 0.432296323,
+          "replica-2": 0.341343949,
+          "replica-3": 0.247880355
+        },
+        "memoryMiBMax": {
+          "replica-1": 342.25390625,
+          "replica-2": 165.41796875,
+          "replica-3": 392.44921875
+        },
+        "cpuMeasurementWindows": [
+          "13.102s",
+          "15.989s",
+          "16.014s",
+          "16.237s",
+          "18.641s",
+          "19.148s"
+        ],
+        "sampledUnixSeconds": [
+          1793743219.740743,
+          1793743234.283576
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 3,
+          "replica-2": 4,
+          "replica-3": 2
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 3000
+      },
+      {
+        "scenario": "oauth",
+        "offered": 400,
+        "durationSeconds": 15.013401924,
+        "completed": 6000,
+        "completedPerSecond": 399.6429343844162,
+        "p50Ms": 19.471333999999842,
+        "p95Ms": 43.89337499999999,
+        "p99Ms": 123.27804099999958,
+        "errors": {},
+        "maxScheduleLagMs": 23.180999999999997,
+        "cpuCoresMax": {
+          "replica-1": 0.432296323,
+          "replica-2": 0.341343949,
+          "replica-3": 0.568200843
+        },
+        "memoryMiBMax": {
+          "replica-1": 170.92578125,
+          "replica-2": 164.5390625,
+          "replica-3": 391.3515625
+        },
+        "cpuMeasurementWindows": [
+          "15.989s",
+          "16.014s",
+          "19.148s",
+          "22.988s"
+        ],
+        "sampledUnixSeconds": [
+          1793743240.230626,
+          1793743254.695138
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 10,
+          "replica-2": 2,
+          "replica-3": 3
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 6000
+      },
+      {
+        "scenario": "oauth",
+        "offered": 800,
+        "durationSeconds": 15.016865840000001,
+        "completed": 11427,
+        "completedPerSecond": 760.9444022308718,
+        "p50Ms": 477.6940420000001,
+        "p95Ms": 852.4135419999993,
+        "p99Ms": 958.0739589999998,
+        "errors": {
+          "generator.capacity": 573,
+          "429:iam.ingress_rate_limit_exceeded": 4327
+        },
+        "maxScheduleLagMs": 82.65195899999992,
+        "cpuCoresMax": {
+          "replica-1": 0.587940818,
+          "replica-2": 0.988902036,
+          "replica-3": 1.235657795
+        },
+        "memoryMiBMax": {
+          "replica-1": 210.19140625,
+          "replica-2": 165.2734375,
+          "replica-3": 147.04296875
+        },
+        "cpuMeasurementWindows": [
+          "10.409s",
+          "12.437s",
+          "14.19s",
+          "14.295s",
+          "18.894s",
+          "19.252s"
+        ],
+        "sampledUnixSeconds": [
+          1793743785.846853,
+          1793743800.420727
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 4,
+          "replica-2": 3,
+          "replica-3": 2
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 573,
+        "successfulOperations": 7100
+      }
+    ],
+    "discovery": [
+      {
+        "scenario": "discovery",
+        "offered": 5,
+        "durationSeconds": 14.803010799,
+        "completed": 75,
+        "completedPerSecond": 5.06653686999043,
+        "p50Ms": 4.954624999999851,
+        "p95Ms": 10.122333000001163,
+        "p99Ms": 35.593833000000004,
+        "errors": {},
+        "maxScheduleLagMs": 1.2607540000008157,
+        "cpuCoresMax": {
+          "replica-1": 0.619450816,
+          "replica-2": 0.627836387,
+          "replica-3": 0.920376123
+        },
+        "memoryMiBMax": {
+          "replica-1": 114.09765625,
+          "replica-2": 51.6953125,
+          "replica-3": 49.00390625
+        },
+        "cpuMeasurementWindows": [
+          "13.352s",
+          "14.213s",
+          "16.896s",
+          "17.792s",
+          "18.625s",
+          "19.396s"
+        ],
+        "sampledUnixSeconds": [
+          1793743264.927294,
+          1793743279.3444061
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 75
+      },
+      {
+        "scenario": "discovery",
+        "offered": 25,
+        "durationSeconds": 14.963035757,
+        "completed": 375,
+        "completedPerSecond": 25.061759263962706,
+        "p50Ms": 3.294792000000598,
+        "p95Ms": 4.670874999999796,
+        "p99Ms": 8.340750000000298,
+        "errors": {},
+        "maxScheduleLagMs": 2.6088380000001052,
+        "cpuCoresMax": {
+          "replica-1": 0.526525852,
+          "replica-2": 0.627836387,
+          "replica-3": 0.007722795
+        },
+        "memoryMiBMax": {
+          "replica-1": 112.89453125,
+          "replica-2": 50.00390625,
+          "replica-3": 49.234375
+        },
+        "cpuMeasurementWindows": [
+          "13.463s",
+          "14.213s",
+          "16.78s",
+          "17.589s",
+          "17.792s",
+          "18.625s"
+        ],
+        "sampledUnixSeconds": [
+          1793743282.27387,
+          1793743296.740248
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 375
+      },
+      {
+        "scenario": "discovery",
+        "offered": 100,
+        "durationSeconds": 14.992240173999999,
+        "completed": 1500,
+        "completedPerSecond": 100.05175894936274,
+        "p50Ms": 2.2555830000000014,
+        "p95Ms": 3.8354590000000144,
+        "p99Ms": 6.856708999999682,
+        "errors": {},
+        "maxScheduleLagMs": 15.332042000000001,
+        "cpuCoresMax": {
+          "replica-1": 0.01273986,
+          "replica-2": 0.011646708,
+          "replica-3": 0.011483076
+        },
+        "memoryMiBMax": {
+          "replica-1": 112.875,
+          "replica-2": 50.2578125,
+          "replica-3": 49.234375
+        },
+        "cpuMeasurementWindows": [
+          "13.463s",
+          "14.654s",
+          "15.607s",
+          "15.8s",
+          "16.78s",
+          "17.589s"
+        ],
+        "sampledUnixSeconds": [
+          1793743299.368761,
+          1793743313.744659
+        ],
+        "sqlPoolInUseMax": {
+          "replica-3": 1,
+          "replica-1": 1,
+          "replica-2": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-3": 0,
+          "replica-1": 0,
+          "replica-2": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 1500
+      },
+      {
+        "scenario": "discovery",
+        "offered": 250,
+        "durationSeconds": 14.997950424,
+        "completed": 3750,
+        "completedPerSecond": 250.03416426815093,
+        "p50Ms": 1.790500000000975,
+        "p95Ms": 3.2428329999997914,
+        "p99Ms": 5.454457999999988,
+        "errors": {},
+        "maxScheduleLagMs": 25.460958,
+        "cpuCoresMax": {
+          "replica-1": 0.0294259,
+          "replica-2": 0.027273278,
+          "replica-3": 0.031047148
+        },
+        "memoryMiBMax": {
+          "replica-1": 112.875,
+          "replica-2": 50.265625,
+          "replica-3": 48.80078125
+        },
+        "cpuMeasurementWindows": [
+          "13.05s",
+          "14.654s",
+          "15.607s",
+          "15.8s",
+          "18.483s",
+          "19.64s"
+        ],
+        "sampledUnixSeconds": [
+          1793743317.276306,
+          1793743331.659898
+        ],
+        "sqlPoolInUseMax": {
+          "replica-3": 1,
+          "replica-1": 1,
+          "replica-2": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-3": 0,
+          "replica-1": 0,
+          "replica-2": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 3750
+      },
+      {
+        "scenario": "discovery",
+        "offered": 500,
+        "durationSeconds": 15.000092006,
+        "completed": 7500,
+        "completedPerSecond": 499.9969331521446,
+        "p50Ms": 1.7029999999995198,
+        "p95Ms": 2.9600420000006125,
+        "p99Ms": 6.263124999999491,
+        "errors": {},
+        "maxScheduleLagMs": 23.639374999999998,
+        "cpuCoresMax": {
+          "replica-1": 0.053613439,
+          "replica-2": 0.073000431,
+          "replica-3": 0.046595886
+        },
+        "memoryMiBMax": {
+          "replica-1": 113.36328125,
+          "replica-2": 50.46484375,
+          "replica-3": 48.7578125
+        },
+        "cpuMeasurementWindows": [
+          "11.578s",
+          "13.64s",
+          "14.197s",
+          "15.946s",
+          "16.932s",
+          "19.64s"
+        ],
+        "sampledUnixSeconds": [
+          1793743335.992691,
+          1793743350.373902
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 2,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 0,
+        "successfulOperations": 7500
+      },
+      {
+        "scenario": "discovery",
+        "offered": 1000,
+        "durationSeconds": 15.001717549,
+        "completed": 14925,
+        "completedPerSecond": 994.8860822936161,
+        "p50Ms": 1.8575829999990674,
+        "p95Ms": 45.35816599999998,
+        "p99Ms": 459.67266699999993,
+        "errors": {
+          "generator.capacity": 75,
+          "429:iam.ingress_rate_limit_exceeded": 3586
+        },
+        "maxScheduleLagMs": 118.06454199999996,
+        "cpuCoresMax": {
+          "replica-1": 0.098139261,
+          "replica-2": 0.073000431,
+          "replica-3": 0.115651896
+        },
+        "memoryMiBMax": {
+          "replica-1": 113.36328125,
+          "replica-2": 50.47265625,
+          "replica-3": 48.69140625
+        },
+        "cpuMeasurementWindows": [
+          "11.578s",
+          "13.055s",
+          "14.024s",
+          "14.197s",
+          "15.946s",
+          "28.391s"
+        ],
+        "sampledUnixSeconds": [
+          1793743355.8030562,
+          1793743370.1537018
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        },
+        "notDispatched": 75,
+        "successfulOperations": 11339
+      }
+    ],
+    "websocket": [
+      {
+        "scenario": "websocket",
+        "offered": 1,
+        "durationSeconds": 15.103202174,
+        "completed": 15,
+        "completedPerSecond": 0.9931668680051399,
+        "p50Ms": 1.2735830000001442,
+        "p95Ms": 2.5838340000000244,
+        "p99Ms": 2.5838340000000244,
+        "errors": {},
+        "connections": 1,
+        "messagesPerConnectionPerSecond": 1,
+        "cpuCoresMax": {
+          "replica-1": 0.17791199,
+          "replica-2": 0.218644821,
+          "replica-3": 0.115651896
+        },
+        "memoryMiBMax": {
+          "replica-1": 113.390625,
+          "replica-2": 50.48046875,
+          "replica-3": 48.69140625
+        },
+        "cpuMeasurementWindows": [
+          "12.909s",
+          "13.055s",
+          "14.024s",
+          "14.272s",
+          "16.964s",
+          "28.391s"
+        ],
+        "sampledUnixSeconds": [
+          1793743378.626244,
+          1793743393.076237
+        ],
+        "sqlPoolInUseMax": {
+          "replica-3": 1,
+          "replica-1": 1,
+          "replica-2": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-3": 0,
+          "replica-1": 0,
+          "replica-2": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        }
+      },
+      {
+        "scenario": "websocket",
+        "offered": 10,
+        "durationSeconds": 15.077474382,
+        "completed": 150,
+        "completedPerSecond": 9.948615809228308,
+        "p50Ms": 1.7661250000001019,
+        "p95Ms": 4.06054099999983,
+        "p99Ms": 5.889165999999932,
+        "errors": {},
+        "connections": 10,
+        "messagesPerConnectionPerSecond": 1,
+        "cpuCoresMax": {
+          "replica-1": 0.02559377,
+          "replica-2": 0.022109677,
+          "replica-3": 0.096022141
+        },
+        "memoryMiBMax": {
+          "replica-1": 113.6796875,
+          "replica-2": 50.921875,
+          "replica-3": 49.42578125
+        },
+        "cpuMeasurementWindows": [
+          "13.421s",
+          "14.272s",
+          "15.19s",
+          "16.018s",
+          "23.56s",
+          "30.174s"
+        ],
+        "sampledUnixSeconds": [
+          1793743395.7515159,
+          1793743410.2244108
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 2
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        }
+      },
+      {
+        "scenario": "websocket",
+        "offered": 50,
+        "durationSeconds": 15.182895507,
+        "completed": 750,
+        "completedPerSecond": 49.39769226852784,
+        "p50Ms": 3.6769580000000133,
+        "p95Ms": 5.2239589999999225,
+        "p99Ms": 6.016708999999537,
+        "errors": {},
+        "connections": 50,
+        "messagesPerConnectionPerSecond": 1,
+        "cpuCoresMax": {
+          "replica-1": 0.008558261,
+          "replica-2": 0.010693364,
+          "replica-3": 0.010218186
+        },
+        "memoryMiBMax": {
+          "replica-1": 116.859375,
+          "replica-2": 53.609375,
+          "replica-3": 52.6171875
+        },
+        "cpuMeasurementWindows": [
+          "12.96s",
+          "14.153s",
+          "16.018s",
+          "23.56s",
+          "25.583s",
+          "30.174s"
+        ],
+        "sampledUnixSeconds": [
+          1793743413.3814201,
+          1793743427.853865
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        }
+      },
+      {
+        "scenario": "websocket",
+        "offered": 100,
+        "durationSeconds": 15.27754734,
+        "completed": 1500,
+        "completedPerSecond": 98.18329910015517,
+        "p50Ms": 5.0224160000002485,
+        "p95Ms": 11.919792000000598,
+        "p99Ms": 14.80541599999924,
+        "errors": {},
+        "connections": 100,
+        "messagesPerConnectionPerSecond": 1,
+        "cpuCoresMax": {
+          "replica-1": 0.017983184,
+          "replica-2": 0.015335368,
+          "replica-3": 0.014921036
+        },
+        "memoryMiBMax": {
+          "replica-1": 121.06640625,
+          "replica-2": 58.33203125,
+          "replica-3": 58.61328125
+        },
+        "cpuMeasurementWindows": [
+          "12.96s",
+          "13.202s",
+          "14.153s",
+          "15.231s",
+          "16.78s",
+          "25.583s"
+        ],
+        "sampledUnixSeconds": [
+          1793743430.481389,
+          1793743444.92738
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        }
+      },
+      {
+        "scenario": "websocket",
+        "offered": 250,
+        "durationSeconds": 15.729051341,
+        "completed": 3750,
+        "completedPerSecond": 238.4123440569549,
+        "p50Ms": 10.627917000000025,
+        "p95Ms": 17.368667000000187,
+        "p99Ms": 23.283708000000388,
+        "errors": {},
+        "connections": 250,
+        "messagesPerConnectionPerSecond": 1,
+        "cpuCoresMax": {
+          "replica-1": 0.036136821,
+          "replica-2": 0.015335368,
+          "replica-3": 0.014921036
+        },
+        "memoryMiBMax": {
+          "replica-1": 134.8359375,
+          "replica-2": 58.33203125,
+          "replica-3": 58.61328125
+        },
+        "cpuMeasurementWindows": [
+          "12.615s",
+          "13.202s",
+          "15.231s",
+          "16.78s"
+        ],
+        "sampledUnixSeconds": [
+          1793743448.5785081,
+          1793743462.9913678
+        ],
+        "sqlPoolInUseMax": {
+          "replica-3": 1,
+          "replica-1": 1,
+          "replica-2": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-3": 0,
+          "replica-1": 0,
+          "replica-2": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        }
+      },
+      {
+        "scenario": "websocket",
+        "offered": 500,
+        "durationSeconds": 16.081006381999998,
+        "completed": 7500,
+        "completedPerSecond": 466.3887210687882,
+        "p50Ms": 16.194792000000234,
+        "p95Ms": 26.700167000000192,
+        "p99Ms": 32.82929199999853,
+        "errors": {},
+        "connections": 500,
+        "messagesPerConnectionPerSecond": 1,
+        "cpuCoresMax": {
+          "replica-1": 0.047051581,
+          "replica-2": 0.030835794,
+          "replica-3": 0.030239509
+        },
+        "memoryMiBMax": {
+          "replica-1": 158.56640625,
+          "replica-2": 71.3671875,
+          "replica-3": 69.9375
+        },
+        "cpuMeasurementWindows": [
+          "12.615s",
+          "15.231s",
+          "16.78s",
+          "18.553s",
+          "18.588s",
+          "19.573s"
+        ],
+        "sampledUnixSeconds": [
+          1793743466.849609,
+          1793743481.27265
+        ],
+        "sqlPoolInUseMax": {
+          "replica-3": 1,
+          "replica-1": 1,
+          "replica-2": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-3": 0,
+          "replica-1": 0,
+          "replica-2": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        }
+      },
+      {
+        "scenario": "websocket",
+        "offered": 1000,
+        "durationSeconds": 17.576621965999998,
+        "completed": 14775,
+        "completedPerSecond": 840.6052100671324,
+        "p50Ms": 28.388082999999824,
+        "p95Ms": 50.01354200000014,
+        "p99Ms": 62.40541699999994,
+        "errors": {
+          "503:websocket.handshake": 15,
+          "websocket.transport": 15,
+          "websocket.closed": 225
+        },
+        "connections": 1000,
+        "messagesPerConnectionPerSecond": 1,
+        "cpuCoresMax": {
+          "replica-1": 0.145250471,
+          "replica-2": 0.10729844,
+          "replica-3": 0.089607991
+        },
+        "memoryMiBMax": {
+          "replica-1": 209.16015625,
+          "replica-2": 148.31640625,
+          "replica-3": 145.765625
+        },
+        "cpuMeasurementWindows": [
+          "11.127s",
+          "13.564s",
+          "14.75s",
+          "16.299s",
+          "17.804s",
+          "18.553s",
+          "18.588s",
+          "18.594s",
+          "19.573s"
+        ],
+        "sampledUnixSeconds": [
+          1793743484.623085,
+          1793743503.2690141
+        ],
+        "sqlPoolInUseMax": {
+          "replica-1": 1,
+          "replica-2": 1,
+          "replica-3": 1
+        },
+        "passwordHashingActiveMax": {
+          "replica-1": 0,
+          "replica-2": 0,
+          "replica-3": 0
+        },
+        "passwordHashingRejectionsCumulative": {
+          "replica-1": {
+            "verify": 2
+          },
+          "replica-2": {
+            "verify": 53
+          }
+        }
+      }
+    ]
+  },
+  "redisLatencyDuringLoad": [
+    {
+      "startedUnixSeconds": 1793742900.4674199,
+      "endedUnixSeconds": 1793742901.6088672,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742902.6175108,
+      "endedUnixSeconds": 1793742903.7527459,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.22,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742904.7546399,
+      "endedUnixSeconds": 1793742905.8995252,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.2,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742906.9084318,
+      "endedUnixSeconds": 1793742908.10112,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.21,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793742909.1088939,
+      "endedUnixSeconds": 1793742910.245012,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.17,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742911.2483041,
+      "endedUnixSeconds": 1793742912.3704782,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.27,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742913.378811,
+      "endedUnixSeconds": 1793742914.525249,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.18,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742915.534743,
+      "endedUnixSeconds": 1793742916.6865332,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742917.6920378,
+      "endedUnixSeconds": 1793742918.799488,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742919.8061252,
+      "endedUnixSeconds": 1793742920.96646,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.19,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742921.973562,
+      "endedUnixSeconds": 1793742923.08625,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.2,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742924.086563,
+      "endedUnixSeconds": 1793742925.200216,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742926.2068071,
+      "endedUnixSeconds": 1793742927.351423,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742928.359301,
+      "endedUnixSeconds": 1793742929.473539,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793742930.480798,
+      "endedUnixSeconds": 1793742931.5980291,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.06,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742932.60707,
+      "endedUnixSeconds": 1793742933.725069,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793742934.73155,
+      "endedUnixSeconds": 1793742935.8579898,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742936.8658319,
+      "endedUnixSeconds": 1793742937.994626,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793742939.002031,
+      "endedUnixSeconds": 1793742940.1320362,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793742941.132843,
+      "endedUnixSeconds": 1793742942.239077,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793742943.247553,
+      "endedUnixSeconds": 1793742944.366229,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.19,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793742945.366986,
+      "endedUnixSeconds": 1793742946.4916291,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742947.5007281,
+      "endedUnixSeconds": 1793742948.594005,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742949.597172,
+      "endedUnixSeconds": 1793742950.709248,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.05,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793742951.711322,
+      "endedUnixSeconds": 1793742952.8298938,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793742953.834889,
+      "endedUnixSeconds": 1793742954.947764,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742955.94821,
+      "endedUnixSeconds": 1793742957.067777,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.15,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742958.075142,
+      "endedUnixSeconds": 1793742959.197942,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.04,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742960.201605,
+      "endedUnixSeconds": 1793742961.316687,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742962.3265548,
+      "endedUnixSeconds": 1793742963.446969,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793742964.448493,
+      "endedUnixSeconds": 1793742965.54989,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742966.55543,
+      "endedUnixSeconds": 1793742967.6623611,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742968.6687849,
+      "endedUnixSeconds": 1793742969.77712,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742970.7840269,
+      "endedUnixSeconds": 1793742971.8969102,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742972.9066398,
+      "endedUnixSeconds": 1793742974.008965,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742975.010102,
+      "endedUnixSeconds": 1793742976.108564,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742977.114704,
+      "endedUnixSeconds": 1793742978.2202408,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793742979.2256021,
+      "endedUnixSeconds": 1793742980.330188,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.15,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793742981.335308,
+      "endedUnixSeconds": 1793742982.4704819,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742983.476328,
+      "endedUnixSeconds": 1793742984.659127,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742985.667117,
+      "endedUnixSeconds": 1793742986.8127732,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742987.818791,
+      "endedUnixSeconds": 1793742988.976119,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742989.984498,
+      "endedUnixSeconds": 1793742991.1093068,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742992.119728,
+      "endedUnixSeconds": 1793742993.2276192,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742994.236531,
+      "endedUnixSeconds": 1793742995.3401668,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742996.3480089,
+      "endedUnixSeconds": 1793742997.472231,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793742998.478196,
+      "endedUnixSeconds": 1793742999.630105,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743000.63324,
+      "endedUnixSeconds": 1793743001.75883,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743002.768138,
+      "endedUnixSeconds": 1793743003.87765,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743004.8886771,
+      "endedUnixSeconds": 1793743006.04525,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.17,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743007.051326,
+      "endedUnixSeconds": 1793743008.174242,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743009.1763442,
+      "endedUnixSeconds": 1793743010.330267,
+      "minMs": 0.0,
+      "maxMs": 10.0,
+      "meanMs": 0.74,
+      "samples": 92
+    },
+    {
+      "startedUnixSeconds": 1793743011.339753,
+      "endedUnixSeconds": 1793743012.951072,
+      "minMs": 0.0,
+      "maxMs": 184.0,
+      "meanMs": 5.85,
+      "samples": 60
+    },
+    {
+      "startedUnixSeconds": 1793743013.967446,
+      "endedUnixSeconds": 1793743016.6734111,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.4,
+      "samples": 92
+    },
+    {
+      "startedUnixSeconds": 1793743017.681123,
+      "endedUnixSeconds": 1793743018.845896,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743019.847112,
+      "endedUnixSeconds": 1793743021.174525,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.26,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743022.176716,
+      "endedUnixSeconds": 1793743023.35276,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.25,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743024.3556428,
+      "endedUnixSeconds": 1793743025.4951282,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.26,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743026.501257,
+      "endedUnixSeconds": 1793743027.63136,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.31,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743028.6418188,
+      "endedUnixSeconds": 1793743029.7667599,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743030.7715871,
+      "endedUnixSeconds": 1793743031.892533,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743032.9026718,
+      "endedUnixSeconds": 1793743034.172756,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743035.1765718,
+      "endedUnixSeconds": 1793743036.308202,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743037.312261,
+      "endedUnixSeconds": 1793743038.420991,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.22,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743039.431351,
+      "endedUnixSeconds": 1793743040.542203,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743041.548226,
+      "endedUnixSeconds": 1793743042.717079,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.29,
+      "samples": 92
+    },
+    {
+      "startedUnixSeconds": 1793743043.7268128,
+      "endedUnixSeconds": 1793743044.891819,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743045.89441,
+      "endedUnixSeconds": 1793743046.988915,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743047.991677,
+      "endedUnixSeconds": 1793743049.1075149,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743050.1078432,
+      "endedUnixSeconds": 1793743051.206274,
+      "minMs": 0.0,
+      "maxMs": 7.0,
+      "meanMs": 0.22,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743052.215366,
+      "endedUnixSeconds": 1793743053.314812,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743054.321627,
+      "endedUnixSeconds": 1793743055.4647071,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743056.466479,
+      "endedUnixSeconds": 1793743057.5848541,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743058.590293,
+      "endedUnixSeconds": 1793743059.694913,
+      "minMs": 0.0,
+      "maxMs": 16.0,
+      "meanMs": 0.5,
+      "samples": 88
+    },
+    {
+      "startedUnixSeconds": 1793743060.695505,
+      "endedUnixSeconds": 1793743061.843589,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743062.844566,
+      "endedUnixSeconds": 1793743063.937396,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743064.939969,
+      "endedUnixSeconds": 1793743066.0420952,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743067.042613,
+      "endedUnixSeconds": 1793743068.1761038,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743069.1781912,
+      "endedUnixSeconds": 1793743070.28911,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743071.291361,
+      "endedUnixSeconds": 1793743072.383714,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743073.389216,
+      "endedUnixSeconds": 1793743074.534286,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743075.539626,
+      "endedUnixSeconds": 1793743076.633043,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743077.634641,
+      "endedUnixSeconds": 1793743078.8952682,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743079.897795,
+      "endedUnixSeconds": 1793743081.102386,
+      "minMs": 0.0,
+      "maxMs": 7.0,
+      "meanMs": 0.29,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743082.1078458,
+      "endedUnixSeconds": 1793743083.207741,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743084.209692,
+      "endedUnixSeconds": 1793743085.327565,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743086.330605,
+      "endedUnixSeconds": 1793743087.44065,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743088.443199,
+      "endedUnixSeconds": 1793743089.538205,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743090.5436249,
+      "endedUnixSeconds": 1793743091.685237,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743092.6855848,
+      "endedUnixSeconds": 1793743093.7863512,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.29,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743094.7869692,
+      "endedUnixSeconds": 1793743095.947188,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.32,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743096.9511511,
+      "endedUnixSeconds": 1793743098.1255639,
+      "minMs": 0.0,
+      "maxMs": 6.0,
+      "meanMs": 0.31,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743099.1265721,
+      "endedUnixSeconds": 1793743100.277076,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.28,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743101.282519,
+      "endedUnixSeconds": 1793743102.413058,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743103.418432,
+      "endedUnixSeconds": 1793743104.576127,
+      "minMs": 0.0,
+      "maxMs": 5.0,
+      "meanMs": 0.39,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743105.580516,
+      "endedUnixSeconds": 1793743106.733261,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743107.735893,
+      "endedUnixSeconds": 1793743109.0235672,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.26,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743110.0250099,
+      "endedUnixSeconds": 1793743111.116917,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743112.117386,
+      "endedUnixSeconds": 1793743113.316597,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.26,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743114.319733,
+      "endedUnixSeconds": 1793743115.495397,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.24,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743116.500944,
+      "endedUnixSeconds": 1793743117.670826,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.12,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743118.672516,
+      "endedUnixSeconds": 1793743119.793697,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.29,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743120.794571,
+      "endedUnixSeconds": 1793743121.903296,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743122.9086761,
+      "endedUnixSeconds": 1793743124.0605981,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.24,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743125.061962,
+      "endedUnixSeconds": 1793743126.1920588,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.24,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743127.192768,
+      "endedUnixSeconds": 1793743128.335691,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.23,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743129.3391948,
+      "endedUnixSeconds": 1793743130.719968,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.2,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743131.720912,
+      "endedUnixSeconds": 1793743132.8172102,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743133.817888,
+      "endedUnixSeconds": 1793743134.9217439,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743135.924469,
+      "endedUnixSeconds": 1793743137.034979,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743138.040394,
+      "endedUnixSeconds": 1793743139.1404102,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743140.145864,
+      "endedUnixSeconds": 1793743141.2425852,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743142.2439559,
+      "endedUnixSeconds": 1793743143.367281,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743144.372563,
+      "endedUnixSeconds": 1793743145.4731069,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.2,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743146.476802,
+      "endedUnixSeconds": 1793743147.592932,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743148.5955951,
+      "endedUnixSeconds": 1793743149.692074,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743150.6926122,
+      "endedUnixSeconds": 1793743151.7919738,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743152.792555,
+      "endedUnixSeconds": 1793743153.884028,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.05,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743154.884574,
+      "endedUnixSeconds": 1793743155.9747279,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743156.9752371,
+      "endedUnixSeconds": 1793743158.059732,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743159.0647922,
+      "endedUnixSeconds": 1793743160.156369,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743161.157569,
+      "endedUnixSeconds": 1793743162.253408,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743163.2579,
+      "endedUnixSeconds": 1793743164.352939,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743165.356395,
+      "endedUnixSeconds": 1793743166.466777,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743167.4678998,
+      "endedUnixSeconds": 1793743168.5639338,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743169.566775,
+      "endedUnixSeconds": 1793743170.655668,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743171.656668,
+      "endedUnixSeconds": 1793743172.7476768,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743173.749692,
+      "endedUnixSeconds": 1793743174.8393312,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743175.841124,
+      "endedUnixSeconds": 1793743176.936827,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.06,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743177.938561,
+      "endedUnixSeconds": 1793743179.0252008,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743180.025805,
+      "endedUnixSeconds": 1793743181.107786,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.03,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743182.111808,
+      "endedUnixSeconds": 1793743183.2054322,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743184.209742,
+      "endedUnixSeconds": 1793743185.328703,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.04,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743186.33407,
+      "endedUnixSeconds": 1793743187.42475,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743188.430181,
+      "endedUnixSeconds": 1793743189.527159,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743190.529866,
+      "endedUnixSeconds": 1793743191.616853,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743192.617704,
+      "endedUnixSeconds": 1793743193.708231,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743194.70864,
+      "endedUnixSeconds": 1793743195.799721,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743196.803287,
+      "endedUnixSeconds": 1793743197.965968,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.05,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743198.966654,
+      "endedUnixSeconds": 1793743200.064712,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743201.067949,
+      "endedUnixSeconds": 1793743202.1696022,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743203.170357,
+      "endedUnixSeconds": 1793743204.262423,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743205.266269,
+      "endedUnixSeconds": 1793743206.356933,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.1,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743207.35963,
+      "endedUnixSeconds": 1793743208.452728,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743209.454986,
+      "endedUnixSeconds": 1793743210.548896,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.06,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743211.55531,
+      "endedUnixSeconds": 1793743212.749621,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743213.7519941,
+      "endedUnixSeconds": 1793743214.852246,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743215.853077,
+      "endedUnixSeconds": 1793743216.941968,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743217.9423292,
+      "endedUnixSeconds": 1793743219.0315719,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743220.0334752,
+      "endedUnixSeconds": 1793743221.133437,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743222.135919,
+      "endedUnixSeconds": 1793743223.2408671,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743224.2431319,
+      "endedUnixSeconds": 1793743225.338746,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743226.343649,
+      "endedUnixSeconds": 1793743227.440143,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743228.440976,
+      "endedUnixSeconds": 1793743229.569393,
+      "minMs": 0.0,
+      "maxMs": 47.0,
+      "meanMs": 4.18,
+      "samples": 67
+    },
+    {
+      "startedUnixSeconds": 1793743230.573251,
+      "endedUnixSeconds": 1793743231.719688,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743232.7207942,
+      "endedUnixSeconds": 1793743233.835045,
+      "minMs": 0.0,
+      "maxMs": 7.0,
+      "meanMs": 0.53,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743234.835673,
+      "endedUnixSeconds": 1793743235.951105,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.23,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743236.9527738,
+      "endedUnixSeconds": 1793743238.046955,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743239.049568,
+      "endedUnixSeconds": 1793743240.161494,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743241.161877,
+      "endedUnixSeconds": 1793743242.264388,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.4,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743243.269803,
+      "endedUnixSeconds": 1793743244.37488,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.33,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743245.375456,
+      "endedUnixSeconds": 1793743246.5276139,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.19,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743247.529532,
+      "endedUnixSeconds": 1793743248.644753,
+      "minMs": 0.0,
+      "maxMs": 7.0,
+      "meanMs": 0.68,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743249.646285,
+      "endedUnixSeconds": 1793743250.7786949,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.38,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743251.7792761,
+      "endedUnixSeconds": 1793743252.903869,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.19,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743253.905241,
+      "endedUnixSeconds": 1793743255.007259,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.29,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743256.011648,
+      "endedUnixSeconds": 1793743257.106036,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743258.10657,
+      "endedUnixSeconds": 1793743259.231979,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743260.2329211,
+      "endedUnixSeconds": 1793743261.316693,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743262.317895,
+      "endedUnixSeconds": 1793743263.421449,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743264.4230452,
+      "endedUnixSeconds": 1793743265.531832,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743266.5342238,
+      "endedUnixSeconds": 1793743267.651485,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.16,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743268.652972,
+      "endedUnixSeconds": 1793743269.753515,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743270.754068,
+      "endedUnixSeconds": 1793743271.880468,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743272.881205,
+      "endedUnixSeconds": 1793743274.057348,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743275.0621388,
+      "endedUnixSeconds": 1793743276.178229,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743277.1800551,
+      "endedUnixSeconds": 1793743278.324981,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.24,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743279.3259351,
+      "endedUnixSeconds": 1793743280.408927,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743281.409641,
+      "endedUnixSeconds": 1793743282.5083442,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743283.513578,
+      "endedUnixSeconds": 1793743284.6272151,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743285.628217,
+      "endedUnixSeconds": 1793743286.72488,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743287.726232,
+      "endedUnixSeconds": 1793743288.822779,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743289.8244889,
+      "endedUnixSeconds": 1793743290.942369,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.06,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743291.944444,
+      "endedUnixSeconds": 1793743293.045248,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743294.05041,
+      "endedUnixSeconds": 1793743295.152493,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743296.156131,
+      "endedUnixSeconds": 1793743297.2660549,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743298.2711449,
+      "endedUnixSeconds": 1793743299.369542,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743300.372819,
+      "endedUnixSeconds": 1793743301.460757,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743302.464003,
+      "endedUnixSeconds": 1793743303.617166,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743304.619201,
+      "endedUnixSeconds": 1793743305.733906,
+      "minMs": 0.0,
+      "maxMs": 6.0,
+      "meanMs": 0.18,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743306.7383199,
+      "endedUnixSeconds": 1793743307.8327382,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743308.834257,
+      "endedUnixSeconds": 1793743309.962613,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.06,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743310.963727,
+      "endedUnixSeconds": 1793743312.0609531,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743313.062151,
+      "endedUnixSeconds": 1793743314.154149,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743315.154623,
+      "endedUnixSeconds": 1793743316.266689,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743317.2675672,
+      "endedUnixSeconds": 1793743318.366356,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743319.3690822,
+      "endedUnixSeconds": 1793743320.471246,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743321.476029,
+      "endedUnixSeconds": 1793743322.5713348,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743323.5723798,
+      "endedUnixSeconds": 1793743324.678307,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743325.681084,
+      "endedUnixSeconds": 1793743326.7763999,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.09,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743327.7788,
+      "endedUnixSeconds": 1793743328.865676,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743329.866272,
+      "endedUnixSeconds": 1793743330.956265,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743331.958085,
+      "endedUnixSeconds": 1793743333.0566342,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743334.0620658,
+      "endedUnixSeconds": 1793743335.197016,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743336.202081,
+      "endedUnixSeconds": 1793743337.29976,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743338.3022878,
+      "endedUnixSeconds": 1793743339.389844,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743340.392433,
+      "endedUnixSeconds": 1793743341.497393,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743342.501473,
+      "endedUnixSeconds": 1793743343.5888698,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743344.5897229,
+      "endedUnixSeconds": 1793743345.6964521,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743346.701608,
+      "endedUnixSeconds": 1793743347.796533,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743348.7969768,
+      "endedUnixSeconds": 1793743349.894502,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743350.89963,
+      "endedUnixSeconds": 1793743351.99583,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743352.999957,
+      "endedUnixSeconds": 1793743354.11092,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743355.112757,
+      "endedUnixSeconds": 1793743356.216685,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743357.222025,
+      "endedUnixSeconds": 1793743358.3150988,
+      "minMs": 0.0,
+      "maxMs": 5.0,
+      "meanMs": 0.39,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743359.316948,
+      "endedUnixSeconds": 1793743360.476385,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743361.4769258,
+      "endedUnixSeconds": 1793743362.576103,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743363.581574,
+      "endedUnixSeconds": 1793743364.687021,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743365.6875992,
+      "endedUnixSeconds": 1793743366.847426,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743367.848233,
+      "endedUnixSeconds": 1793743368.958179,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.2,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743369.9595468,
+      "endedUnixSeconds": 1793743371.056491,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743372.0582159,
+      "endedUnixSeconds": 1793743373.18031,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743374.1810958,
+      "endedUnixSeconds": 1793743375.2759879,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743376.277462,
+      "endedUnixSeconds": 1793743377.4009259,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743378.4054568,
+      "endedUnixSeconds": 1793743379.5268931,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743380.532148,
+      "endedUnixSeconds": 1793743381.649438,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743382.6512818,
+      "endedUnixSeconds": 1793743383.7682822,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.05,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743384.770593,
+      "endedUnixSeconds": 1793743385.8663821,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.06,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743386.867636,
+      "endedUnixSeconds": 1793743387.954667,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743388.958136,
+      "endedUnixSeconds": 1793743390.055089,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743391.057327,
+      "endedUnixSeconds": 1793743392.1528041,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743393.156849,
+      "endedUnixSeconds": 1793743394.2539709,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743395.25455,
+      "endedUnixSeconds": 1793743396.3499699,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743397.355102,
+      "endedUnixSeconds": 1793743398.5007732,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743399.501321,
+      "endedUnixSeconds": 1793743400.626957,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743401.632617,
+      "endedUnixSeconds": 1793743402.75526,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743403.7575161,
+      "endedUnixSeconds": 1793743404.896829,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.19,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743405.8987122,
+      "endedUnixSeconds": 1793743407.009665,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743408.0107992,
+      "endedUnixSeconds": 1793743409.1192582,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.21,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743410.120298,
+      "endedUnixSeconds": 1793743411.268425,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743412.269134,
+      "endedUnixSeconds": 1793743413.436786,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743414.4422898,
+      "endedUnixSeconds": 1793743415.557704,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743416.558623,
+      "endedUnixSeconds": 1793743417.687042,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743418.689485,
+      "endedUnixSeconds": 1793743419.8028748,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743420.806564,
+      "endedUnixSeconds": 1793743421.9086888,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743422.910517,
+      "endedUnixSeconds": 1793743424.0116282,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743425.01732,
+      "endedUnixSeconds": 1793743426.1265678,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743427.128778,
+      "endedUnixSeconds": 1793743428.249102,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.27,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743429.250483,
+      "endedUnixSeconds": 1793743430.381131,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743431.3818529,
+      "endedUnixSeconds": 1793743432.497738,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743433.498915,
+      "endedUnixSeconds": 1793743434.59833,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.22,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743435.602242,
+      "endedUnixSeconds": 1793743436.7161112,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743437.716597,
+      "endedUnixSeconds": 1793743438.808396,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.24,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743439.813796,
+      "endedUnixSeconds": 1793743440.900967,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743441.904864,
+      "endedUnixSeconds": 1793743443.0722098,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743444.07667,
+      "endedUnixSeconds": 1793743445.194947,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743446.195658,
+      "endedUnixSeconds": 1793743447.293227,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743448.296824,
+      "endedUnixSeconds": 1793743449.4332118,
+      "minMs": 0.0,
+      "maxMs": 9.0,
+      "meanMs": 0.4,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743450.438601,
+      "endedUnixSeconds": 1793743451.544081,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743452.544655,
+      "endedUnixSeconds": 1793743453.643501,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743454.64565,
+      "endedUnixSeconds": 1793743455.783678,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743456.783978,
+      "endedUnixSeconds": 1793743457.870502,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743458.8715641,
+      "endedUnixSeconds": 1793743459.952542,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743460.953642,
+      "endedUnixSeconds": 1793743462.049271,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743463.0526688,
+      "endedUnixSeconds": 1793743464.143612,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743465.1442912,
+      "endedUnixSeconds": 1793743466.2382011,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743467.239407,
+      "endedUnixSeconds": 1793743468.4080782,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.23,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743469.4135969,
+      "endedUnixSeconds": 1793743470.528946,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.18,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743471.5309818,
+      "endedUnixSeconds": 1793743472.648522,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743473.65271,
+      "endedUnixSeconds": 1793743474.767106,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743475.768207,
+      "endedUnixSeconds": 1793743476.909205,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743477.913933,
+      "endedUnixSeconds": 1793743479.037281,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.22,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743480.0377758,
+      "endedUnixSeconds": 1793743481.130027,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743482.130608,
+      "endedUnixSeconds": 1793743483.24509,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743484.245932,
+      "endedUnixSeconds": 1793743485.383515,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.21,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743486.387363,
+      "endedUnixSeconds": 1793743487.4910378,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743488.495214,
+      "endedUnixSeconds": 1793743489.630363,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743490.631816,
+      "endedUnixSeconds": 1793743491.769444,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743492.769856,
+      "endedUnixSeconds": 1793743493.885091,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743494.886644,
+      "endedUnixSeconds": 1793743495.973415,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743496.976844,
+      "endedUnixSeconds": 1793743498.138199,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743499.140314,
+      "endedUnixSeconds": 1793743500.226763,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743501.2318091,
+      "endedUnixSeconds": 1793743502.328512,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743503.332691,
+      "endedUnixSeconds": 1793743504.419324,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.07,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743505.42298,
+      "endedUnixSeconds": 1793743506.540458,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743507.545392,
+      "endedUnixSeconds": 1793743508.686988,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743509.689835,
+      "endedUnixSeconds": 1793743510.794303,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743511.795973,
+      "endedUnixSeconds": 1793743512.918143,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743513.923042,
+      "endedUnixSeconds": 1793743515.043007,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.23,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743516.045439,
+      "endedUnixSeconds": 1793743517.141334,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.29,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743518.144064,
+      "endedUnixSeconds": 1793743519.275383,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743520.277909,
+      "endedUnixSeconds": 1793743521.398255,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743522.402102,
+      "endedUnixSeconds": 1793743523.547945,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743524.549479,
+      "endedUnixSeconds": 1793743525.659502,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743526.663182,
+      "endedUnixSeconds": 1793743527.792489,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743528.7968981,
+      "endedUnixSeconds": 1793743529.909961,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.21,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743530.913496,
+      "endedUnixSeconds": 1793743532.071368,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743533.0767412,
+      "endedUnixSeconds": 1793743534.235569,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743535.239168,
+      "endedUnixSeconds": 1793743536.345061,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743537.346907,
+      "endedUnixSeconds": 1793743538.467865,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.21,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743539.4706922,
+      "endedUnixSeconds": 1793743540.5985029,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743541.603812,
+      "endedUnixSeconds": 1793743542.719766,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743543.720782,
+      "endedUnixSeconds": 1793743544.840456,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.26,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743545.843783,
+      "endedUnixSeconds": 1793743546.982343,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743547.983003,
+      "endedUnixSeconds": 1793743549.1072419,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743550.112816,
+      "endedUnixSeconds": 1793743551.231043,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743552.236418,
+      "endedUnixSeconds": 1793743553.362839,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743554.364001,
+      "endedUnixSeconds": 1793743555.483799,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743556.486519,
+      "endedUnixSeconds": 1793743557.5885801,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743558.591077,
+      "endedUnixSeconds": 1793743559.822552,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743560.8233018,
+      "endedUnixSeconds": 1793743561.927115,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743562.9282718,
+      "endedUnixSeconds": 1793743564.0453491,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743565.047221,
+      "endedUnixSeconds": 1793743566.2017028,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743567.205065,
+      "endedUnixSeconds": 1793743568.325533,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743569.328437,
+      "endedUnixSeconds": 1793743570.438457,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.05,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743571.442215,
+      "endedUnixSeconds": 1793743572.550866,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.17,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743573.5522099,
+      "endedUnixSeconds": 1793743574.666548,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743575.667222,
+      "endedUnixSeconds": 1793743576.7738051,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743577.778125,
+      "endedUnixSeconds": 1793743578.8979928,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743579.902048,
+      "endedUnixSeconds": 1793743581.008636,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743582.010057,
+      "endedUnixSeconds": 1793743583.128599,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743584.13411,
+      "endedUnixSeconds": 1793743585.260308,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.16,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743586.265738,
+      "endedUnixSeconds": 1793743587.3862798,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.13,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743588.3900769,
+      "endedUnixSeconds": 1793743589.496212,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.08,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743590.49669,
+      "endedUnixSeconds": 1793743591.605393,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743592.6086552,
+      "endedUnixSeconds": 1793743593.728775,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743594.7301939,
+      "endedUnixSeconds": 1793743595.847448,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743596.849111,
+      "endedUnixSeconds": 1793743597.969162,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.24,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743598.971274,
+      "endedUnixSeconds": 1793743600.0895638,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743601.090612,
+      "endedUnixSeconds": 1793743602.257097,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.16,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743603.259094,
+      "endedUnixSeconds": 1793743604.374656,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.05,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743605.376132,
+      "endedUnixSeconds": 1793743606.464252,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743607.468414,
+      "endedUnixSeconds": 1793743608.611156,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743609.61651,
+      "endedUnixSeconds": 1793743610.7251048,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.19,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743611.7271,
+      "endedUnixSeconds": 1793743612.823781,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.22,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743741.014456,
+      "endedUnixSeconds": 1793743742.2361379,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743743.237814,
+      "endedUnixSeconds": 1793743744.358096,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.25,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743745.361805,
+      "endedUnixSeconds": 1793743746.485302,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.1,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743747.4886909,
+      "endedUnixSeconds": 1793743748.619015,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.25,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743749.624547,
+      "endedUnixSeconds": 1793743750.744124,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743751.746628,
+      "endedUnixSeconds": 1793743752.8603032,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743753.861585,
+      "endedUnixSeconds": 1793743754.978406,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743755.979406,
+      "endedUnixSeconds": 1793743757.09775,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743758.0997062,
+      "endedUnixSeconds": 1793743759.218633,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743760.2205582,
+      "endedUnixSeconds": 1793743761.3423061,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.21,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743762.3477492,
+      "endedUnixSeconds": 1793743763.485666,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743764.4894369,
+      "endedUnixSeconds": 1793743765.598851,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.19,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743766.599703,
+      "endedUnixSeconds": 1793743767.740941,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.36,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743768.7417579,
+      "endedUnixSeconds": 1793743769.85283,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743770.858133,
+      "endedUnixSeconds": 1793743771.979264,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.26,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743772.98049,
+      "endedUnixSeconds": 1793743774.100161,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743775.103969,
+      "endedUnixSeconds": 1793743776.2252889,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.16,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743777.229318,
+      "endedUnixSeconds": 1793743778.370278,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743779.372721,
+      "endedUnixSeconds": 1793743780.4999208,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.17,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743781.501315,
+      "endedUnixSeconds": 1793743782.5867572,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743783.5888178,
+      "endedUnixSeconds": 1793743784.78204,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 98
+    },
+    {
+      "startedUnixSeconds": 1793743785.782618,
+      "endedUnixSeconds": 1793743786.8974311,
+      "minMs": 0.0,
+      "maxMs": 17.0,
+      "meanMs": 1.18,
+      "samples": 87
+    },
+    {
+      "startedUnixSeconds": 1793743787.901691,
+      "endedUnixSeconds": 1793743789.059773,
+      "minMs": 0.0,
+      "maxMs": 27.0,
+      "meanMs": 3.63,
+      "samples": 71
+    },
+    {
+      "startedUnixSeconds": 1793743790.060516,
+      "endedUnixSeconds": 1793743791.205119,
+      "minMs": 0.0,
+      "maxMs": 11.0,
+      "meanMs": 0.79,
+      "samples": 91
+    },
+    {
+      "startedUnixSeconds": 1793743792.210386,
+      "endedUnixSeconds": 1793743793.364556,
+      "minMs": 0.0,
+      "maxMs": 17.0,
+      "meanMs": 1.78,
+      "samples": 83
+    },
+    {
+      "startedUnixSeconds": 1793743794.368932,
+      "endedUnixSeconds": 1793743795.528769,
+      "minMs": 0.0,
+      "maxMs": 8.0,
+      "meanMs": 0.69,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743796.530566,
+      "endedUnixSeconds": 1793743797.663309,
+      "minMs": 0.0,
+      "maxMs": 16.0,
+      "meanMs": 0.92,
+      "samples": 91
+    },
+    {
+      "startedUnixSeconds": 1793743798.663757,
+      "endedUnixSeconds": 1793743799.897248,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.33,
+      "samples": 97
+    },
+    {
+      "startedUnixSeconds": 1793743800.9020648,
+      "endedUnixSeconds": 1793743802.00717,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.33,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743803.00926,
+      "endedUnixSeconds": 1793743804.1542149,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743805.157556,
+      "endedUnixSeconds": 1793743806.291163,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.14,
+      "samples": 99
+    },
+    {
+      "startedUnixSeconds": 1793743807.295083,
+      "endedUnixSeconds": 1793743808.472391,
+      "minMs": 0.0,
+      "maxMs": 4.0,
+      "meanMs": 0.62,
+      "samples": 90
+    },
+    {
+      "startedUnixSeconds": 1793743809.475849,
+      "endedUnixSeconds": 1793743810.669072,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.32,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743811.66977,
+      "endedUnixSeconds": 1793743812.7752142,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.16,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743813.780551,
+      "endedUnixSeconds": 1793743814.890613,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.12,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743815.89611,
+      "endedUnixSeconds": 1793743817.042648,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.09,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743818.046348,
+      "endedUnixSeconds": 1793743819.171689,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743820.175797,
+      "endedUnixSeconds": 1793743821.271925,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.11,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743822.272752,
+      "endedUnixSeconds": 1793743823.404245,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743824.4094641,
+      "endedUnixSeconds": 1793743825.516775,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743826.518381,
+      "endedUnixSeconds": 1793743827.604464,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743828.604764,
+      "endedUnixSeconds": 1793743829.715486,
+      "minMs": 0.0,
+      "maxMs": 13.0,
+      "meanMs": 0.38,
+      "samples": 92
+    },
+    {
+      "startedUnixSeconds": 1793743830.721494,
+      "endedUnixSeconds": 1793743831.836415,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743832.841624,
+      "endedUnixSeconds": 1793743833.932021,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.21,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743834.935791,
+      "endedUnixSeconds": 1793743836.069385,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743837.074741,
+      "endedUnixSeconds": 1793743838.185399,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743839.186604,
+      "endedUnixSeconds": 1793743840.281992,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.24,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743841.287323,
+      "endedUnixSeconds": 1793743842.419368,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.22,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743843.4228008,
+      "endedUnixSeconds": 1793743844.5410402,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.27,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743845.54671,
+      "endedUnixSeconds": 1793743846.659065,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.19,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743847.66465,
+      "endedUnixSeconds": 1793743848.815182,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743849.815992,
+      "endedUnixSeconds": 1793743850.938594,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.22,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743851.941134,
+      "endedUnixSeconds": 1793743853.065056,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743854.070236,
+      "endedUnixSeconds": 1793743855.233908,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.28,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743856.239201,
+      "endedUnixSeconds": 1793743857.339608,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743858.341953,
+      "endedUnixSeconds": 1793743859.440423,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.22,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743860.442854,
+      "endedUnixSeconds": 1793743861.575535,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743862.576737,
+      "endedUnixSeconds": 1793743863.667111,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.23,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743864.6717691,
+      "endedUnixSeconds": 1793743865.765145,
+      "minMs": 0.0,
+      "maxMs": 5.0,
+      "meanMs": 0.44,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743866.7677639,
+      "endedUnixSeconds": 1793743867.877328,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.23,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743868.881404,
+      "endedUnixSeconds": 1793743869.967212,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.15,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743870.970597,
+      "endedUnixSeconds": 1793743872.060247,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743873.061876,
+      "endedUnixSeconds": 1793743874.179327,
+      "minMs": 0.0,
+      "maxMs": 5.0,
+      "meanMs": 0.33,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743875.182173,
+      "endedUnixSeconds": 1793743876.276831,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.26,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743877.277738,
+      "endedUnixSeconds": 1793743878.3699892,
+      "minMs": 0.0,
+      "maxMs": 3.0,
+      "meanMs": 0.27,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743879.373905,
+      "endedUnixSeconds": 1793743880.483281,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.34,
+      "samples": 93
+    },
+    {
+      "startedUnixSeconds": 1793743881.483698,
+      "endedUnixSeconds": 1793743882.573673,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743883.578929,
+      "endedUnixSeconds": 1793743884.667615,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.23,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743885.669204,
+      "endedUnixSeconds": 1793743886.832691,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.22,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743887.8376892,
+      "endedUnixSeconds": 1793743888.943297,
+      "minMs": 0.0,
+      "maxMs": 2.0,
+      "meanMs": 0.21,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743889.9449909,
+      "endedUnixSeconds": 1793743891.047355,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.17,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743892.0480509,
+      "endedUnixSeconds": 1793743893.17505,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.34,
+      "samples": 94
+    },
+    {
+      "startedUnixSeconds": 1793743894.1798642,
+      "endedUnixSeconds": 1793743895.3281002,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.26,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743896.332617,
+      "endedUnixSeconds": 1793743897.4308321,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 96
+    },
+    {
+      "startedUnixSeconds": 1793743898.432107,
+      "endedUnixSeconds": 1793743899.552612,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.2,
+      "samples": 95
+    },
+    {
+      "startedUnixSeconds": 1793743900.5539699,
+      "endedUnixSeconds": 1793743901.652674,
+      "minMs": 0.0,
+      "maxMs": 1.0,
+      "meanMs": 0.18,
+      "samples": 97
+    }
+  ],
+  "redisMemory": {
+    "native_session_bytes": {
+      "subject": 112,
+      "refresh_rotation": 128,
+      "single_user_index": 176,
+      "directory_per_session": 181.7257525083612
+    },
+    "native_session_total_bytes": 597.7257525083612,
+    "pending_authorization_code_bytes": 392,
+    "refresh_family_sample": {
+      "count": 200,
+      "mean_bytes": 416.0,
+      "min_bytes": 416,
+      "max_bytes": 416
+    },
+    "redis_memory_info": {
+      "used_memory": "17190144",
+      "used_memory_rss": "29306880",
+      "mem_fragmentation_ratio": "1.71"
+    }
+  },
+  "bucketScope": {
+    "traefik": "3.5.1",
+    "average": 1,
+    "period": "1h",
+    "burst": 2,
+    "identity": [
+      200,
+      200,
+      429
+    ],
+    "api": [
+      200,
+      200,
+      429
+    ],
+    "separate_router_buckets": true
+  },
+  "outage": {
+    "healthy": {
+      "load": {
+        "scenario": "discovery",
+        "offered": 100,
+        "durationSeconds": 19.990036968000002,
+        "completed": 2000,
+        "completedPerSecond": 100.04983998786969,
+        "p50Ms": 0.8197920000020531,
+        "p95Ms": 20.17912499999875,
+        "p99Ms": 22.247832999999446,
+        "errors": {
+          "429:iam.ingress_rate_limit_exceeded": 300,
+          "429:http_error": 1648
+        },
+        "maxScheduleLagMs": 18.494125
+      },
+      "readiness": [
+        {
+          "timestamp": 1793744125.064768,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744126.225864,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744127.285694,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744128.346515,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744129.4086342,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744130.465698,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744131.5137851,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744132.601865,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744133.6548748,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744134.711773,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744135.763905,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744136.821617,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744137.883904,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744138.997508,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744140.058837,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744141.113742,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744142.164769,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744143.223653,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744144.272723,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        }
+      ]
+    },
+    "recovered": true,
+    "scope": "One identity router and one Traefik instance",
+    "redisStopped": {
+      "load": {
+        "scenario": "discovery",
+        "offered": 100,
+        "durationSeconds": 20.480463592,
+        "completed": 2000,
+        "completedPerSecond": 97.6540394711198,
+        "p50Ms": 0.8028750000003129,
+        "p95Ms": 278.1502919999998,
+        "p99Ms": 279.2174589999995,
+        "errors": {
+          "429:http_error": 1992
+        },
+        "maxScheduleLagMs": 18.11
+      },
+      "readiness": [
+        {
+          "timestamp": 1793744146.314158,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744147.367093,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744148.4548259,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744149.508802,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744150.58516,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744151.646354,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744152.699973,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744153.757906,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744154.8118348,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744155.970222,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744157.023129,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744158.093409,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744159.147668,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744160.210017,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744161.2668202,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744162.3522089,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744163.4058628,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744164.4678872,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744165.517844,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        },
+        {
+          "timestamp": 1793744166.573878,
+          "replicas": [
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            },
+            {
+              "ready": true
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
