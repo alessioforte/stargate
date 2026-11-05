@@ -182,6 +182,9 @@ runtimeConfig:
   annotations: {}
   data:
     LOG_FORMAT: json
+    # Literal Redis state namespace; empty preserves existing deployments.
+    # Set stargate: for ACL ~stargate:*; AUDIT_REDIS_STREAM stays independent.
+    REDIS_KEY_PREFIX: ""
 
 # JWT signing keys. Edge keeps them on the PVC (generated as RS256 on first
 # start; rotate with `stargate jwt generate-key` in the pod). Cluster replicas

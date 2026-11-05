@@ -4,6 +4,7 @@ use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
 use redis::AsyncCommands;
 use redis::aio::{ConnectionManager, ConnectionManagerConfig};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -342,6 +343,7 @@ impl StreamEntry {
 pub struct RedisStore {
     pool: RedisPool,
     compression: CompressionConfig,
+    key_prefix: String,
 }
 
 impl RedisStore {
@@ -378,7 +380,25 @@ impl RedisStore {
         Ok(Self {
             pool,
             compression: CompressionConfig::default(),
+            key_prefix: String::new(),
         })
+    }
+
+    /// Set the literal prefix for state keys (empty by default).
+    /// Stream methods always use the explicit stream name without this prefix.
+    pub fn with_key_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.key_prefix = prefix.into();
+        self
+    }
+
+    /// Convert a logical state key for raw commands and Lua scripts.
+    /// Call exactly once at the dispatch boundary; never prefix hash fields.
+    pub fn prefixed_key<'a>(&self, key: &'a str) -> Cow<'a, str> {
+        if self.key_prefix.is_empty() {
+            Cow::Borrowed(key)
+        } else {
+            Cow::Owned(format!("{}{}", self.key_prefix, key))
+        }
     }
 
     /// Enable compression on this store.
@@ -408,7 +428,8 @@ impl RedisStore {
     ///
     /// The returned `ConnectionManager` is a cheap Arc-clone of one of the
     /// pooled connections, selected via round-robin. It can be used directly
-    /// with the `redis` crate's async command API.
+    /// with the `redis` crate's async command API. Raw state commands must use
+    /// [`Self::prefixed_key`]; stream commands use their explicit names.
     pub fn get_connection(&self) -> ConnectionManager {
         self.pool.get()
     }
@@ -520,6 +541,8 @@ impl Store for RedisStore {
 
     async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -544,6 +567,8 @@ impl Store for RedisStore {
         ttl: Option<u64>,
     ) -> StoreResult<()> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
@@ -576,6 +601,8 @@ impl Store for RedisStore {
         ttl: Option<u64>,
     ) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -602,6 +629,8 @@ impl Store for RedisStore {
 
     async fn delete(&self, key: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -614,6 +643,8 @@ impl Store for RedisStore {
 
     async fn exists(&self, key: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -632,6 +663,8 @@ impl Store for RedisStore {
         ttl: Option<u64>,
     ) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
         self.validate_field(field)?;
 
         if ttl == Some(0) {
@@ -675,6 +708,8 @@ impl Store for RedisStore {
 
     async fn hget<T: DeserializeValue>(&self, key: &str, field: &str) -> StoreResult<Option<T>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
         self.validate_field(field)?;
 
         let mut con = self.pool.get();
@@ -697,6 +732,8 @@ impl Store for RedisStore {
 
     async fn hdel(&self, key: &str, field: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
         self.validate_field(field)?;
 
         let mut con = self.pool.get();
@@ -713,6 +750,8 @@ impl Store for RedisStore {
 
     async fn hgetall<T: DeserializeValue>(&self, key: &str) -> StoreResult<HashMap<String, T>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -740,6 +779,8 @@ impl Store for RedisStore {
 
     async fn hexists(&self, key: &str, field: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
         self.validate_field(field)?;
 
         let mut con = self.pool.get();
@@ -756,6 +797,8 @@ impl Store for RedisStore {
 
     async fn hkeys(&self, key: &str) -> StoreResult<Vec<String>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -768,6 +811,8 @@ impl Store for RedisStore {
 
     async fn hvals<T: DeserializeValue>(&self, key: &str) -> StoreResult<Vec<T>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -795,6 +840,8 @@ impl Store for RedisStore {
 
     async fn hlen(&self, key: &str) -> StoreResult<usize> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -816,6 +863,8 @@ impl Store for RedisStore {
         ttl: Option<u64>,
     ) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
@@ -868,7 +917,11 @@ impl RedisStore {
         let mut con = self.pool.get();
 
         let values: Vec<Option<Vec<u8>>> = con
-            .mget(keys)
+            .mget(
+                keys.iter()
+                    .map(|key| self.prefixed_key(key))
+                    .collect::<Vec<_>>(),
+            )
             .await
             .map_err(|e| StoreError::RedisFailed(format!("Failed to mget keys: {}", e)))?;
 
@@ -906,8 +959,10 @@ impl RedisStore {
             }
             let serialized = self.serialize(value)?;
             match ttl {
-                Some(ttl) => pipe.set_ex(key, serialized, ttl).ignore(),
-                None => pipe.set(key, serialized).ignore(),
+                Some(ttl) => pipe
+                    .set_ex(self.prefixed_key(key), serialized, ttl)
+                    .ignore(),
+                None => pipe.set(self.prefixed_key(key), serialized).ignore(),
             };
         }
         if operations.is_empty() {
@@ -934,7 +989,7 @@ impl RedisStore {
 
         let mut pipe = redis::pipe();
         for key in keys {
-            pipe.del(*key);
+            pipe.del(self.prefixed_key(key));
         }
 
         let mut con = self.pool.get();
@@ -957,7 +1012,7 @@ impl RedisStore {
 
         let mut pipe = redis::pipe();
         for key in keys {
-            pipe.exists(*key);
+            pipe.exists(self.prefixed_key(key));
         }
 
         let mut con = self.pool.get();
@@ -977,6 +1032,8 @@ impl RedisStore {
 impl AtomicStore for RedisStore {
     async fn get_i64(&self, key: &str) -> StoreResult<Option<i64>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         let mut con = self.pool.get();
 
@@ -990,6 +1047,8 @@ impl AtomicStore for RedisStore {
 
     async fn set_i64(&self, key: &str, value: i64, ttl: Option<u64>) -> StoreResult<()> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
@@ -1015,6 +1074,8 @@ impl AtomicStore for RedisStore {
 
     async fn incr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
@@ -1054,6 +1115,8 @@ impl AtomicStore for RedisStore {
 
     async fn decr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
@@ -1099,6 +1162,8 @@ impl AtomicStore for RedisStore {
         ttl: Option<u64>,
     ) -> StoreResult<bool> {
         self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
 
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));

@@ -280,7 +280,7 @@ impl RateLimit for TokenBucket {
         let ttl = self.ttl;
 
         let (allowed, remaining, retry_after_ms): (i32, u64, u64) = script
-            .key(key)
+            .key(self.store.prefixed_key(key))
             .arg(capacity)
             .arg(refill_rate)
             .arg(cost)

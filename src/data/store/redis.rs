@@ -10,6 +10,8 @@ pub async fn init() -> anyhow::Result<&'static RedisStore> {
 
             let pool_size = pool_size()?;
 
+            let key_prefix =
+                crate::conf::env::parse_or::<String>("REDIS_KEY_PREFIX", String::new())?;
             let config = RedisPoolConfig::new(pool_size);
             #[cfg(feature = "redis-compression")]
             let com = Compression::Lz4;
@@ -18,7 +20,8 @@ pub async fn init() -> anyhow::Result<&'static RedisStore> {
             let com_config = CompressionConfig::new(com);
             let store = RedisStore::with_client(client, config)
                 .await?
-                .with_compression(com_config);
+                .with_compression(com_config)
+                .with_key_prefix(key_prefix);
             tracing::info!(
                 "Redis store initialized with pool of {} connection(s)",
                 store.pool_size()

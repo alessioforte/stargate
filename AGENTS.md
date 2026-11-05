@@ -144,6 +144,11 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   verified TLS for `rediss://`, public roots by default or `REDIS_CA_FILE`, and
   separate credentials without URL encoding. The store, limiter, and audit relay
   share the same pool; URL credentials cannot be combined with separate fields.
+  `REDIS_KEY_PREFIX` (empty by default) literally prefixes all state keys at the
+  store boundary, including batch/atomic operations and limiter Lua keys. Hash
+  fields are unchanged; audit stream methods use the explicit `AUDIT_REDIS_STREAM`
+  name without the prefix. Changing the prefix hides existing sessions, revocations
+  and counters; coordinate migration/draining across replicas.
   A configured `REDIS_CA_FILE` requires `rediss://`; a cleartext URL fails startup.
 - `obs/`: logging (`logging/settings.rs` parses the format and sinks), and the
   telemetry provider (`telemetry/metrics.rs`, `telemetry/propagation.rs`). OTLP
@@ -878,6 +883,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `DB_POOL_MAX`                                                                          | 20                                     | Positive maximum connections in each SQL pool; invalid values stop startup                                                                                                |
 | `DB_MIGRATE_ON_START`                                                                  | true                                   | true/false; false checks the schema without migrating; run `stargate db migrate` separately                                         |
 | `REDIS_URL`                                                                            | redis://localhost:6379                 | Redis endpoint; `rediss://` verifies the server and hostname                                                                        |
+| `REDIS_KEY_PREFIX` | empty | Literal state-key prefix, including limiter Lua keys; excludes audit stream names. Coordinate changes across replicas. |
 | `REDIS_POOL_SIZE` | 4 | Positive connections per Redis pool; invalid values stop startup |
 | `REDIS_USERNAME` / `REDIS_PASSWORD`                                                    | -                                      | Optional ACL credentials, passed without URL encoding; cannot be combined with URL credentials                                      |
 | `REDIS_CA_FILE`                                                                        | -                                      | Private CA PEM roots for `rediss://`; replace public roots                                                                          |

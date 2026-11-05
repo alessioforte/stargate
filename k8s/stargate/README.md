@@ -143,6 +143,41 @@ CLI process or Job using these settings. Chart `extraVolumes` and
 import hooks do not inherit these mounts. When a private CA is required, use
 separate CLI Jobs with the CA mounted instead of enabling those hooks.
 
+## Redis state namespace
+
+Set `runtimeConfig.data.REDIS_KEY_PREFIX: "stargate:"` to isolate state keys
+with ACL patterns `~stargate:* ~audit.raw`. The default is empty for compatibility.
+The prefix is literal: include the trailing colon. It covers session/auth/OAuth
+state, hash keys (not fields), batch and atomic operations, and all limiter Lua
+keys. `AUDIT_REDIS_STREAM` remains a separate, explicit name (`audit.raw` by default).
+Changing the prefix hides existing sessions, revocations and limiter counters;
+coordinate migration or draining across every replica before changing it.
+
+The local ACL smoke test builds a fresh synthetic database and verifies login,
+refresh rotation, session revocation, gateway admission/rate limiting, all three
+Lua limiter strategies, store operations and the audit relay with a protected
+consumer group. Run it after `cargo build --features cluster`:
+
+```bash
+python3 benches/scripts/test_redis_prefix.py \
+  --redis-image <local-redis-image-digest> \
+  --postgres-image <local-postgres-image-digest>
+```
+
+Use Redis >= 7.4 (hash-field expiry). The disposable services bind only to
+localhost and are removed on exit. The test creates the exact ACL
+`~stargate:* ~audit.raw +@all -@admin -@dangerous`, verifies an empty ACL failure
+log and checks that every state key has the prefix while `audit.raw` does not.
+Its observer uses the fixture's admin connection for diagnostics only.
+
+Observed application commands: `AUTH`, `HELLO`, `CLIENT SETINFO`, `PING`, `GET`,
+`SET`, `SETEX`, `DEL`, `EXISTS`, `MGET`, `HSET`, `HGET`, `HDEL`, `HEXISTS`,
+`HGETALL`, `HKEYS`, `HVALS`, `HLEN`, `HEXPIRE`, `INCRBY`, `DECRBY`, `EXPIRE`,
+`TTL`, `SCRIPT LOAD`, `EVALSHA`, `TIME`, `XADD`, `XLEN`, `XINFO GROUPS`,
+`XPENDING`, `XRANGE`, `XTRIM`. No additional command grants were needed for the
+smoke test. `ACL LOG`, `CONFIG RESETSTAT`, `INFO`, `KEYS` and fixture setup/removal
+are observer operations, not permissions required by Stargate.
+
 ## Redis TLS and availability
 
 Set `REDIS_URL` to a `rediss://` endpoint to verify the server certificate

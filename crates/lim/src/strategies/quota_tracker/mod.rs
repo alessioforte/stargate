@@ -161,7 +161,7 @@ impl RateLimit for QuotaTracker {
         let window = self.window;
 
         let (allowed, count, ttl_remaining): (i32, u64, u64) = script
-            .key(key)
+            .key(self.store.prefixed_key(key))
             .arg(limit)
             .arg(window)
             .arg(cost)

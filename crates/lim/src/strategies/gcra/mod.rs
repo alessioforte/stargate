@@ -217,7 +217,7 @@ impl RateLimit for Gcra {
         let ttl = self.ttl;
 
         let (allow, retry_after, remaining_burst): (i32, u64, u64) = script
-            .key(key)
+            .key(self.store.prefixed_key(key))
             .arg(tau)
             .arg(burst)
             .arg(ttl)
