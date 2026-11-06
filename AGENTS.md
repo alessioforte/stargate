@@ -46,7 +46,7 @@ stargate/
 │   ├── oidc/          # Pure OAuth/OIDC provider helpers (PKCE, codes, refresh, claims, metadata)
 │   ├── otp/           # Pure HOTP/TOTP + email/SMS OTP primitives
 │   ├── pw/            # Passwords: Argon2 (tunable params + pepper), policy engine, generator, API keys
-│   ├── smtp/          # Email delivery (lettre)
+│   ├── smtp/          # Email delivery (lettre with rustls TLS)
 │   ├── store/         # State store (DashMap / Redis)
 │   └── tools/         # Shared duration parsing and hostname validation
 ├── apps/              # TypeScript frontends (see "Frontend")
@@ -751,7 +751,9 @@ OTP state keys: `account:login:otp:email:{challenge_id}`,
 `account:mfa:verified:{sid}:{purpose}`, throttling under `account:otp:request:*`.
 
 Delivery: `smtp::Smtp` on `spawn_blocking`; passwordless delivery is backgrounded
-against enumeration timing. Only email OTP is wired; TOTP/HOTP and SMS exist as
+against enumeration timing. `SMTP_TLS` selects `starttls` (default, required
+STARTTLS), `implicit` (SMTPS), or `none` (local relays only; rejected at
+startup with credentials). Only email OTP is wired; TOTP/HOTP and SMS exist as
 primitives only.
 
 Per-recipient email throttle (`src/iam/email_throttle.rs`): unauthenticated flows
@@ -926,7 +928,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `ARGON2_MEMORY_KIB` / `_ITERATIONS` / `_PARALLELISM`                                   | 19456 / 2 / 1                          | Argon2id cost                                                                                                                       |
 | `PASSWORD_HASH_CONCURRENCY` | available CPUs (at least 1) | Positive process-wide Argon2 concurrency; invalid values stop startup |
 | `PASSWORD_PEPPER`                                                                      | -                                      | Optional Argon2 secret                                                                                                              |
-| `SMTP_*`, `GOOGLE_OAUTH_*`, `GITHUB_OAUTH_*`                                           | -                                      | Email delivery, social login                                                                                                        |
+| `SMTP_*` (incl. `SMTP_TLS`), `GOOGLE_OAUTH_*`, `GITHUB_OAUTH_*`           | -                                      | Email delivery (`SMTP_TLS=starttls` default), social login                                                                              |
 
 Full list: `.env.example`.
 

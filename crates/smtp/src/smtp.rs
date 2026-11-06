@@ -1,7 +1,13 @@
 use lettre::address::AddressError;
 use lettre::message::{Mailbox, header::ContentType};
-use lettre::transport::smtp::{authentication::Credentials, response::Response};
+use lettre::transport::smtp::{
+    authentication::Credentials,
+    client::{Tls, TlsParameters},
+    response::Response,
+};
 use lettre::{Message, SmtpTransport, Transport};
+
+use crate::settings::{SmtpSettings, SmtpTls, smtp_settings};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SmtpError {
@@ -11,23 +17,11 @@ pub enum SmtpError {
         #[source]
         source: AddressError,
     },
-    #[error("invalid SMTP sender mailbox `{value}`")]
-    InvalidSender {
-        value: String,
-        #[source]
-        source: AddressError,
-    },
     #[error("failed to read email template `{path}`")]
     TemplateRead {
         path: String,
         #[source]
         source: std::io::Error,
-    },
-    #[error("invalid SMTP port `{value}`")]
-    InvalidPort {
-        value: String,
-        #[source]
-        source: std::num::ParseIntError,
     },
     #[error("email message has not been built")]
     MissingMessage,
@@ -146,13 +140,6 @@ impl Smtp {
         Ok(Mailbox::new(name, address))
     }
 
-    fn sender_mailbox(value: &str) -> Result<Mailbox, SmtpError> {
-        value.parse().map_err(|source| SmtpError::InvalidSender {
-            value: value.to_string(),
-            source,
-        })
-    }
-
     fn render_body(&self) -> Result<String, SmtpError> {
         if let Some(body) = &self.body {
             return Ok(body.clone());
@@ -173,31 +160,33 @@ impl Smtp {
             .replace("{{link}}", &self.link)
     }
 
-    fn build_mailer(
-        host: String,
-        port: &str,
-        username: String,
-        password: String,
-    ) -> Result<SmtpTransport, SmtpError> {
-        let port = port.parse().map_err(|source| SmtpError::InvalidPort {
-            value: port.to_string(),
-            source,
-        })?;
-        let builder = SmtpTransport::builder_dangerous(host).port(port);
-        let builder = if username.is_empty() && password.is_empty() {
+    fn build_mailer(settings: &SmtpSettings) -> Result<SmtpTransport, SmtpError> {
+        let builder = SmtpTransport::builder_dangerous(settings.host.clone()).port(settings.port);
+        let builder = match settings.tls {
+            SmtpTls::Starttls => {
+                let tls = TlsParameters::new(settings.host.clone())?;
+                builder.tls(Tls::Required(tls))
+            }
+            SmtpTls::Implicit => {
+                let tls = TlsParameters::new(settings.host.clone())?;
+                builder.tls(Tls::Wrapper(tls))
+            }
+            SmtpTls::None => builder,
+        };
+        let builder = if settings.username.is_empty() && settings.password.is_empty() {
             builder
         } else {
-            builder.credentials(Credentials::new(username, password))
+            builder.credentials(Credentials::new(
+                settings.username.clone(),
+                settings.password.clone(),
+            ))
         };
         Ok(builder.build())
     }
 
     pub fn build(&mut self) -> Result<&mut Self, SmtpError> {
         let to = self.recipient_mailbox()?;
-        let from = Self::sender_mailbox(
-            &std::env::var("SMTP_FROM")
-                .unwrap_or_else(|_| "NoBody <nobody@domain.tld>".to_string()),
-        )?;
+        let from = smtp_settings().from.clone();
         let subject = self
             .subject
             .as_deref()
@@ -219,12 +208,8 @@ impl Smtp {
     }
 
     pub fn send(&self) -> Result<Response, SmtpError> {
-        let username = std::env::var("SMTP_USERNAME").unwrap_or_else(|_| "".to_string());
-        let password = std::env::var("SMTP_PASSWORD").unwrap_or_else(|_| "".to_string());
-        let host = std::env::var("SMTP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-        let port = std::env::var("SMTP_PORT").unwrap_or_else(|_| "1025".to_string());
-        let mailer = Self::build_mailer(host, &port, username, password)?;
         let message = self.message.as_ref().ok_or(SmtpError::MissingMessage)?;
+        let mailer = Self::build_mailer(smtp_settings())?;
 
         let response = mailer.send(message).map_err(SmtpError::Transport);
         if let Err(error) = &response {
@@ -237,7 +222,7 @@ impl Smtp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Smtp, SmtpError, Template};
+    use super::{Smtp, SmtpError, SmtpSettings, SmtpTls, Template};
 
     #[test]
     fn build_rejects_invalid_recipient_email() {
@@ -281,14 +266,97 @@ mod tests {
     }
 
     #[test]
-    fn build_mailer_rejects_invalid_port() {
-        let result = Smtp::build_mailer(
-            "localhost".to_string(),
-            "not-a-port",
-            String::new(),
-            String::new(),
-        );
+    fn build_mailer_builds_every_tls_mode() {
+        for tls in [SmtpTls::Starttls, SmtpTls::Implicit, SmtpTls::None] {
+            let settings = SmtpSettings {
+                host: "localhost".to_string(),
+                port: 1025,
+                from: "NoBody <nobody@domain.tld>".parse().unwrap(),
+                username: String::new(),
+                password: String::new(),
+                tls,
+            };
+            assert!(Smtp::build_mailer(&settings).is_ok(), "{tls}");
+        }
+    }
 
-        assert!(matches!(result, Err(SmtpError::InvalidPort { .. })));
+    /// A server that advertises AUTH but not STARTTLS must never receive the
+    /// credentials: the transport fails while negotiating TLS, before AUTH.
+    #[test]
+    fn required_starttls_sends_no_credentials_to_a_server_without_it() {
+        use lettre::{Message, Transport};
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (commands, received) = mpsc::channel::<Vec<String>>();
+
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut writer = stream.try_clone().unwrap();
+            let mut reader = BufReader::new(stream);
+            writer.write_all(b"220 test ESMTP\r\n").unwrap();
+            let mut seen = Vec::new();
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                let command = line.trim_end().to_string();
+                seen.push(command.clone());
+                let reply: &[u8] = if command.starts_with("EHLO") || command.starts_with("HELO") {
+                    // Advertises an authentication mechanism and no STARTTLS.
+                    b"250-test\r\n250-AUTH PLAIN LOGIN\r\n250 SIZE 10240000\r\n"
+                } else if command.starts_with("QUIT") {
+                    b"221 Bye\r\n"
+                } else {
+                    b"250 OK\r\n"
+                };
+                if writer.write_all(reply).is_err() {
+                    break;
+                }
+                if command.starts_with("QUIT") {
+                    break;
+                }
+            }
+            let _ = commands.send(seen);
+        });
+
+        let settings = SmtpSettings {
+            host: "127.0.0.1".to_string(),
+            port,
+            from: "Smoke <smoke@example.com>".parse().unwrap(),
+            username: "project-id".to_string(),
+            password: "secret".to_string(),
+            tls: SmtpTls::Starttls,
+        };
+        let message = Message::builder()
+            .from(settings.from.clone())
+            .to("recipient@example.com".parse().unwrap())
+            .subject("STARTTLS regression")
+            .body(String::from("body"))
+            .unwrap();
+        let mailer = Smtp::build_mailer(&settings).unwrap();
+
+        assert!(mailer.send(&message).is_err());
+
+        let seen = received.recv_timeout(Duration::from_secs(10)).unwrap();
+        server.join().unwrap();
+        assert!(
+            seen.iter().any(|command| command.starts_with("EHLO")),
+            "no EHLO: {seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|command| command.starts_with("AUTH")),
+            "credentials sent without STARTTLS: {seen:?}"
+        );
     }
 }

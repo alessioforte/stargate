@@ -695,6 +695,12 @@ naming the variable: for example passwordless login without
 `EMAIL_OTP_PEPPER`, or a client id without its secret. The container exits
 and restarts (`CrashLoopBackOff`); `kubectl logs` shows the reason.
 
+`SMTP_TLS` selects how outgoing email connects: `starttls` (default, required
+STARTTLS, never opportunistic), `implicit` (SMTPS on connect), or `none`
+(plaintext, only for a trusted local relay such as Mailpit). `none` together
+with `SMTP_USERNAME`/`SMTP_PASSWORD` stops the pod at startup rather than
+sending credentials in plaintext.
+
 ## Configuration ownership
 
 The chart manages these environment variables and rejects duplicates in

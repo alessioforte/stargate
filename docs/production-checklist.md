@@ -45,7 +45,8 @@ example hostname, CIDR, Secret name and image tag.
       identity host, never the Stargate Service.
 - [ ] **Admin access**: `traefik.adminAllowList.sourceRange` contains only operator
       networks (VPN or office egress).
-- [ ] **Email**: an authenticated SMTP relay with SPF and DKIM for the sender domain.
+- [ ] **Email**: an authenticated SMTP relay with SPF and DKIM for the sender domain;
+      `SMTP_TLS=starttls` (or `implicit`) so credentials never leave in plaintext.
 - [ ] **Network policy**: egress rules match your PostgreSQL, Redis, SMTP, collector,
       backends and any external OAuth/JWKS endpoints.
 
@@ -59,6 +60,7 @@ example hostname, CIDR, Secret name and image tag.
 | `MFA_REQUIRED_FOR_SUPER_ADMIN` | `true` | Super-admins sign in with a second factor. |
 | `MFA_ADMIN_STEP_UP_REQUIRED` | `true` | Admin operations need a recent step-up. |
 | `SIGNUP_MODE` | `invite` | No self-registration unless you choose `open`. |
+| `SMTP_TLS` | `starttls` | STARTTLS required before any SMTP data; `none` with credentials is refused. |
 | `migrations.job.enabled` | `true` | Schema changes run once, before the rollout. |
 | `topologySpreadConstraints` | one replica per node | A node failure leaves two replicas. |
 | `podDisruptionBudget.maxUnavailable` | `1` | Drains and upgrades keep two replicas serving. |

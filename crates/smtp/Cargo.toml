@@ -7,6 +7,13 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-lettre = { workspace = true }
+lettre = { workspace = true, features = [
+    "smtp-transport",
+    "pool",
+    "builder",
+    "hostname",
+    "rustls-tls",
+] }
+rustls = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

@@ -98,6 +98,7 @@ runtimeConfig:
     # for the sender domain). SMTP_USERNAME/SMTP_PASSWORD go in the Secret.
     SMTP_HOST: smtp.example.com
     SMTP_PORT: "587"
+    SMTP_TLS: starttls
     SMTP_FROM: Stargate <no-reply@example.com>
 
     # Telemetry to the in-cluster collector (gRPC).
