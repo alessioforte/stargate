@@ -197,3 +197,18 @@ WHERE "published_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_outbox_events_operation_id"
 ON "outbox_events" ("operation_id")
 WHERE "operation_id" IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS "config_documents" (
+    "id" TEXT PRIMARY KEY,
+    "kind" TEXT NOT NULL CHECK ("kind" IN ('gateway', 'policies')),
+    "version" BIGINT NOT NULL CHECK ("version" > 0),
+    "revision" TEXT NOT NULL,
+    "content" TEXT NOT NULL,
+    "source" TEXT NOT NULL CHECK ("source" IN ('seed', 'admin_api', 'cli_import')),
+    "created_by" TEXT,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE ("kind", "version")
+);
+
+CREATE INDEX idx_outbox_events_published_at
+    ON outbox_events (published_at) WHERE published_at IS NOT NULL;

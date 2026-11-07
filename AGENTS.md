@@ -822,7 +822,10 @@ Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_his
 `user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`,
 `config_documents` (append-only gateway configuration and ACE policy versions).
 The initial migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
-creates the base schema; later forward migrations extend it.
+creates the complete initial schema. After a release, published migrations are
+immutable: never edit or squash them. Every schema change must be a new forward
+migration. Local databases created before the initial schema was consolidated
+must be recreated, because sqlx rejects a modified applied migration checksum.
 
 User identity (`crates/db/src/ent/user.rs`, enforced by the users repository on
 every insert/update):
