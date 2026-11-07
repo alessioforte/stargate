@@ -12,10 +12,10 @@ use lim::{
 use std::{sync::Arc, time::Duration};
 
 #[tokio::test]
-#[ignore = "requires isolated SG02_REDIS_URL with the restricted Stargate ACL"]
+#[ignore = "requires isolated REDIS_PREFIX_TEST_URL with the restricted Stargate ACL"]
 async fn all_lua_limiters_use_the_store_prefix() -> Result<(), Box<dyn std::error::Error>> {
     let store = Arc::new(
-        store::RedisStore::new(&std::env::var("SG02_REDIS_URL")?)
+        store::RedisStore::new(&std::env::var("REDIS_PREFIX_TEST_URL")?)
             .await?
             .with_key_prefix("stargate:"),
     );

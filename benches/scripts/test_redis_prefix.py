@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SG02: disposable local cluster-profile smoke test with the production ACL.
+"""Redis prefix test: disposable local cluster-profile smoke test with the production ACL.
 
 Build first: cargo build --features cluster
 Run: python3 benches/scripts/test_redis_prefix.py --redis-image <digest> --postgres-image <digest>
@@ -56,17 +56,17 @@ def main():
         else:
             raise AssertionError('fixture startup timeout')
         assert redis_cmd('ACL', 'SETUSER', 'stargate', 'reset', 'on', 'nopass', '~stargate:*', '~audit.raw', '+@all', '-@admin', '-@dangerous') == '"OK"'
-        redis_cmd('XGROUP', 'CREATE', 'audit.raw', 'sg02', '0', 'MKSTREAM')
+        redis_cmd('XGROUP', 'CREATE', 'audit.raw', 'redis-prefix-test', '0', 'MKSTREAM')
         redis_cmd('ACL', 'LOG', 'RESET')
         redis_cmd('CONFIG', 'RESETSTAT')
-        with tempfile.TemporaryDirectory(prefix='sg02-') as directory:
+        with tempfile.TemporaryDirectory(prefix='redis-prefix-test-') as directory:
             folder = Path(directory)
             # Run outside the checkout so dotenv never reads the operator's .env.
             env = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'RUSTUP_HOME', 'CARGO_HOME') if key in os.environ}
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
-            env.update(CONFIG_PATH=directory, POSTGRES_ENDPOINT=f'127.0.0.1:{pg_port}', POSTGRES_USERNAME='postgres', POSTGRES_PASSWORD='', POSTGRES_DATABASE='postgres', POSTGRES_CREATE_DATABASE='false', POSTGRES_SSLMODE='disable', REDIS_URL=f'redis://127.0.0.1:{redis_port}', REDIS_USERNAME='stargate', REDIS_PASSWORD='', REDIS_KEY_PREFIX='stargate:', MFA_MODE='off', JWT_ALGORITHM='HS256', JWT_SECRET=secrets.token_urlsafe(48), JWT_ISSUER=f'http://127.0.0.1:{port}', PORT=str(port), LOG_FORMAT='json', AUDIT_REDIS_STREAM='audit.raw', AUDIT_STREAM_CONSUMER_GROUPS='sg02', OTEL_ENABLED='false', SERVER_DRAIN_DELAY_SECS='0', SG02_REDIS_URL=f'redis://stargate@127.0.0.1:{redis_port}')
+            env.update(CONFIG_PATH=directory, POSTGRES_ENDPOINT=f'127.0.0.1:{pg_port}', POSTGRES_USERNAME='postgres', POSTGRES_PASSWORD='', POSTGRES_DATABASE='postgres', POSTGRES_CREATE_DATABASE='false', POSTGRES_SSLMODE='disable', REDIS_URL=f'redis://127.0.0.1:{redis_port}', REDIS_USERNAME='stargate', REDIS_PASSWORD='', REDIS_KEY_PREFIX='stargate:', MFA_MODE='off', JWT_ALGORITHM='HS256', JWT_SECRET=secrets.token_urlsafe(48), JWT_ISSUER=f'http://127.0.0.1:{port}', PORT=str(port), LOG_FORMAT='json', AUDIT_REDIS_STREAM='audit.raw', AUDIT_STREAM_CONSUMER_GROUPS='redis-prefix-test', OTEL_ENABLED='false', SERVER_DRAIN_DELAY_SECS='0', REDIS_PREFIX_TEST_URL=f'redis://stargate@127.0.0.1:{redis_port}')
             (folder / 'config.yaml').write_text('''schema: stargate/v1
 ingress:
   limit: ingress
@@ -88,13 +88,13 @@ http:
     limit: {kind: rate_limit, limit: smoke, on_store_error: deny}
   routers:
     smoke:
-      match: {path: {exact: /sg02}}
+      match: {path: {exact: /redis-prefix-test}}
       service: ok
       policies: [limit]
 ''')
             binary = str(ROOT / 'target/debug/stargate')
             password = secrets.token_urlsafe(30) + 'Aa1!'
-            run([binary, 'admin', 'bootstrap', '--email', 'sg02@example.com', '--password-stdin', '--name', 'SG02', '--nickname', 'sg02'], input=password+'\n', env=env, cwd=directory)
+            run([binary, 'admin', 'bootstrap', '--email', 'redis-prefix-test@example.com', '--password-stdin', '--name', 'Redis prefix test', '--nickname', 'redis-prefix-test'], input=password+'\n', env=env, cwd=directory)
             with (folder / 'server.log').open('w+') as log:
                 server = subprocess.Popen([binary], env=env, cwd=directory, stdout=log, stderr=subprocess.STDOUT)
                 def request(path, method='GET', body=None, token=None):
@@ -121,20 +121,20 @@ http:
                     time.sleep(.2)
                 else:
                     raise AssertionError('server readiness timeout')
-                status, login = request('/account/login', 'POST', {'username': 'sg02', 'password': password})
+                status, login = request('/account/login', 'POST', {'username': 'redis-prefix-test', 'password': password})
                 assert status == 200, f'login status {status}'
                 status, refreshed = request('/account/refresh-token', 'PUT', {'refresh_token': login['refreshToken']})
                 assert status == 200, f'refresh status {status}'
                 # A second session performs revocation of the first one.
-                status, admin = request('/account/login', 'POST', {'username': 'sg02', 'password': password})
+                status, admin = request('/account/login', 'POST', {'username': 'redis-prefix-test', 'password': password})
                 assert status == 200
                 claims = json.loads(base64.urlsafe_b64decode(refreshed['accessToken'].split('.')[1] + '=='))
                 assert request(f"/admin/sessions/{claims['sid']}", 'DELETE', token=admin['accessToken'])[0] == 200
                 assert request('/account/refresh-token', 'PUT', {'refresh_token': refreshed['refreshToken']})[0] == 401
                 revoked_status = request('/admin/sessions', token=refreshed['accessToken'])[0]
                 assert revoked_status in (401, 403), f'revoked access status {revoked_status}'
-                assert request('/sg02')[0] == 200
-                assert request('/sg02')[0] == 429
+                assert request('/redis-prefix-test')[0] == 200
+                assert request('/redis-prefix-test')[0] == 429
                 for _ in range(100):
                     if int(json.loads(redis_cmd('XLEN', 'audit.raw'))) > 0:
                         break

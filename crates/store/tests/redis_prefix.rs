@@ -3,9 +3,9 @@
 use store::{AtomicStore, RedisStore, Store, StreamEntry};
 
 #[tokio::test]
-#[ignore = "requires isolated SG02_REDIS_URL with the restricted Stargate ACL"]
+#[ignore = "requires isolated REDIS_PREFIX_TEST_URL with the restricted Stargate ACL"]
 async fn prefixed_state_and_explicit_stream() -> Result<(), Box<dyn std::error::Error>> {
-    let store = RedisStore::new(&std::env::var("SG02_REDIS_URL")?)
+    let store = RedisStore::new(&std::env::var("REDIS_PREFIX_TEST_URL")?)
         .await?
         .with_key_prefix("stargate:");
     assert_eq!(store.prefixed_key("account:test"), "stargate:account:test");
@@ -13,7 +13,7 @@ async fn prefixed_state_and_explicit_stream() -> Result<(), Box<dyn std::error::
         store.prefixed_key("stargate:test"),
         "stargate:stargate:test"
     );
-    let peer = RedisStore::new(&std::env::var("SG02_REDIS_URL")?).await?;
+    let peer = RedisStore::new(&std::env::var("REDIS_PREFIX_TEST_URL")?).await?;
     assert_eq!(peer.prefixed_key("legacy"), "legacy");
     store.ping().await?;
     store.set("value", &"first", Some(60)).await?;
@@ -85,7 +85,7 @@ async fn prefixed_state_and_explicit_stream() -> Result<(), Box<dyn std::error::
     let zero = "0-0".parse()?;
     assert!(
         store
-            .stream_groups("audit.raw", &["sg02".into()])
+            .stream_groups("audit.raw", &["redis-prefix-test".into()])
             .await?
             .is_some()
     );

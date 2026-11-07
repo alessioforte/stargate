@@ -15,7 +15,10 @@ transactional mail templates. The final image serves:
 
 Published release images (`ghcr.io/alessioforte/stargate:<version>`) are built
 with the `cluster` profile for `linux/amd64` and `linux/arm64`. There is no
-`latest` tag; see [Releasing Stargate](RELEASING.md).
+`latest` tag. Each architecture builds on its own native GitHub runner; the
+publishing job merges their digests into one version tag and verifies provenance
+and SBOM for both. Dry runs export separate OCI archives without registry pushes
+or a merged index. See [Releasing Stargate](RELEASING.md).
 
 Release images write JSON logs to stdout by default, without ANSI colors or the
 server banner; read them with `docker logs stargate` or `docker compose logs`.
