@@ -139,9 +139,11 @@ extraVolumeMounts:
 
 Create `postgres-ca` with a `ca.pem` key. Mount the CA at the same path in every
 CLI process or Job using these settings. Chart `extraVolumes` and
-`extraVolumeMounts` apply to the Deployment and migration Job; the bootstrap and config
-import hooks do not inherit these mounts. When a private CA is required, use
-separate CLI Jobs with the CA mounted instead of enabling those hooks.
+`extraVolumeMounts` apply to the Deployment, migration Job, bootstrap hook and
+configuration-import hook. Bootstrap keeps its edge PVC mount and config import
+keeps the gateway seed mount alongside the additional mounts. Supply the shared
+TLS settings through `runtimeConfig.data` or the runtime Secret so these CLI
+processes use the same CA path without weakening certificate verification.
 
 ## Redis state namespace
 
@@ -203,7 +205,7 @@ ingress behavior during an outage.
 
 When an ingress forwards both `identity.example.com` and `api.example.com` to
 Stargate, enable the [Traefik integration](#traefik-in-front) below,
-which manages `IAM_HOSTS` from `traefik.identityHost`. With another ingress
+which manages `IAM_HOSTS` from `traefik.identityHost` plus `traefik.internalIamHosts`. With another ingress
 controller, put `IAM_HOSTS: identity.example.com` in `runtimeConfig.data` and set
 `JWT_ISSUER` (or `OAUTH_BASE_URL`) to the public identity URL. The public base URL
 host must appear in `IAM_HOSTS`, or startup fails. The comma-separated list accepts
@@ -261,6 +263,26 @@ The TLS Secret belongs in Stargate's namespace and must cover every configured
 host. Alternatively clear `secretName` and set `traefik.tls.certResolver` to a
 resolver configured in Traefik. With neither selected, `tls: {}` uses Traefik's
 default certificate configuration. Ordinary routes use HTTP to Stargate; setting
+For direct IAM calls from explicitly authorized in-cluster workloads, add the
+Service DNS names they use to `traefik.internalIamHosts`:
+
+```yaml
+traefik:
+  internalIamHosts:
+    - stargate.identity.svc.cluster.local
+```
+
+The identity hostname is always retained in `IAM_HOSTS`; the additional list is
+empty by default and requires `traefik.enabled=true`. Entries must be plain
+hostnames, without wildcards, schemes, paths, query strings, or ports. Empty
+names and duplicates (case-insensitive, ignoring a trailing dot), including overlaps with identity/API
+hosts, are rejected. Internal names are emitted in lowercase with the trailing
+DNS dot removed, matching request-host comparison. These names do not add
+public IngressRoute rules or NetworkPolicy exceptions. Allow only the intended
+namespace and Pod selectors in your network policy, and use narrowly scoped
+admin credentials for internal callers. ConfigMap/extraEnv overrides of the
+managed `IAM_HOSTS` remain rejected.
+
 `traefik.grpc.enabled=true` adds a higher-priority `HeaderRegexp` route for each
 API host in `traefik.apiHosts` using h2c. The identity host keeps its ordinary
 HTTP route; IAM errors there use JSON. WebSocket upgrades continue through the ordinary HTTP routes.
@@ -715,7 +737,7 @@ The chart manages these environment variables and rejects duplicates in
 - `CONFIG_FILENAME`
 - `DB_MIGRATE_ON_START` when `migrations.job.enabled` (set that option)
 - `JWT_KID` and `JWT_ID_TOKEN_KID` (set `jwt.activeKid` and `jwt.idTokenKid`)
-- `IAM_HOSTS` when `traefik.enabled` (set `traefik.identityHost`)
+- `IAM_HOSTS` when `traefik.enabled` (set `traefik.identityHost` and `traefik.internalIamHosts`)
 - `TRUSTED_PROXIES` when `trustedProxies` is nonempty (set that list)
 - `INTERNAL_CONTEXT_PRIVATE_KEY_PATH` and `INTERNAL_CONTEXT_JWKS_PATH` when
   `internalContext.enabled` (set `internalContext.existingSecret` and `mountPath`)
@@ -767,6 +789,8 @@ helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml -f ./k8s/stargate
 python3 ./k8s/stargate/tests/test_production_values.py
 python3 -I ./k8s/stargate/tests/test_telemetry_identity.py
 python3 -I ./k8s/stargate/tests/test_rate_limit.py
+python3 -I ./k8s/stargate/tests/test_internal_iam_hosts.py
+python3 -I ./k8s/stargate/tests/test_connection_pod.py
 # Expected failure: an enabled allow-list needs at least one source range.
 helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set traefik.adminAllowList.enabled=true
 helm lint ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set internalContext.enabled=true --set internalContext.existingSecret=stargate-internal-context --set internalContext.issuer=https://identity.example.com --set internalContext.kid=gateway-2026-10
@@ -786,7 +810,11 @@ helm template traefik ./k8s/stargate -f ./k8s/stargate/values-traefik.yaml --set
 helm test stargate --namespace identity
 ```
 
-The existing Helm connection-test pod contacts the Stargate Service directly;
+The Helm connection-test Pod uses BusyBox 1.36.1 pinned to a multi-platform
+index digest (recorded in [VERSIONS.md](VERSIONS.md) and [versions.json](versions.json)),
+UID/GID 65534, a read-only root filesystem, dropped capabilities, and no service
+account token. Its resource requests are 10m CPU / 16Mi memory and limits are
+100m CPU / 32Mi memory. The Pod contacts the Stargate Service directly;
 it is outside the Traefik-only ingress peers in `values-traefik.yaml`. For that
 example, check health through the public Traefik routes after deployment:
 

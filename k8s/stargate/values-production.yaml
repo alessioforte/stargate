@@ -11,7 +11,7 @@ image:
   # release.yml publishes the cluster image as ghcr.io/<owner>/stargate:<version>.
   # Pin a released version; prefer an immutable digest in production.
   repository: ghcr.io/alessioforte/stargate
-  tag: "0.1.0"
+  tag: "0.1.1"
   pullPolicy: IfNotPresent
 
 replicaCount: 3

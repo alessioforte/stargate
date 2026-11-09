@@ -91,6 +91,47 @@ class MigrationHooks(unittest.TestCase):
             env_from = container["envFrom"]
             self.assertIn({"configMapRef": {"name": "check-stargate-runtime"}}, env_from)
 
+    def test_private_ca_mounts_reach_bootstrap_and_import_hooks(self):
+        mounts = [{"name": "postgres-ca", "mountPath": "/ca", "readOnly": True}]
+        volumes = [{"name": "postgres-ca", "secret": {"secretName": "existing-ca"}}]
+        result = render({
+            "gatewayConfig": {"importOnUpgrade": True},
+            "bootstrap": {"enabled": True},
+            "runtimeConfig": {"data": {"POSTGRES_SSLMODE": "verify-full", "POSTGRES_SSLROOTCERT": "/ca/ca.pem"}},
+            "extraVolumes": volumes,
+            "extraVolumeMounts": mounts,
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        items = documents(result.stdout)
+        runtime = resource(items, "ConfigMap", "check-stargate-runtime")
+        self.assertEqual(runtime["data"]["POSTGRES_SSLMODE"], "verify-full")
+        for name in ("check-stargate-bootstrap", "check-stargate-config-import"):
+            pod = resource(items, "Job", name)["spec"]["template"]["spec"]
+            container = pod["containers"][0]
+            self.assertIn(volumes[0], pod["volumes"])
+            self.assertIn(mounts[0], container["volumeMounts"])
+            self.assertIn({"configMapRef": {"name": "check-stargate-runtime"}}, container["envFrom"])
+        importer = workload_container(resource(items, "Job", "check-stargate-config-import"))
+        self.assertIn({"name": "gateway-config", "mountPath": "/etc/stargate", "readOnly": True}, importer["volumeMounts"])
+
+    def test_edge_bootstrap_preserves_pvc_and_adds_ca_mount(self):
+        result = render({
+            "bootstrap": {"enabled": True, "email": "admin@example.com", "existingSecret": "admin-password", "oauthRedirectUri": "https://identity.example.com/stargate/auth/callback"},
+            "extraVolumes": [{"name": "ca", "configMap": {"name": "ca"}}],
+            "extraVolumeMounts": [{"name": "ca", "mountPath": "/ca", "readOnly": True}],
+        }, cluster=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pod = resource(documents(result.stdout), "Job", "check-stargate-bootstrap")["spec"]["template"]["spec"]
+        self.assertEqual([volume["name"] for volume in pod["volumes"]], ["data", "ca"])
+        self.assertEqual([mount["name"] for mount in pod["containers"][0]["volumeMounts"]], ["data", "ca"])
+
+    def test_cluster_bootstrap_without_mounts_emits_no_empty_volume_lists(self):
+        result = render({"extraVolumes": [], "extraVolumeMounts": []})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pod = resource(documents(result.stdout), "Job", "check-stargate-bootstrap")["spec"]["template"]["spec"]
+        self.assertNotIn("volumes", pod)
+        self.assertNotIn("volumeMounts", pod["containers"][0])
+
     def test_external_runtime_configmap_uses_explicit_env_for_all_workloads(self):
         result = render({
             "runtimeConfig": {"create": False, "existingConfigMap": "external-runtime"},

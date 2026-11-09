@@ -454,7 +454,9 @@ The Helm chart (`k8s/stargate`) can route through Traefik v3 `IngressRoute`
 resources (`traefik.enabled`, mutually exclusive with the standard Ingress).
 `values-traefik.yaml` is a three-replica cluster example
 with ingress restricted to Traefik and explicit egress rules. The chart manages
-`IAM_HOSTS` from the identity host, `TRUSTED_PROXIES` from a nonempty peer list,
+`IAM_HOSTS` from the identity host plus explicit `traefik.internalIamHosts`
+(plain hostnames, empty by default; no public route or network-policy changes),
+`TRUSTED_PROXIES` from a nonempty peer list,
 and the four signer path/issuer/kid variables when `internalContext.enabled`,
 mounting the existing signing Secret read-only. Active managed settings reject
 duplicates in runtimeConfig data and extraEnv. Optional gRPC routes use h2c with
@@ -479,6 +481,10 @@ hook configuration and optional DDL credentials. It sets the chart-managed
 environment so they verify the schema even with external runtime resources.
 Schema verification compares migration versions and checksums and reports a
 modified applied migration when a checksum differs.
+`extraVolumes` and `extraVolumeMounts` reach the server, migration Job and both
+bootstrap/config-import hooks; built-in data/seed mounts are retained. The Helm
+connection-test Pod uses a pinned BusyBox index (catalogued under
+`k8s/stargate/VERSIONS.md` and `versions.json`), bounded resources and UID/GID 65534.
 Migration pods use distinct labels and need their own egress
 policy when the namespace denies traffic by default. Old replicas keep serving
 during the migration, so schema changes must remain compatible with them.

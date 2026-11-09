@@ -136,7 +136,7 @@ spec:
             {{- end }}
             {{- if .Values.traefik.enabled }}
             - name: IAM_HOSTS
-              value: {{ .Values.traefik.identityHost | quote }}
+              value: {{ include "stargate.iamHosts" . | quote }}
             {{- end }}
             {{- with .Values.trustedProxies }}
             - name: TRUSTED_PROXIES

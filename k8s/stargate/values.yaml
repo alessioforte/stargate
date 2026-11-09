@@ -81,6 +81,8 @@ traefik:
     secretName: ""
     certResolver: ""
   identityHost: ""
+  # Explicit Service DNS names allowed to reach IAM directly; no public routes.
+  internalIamHosts: []
   apiHosts: []
   grpc:
     enabled: false

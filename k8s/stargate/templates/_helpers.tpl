@@ -30,6 +30,15 @@ Chart and resource names.
 {{- end -}}
 {{- end -}}
 
+{{/* Public identity plus explicitly permitted internal Service names. */}}
+{{- define "stargate.iamHosts" -}}
+{{- $hosts := list (lower .Values.traefik.identityHost) -}}
+{{- range .Values.traefik.internalIamHosts -}}
+  {{- $hosts = append $hosts (trimSuffix "." (lower .)) -}}
+{{- end -}}
+{{- join "," $hosts -}}
+{{- end -}}
+
 {{/*
 Labels. Hook and test pods intentionally use different `name` labels so
 the Service selector can never route traffic to them.
@@ -290,6 +299,9 @@ Cross-field validation that JSON Schema cannot express.
     {{- fail "traefik.adminAllowList.enabled=true requires a nonempty sourceRange" -}}
   {{- end -}}
 {{- end -}}
+{{- if and .Values.traefik.internalIamHosts (not .Values.traefik.enabled) -}}
+  {{- fail "traefik.internalIamHosts requires traefik.enabled=true" -}}
+{{- end -}}
 {{- if .Values.traefik.enabled -}}
   {{- if .Values.ingress.enabled -}}
     {{- fail "traefik.enabled and ingress.enabled are mutually exclusive" -}}
@@ -302,10 +314,21 @@ Cross-field validation that JSON Schema cannot express.
     {{- end -}}
     {{- $hosts = append $hosts (lower $host) -}}
   {{- end -}}
+  {{- $iamConflicts := list -}}
+  {{- range $host := $hosts -}}
+    {{- $iamConflicts = append $iamConflicts (trimSuffix "." (lower $host)) -}}
+  {{- end -}}
+  {{- range $host := .Values.traefik.internalIamHosts -}}
+    {{- $canonical := trimSuffix "." (lower $host) -}}
+    {{- if has $canonical $iamConflicts -}}
+      {{- fail "traefik.internalIamHosts must be distinct from each other, identityHost, and apiHosts (case-insensitive, ignoring a trailing dot)" -}}
+    {{- end -}}
+    {{- $iamConflicts = append $iamConflicts $canonical -}}
+  {{- end -}}
   {{- if and .Values.traefik.tls.secretName .Values.traefik.tls.certResolver -}}
     {{- fail "set only one of traefik.tls.secretName and traefik.tls.certResolver" -}}
   {{- end -}}
-  {{- $_ := set $managed "IAM_HOSTS" "traefik.identityHost" -}}
+  {{- $_ := set $managed "IAM_HOSTS" "traefik.identityHost and traefik.internalIamHosts" -}}
 {{- end -}}
 {{- if .Values.trustedProxies -}}
   {{- $_ := set $managed "TRUSTED_PROXIES" "trustedProxies" -}}

@@ -68,6 +68,9 @@ spec:
             - name: gateway-config
               mountPath: {{ .Values.gatewayConfig.mountPath }}
               readOnly: true
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
@@ -80,6 +83,9 @@ spec:
                 path: {{ .Values.gatewayConfig.fileName }}
               - key: {{ .Values.gatewayConfig.policiesFileName }}
                 path: {{ .Values.gatewayConfig.policiesFileName }}
+      {{- with .Values.extraVolumes }}
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

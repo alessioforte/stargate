@@ -190,6 +190,12 @@
             { "$ref": "#/definitions/hostname" }
           ]
         },
+        "internalIamHosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Explicit internal IAM hostnames, without schemes, wildcards, paths, or ports. Requires Traefik.",
+          "items": { "$ref": "#/definitions/hostname" }
+        },
         "apiHosts": {
           "type": "array",
           "uniqueItems": true,
