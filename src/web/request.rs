@@ -1,6 +1,7 @@
 use http::Request;
-use http::header::{AUTHORIZATION, COOKIE, HeaderMap, USER_AGENT};
+use http::header::{ACCEPT_LANGUAGE, AUTHORIZATION, COOKIE, HeaderMap, USER_AGENT};
 use std::net::{IpAddr, SocketAddr};
+use tools::Locale;
 
 /// Parse a single IP token that may be a bare IP, a bracketed IPv6 address,
 /// or a socket address (`ip:port` / `[ip]:port`).
@@ -42,6 +43,11 @@ pub trait RequestExt {
 
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+/// The first supported language in the request's `Accept-Language` header.
+pub(crate) fn accept_language(headers: &HeaderMap) -> Option<Locale> {
+    header_str(headers, ACCEPT_LANGUAGE.as_str()).and_then(Locale::from_accept_language)
 }
 
 fn normalize_host(raw: &str) -> Option<String> {

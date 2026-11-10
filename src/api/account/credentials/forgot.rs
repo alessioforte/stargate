@@ -1,8 +1,9 @@
 use crate::err::ErrorResponse;
 use crate::iam::email_throttle::{EmailFlow, check_and_record_email_request};
+use crate::iam::user::profile::{format_name, locale as user_locale};
 use crate::iam::{auth::jwt::jwt_config, pwd};
+use crate::web::links::change_password_url;
 use crate::web::messages::{MessageCode, MessageResponse};
-use crate::{iam::user::profile::format_name, web::links::change_password_url};
 use axum::Json;
 use db::ent::User;
 use serde::{Deserialize, Serialize};
@@ -50,7 +51,8 @@ pub async fn post_credentials(
                 .await
                 .map_err(ErrorResponse::internal)?,
         };
-        spawn_reset_email(user, sid);
+        let locale = user_locale(&user).unwrap_or_else(smtp::default_locale);
+        spawn_reset_email(user, sid, locale);
     }
 
     // Same response and no delivery wait either way, so neither the body nor
@@ -60,15 +62,15 @@ pub async fn post_credentials(
     )))
 }
 
-fn spawn_reset_email(user: User, sid: String) {
+fn spawn_reset_email(user: User, sid: String, locale: tools::Locale) {
     std::mem::drop(tokio::task::spawn_blocking(move || {
-        if let Err(error) = send_reset_email(&user, sid) {
+        if let Err(error) = send_reset_email(&user, sid, locale) {
             tracing::error!(%error, user_id = %user.id, "failed to send password-reset email");
         }
     }));
 }
 
-fn send_reset_email(user: &User, sid: String) -> anyhow::Result<()> {
+fn send_reset_email(user: &User, sid: String, locale: tools::Locale) -> anyhow::Result<()> {
     let claim = jwt::Claims::default()
         .sub_id(user.id.clone())
         .email(user.email.clone())
@@ -79,6 +81,7 @@ fn send_reset_email(user: &User, sid: String) -> anyhow::Result<()> {
     let family_name = user.family_name.clone().unwrap_or_default();
     Smtp::new()
         .template(Template::ChangePasswordRequest)
+        .locale(locale)
         .to(user.email.clone())
         .name(Some(format_name(&given_name, &family_name)))
         .link(change_password_url(&token))

@@ -1,7 +1,7 @@
 use super::ChangePasswordRequestBody;
 use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::iam::user::profile::format_name;
+use crate::iam::user::profile::{format_name, locale as user_locale};
 use crate::iam::{auth::jwt::jwt_config, pwd};
 use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
@@ -76,8 +76,10 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageResponse>, Erro
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
+    let locale = user_locale(&user).unwrap_or_else(smtp::default_locale);
     if let Err(e) = Smtp::new()
         .template(Template::PasswordChangedNotification)
+        .locale(locale)
         .to(user.email.clone())
         .name(Some(format_name(&given_name, &family_name)))
         .build()

@@ -3579,7 +3579,10 @@ version = "0.1.2"
 dependencies = [
  "lettre",
  "rustls",
+ "serde",
+ "serde_json",
  "thiserror",
+ "tools",
  "tracing",
 ]
 

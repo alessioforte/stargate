@@ -81,30 +81,6 @@ pub(crate) fn random_challenge_id() -> Result<String, ErrorResponse> {
     Ok(hex_encode(&bytes))
 }
 
-pub(crate) fn render_email_body(body: &str) -> String {
-    format!(
-        "<!doctype html><html><body><p>{}</p></body></html>",
-        escape_html(body)
-    )
-}
-
-pub(crate) fn escape_html(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-
-    for ch in value.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(ch),
-        }
-    }
-
-    escaped
-}
-
 pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);

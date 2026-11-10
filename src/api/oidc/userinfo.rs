@@ -26,6 +26,8 @@ pub struct UserInfoResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     picture: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    locale: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     updated_at: Option<i64>,
 }
 
@@ -142,6 +144,11 @@ fn userinfo_from_user(user: &db::ent::User, scopes: &HashSet<String>) -> UserInf
         nickname: include_profile.then(|| user.nickname.clone()),
         preferred_username: include_profile.then(|| user.nickname.clone()),
         picture: include_profile.then(|| user.picture.clone()).flatten(),
+        locale: include_profile
+            .then(|| {
+                crate::iam::user::profile::locale(user).map(|locale| locale.as_str().to_string())
+            })
+            .flatten(),
         updated_at: include_profile.then(|| user.updated_at.timestamp()),
     }
 }
@@ -228,6 +235,7 @@ mod tests {
             .given_name(Some("Alice".to_string()))
             .family_name(Some("Example".to_string()))
             .picture(Some("https://app.example.com/alice.png".to_string()))
+            .attrs(serde_json::json!({ "locale": "it" }))
     }
 
     #[test]
@@ -239,6 +247,7 @@ mod tests {
         assert_eq!(body.sub, user.id);
         assert!(body.email.is_none());
         assert!(body.name.is_none());
+        assert!(body.locale.is_none());
         assert!(body.updated_at.is_none());
     }
 
@@ -264,6 +273,7 @@ mod tests {
             body.picture.as_deref(),
             Some("https://app.example.com/alice.png")
         );
+        assert_eq!(body.locale.as_deref(), Some("it"));
         assert_eq!(body.updated_at, Some(user.updated_at.timestamp()));
     }
 }

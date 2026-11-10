@@ -56,7 +56,9 @@ pub async fn get_google(req: Request) -> Response {
 pub(super) async fn sign_in(
     code: &str,
     audit_request: TrustedAuditRequest,
+    locale: Option<tools::Locale>,
 ) -> Result<db::ent::User, ErrorResponse> {
+    let locale = locale.unwrap_or_else(smtp::default_locale);
     let token = get_google_oauth_token(code).await.map_err(|e| {
         tracing::error!("Google OAuth token error: {}", e);
         ErrorResponse::new(ErrorCode::SocialTokenExchangeFailed).with_param("provider", "Google")
@@ -87,7 +89,7 @@ pub(super) async fn sign_in(
         Some(user) => user,
         None => {
             super::ensure_provisioning("Google", &email)?;
-            create_google_user(&google_user, &email, audit_context.clone()).await?
+            create_google_user(&google_user, &email, audit_context.clone(), locale).await?
         }
     };
 
@@ -110,6 +112,7 @@ async fn create_google_user(
     google_user: &GoogleUser,
     email: &str,
     audit_context: TrustedAuditContext,
+    locale: tools::Locale,
 ) -> Result<db::ent::User, ErrorResponse> {
     // Google's full name is the given name when it sends no name parts.
     let (given_name, family_name) = match (&google_user.given_name, &google_user.family_name) {
@@ -119,7 +122,11 @@ async fn create_google_user(
     let profile = Profile::new(email.to_string(), email.to_string())
         .given_name(given_name)
         .family_name(family_name)
-        .picture(google_user.picture.clone());
+        .picture(google_user.picture.clone())
+        .attrs(crate::iam::user::profile::with_locale(
+            serde_json::Value::Object(serde_json::Map::new()),
+            locale,
+        ));
     let credential = format!("google:{}", google_user.id);
     match crate::data::db::create_user(
         profile,

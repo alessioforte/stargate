@@ -100,6 +100,10 @@ pub async fn run() -> std::io::Result<()> {
         tracing::error!("Invalid SMTP settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
+    smtp::validate_templates().map_err(|error| {
+        tracing::error!("Invalid email templates: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
     jwt::init();
     ctx::sign::init().map_err(std::io::Error::other)?;
     iam::pwd::policy::init();

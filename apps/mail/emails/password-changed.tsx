@@ -1,56 +1,32 @@
-import {
-  Body,
-  Button,
-  Column,
-  Container,
-  Head,
-  Heading,
-  Html,
-  Preview,
-  Row,
-  Section,
-  Tailwind,
-  Text,
-} from "@react-email/components";
+import { Text } from "@react-email/components";
 
-export const PasswordChanged = () => {
+import { type Locale, t } from "./_components/i18n";
+import { EmailLayout } from "./_components/layout";
+import { EmailNote } from "./_components/kit";
+import { leadStyle, paragraphLastStyle } from "./_components/theme";
+
+interface PasswordChangedProps {
+  locale?: Locale;
+}
+
+export const PasswordChanged = ({ locale = "en" }: PasswordChangedProps) => {
   return (
-    <Html>
-      <Tailwind>
-        <Head />
-        <Body style={main}>
-          <Preview>Password Changed</Preview>
-          <Container className="pt-10">
-            <Section>
-              <Row className="p-5">
-                <Column>
-                  <Heading className="text-[32px] font-bold text-center">
-                    Password Changed
-                  </Heading>
+    <EmailLayout
+      locale={locale}
+      preview={t(locale, "password-changed.preview")}
+      eyebrow={t(locale, "password-changed.eyebrow")}
+      title={t(locale, "password-changed.title")}
+    >
+      <Text style={leadStyle}>{t(locale, "password-changed.lead")}</Text>
+      <Text style={paragraphLastStyle}>
+        {t(locale, "password-changed.body")}
+      </Text>
 
-                  <Text className="text-base">
-                    Your password has been changed successfully.
-                  </Text>
-                  <Text className="text-base">
-                    If you did not request a password change, please contact us
-                    immediately.
-                  </Text>
-                </Column>
-              </Row>
-            </Section>
-            <Text className="text-center text-xs leading-[24px] text-black/70">
-              © {new Date().getFullYear()} | Stargate Inc. All rights reserved.
-            </Text>
-          </Container>
-        </Body>
-      </Tailwind>
-    </Html>
+      <EmailNote title={t(locale, "password-changed.noteTitle")} tone="warning">
+        {t(locale, "password-changed.note")}
+      </EmailNote>
+    </EmailLayout>
   );
 };
 
 export default PasswordChanged;
-
-const main = {
-  fontFamily:
-    "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
-};

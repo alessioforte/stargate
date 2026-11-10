@@ -101,6 +101,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   ...initialState,
   setLanguage: (lang: "en" | "it") => {
     set({ language: lang });
+    void services.auth.updateProfile(lang);
   },
   loadApiMessages: async (locale) => {
     const response = await services.auth.getApiMessages(
@@ -372,7 +373,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       error: null,
     });
 
-    const response = await services.auth.requestSignup(email);
+    const response = await services.auth.requestSignup(email, get().language);
 
     if (response.error || !response.data) {
       const message = resolveApiMessage(

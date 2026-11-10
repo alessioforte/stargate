@@ -34,6 +34,7 @@ interface FormValues {
   confirmPassword: string;
   phoneNumber: string;
   picture: string;
+  locale: string;
   organizationId: string;
   role: string;
   attrs: string;
@@ -58,6 +59,7 @@ const emptyFormValues: FormValues = {
   confirmPassword: "",
   phoneNumber: "",
   picture: "",
+  locale: "",
   organizationId: "",
   role: "member",
   attrs: "{}",
@@ -102,6 +104,7 @@ const CreateUser: React.FC<Props> = ({
       email: values.email.trim(),
       givenName: values.givenName.trim() || null,
       familyName: values.familyName.trim() || null,
+      locale: values.locale || null,
       phoneNumber: values.phoneNumber.trim() || null,
       picture: values.picture.trim() || null,
       attrs: JSON.parse(values.attrs) ?? {},
@@ -201,6 +204,21 @@ const CreateUser: React.FC<Props> = ({
                   label={t("picture")}
                   {...form.getInputProps("picture")}
                 />
+                {mode === "invitation" && (
+                  <Select
+                    clearable
+                    variant="filled"
+                    label={t("language")}
+                    data={[
+                      { label: "English", value: "en" },
+                      { label: "Italiano", value: "it" },
+                    ]}
+                    value={form.values.locale || null}
+                    onChange={(value) =>
+                      form.setFieldValue("locale", value ?? "")
+                    }
+                  />
+                )}
                 {mode === "password" && (
                   <>
                     <PasswordInput

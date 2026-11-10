@@ -5,7 +5,7 @@ use crate::{
         auth::jwt::jwt_config,
         email_throttle::{EmailFlow, check_and_record_email_request},
         user::{
-            email_verification,
+            email_verification, profile,
             signup::{PendingSignupProfile, SignupOrigin},
         },
     },
@@ -16,7 +16,9 @@ use crate::{
 };
 use axum::Json;
 use db::ent::canonical_email;
+use http::HeaderMap;
 use smtp::{Smtp, Template};
+use tools::Locale;
 
 #[utoipa::path(
     post,
@@ -34,6 +36,7 @@ use smtp::{Smtp, Template};
     )
 )]
 pub async fn post_signup(
+    headers: HeaderMap,
     Json(body): Json<SignupRequestBody>,
 ) -> Result<Json<MessageResponse>, ErrorResponse> {
     let email = canonical_email(&body.email);
@@ -44,33 +47,48 @@ pub async fn post_signup(
     super::ensure_self_service(&email)?;
     check_and_record_email_request(EmailFlow::Signup, &email).await?;
 
-    let email_kind = if crate::data::db::get_user_by_email(&email)
+    let requested = crate::web::request::accept_language(&headers);
+    let default = smtp::default_locale();
+
+    let (email_kind, locale) = if let Some(user) = crate::data::db::get_user_by_email(&email)
         .await
         .map_err(ErrorResponse::internal)?
-        .is_some()
     {
-        SignupEmail::AccountExists
+        (
+            SignupEmail::AccountExists,
+            profile::locale(&user).unwrap_or(default),
+        )
     } else {
         // Resend the pending signup's link rather than refusing: the
         // per-recipient throttle bounds repeats, and a lost email stays
-        // recoverable.
-        let sid = match email_verification::check_email_verification_request(&email)
+        // recoverable. Its language was chosen when the signup started.
+        match email_verification::check_email_verification_request(&email)
             .await
             .map_err(ErrorResponse::internal)?
         {
-            Some(sid) => sid,
-            None => email_verification::create_email_verification_request(
-                &PendingSignupProfile::self_service(email.clone()),
-            )
-            .await
-            .map_err(ErrorResponse::internal)?,
-        };
-        SignupEmail::Verify { sid }
+            Some(sid) => {
+                let locale = email_verification::get_email_verification_request(&sid)
+                    .await
+                    .map_err(ErrorResponse::internal)?
+                    .map(|pending| pending.locale)
+                    .unwrap_or_else(|| profile::resolve_email_locale(None, requested, default));
+                (SignupEmail::Verify { sid }, locale)
+            }
+            None => {
+                let locale = profile::resolve_email_locale(None, requested, default);
+                let sid = email_verification::create_email_verification_request(
+                    &PendingSignupProfile::self_service(email.clone(), locale),
+                )
+                .await
+                .map_err(ErrorResponse::internal)?;
+                (SignupEmail::Verify { sid }, locale)
+            }
+        }
     };
 
     // Same response either way, and delivery happens in the background, so
     // neither the body nor the response time reveals an existing account.
-    spawn_signup_email(email, email_kind);
+    spawn_signup_email(email, email_kind, locale);
     Ok(Json(MessageResponse::new(MessageCode::SignupRequested)))
 }
 
@@ -103,8 +121,9 @@ pub(crate) async fn send_invitation(profile: PendingSignupProfile) -> Result<(),
 
     let email = profile.email.clone();
     let delivery_sid = sid.clone();
+    let locale = profile.locale;
     let delivered = tokio::task::spawn_blocking(move || {
-        send_signup_email(&email, SignupEmail::Verify { sid: delivery_sid })
+        send_signup_email(&email, SignupEmail::Verify { sid: delivery_sid }, locale)
     })
     .await
     .map_err(ErrorResponse::internal)
@@ -124,15 +143,15 @@ enum SignupEmail {
     AccountExists,
 }
 
-fn spawn_signup_email(email: String, kind: SignupEmail) {
+fn spawn_signup_email(email: String, kind: SignupEmail, locale: Locale) {
     std::mem::drop(tokio::task::spawn_blocking(move || {
-        if let Err(error) = send_signup_email(&email, kind) {
+        if let Err(error) = send_signup_email(&email, kind, locale) {
             tracing::error!(%error, "failed to send signup email");
         }
     }));
 }
 
-fn send_signup_email(email: &str, kind: SignupEmail) -> anyhow::Result<()> {
+fn send_signup_email(email: &str, kind: SignupEmail, locale: Locale) -> anyhow::Result<()> {
     let (template, link) = match kind {
         SignupEmail::Verify { sid } => {
             let claim = jwt::Claims::default()
@@ -147,6 +166,7 @@ fn send_signup_email(email: &str, kind: SignupEmail) -> anyhow::Result<()> {
 
     Smtp::new()
         .template(template)
+        .locale(locale)
         .to(email.to_string())
         .link(link)
         .build()

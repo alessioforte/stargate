@@ -601,6 +601,7 @@ export interface CreateUserInvitationRequest {
   email: string;
   familyName?: string | null;
   givenName?: string | null;
+  locale?: string | null;
   nickname?: string | null;
   phoneNumber?: string | null;
   picture?: string | null;

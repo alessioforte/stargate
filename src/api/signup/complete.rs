@@ -1,7 +1,11 @@
 use super::SignupCompleteRequestBody;
 use crate::ctx::audit_request_from;
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::iam::user::{email_verification, nicknames, profile::format_name, signup};
+use crate::iam::user::{
+    email_verification, nicknames,
+    profile::{format_name, with_locale},
+    signup,
+};
 use crate::iam::{auth::jwt::jwt_config, pwd};
 use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
@@ -100,12 +104,13 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         ErrorResponse::new(ErrorCode::PasswordPolicyViolation).with_message(message)
     })?;
 
+    let locale = signup.locale;
     let profile = Profile::new(signup.email.clone(), nickname)
         .given_name(optional_nonempty(&body.given_name))
         .family_name(optional_nonempty(&body.family_name))
         .phone_number(body.phone_number.clone())
         .picture(signup.picture)
-        .attrs(signup.attrs);
+        .attrs(with_locale(signup.attrs, locale));
 
     let password = pwd::hash::hash_password(body.password.clone()).await?;
 
@@ -128,6 +133,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
     let family_name = user.family_name.clone().unwrap_or_default();
     if let Err(e) = Smtp::new()
         .template(smtp::Template::SignupCompleted)
+        .locale(locale)
         .to(user.email)
         .name(Some(format_name(&given_name, &family_name)))
         .build()

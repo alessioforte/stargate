@@ -35,6 +35,7 @@ pub struct Claims {
     pub nonce: Option<String>,              // OIDC nonce
     pub preferred_username: Option<String>, // OIDC preferred username
     pub picture: Option<String>,            // OIDC profile picture
+    pub locale: Option<String>,             // OIDC locale
 }
 
 impl Default for Claims {
@@ -66,6 +67,7 @@ impl Default for Claims {
             nonce: None,
             preferred_username: None,
             picture: None,
+            locale: None,
         }
     }
 }
@@ -143,6 +145,11 @@ impl Claims {
 
     pub fn typ(mut self, typ: String) -> Self {
         self.typ = Some(typ);
+        self
+    }
+
+    pub fn locale(mut self, locale: String) -> Self {
+        self.locale = Some(locale);
         self
     }
 }

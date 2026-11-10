@@ -491,9 +491,13 @@ async fn creation_invitation_and_login_identifiers_cannot_replace_a_super_admin(
         // The failed email change leaves recovery at the existing mailbox.
         // A request to the attacker's address sends no mail and creates no reset.
         let recovery_email = format!("attacker-{}@example.test",ulid::Ulid::generate());
-        let _ = crate::api::account::credentials::forgot::post_credentials(Json(crate::api::account::credentials::forgot::ForgotPasswordRequestBody {
-            email: recovery_email.clone(),
-        })).await.unwrap();
+        let _ = crate::api::account::credentials::forgot::post_credentials(
+            Json(crate::api::account::credentials::forgot::ForgotPasswordRequestBody {
+                email: recovery_email.clone(),
+            }),
+        )
+        .await
+        .unwrap();
         assert!(crate::iam::pwd::reset::get_change_password_request(&recovery_email).await.unwrap().is_none());
     }).await;
 }

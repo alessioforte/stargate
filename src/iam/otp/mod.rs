@@ -25,7 +25,6 @@ pub(crate) const DEFAULT_MFA_STEP_UP_TTL_SECS: u64 = 300;
 pub(crate) const OTP_REQUEST_LOCKOUT_SECS: u64 = 300;
 pub(crate) const MAX_OTP_SOURCE_REQUESTS: i32 = 30;
 pub(crate) const MAX_OTP_SUBJECT_REQUESTS: i32 = 5;
-pub(crate) const ISSUER: &str = "Stargate";
 
 pub(crate) use challenge::has_valid_mfa_verification;
 pub(crate) use policy::admin_step_up_required;

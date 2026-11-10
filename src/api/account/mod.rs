@@ -81,6 +81,7 @@ pub fn router() -> axum::Router {
             "/account/credentials",
             post(credentials::forgot::post_credentials).put(credentials::reset::put_credentials),
         )
+        .route("/account/profile", put(profile::put_profile))
         .route(
             "/account/consents/{client_id}",
             delete(consents::delete_consent),

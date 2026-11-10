@@ -9,10 +9,10 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use tools::Locale;
 use utoipa::ToSchema;
 
 const CATALOG_SCHEMA: &str = "stargate/i18n/v1";
-const FALLBACK_LOCALE: &str = "en";
 const ITALIAN_OVERRIDES: &str = include_str!("i18n/it.json");
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
@@ -55,26 +55,18 @@ fn merge_with_english(overrides: ApiMessages) -> ApiMessages {
     messages
 }
 
-fn normalize_locale(locale: &str) -> Option<&'static str> {
-    match locale.to_ascii_lowercase().as_str() {
-        "en" | "en-us" | "en-gb" => Some("en"),
-        "it" | "it-it" => Some("it"),
-        _ => None,
-    }
-}
-
 fn catalog(locale: &str) -> Option<ApiMessageCatalog> {
-    let locale = normalize_locale(locale)?;
+    let locale = Locale::parse(locale)?;
     let messages = match locale {
-        "it" => ITALIAN_MESSAGES.clone(),
-        _ => ENGLISH_MESSAGES.clone(),
+        Locale::It => ITALIAN_MESSAGES.clone(),
+        Locale::En => ENGLISH_MESSAGES.clone(),
     };
-    let version = catalog_version(locale, &messages);
+    let version = catalog_version(locale.as_str(), &messages);
 
     Some(ApiMessageCatalog {
         schema: CATALOG_SCHEMA,
-        locale: locale.to_string(),
-        fallback_locale: FALLBACK_LOCALE,
+        locale: locale.as_str().to_string(),
+        fallback_locale: Locale::FALLBACK.as_str(),
         version,
         messages,
     })

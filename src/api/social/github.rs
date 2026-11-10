@@ -56,7 +56,9 @@ pub async fn get_github(req: Request) -> Response {
 pub(super) async fn sign_in(
     code: &str,
     audit_request: TrustedAuditRequest,
+    locale: Option<tools::Locale>,
 ) -> Result<db::ent::User, ErrorResponse> {
+    let locale = locale.unwrap_or_else(smtp::default_locale);
     let token = get_github_oauth_token(code).await.map_err(|e| {
         tracing::error!("GitHub OAuth token error: {}", e);
         ErrorResponse::new(ErrorCode::SocialTokenExchangeFailed).with_param("provider", "GitHub")
@@ -87,7 +89,7 @@ pub(super) async fn sign_in(
         Some(user) => user,
         None => {
             super::ensure_provisioning("GitHub", &email)?;
-            create_github_user(&github_user, &email, audit_context.clone()).await?
+            create_github_user(&github_user, &email, audit_context.clone(), locale).await?
         }
     };
 
@@ -115,6 +117,7 @@ async fn create_github_user(
     github_user: &GitHubUser,
     email: &str,
     audit_context: TrustedAuditContext,
+    locale: tools::Locale,
 ) -> Result<db::ent::User, ErrorResponse> {
     let credential = format!("github:{}", github_user.id);
     let mut attempt = 1;
@@ -123,7 +126,11 @@ async fn create_github_user(
             crate::iam::user::nicknames::available_nickname(&github_user.login, email).await?;
         let profile = Profile::new(email.to_string(), nickname.clone())
             .given_name(github_user.name.clone())
-            .picture(github_user.avatar_url.clone());
+            .picture(github_user.avatar_url.clone())
+            .attrs(crate::iam::user::profile::with_locale(
+                serde_json::Value::Object(serde_json::Map::new()),
+                locale,
+            ));
         let error = match crate::data::db::create_user(
             profile,
             CredentialType::Oauth,

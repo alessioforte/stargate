@@ -33,6 +33,15 @@ export default class AuthService {
     });
   }
 
+  /** Persist the signed-in user's language in `users.attrs.locale`. */
+  async updateProfile(locale: string) {
+    return this.http.request<GeneralResponse>({
+      method: "PUT",
+      url: `${this.baseURL}/account/profile`,
+      data: { locale },
+    });
+  }
+
   async login(payload: LoginRequest) {
     const response = await this.http.request<LoginResponse | LoginMFAResponse>({
       method: "POST",
@@ -85,11 +94,12 @@ export default class AuthService {
     });
   }
 
-  async requestSignup(email: string) {
+  async requestSignup(email: string, locale: string) {
     const response = await this.http.request<GeneralResponse>({
       method: "POST",
       url: `${this.baseURL}/signup`,
       data: { email },
+      headers: { "Accept-Language": locale },
     });
     return response;
   }

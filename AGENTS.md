@@ -658,7 +658,7 @@ Scopes/claims:
 - `openid`: `sub`
 - `email`: `email`, `email_verified` (in userinfo and the ID token)
 - `profile`: `name`, `given_name`, `family_name`, `nickname`, `preferred_username`,
-  `picture`, `updated_at`
+  `picture`, `locale`, `updated_at`
 - `offline_access`: refresh tokens when the client allows `refresh_token`
 - ID tokens carry no private `typ` / `sub_id` claims.
 - ID tokens and OAuth access tokens carry `acr` and `amr`; introspection adds them with
@@ -815,11 +815,17 @@ existing account gets a `SignupAccountExists` sign-in reminder, so neither the
 response nor its timing reveals the account. Admin invitations
 (`send_invitation`) keep `409` conflicts and wait for delivery.
 
-Emails: templates come from `apps/mail/emails/*.tsx` (`npm run export` writes
-`.stargate/transactional/*.html`). Action URLs are built by the server
+Emails: templates come from `apps/mail/emails/*.tsx`; `npm run export` renders
+`<template>.<locale>.html` and `subjects.json` into `.stargate/transactional`
+for every supported locale (`en`, `it`). Templates and subjects are localized;
+the server validates that every template and subject exists for every locale at
+startup. Delivery locale order is the account's `users.attrs.locale`, the
+request's `Accept-Language` for new addresses, then `DEFAULT_LOCALE` (default
+`en`). Action URLs are built by the server
 (`src/web/links.rs`: `signup_url`, `change_password_url`, `login_url`, based on
 `AUTH_PUBLIC_BASE_URL`, else the public base URL plus the auth app base path) and
-rendered as `{{link}}`; `{{name}}` is the only other placeholder.
+rendered as `{{link}}`; `{{name}}`, `{{code}}`, and `{{minutes}}` are the other
+supported placeholders.
 
 ## Database Schema (migrations/)
 
@@ -938,6 +944,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `PASSWORD_HASH_CONCURRENCY` | available CPUs (at least 1) | Positive process-wide Argon2 concurrency; invalid values stop startup |
 | `PASSWORD_PEPPER`                                                                      | -                                      | Optional Argon2 secret                                                                                                              |
 | `SMTP_*` (incl. `SMTP_TLS`), `GOOGLE_OAUTH_*`, `GITHUB_OAUTH_*`           | -                                      | Email delivery (`SMTP_TLS=starttls` default), social login                                                                              |
+| `DEFAULT_LOCALE`                                                                       | `en`                                   | Outgoing email and invitation default language; `en` or `it`                                                                         |
 
 Full list: `.env.example`.
 
@@ -1134,7 +1141,8 @@ guard; unresponsive peers log at debug level.
   (`lib/env.ts` `socialSignInUrl`), and, in `open` signup mode, a sign-up link; `/signup` without a
   token is the request form (`signup-request.tsx`), or explains that accounts come from
   an administrator.
-- `mail`: transactional email templates (`react-email`). A build-time template
+- `mail`: transactional email templates (`react-email`), rendered at build time
+  for every supported locale with localized subjects. A build-time template
   project, **not** a runtime SPA; it does not follow the layering below.
 
 Stack (console/auth): React 19, Vite, TypeScript, Mantine v9

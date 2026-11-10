@@ -127,8 +127,9 @@ pub(crate) struct MfaPolicy {
 pub(crate) struct EmailOtpDelivery {
     pub(crate) recipient: String,
     pub(crate) name: Option<String>,
-    pub(crate) subject: String,
-    pub(crate) body: String,
+    pub(crate) code: String,
+    pub(crate) minutes: u64,
+    pub(crate) locale: tools::Locale,
 }
 
 pub(crate) enum VerifiedChallenge {

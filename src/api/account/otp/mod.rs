@@ -17,25 +17,13 @@ pub use passwordless::{post_login_email_otp, put_login_email_otp};
 mod tests {
     use crate::iam::otp::DEFAULT_MFA_PURPOSE;
     use crate::iam::otp::types::OtpMethod;
-    use crate::iam::otp::util::{escape_html, normalize_purpose, ttl_until, validate_challenge_id};
+    use crate::iam::otp::util::{normalize_purpose, ttl_until, validate_challenge_id};
 
     #[test]
     fn challenge_id_must_be_32_hex_chars() {
         assert!(validate_challenge_id("0123456789abcdef0123456789abcdef").is_ok());
         assert!(validate_challenge_id("0123456789abcdef").is_err());
         assert!(validate_challenge_id("0123456789abcdef0123456789abcdeg").is_err());
-    }
-
-    #[test]
-    fn html_body_escapes_untrusted_text() {
-        let rendered = format!(
-            "<!doctype html><html><body><p>{}</p></body></html>",
-            escape_html("Code <123> & \"quote\"")
-        );
-
-        assert!(rendered.contains("&lt;123&gt;"));
-        assert!(rendered.contains("&amp;"));
-        assert!(rendered.contains("&quot;quote&quot;"));
     }
 
     #[test]

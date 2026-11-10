@@ -72,6 +72,15 @@ export default class AdminApiService {
     });
   }
 
+  /** Persist the signed-in user's language in `users.attrs.locale`. */
+  updateProfile(locale: string) {
+    return this.http.authRequest<unknown>({
+      url: "/account/profile",
+      method: "PUT",
+      data: { locale },
+    });
+  }
+
   getAdminHealth() {
     return this.request<AdminHealth>({
       url: "/health",

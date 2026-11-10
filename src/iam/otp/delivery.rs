@@ -1,10 +1,9 @@
 use crate::err::ErrorResponse;
-use crate::iam::user::profile::format_name;
-use smtp::Smtp;
+use crate::iam::user::profile::{format_name, locale as user_locale};
+use smtp::{Smtp, Template};
 
-use super::ISSUER;
 use super::types::EmailOtpDelivery;
-use super::util::{email_otp_internal, render_email_body};
+use super::util::email_otp_internal;
 
 pub(crate) fn issue_email_challenge(
     user: &db::ent::User,
@@ -21,17 +20,14 @@ fn email_otp_delivery(user: &db::ent::User, issued: &::otp::IssuedMessageOtp) ->
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
     let name = format_name(&given_name, &family_name);
-    let content = issued.delivery_content(ISSUER);
-    let subject = content
-        .subject
-        .unwrap_or_else(|| format!("{ISSUER} verification code"));
-    let body = render_email_body(&content.body);
+    let minutes = issued.record.ttl_seconds().div_ceil(60);
 
     EmailOtpDelivery {
-        recipient: content.recipient,
+        recipient: issued.record.recipient.clone(),
         name: Some(name),
-        subject,
-        body,
+        code: issued.code.clone(),
+        minutes,
+        locale: user_locale(user).unwrap_or_else(smtp::default_locale),
     }
 }
 
@@ -62,12 +58,58 @@ pub(crate) fn spawn_email_otp_delivery(user: &db::ent::User, issued: &::otp::Iss
 
 fn deliver_email_otp(delivery: EmailOtpDelivery) -> Result<(), smtp::SmtpError> {
     Smtp::new()
+        .template(Template::EmailOtp)
+        .locale(delivery.locale)
         .to(delivery.recipient)
         .name(delivery.name)
-        .subject(delivery.subject)
-        .html_body(delivery.body)
+        .variable("code", delivery.code)
+        .variable("minutes", delivery.minutes.to_string())
         .build()
         .and_then(|smtp| smtp.send())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::email_otp_delivery;
+    use serde_json::json;
+    use tools::Locale;
+
+    fn issued(ttl_seconds: u64) -> ::otp::IssuedMessageOtp {
+        let config = ::otp::MessageOtpConfig::numeric(6, ttl_seconds, 5).unwrap();
+        ::otp::issue_email_otp(
+            "alice@example.com".to_string(),
+            "login",
+            b"pepper",
+            1_000,
+            config,
+        )
+        .unwrap()
+    }
+
+    fn user(locale: Option<&str>) -> db::ent::User {
+        let attrs = locale
+            .map(|locale| json!({ "locale": locale }))
+            .unwrap_or(json!({}));
+        db::ent::User::new("alice@example.com".to_string(), "alice".to_string()).attrs(attrs)
+    }
+
+    #[test]
+    fn delivery_uses_the_code_and_minutes_placeholders() {
+        let issued = issued(300);
+        let delivery = email_otp_delivery(&user(None), &issued);
+
+        assert_eq!(delivery.code, issued.code);
+        assert_eq!(delivery.minutes, 5);
+        assert_eq!(delivery.locale, Locale::En);
+    }
+
+    #[test]
+    fn delivery_uses_the_account_locale() {
+        let delivery = email_otp_delivery(&user(Some("it")), &issued(30));
+
+        assert_eq!(delivery.minutes, 1);
+        assert_eq!(delivery.locale, Locale::It);
+    }
 }

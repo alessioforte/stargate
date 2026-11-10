@@ -15,5 +15,8 @@ lettre = { workspace = true, features = [
     "rustls-tls",
 ] }
 rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+tools = { workspace = true }
 tracing = { workspace = true }

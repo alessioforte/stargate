@@ -9,6 +9,7 @@ pub struct UserClaimsProfile {
     pub family_name: Option<String>,
     pub nickname: String,
     pub picture: Option<String>,
+    pub locale: Option<String>,
 }
 
 fn format_name(given_name: &str, family_name: &str) -> String {
@@ -90,6 +91,7 @@ pub fn id_token_claims(
         claims.name = Some(format_name(&given_name, &family_name));
         claims.preferred_username = Some(user.nickname.clone());
         claims.picture = user.picture.clone();
+        claims.locale = user.locale.clone();
     }
 
     claims
@@ -116,6 +118,7 @@ mod tests {
             family_name: Some("Example".to_string()),
             nickname: "alice".to_string(),
             picture: Some("https://app.example.com/alice.png".to_string()),
+            locale: Some("it".to_string()),
         }
     }
 
@@ -173,6 +176,7 @@ mod tests {
             claims.picture.as_deref(),
             Some("https://app.example.com/alice.png")
         );
+        assert_eq!(claims.locale.as_deref(), Some("it"));
         assert_eq!(claims.nonce.as_deref(), Some("nonce-1"));
     }
 }

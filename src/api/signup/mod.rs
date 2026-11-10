@@ -87,7 +87,7 @@ mod tests {
     /// The tests run with the default `SIGNUP_MODE=invite`.
     #[test]
     fn only_invitations_complete_outside_open_mode() {
-        let mut profile = PendingSignupProfile::self_service("ada@example.com");
+        let mut profile = PendingSignupProfile::self_service("ada@example.com", tools::Locale::En);
         let error = ensure_completable(&profile).unwrap_err();
         assert_eq!(error.code, ErrorCode::FeatureDisabled);
 

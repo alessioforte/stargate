@@ -7,6 +7,7 @@ use lettre::address::AddressError;
 use lettre::message::Mailbox;
 use std::fmt;
 use std::sync::OnceLock;
+use tools::Locale;
 
 const DEFAULT_HOST: &str = "0.0.0.0";
 const DEFAULT_PORT: &str = "1025";
@@ -65,6 +66,7 @@ pub struct SmtpSettings {
     pub(crate) username: String,
     pub(crate) password: String,
     pub(crate) tls: SmtpTls,
+    pub(crate) default_locale: Locale,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -82,6 +84,10 @@ pub enum SmtpSettingsError {
 }
 
 impl SmtpSettings {
+    pub fn default_locale(&self) -> Locale {
+        self.default_locale
+    }
+
     pub fn from_env() -> Result<Self, SmtpSettingsError> {
         Self::from_lookup(|name| std::env::var(name).ok())
     }
@@ -141,6 +147,15 @@ impl SmtpSettings {
         if tls == SmtpTls::None && (!username.is_empty() || !password.is_empty()) {
             return Err(SmtpSettingsError::CredentialsWithoutTls);
         }
+        let default_locale_value =
+            var("DEFAULT_LOCALE").unwrap_or_else(|| Locale::FALLBACK.to_string());
+        let default_locale = Locale::parse(&default_locale_value).ok_or_else(|| {
+            invalid(
+                "DEFAULT_LOCALE",
+                &default_locale_value,
+                format!("expected one of: {}", locale_values()),
+            )
+        })?;
         Ok(Self {
             host,
             port,
@@ -148,8 +163,17 @@ impl SmtpSettings {
             username,
             password,
             tls,
+            default_locale,
         })
     }
+}
+
+fn locale_values() -> String {
+    Locale::ALL
+        .iter()
+        .map(|locale| locale.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl fmt::Display for SmtpSettings {
@@ -161,8 +185,8 @@ impl fmt::Display for SmtpSettings {
         };
         write!(
             f,
-            "host={} port={} tls={} from={} auth={auth}",
-            self.host, self.port, self.tls, self.from
+            "host={} port={} tls={} from={} auth={auth} default_locale={}",
+            self.host, self.port, self.tls, self.from, self.default_locale
         )
     }
 }
@@ -176,8 +200,14 @@ impl fmt::Debug for SmtpSettings {
             .field("username", &"<redacted>")
             .field("password", &"<redacted>")
             .field("tls", &self.tls)
+            .field("default_locale", &self.default_locale)
             .finish()
     }
+}
+
+/// The installation's configured default language, then English.
+pub fn default_locale() -> Locale {
+    smtp_settings().default_locale
 }
 
 static SETTINGS: OnceLock<SmtpSettings> = OnceLock::new();
@@ -227,14 +257,35 @@ mod tests {
         assert_eq!(settings.from, DEFAULT_FROM.parse::<Mailbox>().unwrap());
         assert_eq!(settings.username, "");
         assert_eq!(settings.password, "");
+        assert_eq!(settings.default_locale(), Locale::En);
         assert_eq!(
             settings.to_string(),
-            "host=0.0.0.0 port=1025 tls=none from=NoBody <nobody@domain.tld> auth=off"
+            "host=0.0.0.0 port=1025 tls=none from=NoBody <nobody@domain.tld> auth=off default_locale=en"
         );
 
         let defaults = settings_from(&[]).unwrap();
         assert_eq!(defaults.tls, SmtpTls::Starttls);
         assert_eq!(defaults.port, 1025);
+    }
+
+    #[test]
+    fn parses_the_default_locale() {
+        for (value, expected) in [
+            ("en", Locale::En),
+            ("IT", Locale::It),
+            ("it-IT", Locale::It),
+            ("en-US", Locale::En),
+        ] {
+            let settings = settings_from(&[("SMTP_TLS", "none"), ("DEFAULT_LOCALE", value)])
+                .unwrap_or_else(|error| panic!("{value}: {error}"));
+            assert_eq!(settings.default_locale(), expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn rejects_an_unsupported_default_locale() {
+        let error = message(&[("SMTP_TLS", "none"), ("DEFAULT_LOCALE", "fr")]);
+        assert!(error.contains("DEFAULT_LOCALE"), "{error}");
     }
 
     #[test]

@@ -180,6 +180,10 @@ pub struct CreateUserRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateUserInvitationRequest {
     pub email: String,
+    /// Explicit language for the invitation email; defaults to the
+    /// installation's `DEFAULT_LOCALE`.
+    #[serde(default)]
+    pub locale: Option<String>,
     #[serde(default)]
     pub given_name: Option<String>,
     #[serde(default)]
@@ -456,6 +460,12 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
     let profile = PendingSignupProfile {
         origin: SignupOrigin::Invitation,
         email: payload.email,
+        locale: match payload.locale.as_deref() {
+            Some(value) => tools::Locale::parse(value).ok_or_else(|| {
+                ErrorResponse::new(ErrorCode::RequestInvalid).with_param("field", "locale")
+            })?,
+            None => smtp::default_locale(),
+        },
         given_name: payload.given_name,
         family_name: payload.family_name,
         nickname: payload.nickname,

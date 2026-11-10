@@ -558,7 +558,7 @@ Claims depend on granted scopes:
 
 - `openid`: `sub`
 - `email`: `email`, `email_verified`
-- `profile`: `name`, `given_name`, `family_name`, `nickname`, `preferred_username`, `picture`, `updated_at`
+- `profile`: `name`, `given_name`, `family_name`, `nickname`, `preferred_username`, `picture`, `locale`, `updated_at`
 
 Client credentials tokens are rejected by UserInfo.
 

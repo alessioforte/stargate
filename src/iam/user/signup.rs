@@ -3,6 +3,7 @@ use db::ent::NewOrganizationMembership;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use store::Store;
+use tools::Locale;
 
 const KEY_PREFIX: &str = "signup_requests";
 
@@ -22,6 +23,8 @@ pub enum SignupOrigin {
 pub struct PendingSignupProfile {
     pub origin: SignupOrigin,
     pub email: String,
+    #[serde(default)]
+    pub locale: Locale,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
     pub nickname: Option<String>,
@@ -32,11 +35,13 @@ pub struct PendingSignupProfile {
 }
 
 impl PendingSignupProfile {
-    /// A self-registration: only the address is known.
-    pub fn self_service(email: impl Into<String>) -> Self {
+    /// A self-registration: only the address and its chosen language are
+    /// known until the verification link is opened.
+    pub fn self_service(email: impl Into<String>, locale: Locale) -> Self {
         Self {
             origin: SignupOrigin::SelfService,
             email: email.into(),
+            locale,
             given_name: None,
             family_name: None,
             nickname: None,
@@ -76,12 +81,14 @@ pub async fn delete_signup_request(sid: &str) -> Result<bool, store::StoreError>
 #[cfg(test)]
 mod tests {
     use super::{PendingSignupProfile, SignupOrigin};
+    use tools::Locale;
 
     #[test]
     fn pending_profile_roundtrips_server_owned_membership() {
         let profile: PendingSignupProfile = serde_json::from_value(serde_json::json!({
             "origin": "invitation",
             "email": "member@example.com",
+            "locale": "it",
             "givenName": null,
             "familyName": null,
             "nickname": null,
@@ -96,6 +103,7 @@ mod tests {
         .expect("deserialize pending membership");
 
         assert_eq!(profile.origin, SignupOrigin::Invitation);
+        assert_eq!(profile.locale, Locale::It);
         let membership = profile.membership.expect("membership");
         assert_eq!(membership.organization_id, "01JZ0000000000000000000001");
         assert_eq!(membership.role, "admin");

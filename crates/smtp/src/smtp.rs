@@ -6,8 +6,14 @@ use lettre::transport::smtp::{
     response::Response,
 };
 use lettre::{Message, SmtpTransport, Transport};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use tools::Locale;
 
 use crate::settings::{SmtpSettings, SmtpTls, smtp_settings};
+
+const TRANSACTIONAL_DIR: &str = ".stargate/transactional";
+const SUBJECTS_FILE: &str = "subjects.json";
 
 #[derive(Debug, thiserror::Error)]
 pub enum SmtpError {
@@ -23,6 +29,20 @@ pub enum SmtpError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to read email subjects `{path}`")]
+    SubjectsRead {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse email subjects `{path}`")]
+    SubjectsParse {
+        path: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("no email subject for `{template}` in locale `{locale}`")]
+    SubjectMissing { template: String, locale: String },
     #[error("email message has not been built")]
     MissingMessage,
     #[error(transparent)]
@@ -31,35 +51,163 @@ pub enum SmtpError {
     Transport(#[from] lettre::transport::smtp::Error),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum TemplateValidationError {
+    #[error("failed to read email subjects `{path}`")]
+    SubjectsRead {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse email subjects `{path}`")]
+    SubjectsParse {
+        path: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("email subjects have no `{locale}` translations")]
+    LocaleMissing { locale: String },
+    #[error("missing email template `{path}` for locale `{locale}`")]
+    TemplateMissing { path: String, locale: String },
+    #[error("missing email subject for `{template}` in locale `{locale}`")]
+    SubjectMissing { template: String, locale: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Template {
     SignupRequest,
     SignupAccountExists,
     SignupCompleted,
     ChangePasswordRequest,
     PasswordChangedNotification,
+    EmailOtp,
     // LoginWithOauthProvider,
 }
 
 impl Template {
-    pub fn subject(&self) -> &str {
+    pub const ALL: &'static [Self] = &[
+        Self::SignupRequest,
+        Self::SignupAccountExists,
+        Self::SignupCompleted,
+        Self::ChangePasswordRequest,
+        Self::PasswordChangedNotification,
+        Self::EmailOtp,
+    ];
+
+    pub const fn filename(self) -> &'static str {
         match self {
-            Template::SignupRequest => "Signup Request",
-            Template::SignupAccountExists => "You already have an account",
-            Template::ChangePasswordRequest => "Change Password Request",
-            Template::PasswordChangedNotification => "Password Changed",
-            Template::SignupCompleted => "Welcome to Stargate!",
+            Self::SignupRequest => "signup-request",
+            Self::SignupAccountExists => "signup-account-exists",
+            Self::SignupCompleted => "signup-completed",
+            Self::ChangePasswordRequest => "change-password-request",
+            Self::PasswordChangedNotification => "password-changed",
+            Self::EmailOtp => "email-otp",
+        }
+    }
+}
+
+fn template_path(dir: &Path, template: Template, locale: Locale) -> PathBuf {
+    dir.join(format!("{}.{}.html", template.filename(), locale.as_str()))
+}
+
+type Subjects = BTreeMap<String, BTreeMap<String, String>>;
+
+fn subjects_path(dir: &Path) -> PathBuf {
+    dir.join(SUBJECTS_FILE)
+}
+
+fn load_subjects(dir: &Path) -> Result<Subjects, TemplateValidationError> {
+    let path = subjects_path(dir);
+    let contents =
+        std::fs::read_to_string(&path).map_err(|source| TemplateValidationError::SubjectsRead {
+            path: path.display().to_string(),
+            source,
+        })?;
+    serde_json::from_str(&contents).map_err(|source| TemplateValidationError::SubjectsParse {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+/// Verifies that every template and every subject exists for every supported
+/// locale. Called during startup so a broken build never sends a partial email.
+pub fn validate_templates_at(dir: &Path) -> Result<(), TemplateValidationError> {
+    let subjects = load_subjects(dir)?;
+
+    for &locale in Locale::ALL {
+        let Some(locale_subjects) = subjects.get(locale.as_str()) else {
+            return Err(TemplateValidationError::LocaleMissing {
+                locale: locale.to_string(),
+            });
+        };
+
+        for &template in Template::ALL {
+            let path = template_path(dir, template, locale);
+            if !path.is_file() {
+                return Err(TemplateValidationError::TemplateMissing {
+                    path: path.display().to_string(),
+                    locale: locale.to_string(),
+                });
+            }
+
+            let subject = locale_subjects
+                .get(template.filename())
+                .map(String::as_str)
+                .unwrap_or_default();
+            if subject.trim().is_empty() {
+                return Err(TemplateValidationError::SubjectMissing {
+                    template: template.filename().to_string(),
+                    locale: locale.to_string(),
+                });
+            }
         }
     }
 
-    pub fn filename(&self) -> &str {
-        match self {
-            Template::SignupRequest => "signup-request",
-            Template::SignupAccountExists => "signup-account-exists",
-            Template::ChangePasswordRequest => "change-password-request",
-            Template::PasswordChangedNotification => "password-changed",
-            Template::SignupCompleted => "signup-completed",
+    Ok(())
+}
+
+pub fn validate_templates() -> Result<(), TemplateValidationError> {
+    validate_templates_at(Path::new(TRANSACTIONAL_DIR))
+}
+
+fn load_subject(template: Template, locale: Locale) -> Result<String, SmtpError> {
+    let path = subjects_path(Path::new(TRANSACTIONAL_DIR));
+    let contents = std::fs::read_to_string(&path).map_err(|source| SmtpError::SubjectsRead {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let subjects: Subjects =
+        serde_json::from_str(&contents).map_err(|source| SmtpError::SubjectsParse {
+            path: path.display().to_string(),
+            source,
+        })?;
+
+    subjects
+        .get(locale.as_str())
+        .and_then(|locale_subjects| locale_subjects.get(template.filename()))
+        .filter(|subject| !subject.trim().is_empty())
+        .cloned()
+        .ok_or_else(|| SmtpError::SubjectMissing {
+            template: template.filename().to_string(),
+            locale: locale.to_string(),
+        })
+}
+
+fn escape_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
         }
     }
+
+    escaped
 }
 
 /// Whether `value` parses as a deliverable recipient address.
@@ -72,9 +220,11 @@ pub struct Smtp {
     email: String,
     link: String,
     template: Template,
+    locale: Option<Locale>,
     name: Option<String>,
     subject: Option<String>,
     body: Option<String>,
+    variables: Vec<(String, String)>,
 }
 
 impl Default for Smtp {
@@ -90,14 +240,23 @@ impl Smtp {
             email: "".to_string(),
             link: "".to_string(),
             template: Template::SignupRequest,
+            locale: None,
             name: None,
             subject: None,
             body: None,
+            variables: Vec::new(),
         }
     }
 
     pub fn template(&mut self, template: Template) -> &mut Self {
         self.template = template;
+        self
+    }
+
+    /// The language of the template and subject. Defaults to
+    /// `DEFAULT_LOCALE`, then English.
+    pub fn locale(&mut self, locale: Locale) -> &mut Self {
+        self.locale = Some(locale);
         self
     }
 
@@ -128,6 +287,17 @@ impl Smtp {
         self
     }
 
+    /// A `{{key}}` value rendered in the template body, e.g. an OTP code.
+    /// Values are HTML-escaped before insertion.
+    pub fn variable(&mut self, key: impl Into<String>, value: impl Into<String>) -> &mut Self {
+        self.variables.push((key.into(), value.into()));
+        self
+    }
+
+    fn resolved_locale(&self) -> Locale {
+        self.locale.unwrap_or_else(crate::settings::default_locale)
+    }
+
     fn recipient_mailbox(&self) -> Result<Mailbox, SmtpError> {
         let address = self
             .email
@@ -145,7 +315,13 @@ impl Smtp {
             return Ok(body.clone());
         }
 
-        let file_path = format!(".stargate/transactional/{}.html", self.template.filename());
+        let file_path = template_path(
+            Path::new(TRANSACTIONAL_DIR),
+            self.template,
+            self.resolved_locale(),
+        )
+        .display()
+        .to_string();
         let content =
             std::fs::read_to_string(&file_path).map_err(|source| SmtpError::TemplateRead {
                 path: file_path,
@@ -155,9 +331,17 @@ impl Smtp {
     }
 
     fn render_template(&self, content: String) -> String {
-        content
-            .replace("{{name}}", self.name.as_deref().unwrap_or(""))
-            .replace("{{link}}", &self.link)
+        let name = escape_html(self.name.as_deref().unwrap_or(""));
+        let link = escape_html(&self.link);
+        let mut rendered = content
+            .replace("{{name}}", &name)
+            .replace("{{link}}", &link);
+
+        for (key, value) in &self.variables {
+            rendered = rendered.replace(&format!("{{{{{key}}}}}"), &escape_html(value));
+        }
+
+        rendered
     }
 
     fn build_mailer(settings: &SmtpSettings) -> Result<SmtpTransport, SmtpError> {
@@ -187,10 +371,10 @@ impl Smtp {
     pub fn build(&mut self) -> Result<&mut Self, SmtpError> {
         let to = self.recipient_mailbox()?;
         let from = smtp_settings().from.clone();
-        let subject = self
-            .subject
-            .as_deref()
-            .unwrap_or_else(|| self.template.subject());
+        let subject = match self.subject.as_deref() {
+            Some(subject) => subject.to_string(),
+            None => load_subject(self.template, self.resolved_locale())?,
+        };
         let header = ContentType::TEXT_HTML;
         let body = self.render_body()?;
 
@@ -222,7 +406,11 @@ impl Smtp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Smtp, SmtpError, SmtpSettings, SmtpTls, Template};
+    use super::{
+        Locale, Smtp, SmtpError, SmtpSettings, SmtpTls, Template, TemplateValidationError,
+        subjects_path, template_path, validate_templates_at,
+    };
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn build_rejects_invalid_recipient_email() {
@@ -266,6 +454,108 @@ mod tests {
     }
 
     #[test]
+    fn render_template_replaces_custom_variables() {
+        let mut smtp = Smtp::new();
+        smtp.variable("code", "123456")
+            .variable("expires", "5 minutes");
+
+        assert_eq!(
+            smtp.render_template("{{code}} expires in {{expires}}".to_string()),
+            "123456 expires in 5 minutes"
+        );
+    }
+
+    #[test]
+    fn render_template_escapes_variables() {
+        let mut smtp = Smtp::new();
+        smtp.name(Some("Ada <admin> & Co".to_string()));
+        smtp.link("https://example.com/?a=1&b=2".to_string());
+        smtp.variable("code", "<123>");
+
+        assert_eq!(
+            smtp.render_template("{{name}}|{{link}}|{{code}}".to_string()),
+            "Ada &lt;admin&gt; &amp; Co|https://example.com/?a=1&amp;b=2|&lt;123&gt;"
+        );
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("stargate-smtp-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_template_tree(dir: &Path) {
+        let mut locales = serde_json::Map::new();
+
+        for &locale in Locale::ALL {
+            let mut subjects = serde_json::Map::new();
+            for &template in Template::ALL {
+                subjects.insert(
+                    template.filename().to_string(),
+                    serde_json::Value::String(format!(
+                        "{} {}",
+                        template.filename(),
+                        locale.as_str()
+                    )),
+                );
+                std::fs::write(template_path(dir, template, locale), "<html></html>").unwrap();
+            }
+            locales.insert(
+                locale.as_str().to_string(),
+                serde_json::Value::Object(subjects),
+            );
+        }
+
+        std::fs::write(subjects_path(dir), serde_json::to_string(&locales).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn validates_a_complete_template_tree() {
+        let dir = temp_dir("complete");
+        write_template_tree(&dir);
+
+        assert!(validate_templates_at(&dir).is_ok());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validation_fails_when_a_template_is_missing() {
+        let dir = temp_dir("missing-template");
+        write_template_tree(&dir);
+        std::fs::remove_file(template_path(&dir, Template::EmailOtp, Locale::It)).unwrap();
+
+        let error = validate_templates_at(&dir).unwrap_err();
+        assert!(matches!(
+            error,
+            TemplateValidationError::TemplateMissing { .. }
+        ));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn validation_fails_when_a_subject_is_missing() {
+        let dir = temp_dir("missing-subject");
+        write_template_tree(&dir);
+
+        let path = subjects_path(&dir);
+        let mut subjects: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        subjects["it"].as_object_mut().unwrap().remove("email-otp");
+        std::fs::write(&path, serde_json::to_string(&subjects).unwrap()).unwrap();
+
+        let error = validate_templates_at(&dir).unwrap_err();
+        assert!(matches!(
+            error,
+            TemplateValidationError::SubjectMissing { .. }
+        ));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn build_mailer_builds_every_tls_mode() {
         for tls in [SmtpTls::Starttls, SmtpTls::Implicit, SmtpTls::None] {
             let settings = SmtpSettings {
@@ -275,6 +565,7 @@ mod tests {
                 username: String::new(),
                 password: String::new(),
                 tls,
+                default_locale: Locale::En,
             };
             assert!(Smtp::build_mailer(&settings).is_ok(), "{tls}");
         }
@@ -337,6 +628,7 @@ mod tests {
             username: "project-id".to_string(),
             password: "secret".to_string(),
             tls: SmtpTls::Starttls,
+            default_locale: Locale::En,
         };
         let message = Message::builder()
             .from(settings.from.clone())

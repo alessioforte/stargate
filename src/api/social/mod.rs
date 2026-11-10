@@ -69,10 +69,11 @@ impl Provider {
         self,
         code: &str,
         audit_request: TrustedAuditRequest,
+        locale: Option<tools::Locale>,
     ) -> Result<db::ent::User, ErrorResponse> {
         match self {
-            Self::Google => google::sign_in(code, audit_request).await,
-            Self::GitHub => github::sign_in(code, audit_request).await,
+            Self::Google => google::sign_in(code, audit_request, locale).await,
+            Self::GitHub => github::sign_in(code, audit_request, locale).await,
         }
     }
 }
@@ -168,6 +169,7 @@ struct CallbackQuery {
 /// `/oauth/{provider}`, where the provider returns the browser.
 async fn callback(req: Request, provider: Provider) -> Response {
     let audit_request = audit_request_from(req.extensions());
+    let locale = crate::web::request::accept_language(req.headers());
     let bound_state = req.get_cookie_value(STATE_COOKIE);
     let query = match Query::<CallbackQuery>::try_from_uri(req.uri()) {
         Ok(Query(query)) => query,
@@ -189,11 +191,11 @@ async fn callback(req: Request, provider: Provider) -> Response {
     match record {
         Some(OAuthState {
             browser: Some(browser),
-        }) => browser_callback(provider, browser, query, bound_state, audit_request).await,
+        }) => browser_callback(provider, browser, query, bound_state, audit_request, locale).await,
         // The browser started a sign-in whose state expired or was used.
         None if bound_state.is_some() => login_failure(None, LoginError::Failed),
         Some(OAuthState { browser: None }) => {
-            match api_callback(provider, &query, audit_request).await {
+            match api_callback(provider, &query, audit_request, locale).await {
                 Ok(response) => response,
                 Err(error) => error.into_response(),
             }
@@ -215,6 +217,7 @@ async fn browser_callback(
     query: CallbackQuery,
     bound_state: Option<String>,
     audit_request: TrustedAuditRequest,
+    locale: Option<tools::Locale>,
 ) -> Response {
     let return_to = browser.return_to.as_deref();
     // Only the browser that started this sign-in may finish it.
@@ -231,7 +234,7 @@ async fn browser_callback(
     let Some(code) = nonempty(query.code.as_deref()) else {
         return login_failure(return_to, LoginError::Failed);
     };
-    match signed_in(provider, code, audit_request).await {
+    match signed_in(provider, code, audit_request, locale).await {
         Ok(session) => {
             let params: Vec<(&str, &str)> = return_to
                 .map(|return_to| vec![("return_to", return_to)])
@@ -251,18 +254,20 @@ async fn api_callback(
     provider: Provider,
     query: &CallbackQuery,
     audit_request: TrustedAuditRequest,
+    locale: Option<tools::Locale>,
 ) -> Result<Response, ErrorResponse> {
     let code = nonempty(query.code.as_deref())
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SocialAuthorizationCodeMissing))?;
-    session_response(signed_in(provider, code, audit_request).await?)
+    session_response(signed_in(provider, code, audit_request, locale).await?)
 }
 
 async fn signed_in(
     provider: Provider,
     code: &str,
     audit_request: TrustedAuditRequest,
+    locale: Option<tools::Locale>,
 ) -> Result<IssuedSession, ErrorResponse> {
-    let user = provider.sign_in(code, audit_request).await?;
+    let user = provider.sign_in(code, audit_request, locale).await?;
     let auth_time = chrono::Utc::now().timestamp() as usize;
     start_user_session(
         user,

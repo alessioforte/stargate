@@ -177,6 +177,7 @@ fn user_claims_profile(user: &db::ent::User) -> oidc::claims::UserClaimsProfile 
         family_name: user.family_name.clone(),
         nickname: user.nickname.clone(),
         picture: user.picture.clone(),
+        locale: crate::iam::user::profile::locale(user).map(|locale| locale.as_str().to_string()),
     }
 }
 
