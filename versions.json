@@ -1,0 +1,18 @@
+{
+  "sqliteSecurityPatch": {
+    "sqlxSqlite": {
+      "version": "0.9.0",
+      "archiveSha256": "488e99c397a62007e4229aec669a179816339afc6d2620ca6fa420dbee2e982c",
+      "path": "vendor/sqlx-sqlite",
+      "upstreamCompatibilityCommit": "10462fa4414c6c7f1ed1d39bb31678e3b726878c",
+      "libsqlite3SysRequirement": ">=0.39.1, <0.40.0",
+      "rustLintOverrides": { "deprecated": "allow" }
+    },
+    "libsqlite3Sys": {
+      "version": "0.39.1",
+      "bundledSqliteVersion": "3.54.1"
+    },
+    "advisory": "RUSTSEC-2026-0459",
+    "removeWhen": "A released SQLx version permits libsqlite3-sys >=0.39.1"
+  }
+}

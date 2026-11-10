@@ -58,6 +58,7 @@ RUN apt-get update && \
 
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
+COPY vendor ./vendor
 COPY crates ./crates
 COPY migrations ./migrations
 COPY src ./src
@@ -67,6 +68,7 @@ FROM chef AS server-build
 ARG APP_NAME
 ARG STARGATE_PROFILE
 COPY --from=planner /app/recipe.json ./recipe.json
+COPY vendor ./vendor
 RUN case "${STARGATE_PROFILE}" in \
     edge|cluster) ;; \
     *) echo "Unsupported STARGATE_PROFILE: ${STARGATE_PROFILE}" >&2; exit 1 ;; \
@@ -76,6 +78,7 @@ RUN case "${STARGATE_PROFILE}" in \
     --no-default-features \
     --features "${STARGATE_PROFILE}"
 COPY Cargo.toml Cargo.lock ./
+COPY vendor ./vendor
 COPY crates ./crates
 COPY migrations ./migrations
 COPY src ./src

@@ -970,6 +970,12 @@ stay feature-gated per crate (`memory`/`redis`, `sqlite`/`postgres`), so a
 `redis` or `sqlx` dependency in a leaf crate is `optional` and enabled by that
 crate's backend feature.
 
+SQLite temporarily patches the released `sqlx-sqlite 0.9.0` driver through
+`vendor/sqlx-sqlite` to permit `libsqlite3-sys >=0.39.1` (bundled SQLite 3.54.1,
+RUSTSEC-2026-0459). Rust sources are unchanged. Details, integrity pins and the
+removal condition are in `vendor/README.md`, `VERSIONS.md` and `versions.json`.
+Keep the vendor directory available in Docker planner/cook/build stages.
+
 ## CLI
 
 ```bash
