@@ -6,6 +6,10 @@ English `message` remains a safe fallback.
 
 ## Error envelope
 
+`403 user.super_admin_mutation_forbidden` means the target account is a
+super-admin and the caller lacks a super-admin principal. Admin-key capabilities
+cannot override this protection; see [admin-key permissions](admin-keys.md).
+
 ```json
 {
   "message": "User not found",

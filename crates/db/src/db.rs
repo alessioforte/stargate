@@ -200,6 +200,7 @@ pub trait DbStore {
     /// API key joined with its owner's org binding, for gateway auth.
     async fn get_api_key_auth_by_hash(&self, key_hash: &str) -> Result<Option<ApiKeyAuth>>;
     async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>>;
+    async fn get_api_key_user_id(&self, id: &str) -> Result<Option<String>>;
     async fn get_all_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;
     async fn get_api_keys_by_user_id(&self, user_id: &str) -> Result<Vec<ApiKey>>;
     async fn get_all_user_api_keys(&self, limit: i64, offset: i64) -> Result<Vec<ApiKey>>;

@@ -59,7 +59,7 @@ class ProductionOverlay(unittest.TestCase):
     def test_image_is_the_released_cluster_image(self):
         # release.yml tags the cluster image with the bare version.
         deployment = document(self.manifest, "Deployment")
-        self.assertIn('image: "ghcr.io/alessioforte/stargate:0.1.1"\n', deployment)
+        self.assertIn('image: "ghcr.io/alessioforte/stargate:0.1.2"\n', deployment)
 
     def test_admin_allow_list_and_migration_job_are_enabled(self):
         self.assertIn("kind: Middleware\n", self.manifest)

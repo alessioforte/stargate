@@ -65,6 +65,7 @@ pub enum ErrorCode {
     UserNicknameAlreadyExists,
     UserNicknameInvalid,
     UserSuperAdminDeleteForbidden,
+    UserSuperAdminMutationForbidden,
     OrganizationNotFound,
     OrganizationNameRequired,
     MembershipRoleRequired,
@@ -213,6 +214,7 @@ impl ErrorCode {
         Self::UserNicknameAlreadyExists,
         Self::UserNicknameInvalid,
         Self::UserSuperAdminDeleteForbidden,
+        Self::UserSuperAdminMutationForbidden,
         Self::OrganizationNotFound,
         Self::OrganizationNameRequired,
         Self::MembershipRoleRequired,
@@ -363,6 +365,7 @@ impl ErrorCode {
             Self::UserNicknameAlreadyExists => "user.nickname_already_exists",
             Self::UserNicknameInvalid => "user.nickname_invalid",
             Self::UserSuperAdminDeleteForbidden => "user.super_admin_delete_forbidden",
+            Self::UserSuperAdminMutationForbidden => "user.super_admin_mutation_forbidden",
             Self::OrganizationNotFound => "organization.not_found",
             Self::OrganizationNameRequired => "organization.name_required",
             Self::MembershipRoleRequired => "membership.role_required",
@@ -598,6 +601,11 @@ impl ErrorCode {
                 Status::FORBIDDEN,
                 Authorization,
                 "Super-admin users cannot be deleted",
+            ),
+            Self::UserSuperAdminMutationForbidden => definition(
+                Status::FORBIDDEN,
+                Authorization,
+                "Only a super-admin can modify a super-admin account",
             ),
             Self::OrganizationNotFound => {
                 definition(Status::NOT_FOUND, NotFound, "Organization not found")

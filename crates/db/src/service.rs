@@ -1717,6 +1717,10 @@ impl DbStore for Service {
         self.api_key.get_auth_by_hash(&self.pool, key_hash).await
     }
 
+    async fn get_api_key_user_id(&self, id: &str) -> Result<Option<String>> {
+        self.api_key.get_user_id(&self.pool, id).await
+    }
+
     async fn get_api_key_by_id(&self, id: &str) -> Result<Option<ApiKey>> {
         self.api_key.get_by_id(&self.pool, id).await
     }
@@ -4724,6 +4728,69 @@ mod tests {
 
     fn unique_nick() -> String {
         ulid::Ulid::generate().to_string()
+    }
+
+    #[tokio::test]
+    #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
+    async fn api_key_user_lookup_keeps_revoked_ownership_and_excludes_service_accounts() {
+        let svc = test_service().await;
+        let context = admin_context(ulid::Ulid::generate().to_string());
+        let user = svc
+            .create_user(
+                Profile::new(unique_email(), unique_nick()),
+                CredentialType::Password,
+                "test-password-hash",
+                None,
+                context.clone(),
+            )
+            .await
+            .unwrap();
+        let key = svc
+            .create_user_api_key(
+                &user.id,
+                &ulid::Ulid::generate().to_string(),
+                "User",
+                None,
+                None,
+                context.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            svc.get_api_key_user_id(&key.id).await.unwrap().as_deref(),
+            Some(user.id.as_str())
+        );
+        svc.revoke_api_key(&key.id, context.clone()).await.unwrap();
+        assert_eq!(
+            svc.get_api_key_user_id(&key.id).await.unwrap().as_deref(),
+            Some(user.id.as_str())
+        );
+        let account = svc
+            .create_service_account("Worker", None, None, context.clone())
+            .await
+            .unwrap();
+        let service_key = svc
+            .create_service_account_api_key(
+                &account.id,
+                &ulid::Ulid::generate().to_string(),
+                "Worker",
+                None,
+                context,
+            )
+            .await
+            .unwrap();
+        assert!(
+            svc.get_api_key_user_id(&service_key.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            svc.get_api_key_user_id(&ulid::Ulid::generate().to_string())
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

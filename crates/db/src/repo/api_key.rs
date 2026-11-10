@@ -32,6 +32,18 @@ impl Default for ApiKeyRepository {
 }
 
 impl ApiKeyRepository {
+    pub async fn get_user_id<'c, E>(&self, ex: E, key_id: &str) -> Result<Option<String>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT user_id FROM {USER_API_KEY} WHERE api_key_id = $1"
+        )))
+        .bind(key_id)
+        .fetch_optional(ex)
+        .await?)
+    }
+
     pub async fn create(
         &self,
         tx: &mut crate::backend::Tx<'_>,

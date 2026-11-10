@@ -652,6 +652,18 @@ async fn load_client(client_id: &str) -> Result<OAuthClient, ErrorResponse> {
         })
 }
 
+// First-party clients are trusted by the admin OAuth grant. A machine key
+// must neither redirect that login flow nor turn another client into one.
+fn require_client_mutation(
+    authorization: &authorization::AdminAuthorization,
+    attrs: &Value,
+) -> Result<(), ErrorResponse> {
+    if oidc::consent::client_is_first_party(attrs) {
+        authorization.require_super_admin()?;
+    }
+    Ok(())
+}
+
 #[utoipa::path(
     get,
     path = "/admin/oauth/clients",
@@ -738,13 +750,15 @@ pub async fn get_oauth_client(mut req: Request) -> Result<Response, ErrorRespons
     )
 )]
 pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    authorization::require(&req, Permission::OAuthClientsCreate)?;
+    let authorization = authorization::get(&req)?.clone();
+    authorization.require(Permission::OAuthClientsCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let payload: CreateOAuthClientRequest = extract_json(req).await?;
     let client_id = payload.client_id.clone().unwrap_or_else(generate_client_id);
     validate_client_id(&client_id)?;
     let input = normalize_create_payload(payload)?;
+    require_client_mutation(&authorization, &input.attrs)?;
 
     if crate::data::db::get_oauth_client_by_client_id(&client_id)
         .await
@@ -804,7 +818,8 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    authorization::require(&req, Permission::OAuthClientsUpdate)?;
+    let authorization = authorization::get(&req)?.clone();
+    authorization.require(Permission::OAuthClientsUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
@@ -812,7 +827,9 @@ pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     let input = normalize_update_payload(payload)?;
 
     let mut existing = load_client(&client_id).await?;
+    require_client_mutation(&authorization, &existing.attrs)?;
     apply_input(&mut existing, input)?;
+    require_client_mutation(&authorization, &existing.attrs)?;
 
     let updated = crate::data::db::update_oauth_client(existing, ctx)
         .await
@@ -837,15 +854,18 @@ pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     )
 )]
 pub async fn patch_oauth_client(mut req: Request) -> Result<Response, ErrorResponse> {
-    authorization::require(&req, Permission::OAuthClientsUpdate)?;
+    let authorization = authorization::get(&req)?.clone();
+    authorization.require(Permission::OAuthClientsUpdate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
     let payload: PatchOAuthClientRequest = extract_json(req).await?;
 
     let mut existing = load_client(&client_id).await?;
+    require_client_mutation(&authorization, &existing.attrs)?;
     let input = normalize_patch_payload(&existing, payload)?;
     apply_input(&mut existing, input)?;
+    require_client_mutation(&authorization, &existing.attrs)?;
 
     let updated = crate::data::db::update_oauth_client(existing, ctx)
         .await
@@ -872,7 +892,8 @@ pub async fn disable_oauth_client(mut req: Request) -> Result<Response, ErrorRes
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
-    let _ = load_client(&client_id).await?;
+    let client = load_client(&client_id).await?;
+    require_client_mutation(authorization::get(&req)?, &client.attrs)?;
     let updated = crate::data::db::set_oauth_client_enabled(&client_id, false, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
@@ -897,7 +918,8 @@ pub async fn enable_oauth_client(mut req: Request) -> Result<Response, ErrorResp
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
-    let _ = load_client(&client_id).await?;
+    let client = load_client(&client_id).await?;
+    require_client_mutation(authorization::get(&req)?, &client.attrs)?;
     let updated = crate::data::db::set_oauth_client_enabled(&client_id, true, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
@@ -924,6 +946,7 @@ pub async fn rotate_oauth_client_secret(mut req: Request) -> Result<Response, Er
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
     let client = load_client(&client_id).await?;
+    require_client_mutation(authorization::get(&req)?, &client.attrs)?;
     if !uses_client_secret(&client.token_endpoint_auth_method) {
         return Err(ErrorResponse::new(ErrorCode::OAuthClientSecretUnsupported));
     }
@@ -963,7 +986,8 @@ pub async fn delete_oauth_client(mut req: Request) -> Result<Response, ErrorResp
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let client_id: String = extract_path(&mut req).await?;
-    let _ = load_client(&client_id).await?;
+    let client = load_client(&client_id).await?;
+    require_client_mutation(authorization::get(&req)?, &client.attrs)?;
 
     crate::data::db::delete_oauth_client(&client_id, ctx)
         .await

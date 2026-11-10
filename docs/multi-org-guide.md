@@ -95,6 +95,11 @@ machine principal needs `users:create` or `users:invite`, plus
 application-wide: the organization ID selects the membership to create, not a
 scope attached to the key.
 
+Capabilities do not authorize mutations of super-admin accounts or their
+memberships. Organizations containing a super-admin also require a super-admin
+for updates/deletion, because those operations affect the member's policies
+or sessions. See [admin-key permissions](admin-keys.md).
+
 Direct creation commits the user, credential, membership, and audit outbox
 events in one transaction. Invitations retain the normalized organization and
 role in server-side pending state and use the same transaction when accepted.

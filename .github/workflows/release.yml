@@ -299,6 +299,10 @@ jobs:
           test -n "$IMAGE_DIGEST"
           printf 'Image: `%s:%s@%s`\n\nChart: `%s/stargate@%s` (version `%s`, appVersion `%s`)\n' \
             "$IMAGE" "$VERSION" "$IMAGE_DIGEST" "$CHART_REGISTRY" "$CHART_DIGEST" "$VERSION" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          if [[ -f "docs/releases/$VERSION.md" ]]; then
+            printf '\n' >> "$RUNNER_TEMP/release-notes.md"
+            cat "docs/releases/$VERSION.md" >> "$RUNNER_TEMP/release-notes.md"
+          fi
           flags=()
           if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \

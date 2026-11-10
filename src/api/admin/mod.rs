@@ -14,6 +14,9 @@ pub mod service_accounts;
 pub mod sessions;
 pub mod users;
 
+#[cfg(all(test, feature = "sqlite", feature = "memory"))]
+mod protection_tests;
+
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;

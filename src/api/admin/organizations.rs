@@ -199,6 +199,10 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    // Organization policy changes also affect each member’s sign-in and limits.
+    authorization::get(&req)?
+        .require_organization_mutation(&id)
+        .await?;
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: UpdateOrganizationRequest = extract_json(req).await?;
     if let Some(attrs) = &payload.attrs {
@@ -270,6 +274,13 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
     let members = crate::data::db::get_organization_users(&id)
         .await
         .map_err(ErrorResponse::internal)?;
+
+    // Deleting an organization also removes memberships and revokes sessions.
+    for member in &members {
+        authorization::get(&req)?
+            .require_user_mutation(&member.user.id)
+            .await?;
+    }
 
     let revoked_key_hashes = crate::data::db::delete_organization(&id, ctx)
         .await

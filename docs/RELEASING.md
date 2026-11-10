@@ -6,6 +6,11 @@ this workflow never deploys or writes to other repositories.
 
 ## Cut a release
 
+Version-specific operator/security notes under `docs/releases/<version>.md`
+are appended to the GitHub Release body alongside the immutable artifact
+digests. [0.1.2 security notes](releases/0.1.2.md) describe the super-admin
+account protection and the affected automation permissions.
+
 1. Set `[workspace.package].version` in `Cargo.toml` to the new version and keep
    the root `[package].version` equal to it. Member crates inherit the workspace
    version. Set `version` and `appVersion` in `k8s/stargate/Chart.yaml` to the

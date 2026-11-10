@@ -370,6 +370,10 @@ pub async fn get_api_key_by_id(id: &str) -> Result<Option<ApiKey>> {
     svc.get_api_key_by_id(id).await
 }
 
+pub async fn get_api_key_user_id(id: &str) -> Result<Option<String>> {
+    service().get_api_key_user_id(id).await
+}
+
 pub async fn get_all_api_keys(limit: i64, offset: i64) -> Result<Vec<ApiKey>> {
     let svc = service();
     svc.get_all_api_keys(limit, offset).await

@@ -13,7 +13,7 @@
 
 name: stargate
 
-x-stargate-image: &stargate-image ghcr.io/alessioforte/stargate:${STARGATE_VERSION:-0.1.1}
+x-stargate-image: &stargate-image ghcr.io/alessioforte/stargate:${STARGATE_VERSION:-0.1.2}
 
 services:
   stargate:

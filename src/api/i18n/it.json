@@ -25,6 +25,7 @@
     "user.nickname_already_exists": "Esiste già un utente con questo nome utente",
     "user.nickname_invalid": "Il nome utente non può essere vuoto e può contenere '@' solo se coincide con l'email dell'account",
     "user.super_admin_delete_forbidden": "Gli utenti super amministratori non possono essere eliminati",
+    "user.super_admin_mutation_forbidden": "Solo un super amministratore può modificare l’account di un super amministratore",
     "organization.not_found": "Organizzazione non trovata",
     "organization.name_required": "Il nome dell'organizzazione è obbligatorio",
     "membership.role_required": "Il ruolo nell'organizzazione è obbligatorio",

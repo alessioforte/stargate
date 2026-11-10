@@ -1028,6 +1028,15 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
   config, access-control rules, sessions, outbox events, `me`, `overview`, `health`.
   Super-admin users bypass capability checks; admin keys need exact `<resource>:<action>`
   permissions (`src/api/admin/authorization.rs`).
+  Capabilities never permit mutations of super-admin accounts: profile/attrs,
+  memberships, sessions and owned API keys require a super-admin principal.
+  Updating/deleting an organization containing a super-admin is protected too,
+  because policies, memberships and sessions would affect that account.
+  First-party OAuth clients (trusted for admin access) can only be created or
+  mutated by super-admins, including changes to `attrs.first_party`.
+  Super-admins keep self/other-super-admin edits; deleting a super-admin remains
+  forbidden to everyone. User API keys authenticate gateway API-key subjects,
+  never an admin user, even when owned by a super-admin. Guide: `docs/admin-keys.md`.
 - `/auth/*` (hosted auth app), `/stargate/*` (console), everything else: gateway fallback.
 
 `IAM_HOSTS` optionally restricts every IAM route above (including docs and hosted

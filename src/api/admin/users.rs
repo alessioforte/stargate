@@ -494,6 +494,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?.require_user_mutation(&id).await?;
     let payload: UpdateUserRequest = extract_json(req).await?;
 
     let existing = crate::data::db::get_user_by_id(&id)
@@ -554,6 +555,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?.require_user_mutation(&id).await?;
     let payload: PatchUserRequest = extract_json(req).await?;
 
     let mut existing = crate::data::db::get_user_by_id(&id)
@@ -613,6 +615,7 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?.require_user_mutation(&id).await?;
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: UserAttrsRequest = extract_json(req).await?;
     super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
@@ -651,6 +654,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?.require_user_mutation(&id).await?;
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: UserAttrsRequest = extract_json(req).await?;
 
@@ -697,6 +701,7 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?.require_user_mutation(&id).await?;
 
     let user = crate::data::db::get_user_by_id(&id)
         .await
@@ -830,6 +835,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
+    authorization.require_user_mutation(&user_id).await?;
     let payload: Option<OrganizationMembershipRequest> = extract_optional_json(req).await?;
     let role = normalize_membership_role(payload.and_then(|p| p.role))?;
 
@@ -895,6 +901,9 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let (user_id, org_id): (String, String) = extract_path(&mut req).await?;
+    authorization::get(&req)?
+        .require_user_mutation(&user_id)
+        .await?;
 
     if crate::data::db::get_user_by_id(&user_id)
         .await

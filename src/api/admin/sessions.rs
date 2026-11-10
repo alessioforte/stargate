@@ -214,6 +214,15 @@ pub async fn delete_session(
         .and_then(AdminPrincipal::user_id)
         .map(str::to_string);
     let session_id: String = extract_path(&mut req).await?;
+    let target = crate::iam::sess::registry::get_session(&session_id)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .ok_or_else(|| {
+            ErrorResponse::new(ErrorCode::SessionNotFound).with_param("id", session_id.clone())
+        })?;
+    authorization::get(&req)?
+        .require_user_mutation(&target.user_id)
+        .await?;
     let session = crate::iam::sess::registry::revoke_session(&session_id)
         .await
         .map_err(ErrorResponse::internal)?
@@ -260,6 +269,9 @@ pub async fn delete_user_sessions(
         .and_then(AdminPrincipal::user_id)
         .map(str::to_string);
     let user_id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?
+        .require_user_mutation(&user_id)
+        .await?;
     crate::data::db::get_user_by_id(&user_id)
         .await
         .map_err(ErrorResponse::internal)?

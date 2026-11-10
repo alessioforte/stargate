@@ -216,11 +216,15 @@ pub async fn get_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
     )
 )]
 pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
-    authorization::require(&req, Permission::ApiKeysCreate)?;
+    let authorization = authorization::get(&req)?.clone();
+    authorization.require(Permission::ApiKeysCreate)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: CreateApiKeyRequest = extract_json(req).await?;
+    if let Some(user_id) = &payload.user_id {
+        authorization.require_user_mutation(user_id).await?;
+    }
     if let Some(attrs) = &payload.attrs {
         super::limit_attrs::validate(&runtime.core.limiter, attrs, false)?;
     }
@@ -303,6 +307,9 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?
+        .require_api_key_mutation(&id)
+        .await?;
 
     let Some(api_key) = crate::data::db::get_api_key_by_id(&id)
         .await
@@ -341,6 +348,9 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?
+        .require_api_key_mutation(&id)
+        .await?;
 
     let api_key = crate::data::db::get_api_key_by_id(&id)
         .await
@@ -385,6 +395,9 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?
+        .require_api_key_mutation(&id)
+        .await?;
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
     super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
@@ -425,6 +438,9 @@ pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResp
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
+    authorization::get(&req)?
+        .require_api_key_mutation(&id)
+        .await?;
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: ApiKeyAttrsRequest = extract_json(req).await?;
 

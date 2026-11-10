@@ -276,6 +276,43 @@ impl AdminAuthorization {
         }
     }
 
+    /// Capabilities never grant control over a super-admin's account.
+    pub async fn require_user_mutation(&self, user_id: &str) -> Result<(), ErrorResponse> {
+        if !self.super_admin
+            && crate::data::db::is_super_admin_user_id(user_id)
+                .await
+                .map_err(ErrorResponse::internal)?
+        {
+            return Err(ErrorResponse::new(
+                ErrorCode::UserSuperAdminMutationForbidden,
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn require_api_key_mutation(&self, key_id: &str) -> Result<(), ErrorResponse> {
+        if !self.super_admin
+            && let Some(user_id) = crate::data::db::get_api_key_user_id(key_id)
+                .await
+                .map_err(ErrorResponse::internal)?
+        {
+            self.require_user_mutation(&user_id).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn require_organization_mutation(&self, org_id: &str) -> Result<(), ErrorResponse> {
+        if !self.super_admin {
+            for member in crate::data::db::get_organization_users(org_id)
+                .await
+                .map_err(ErrorResponse::internal)?
+            {
+                self.require_user_mutation(&member.user.id).await?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn permissions(&self) -> impl Iterator<Item = Permission> + '_ {
         Permission::ALL
             .iter()
