@@ -121,7 +121,9 @@ jobs:
         with:
           node-version: 22.23.4
           cache: npm
-          cache-dependency-path: apps/auth/package-lock.json
+          cache-dependency-path: |
+            apps/auth/package-lock.json
+            apps/mail/package-lock.json
 
       # The suite's browser signs in on the hosted login page. Its build
       # prerenders the page so the form works without JavaScript (HtmlUnit
@@ -131,6 +133,12 @@ jobs:
         run: |
           npm ci
           VITE_API_URL= npm run build
+
+      - name: Export email templates
+        working-directory: apps/mail
+        run: |
+          npm ci
+          npm run export
 
       - name: Start Stargate with TLS
         # The suite requires every discovered endpoint to use HTTPS; it accepts
@@ -142,6 +150,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stargate/.stargate" "$RUNNER_TEMP/results"
           cd "$RUNNER_TEMP/stargate"
           cp "$GITHUB_WORKSPACE/.github/oidc-conformance/stargate-config.yaml" .stargate/config.yaml
+          cp -R "$GITHUB_WORKSPACE/.stargate/transactional" .stargate/transactional
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=stargate.local" \
             -addext "subjectAltName=DNS:stargate.local" -keyout key.pem -out cert.pem
           export TLS_ENABLED=true TLS_CERT="$PWD/cert.pem" TLS_KEY="$PWD/key.pem" PORT=5443 \
