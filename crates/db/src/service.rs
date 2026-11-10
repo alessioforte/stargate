@@ -1224,6 +1224,52 @@ impl DbStore for Service {
         Ok(updated_user)
     }
 
+    async fn update_user_locale(
+        &self,
+        user_id: &str,
+        locale: &str,
+        context: TrustedAuditContext,
+    ) -> Result<User> {
+        ensure!(
+            context.actor().actor_type() == "user"
+                && context.actor().id() == Some(user_id)
+                && matches!(context.boundary().scope(), AuditScopeSelector::Application),
+            "locale update requires the same user in application scope"
+        );
+        let mut tx = self.pool.begin().await?;
+        let before = self
+            .user
+            .get_by_id_for_update(&mut tx, user_id)
+            .await?
+            .context("cannot update locale for a missing user")?;
+        let previous_locale = before.attrs.get("locale").and_then(JsonValue::as_str);
+        if previous_locale == Some(locale) {
+            tx.commit().await?;
+            return Ok(before);
+        }
+
+        // Merge into the locked current row, never into an earlier HTTP read.
+        let mut attrs = before.attrs.as_object().cloned().unwrap_or_default();
+        attrs.insert("locale".to_string(), JsonValue::String(locale.to_string()));
+        let updated = self
+            .user
+            .update_attrs(&mut tx, user_id, &JsonValue::Object(attrs))
+            .await?;
+        let event = build_outbox_event(
+            &context,
+            Utc::now(),
+            AuditResource::new("user", user_id),
+            "user.updated",
+            AuditOperation::Update,
+            Some(serde_json::json!({ "locale": previous_locale })),
+            Some(serde_json::json!({ "locale": locale })),
+            serde_json::json!({ "source": "account", "changed_fields": ["attrs.locale"] }),
+        )?;
+        self.outbox.insert(&mut tx, &event).await?;
+        tx.commit().await?;
+        Ok(updated)
+    }
+
     async fn delete_user(&self, id: &str, context: TrustedAuditContext) -> Result<Vec<String>> {
         ensure_admin_control_plane(&context)?;
         let mut tx = self.pool.begin().await?;
@@ -5495,5 +5541,162 @@ mod pool_settings_tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::*;
+    use crate::ent::{TrustedAdminActor, TrustedAuditActor, TrustedAuditRequest};
+    use serde_json::json;
+
+    async fn service() -> Service {
+        #[cfg(feature = "sqlite")]
+        let service = init("sqlite::memory:").await.unwrap();
+        #[cfg(feature = "postgres")]
+        let service =
+            init(&std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL required"))
+                .await
+                .unwrap();
+        service.migrate().await.unwrap();
+        service
+    }
+
+    fn request() -> TrustedAuditRequest {
+        TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None)
+    }
+
+    fn admin() -> TrustedAuditContext {
+        TrustedAuditContext::admin_control_plane(
+            TrustedAdminActor::admin("01JZ000000000000000000000A"),
+            request(),
+        )
+    }
+
+    fn account(user_id: &str) -> TrustedAuditContext {
+        TrustedAuditContext::application(TrustedAuditActor::user(user_id), request())
+    }
+
+    async fn user(svc: &Service) -> User {
+        let unique = ulid::Ulid::generate().to_string();
+        svc.create_user(
+            Profile::new(format!("{unique}@example.test"), unique).attrs(
+                json!({"locale":"en", "private":"PRIVATE_ATTRIBUTE", "nested":{"keep":true}}),
+            ),
+            CredentialType::Password,
+            "unused-hash",
+            None,
+            admin(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn events(svc: &Service, user_id: &str) -> Vec<JsonValue> {
+        svc.query_outbox_events(&OutboxEventFilter::default(), 10000, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| serde_json::from_str::<JsonValue>(&row.payload).unwrap())
+            .filter(|event| event["resource"]["id"] == user_id)
+            .collect()
+    }
+
+    #[tokio::test]
+    #[cfg_attr(feature = "postgres", ignore = "requires PostgreSQL")]
+    async fn locale_save_merges_current_attributes_and_appends_one_safe_event() {
+        let svc = service().await;
+        let original = user(&svc).await;
+        // An administrator changes the account after the caller read it.
+        let mut current = original.clone();
+        current.given_name = Some("New admin name".into());
+        current.attrs["nested"]["keep"] = json!("updated by admin");
+        current.attrs["new"] = json!({"private":"ADMIN_ATTRIBUTE"});
+        let current = svc.update_user(current, admin()).await.unwrap();
+        let before_events = events(&svc, &original.id).await;
+        let updated = svc
+            .update_user_locale(&original.id, "it", account(&original.id))
+            .await
+            .unwrap();
+        let mut expected = serde_json::to_value(&current).unwrap();
+        expected["attrs"]["locale"] = json!("it");
+        expected["updatedAt"] = serde_json::to_value(updated.updated_at).unwrap();
+        assert_eq!(serde_json::to_value(&updated).unwrap(), expected);
+        assert_eq!(
+            serde_json::to_value(svc.get_user_by_id(&original.id).await.unwrap().unwrap()).unwrap(),
+            expected
+        );
+        let after_events = events(&svc, &original.id).await;
+        assert_eq!(after_events.len(), before_events.len() + 1);
+        let event = after_events
+            .iter()
+            .find(|event| event["metadata"]["source"] == "account")
+            .unwrap();
+        assert_eq!(event["action"], "user.updated");
+        assert_eq!(event["actor"]["type"], "user");
+        assert_eq!(event["actor"]["id"], original.id);
+        assert_eq!(event["scope"]["kind"], "application");
+        assert_eq!(event["before"], json!({"locale":"en"}));
+        assert_eq!(event["after"], json!({"locale":"it"}));
+        assert_eq!(
+            event["metadata"],
+            json!({"source":"account", "changed_fields":["attrs.locale"]})
+        );
+        assert!(!event.to_string().contains("PRIVATE_ATTRIBUTE"));
+        assert!(!event.to_string().contains("ADMIN_ATTRIBUTE"));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(feature = "postgres", ignore = "requires PostgreSQL")]
+    async fn locale_save_rejects_every_other_actor_or_scope_without_writes() {
+        let svc = service().await;
+        let user = user(&svc).await;
+        let contexts = [
+            admin(),
+            TrustedAuditContext::application(TrustedAuditActor::admin(&user.id), request()),
+            TrustedAuditContext::application(TrustedAuditActor::anonymous(), request()),
+            account("01JZ000000000000000000000B"),
+            TrustedAuditContext::organization(
+                TrustedAuditActor::user(&user.id),
+                request(),
+                Some("01JZ000000000000000000000C"),
+                None,
+            )
+            .unwrap(),
+            TrustedAuditContext::system_control_plane(),
+        ];
+        let before_events = events(&svc, &user.id).await;
+        for context in contexts {
+            for locale in ["it", "en"] {
+                assert!(
+                    svc.update_user_locale(&user.id, locale, context.clone())
+                        .await
+                        .is_err()
+                );
+                assert_eq!(
+                    serde_json::to_value(svc.get_user_by_id(&user.id).await.unwrap().unwrap())
+                        .unwrap(),
+                    serde_json::to_value(&user).unwrap()
+                );
+                assert_eq!(events(&svc, &user.id).await, before_events);
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(feature = "postgres", ignore = "requires PostgreSQL")]
+    async fn unchanged_locale_does_not_write_or_append_an_event() {
+        let svc = service().await;
+        let user = user(&svc).await;
+        let before_events = events(&svc, &user.id).await;
+        let updated = svc
+            .update_user_locale(&user.id, "en", account(&user.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(updated).unwrap(),
+            serde_json::to_value(&user).unwrap()
+        );
+        assert_eq!(events(&svc, &user.id).await, before_events);
     }
 }

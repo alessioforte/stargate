@@ -1035,6 +1035,14 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
 - `/.well-known/*`: OAuth/OIDC metadata, JWKS, `stargate-context-jwks.json`
 - `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA,
   `features` (public: available sign-in options)
+- `GET /account/profile` reads the signed-in user's profile; `PUT /account/profile`
+  saves their preferred language (`locale`, `en` or `it`) without writing or emitting
+  audit events when unchanged. Both accept native session tokens or access tokens
+  from an enabled first-party OAuth client, with an active session belonging to
+  the same user. Third-party OAuth clients must use scoped `/oauth/userinfo`.
+  Locale saves use a dedicated database method that checks the actor and merges
+  only `attrs.locale` into the locked current row. Its `user.updated` audit event
+  has source `account` and snapshots containing only the locale.
 - `/oauth/*`: provider endpoints; `/oauth/state`, `/oauth/github`, `/oauth/google`: social login
 - `/signup/*`: registration + email verification
 - `/admin/*`: users (+ invitations), orgs, API/admin keys, OAuth clients, service accounts,

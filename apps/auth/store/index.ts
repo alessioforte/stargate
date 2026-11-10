@@ -101,7 +101,11 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
   ...initialState,
   setLanguage: (lang: "en" | "it") => {
     set({ language: lang });
-    void services.auth.updateProfile(lang);
+    if (get().authStatus === "authenticated") {
+      void services.auth.updateProfile(lang).catch(() => {
+        // Saving the preference must not interrupt the local language change.
+      });
+    }
   },
   loadApiMessages: async (locale) => {
     const response = await services.auth.getApiMessages(

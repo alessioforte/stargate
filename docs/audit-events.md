@@ -41,7 +41,10 @@ Allowed `actor.type` values are `admin`, `admin_key`, `anonymous`, `api_key`,
 `oauth_consent`, `organization`, `organization_membership`, `service_account`,
 `super_admin` and `user`. Administrative events use `control_plane`.
 Login/logout do not produce audit events. Secrets and full configuration
-contents are excluded from producer snapshots.
+contents are excluded from producer snapshots. Saving a user's own language emits
+`user.updated` in application scope with `source: account`, `changed_fields:
+["attrs.locale"]`, and before/after snapshots containing only `locale`. An
+unchanged language emits no event.
 
 Limits are UTF-8 serialized bytes: whole event 65,536; each before/after
 snapshot 16,384; metadata 8,192; snapshot string 2,048; snapshot array 64 items;

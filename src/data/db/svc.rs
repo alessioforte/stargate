@@ -150,6 +150,17 @@ pub async fn update_user(user: User, ctx: TrustedAuditContext) -> Result<User> {
         .inspect_err(|e| tracing::error!("Error updating user: {:?}", e))
 }
 
+pub async fn update_user_locale(
+    user_id: &str,
+    locale: &str,
+    ctx: TrustedAuditContext,
+) -> Result<User> {
+    service()
+        .update_user_locale(user_id, locale, ctx)
+        .await
+        .inspect_err(|e| tracing::error!("Error updating user locale: {:?}", e))
+}
+
 pub async fn delete_user(id: &str, ctx: TrustedAuditContext) -> Result<Vec<String>> {
     service()
         .delete_user(id, ctx)

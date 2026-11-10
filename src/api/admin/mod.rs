@@ -116,19 +116,6 @@ async fn grant_super_admin_if_allowed(user_id: &str, sid: Option<&str>) -> bool 
     }
 }
 
-async fn oauth_client_is_trusted_admin_client(client_id: &str) -> bool {
-    let client = match crate::data::db::get_oauth_client_by_client_id(client_id).await {
-        Ok(Some(client)) => client,
-        Ok(None) => return false,
-        Err(err) => {
-            tracing::error!("Failed to resolve OAuth client for admin grants: {}", err);
-            return false;
-        }
-    };
-
-    client.enabled && oidc::consent::client_is_first_party(&client.attrs)
-}
-
 #[derive(Clone, Copy)]
 enum AuditRouteBoundary {
     Application,
@@ -208,7 +195,7 @@ async fn resolve_authorization(
                     };
                     authenticated = claims.sid.is_none() || active_session.is_some();
                     let step_up_sid = claims.sid.as_deref();
-                    if oauth_client_is_trusted_admin_client(client_id).await
+                    if crate::iam::oidc::client_is_trusted_first_party(client_id).await
                         && authenticated
                         && let Some(user_id) = user_id
                         && grant_super_admin_if_allowed(user_id, step_up_sid).await

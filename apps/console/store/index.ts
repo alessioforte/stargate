@@ -544,7 +544,9 @@ const store: StateCreator<State & Actions> = (set, get) => ({
   setLanguage: (lang: "en" | "it") => {
     set({ language: lang });
     Settings.set("language", lang);
-    void services.admin.updateProfile(lang);
+    void services.admin.updateProfile(lang).catch(() => {
+      // Saving the preference must not interrupt the local language change.
+    });
   },
 
   loadApiMessages: async (locale) => {

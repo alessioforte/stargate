@@ -82,6 +82,14 @@ pub trait DbStore {
     async fn search_users(&self, query: &str, limit: i64, offset: i64) -> Result<Vec<User>>;
     async fn count_search_users(&self, query: &str) -> Result<i64>;
     async fn update_user(&self, user: User, ctx: TrustedAuditContext) -> Result<User>;
+    /// Change only the caller's own locale in application scope, with a safe
+    /// transactional audit event. An unchanged locale performs no write.
+    async fn update_user_locale(
+        &self,
+        user_id: &str,
+        locale: &str,
+        ctx: TrustedAuditContext,
+    ) -> Result<User>;
     /// Deletes the user and revokes their API keys in the same transaction
     /// (the FK cascade only removes ownership links, not the key rows).
     /// Returns the revoked key hashes so callers can purge cached subjects.

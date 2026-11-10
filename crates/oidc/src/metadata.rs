@@ -283,6 +283,7 @@ pub fn openid_configuration(
             "nickname".to_string(),
             "preferred_username".to_string(),
             "picture".to_string(),
+            "locale".to_string(),
             "updated_at".to_string(),
         ],
         code_challenge_methods_supported: vec![PKCE_METHOD_S256.to_string()],
@@ -311,5 +312,17 @@ mod tests {
         );
 
         assert_eq!(base, "https://public.example/oauth");
+        let configuration = openid_configuration(
+            "https://identity.example".into(),
+            "https://identity.example",
+            jwt::Algorithm::RS256,
+        );
+        let metadata = serde_json::to_value(configuration).unwrap();
+        assert!(
+            metadata["claims_supported"]
+                .as_array()
+                .unwrap()
+                .contains(&"locale".into())
+        );
     }
 }

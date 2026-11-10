@@ -131,6 +131,23 @@ impl UserRepository {
         Ok(row)
     }
 
+    pub async fn update_attrs(
+        &self,
+        tx: &mut crate::backend::Tx<'_>,
+        id: &str,
+        attrs: &serde_json::Value,
+    ) -> Result<User> {
+        Ok(sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+            "UPDATE {users} SET attrs = $2, updated_at = $3 WHERE id = $1 RETURNING *",
+            users = USER,
+        )))
+        .bind(id)
+        .bind(attrs)
+        .bind(Utc::now())
+        .fetch_one(&mut **tx)
+        .await?)
+    }
+
     pub async fn get_all<'c, E>(&self, ex: E, limit: i64, offset: i64) -> Result<Vec<User>>
     where
         E: crate::backend::ReadExecutor<'c>,
