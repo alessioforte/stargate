@@ -6,7 +6,7 @@
         "current-block": "",
         "condition": "VerifyScopesReturnedInUserInfoClaims",
         "expected-result": "warning",
-        "comment": "Stargate users have no website, gender, birthdate, zoneinfo, locale, middle_name or profile claims; the test user also has no picture or family_name."
+        "comment": "Stargate users have no website, gender, birthdate, zoneinfo, middle_name or profile claims; the test user also has no picture, family_name or saved language (locale)."
     },
     {
         "test-name": "oidcc-scope-email",

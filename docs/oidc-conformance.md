@@ -72,7 +72,8 @@ Current results:
   - Scope-granted email/profile claims are also in the ID token, not only in
     UserInfo.
   - The profile claims Stargate does not store (`website`, `gender`,
-    `birthdate`, `zoneinfo`, `locale`, ...) are missing.
+    `birthdate`, `zoneinfo`, ...) are missing. `locale` is emitted only for
+    users with a saved language, which the bootstrapped test user lacks.
   - The `claims` parameter is ignored.
   - The `address` and `phone` scopes and request objects are not supported.
 - RP-Initiated Logout OP: 12 modules, no failures or warnings. Eight tests end
