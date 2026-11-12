@@ -96,10 +96,9 @@ authorization, and rate limiting.
 | Smallest deployment                 | One binary + SQLite                                          | JVM server + external database                                  | Server + worker + PostgreSQL               | Server + login UI + PostgreSQL             |
 | Maturity                            | Alpha                                                        | Production-proven                                               | Production-proven                          | Production-proven                          |
 
-Choose Keycloak, authentik, or Zitadel if you need SAML, LDAP, OIDC logout, or
-a mature and audited identity provider today. Comparison as
-of October 2026, from each project's public documentation; corrections are
-welcome.
+Choose Keycloak, authentik, or Zitadel if you need SAML, LDAP, or a mature and
+audited identity provider today. Comparison as of October 2026, from each
+project's public documentation; corrections are welcome.
 
 ## Features
 
@@ -120,13 +119,20 @@ welcome.
 
 - Authorization Code with PKCE, client credentials, and rotating refresh tokens.
 - The authorization endpoint signs users in on the hosted login page, with
-  email MFA; the page is prerendered and also works without JavaScript.
+  email MFA and `acr_values` step-up. The page is prerendered, so password
+  sign-in also works without JavaScript.
 - A consent page for third-party apps; users can list and revoke consents.
-- Discovery, JWKS, userinfo, introspection, and revocation endpoints.
-- The OpenID Foundation Basic OP and Config OP conformance plans run in CI
-  (local suite, not certified).
-- Admin-managed clients. See the [provider guide](docs/oauth-oidc-provider-guide.md)
-  and [conformance status](docs/oidc-conformance.md).
+- Discovery, JWKS, userinfo, introspection, revocation, and end-session
+  endpoints.
+- RP-Initiated Logout and Back-Channel Logout: ending a session notifies the
+  clients signed in with it that registered a back-channel logout URI.
+- The OpenID Foundation Config OP, Basic OP, Form Post OP, RP-Initiated Logout
+  OP, and Back-Channel Logout OP conformance plans run in CI, plus the
+  comprehensive plan with `private_key_jwt` (local suite, not certified).
+- Admin-managed clients: confidential clients authenticate with a client secret
+  or `private_key_jwt`, public clients with PKCE. See the
+  [provider guide](docs/oauth-oidc-provider-guide.md) and
+  [conformance status](docs/oidc-conformance.md).
 
 **Gateway**
 
@@ -162,6 +168,8 @@ welcome.
   existing PostgreSQL and Redis.
 - [CLI](docs/cli.md): bootstrap the first administrator and generate key
   material.
+- [Production checklist](docs/production-checklist.md): checks before exposing
+  a cluster deployment to real users.
 
 Build from source with exactly one profile:
 
@@ -181,8 +189,12 @@ cargo build --release --features cluster
 | [Features](docs/features.md)                                            | Sign-up modes, passwordless and social sign-in, the Console     |
 | [Multi-organization](docs/multi-org-guide.md)                           | Organizations, memberships, and org-scoped sessions and limits  |
 | [Password policies](docs/password-policies-guide.md)                    | Policy rules, per-org overrides, and hashing parameters         |
+| [Admin keys](docs/admin-keys.md)                                        | Capabilities of machine credentials for the admin API           |
 | [Internal context](docs/internal-context-consumer-guide.md)             | Verifying the identity context forwarded to upstreams           |
+| [Audit events](docs/audit-events.md)                                    | Transactional outbox and delivery to Redis Streams              |
 | [Health probes](docs/health-probes.md)                                  | Liveness, readiness, and shutdown timing                        |
+| [Monitoring](docs/monitoring.md)                                        | OpenTelemetry metrics, attributes, and alert catalog            |
+| [Sizing](docs/sizing.md)                                                | Measured cluster workload, connections, and memory budgets      |
 | [API errors](docs/api-errors-and-messages.md)                           | Error codes and response format                                 |
 | [Releasing](docs/RELEASING.md)                                          | Publishing images and the Helm chart                            |
 | [`.env.example`](.env.example)                                          | Every environment variable                                      |
