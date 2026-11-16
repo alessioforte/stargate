@@ -491,7 +491,7 @@ Users manage their consents with:
 
 - `GET /account/consents`: applications they allowed, with scopes.
 - `DELETE /account/consents/{client_id}`: revoke (`204`, or `404
-oauth_consent.not_found`). The next authorization asks again, and the
+  oauth_consent.not_found`). The next authorization asks again, and the
   client's refresh tokens stop working (`invalid_grant`, the refresh family is
   dropped). Access tokens already issued stay valid until they expire.
 
@@ -535,12 +535,12 @@ token and refresh-token family issued for it.
 Every login session records how the user signed in, as OpenID Connect `amr`
 values (RFC 8176):
 
-| Sign-in                                                   | `amr`                   | `acr`                            |
-| --------------------------------------------------------- | ----------------------- | -------------------------------- |
-| Password (hosted login, `/oauth/login`, `/account/login`) | `["pwd"]`               | `urn:stargate:acr:single-factor` |
-| Password and email code (login MFA)                       | `["pwd", "otp", "mfa"]` | `urn:stargate:acr:multi-factor`  |
-| Email code only (passwordless)                            | `["otp"]`               | `urn:stargate:acr:single-factor` |
-| Google or GitHub                                          | `["fed"]`               | `urn:stargate:acr:single-factor` |
+| Sign-in | `amr` | `acr` |
+|---|---|---|
+| Password (hosted login, `/oauth/login`, `/account/login`) | `["pwd"]` | `urn:stargate:acr:single-factor` |
+| Password and email code (login MFA) | `["pwd", "otp", "mfa"]` | `urn:stargate:acr:multi-factor` |
+| Email code only (passwordless) | `["otp"]` | `urn:stargate:acr:single-factor` |
+| Google or GitHub | `["fed"]` | `urn:stargate:acr:single-factor` |
 
 `fed` is not registered by RFC 8176; other providers use it for federated
 sign-in. An email code verified later in the session (`POST

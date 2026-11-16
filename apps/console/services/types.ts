@@ -1,6 +1,8 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue =
-  JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+  | JsonPrimitive
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 export type ApiMessageParams = Record<string, string | number | boolean | null>;
 

@@ -18,7 +18,11 @@ export interface AppMessage {
 }
 
 export type AuthStatus =
-  "idle" | "loading" | "mfa_required" | "authenticated" | "error";
+  | "idle"
+  | "loading"
+  | "mfa_required"
+  | "authenticated"
+  | "error";
 
 export type AuthActionResult =
   | {
