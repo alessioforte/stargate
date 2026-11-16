@@ -125,6 +125,8 @@
   "backchannelLogoutUriDescription": "Receives a signed logout token when a session that used this client ends.",
   "backchannelLogoutSessionRequired": "Require sid in logout tokens",
   "backchannelLogoutSessionRequiredDescription": "Stargate always includes sid; this records the client's requirement.",
+  "initiateLoginUri": "Initiate login URI",
+  "initiateLoginUriDescription": "Where Stargate sends a user after an invitation, a registration, or a password reset that began in this app, with iss and login_hint.",
   "jwks": "Public keys (JWK Set)",
   "jwksDescription": "The client's public JWK Set; it signs its client assertions with the matching private key. Leave empty when using a JWKS URI.",
   "jwksUri": "JWKS URI",

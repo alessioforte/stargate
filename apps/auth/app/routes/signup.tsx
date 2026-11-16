@@ -15,7 +15,10 @@ import {
 import { useForm } from "@mantine/form";
 import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
 import { useTranslations } from "@/i18n";
-import type { SignupVerificationResponse } from "@/services/types";
+import type {
+  FlowContinuation,
+  SignupVerificationResponse,
+} from "@/services/types";
 import useStore from "@/store";
 import SignupRequest from "./signup-request";
 
@@ -92,6 +95,9 @@ function SignupCompletion() {
   const [completionToken, setCompletionToken] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
+  const [continuation, setContinuation] = useState<FlowContinuation | null>(
+    null,
+  );
 
   const form = useForm<SignupValues>({
     initialValues: emptyValues,
@@ -173,6 +179,7 @@ function SignupCompletion() {
 
     if (result.status === "success") {
       clearCachedSignup(sourceToken);
+      setContinuation(result.continuation ?? null);
       setCompleted(true);
     }
   };
@@ -190,14 +197,20 @@ function SignupCompletion() {
             {message?.text ?? t("signupCompletedDescription")}
           </Text>
         </Box>
-        <Button
-          component={Link}
-          to={hrefWithReturnTo("/login", returnTo)}
-          onClick={clearAuthError}
-          fullWidth
-        >
-          {t("goToLogin")}
-        </Button>
+        {continuation ? (
+          <Button component="a" href={continuation.continueUrl} fullWidth>
+            {t("continueToApp", { app: continuation.clientName })}
+          </Button>
+        ) : (
+          <Button
+            component={Link}
+            to={hrefWithReturnTo("/login", returnTo)}
+            onClick={clearAuthError}
+            fullWidth
+          >
+            {t("goToLogin")}
+          </Button>
+        )}
       </Stack>
     );
   }

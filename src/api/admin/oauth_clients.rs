@@ -40,6 +40,8 @@ pub struct OAuthClientSchema {
     pub post_logout_redirect_uris: Vec<String>,
     pub backchannel_logout_uri: Option<String>,
     pub backchannel_logout_session_required: bool,
+    /// Login-initiation endpoint of the app (OpenID Connect Core 1.0 §4).
+    pub initiate_login_uri: Option<String>,
     /// Public JWK Set for `private_key_jwt`.
     pub jwks: Option<Value>,
     pub jwks_uri: Option<String>,
@@ -66,6 +68,7 @@ impl From<OAuthClient> for OAuthClientSchema {
             post_logout_redirect_uris: client.post_logout_redirect_uris.0,
             backchannel_logout_uri: client.backchannel_logout_uri,
             backchannel_logout_session_required: client.backchannel_logout_session_required,
+            initiate_login_uri: client.initiate_login_uri,
             jwks: client.jwks.map(|jwks| jwks.0),
             jwks_uri: client.jwks_uri,
             scopes: client.scopes.0,
@@ -135,6 +138,9 @@ pub struct CreateOAuthClientRequest {
     pub backchannel_logout_uri: Option<String>,
     #[serde(default)]
     pub backchannel_logout_session_required: Option<bool>,
+    /// Login-initiation endpoint of the app (OpenID Connect Core 1.0 §4).
+    #[serde(default)]
+    pub initiate_login_uri: Option<String>,
     /// `private_key_jwt`: the client's public JWK Set, or the URL serving it.
     #[serde(default)]
     pub jwks: Option<Value>,
@@ -166,6 +172,8 @@ pub struct UpdateOAuthClientRequest {
     pub backchannel_logout_uri: Option<String>,
     #[serde(default)]
     pub backchannel_logout_session_required: bool,
+    #[serde(default)]
+    pub initiate_login_uri: Option<String>,
     #[serde(default)]
     pub jwks: Option<Value>,
     #[serde(default)]
@@ -200,6 +208,9 @@ pub struct PatchOAuthClientRequest {
     pub backchannel_logout_uri: Option<String>,
     #[serde(default)]
     pub backchannel_logout_session_required: Option<bool>,
+    /// An empty string removes the endpoint.
+    #[serde(default)]
+    pub initiate_login_uri: Option<String>,
     /// Setting one of `jwks` / `jwksUri` clears the other.
     #[serde(default)]
     pub jwks: Option<Value>,
@@ -223,6 +234,7 @@ struct NormalizedClientInput {
     post_logout_redirect_uris: Vec<String>,
     backchannel_logout_uri: Option<String>,
     backchannel_logout_session_required: bool,
+    initiate_login_uri: Option<String>,
     jwks: Option<Value>,
     jwks_uri: Option<String>,
     scopes: Vec<String>,
@@ -356,13 +368,13 @@ fn is_client_endpoint_url(uri: &str) -> bool {
     }
 }
 
-/// Back-Channel Logout 1.0 §2.2.
-fn validate_backchannel_logout_uri(uri: Option<&str>) -> Result<(), ErrorResponse> {
+/// Back-Channel Logout 1.0 §2.2 and OpenID Connect Core 1.0 §4: URLs the
+/// client registers for Stargate to call.
+fn validate_client_endpoint_uri(uri: Option<&str>, error: ErrorCode) -> Result<(), ErrorResponse> {
     match uri {
-        Some(uri) if !is_client_endpoint_url(uri) => Err(ErrorResponse::new(
-            ErrorCode::OAuthClientBackchannelLogoutUriInvalid,
-        )
-        .with_param("uri", uri.to_string())),
+        Some(uri) if !is_client_endpoint_url(uri) => {
+            Err(ErrorResponse::new(error).with_param("uri", uri.to_string()))
+        }
         _ => Ok(()),
     }
 }
@@ -410,7 +422,14 @@ fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResp
     validate_allowed_values("response_types", &input.response_types, &[RESPONSE_CODE])?;
     validate_redirect_uris(&input.redirect_uris)?;
     validate_redirect_uris(&input.post_logout_redirect_uris)?;
-    validate_backchannel_logout_uri(input.backchannel_logout_uri.as_deref())?;
+    validate_client_endpoint_uri(
+        input.backchannel_logout_uri.as_deref(),
+        ErrorCode::OAuthClientBackchannelLogoutUriInvalid,
+    )?;
+    validate_client_endpoint_uri(
+        input.initiate_login_uri.as_deref(),
+        ErrorCode::OAuthClientInitiateLoginUriInvalid,
+    )?;
     validate_client_keys(input)?;
 
     if input.grant_types.is_empty() {
@@ -509,6 +528,7 @@ fn normalize_create_payload(
         backchannel_logout_session_required: payload
             .backchannel_logout_session_required
             .unwrap_or(false),
+        initiate_login_uri: normalize_optional_string(payload.initiate_login_uri),
         jwks: payload.jwks,
         jwks_uri: normalize_optional_string(payload.jwks_uri),
         scopes: normalize_list(payload.scopes.unwrap_or_default(), "scopes")?,
@@ -535,6 +555,7 @@ fn normalize_update_payload(
         )?,
         backchannel_logout_uri: normalize_optional_string(payload.backchannel_logout_uri),
         backchannel_logout_session_required: payload.backchannel_logout_session_required,
+        initiate_login_uri: normalize_optional_string(payload.initiate_login_uri),
         jwks: payload.jwks,
         jwks_uri: normalize_optional_string(payload.jwks_uri),
         scopes: normalize_list(payload.scopes, "scopes")?,
@@ -585,6 +606,10 @@ fn normalize_patch_payload(
         backchannel_logout_session_required: payload
             .backchannel_logout_session_required
             .unwrap_or(existing.backchannel_logout_session_required),
+        initiate_login_uri: match payload.initiate_login_uri {
+            Some(value) => normalize_optional_string(Some(value)),
+            None => existing.initiate_login_uri.clone(),
+        },
         jwks: match (&payload.jwks, &payload.jwks_uri) {
             (Some(jwks), _) => Some(jwks.clone()),
             (None, Some(_)) => None,
@@ -630,6 +655,7 @@ fn apply_input(
     existing.post_logout_redirect_uris.0 = input.post_logout_redirect_uris;
     existing.backchannel_logout_uri = input.backchannel_logout_uri;
     existing.backchannel_logout_session_required = input.backchannel_logout_session_required;
+    existing.initiate_login_uri = input.initiate_login_uri;
     existing.set_jwks(input.jwks);
     existing.jwks_uri = input.jwks_uri;
     existing.scopes.0 = input.scopes;
@@ -788,6 +814,7 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     client.post_logout_redirect_uris.0 = input.post_logout_redirect_uris;
     client.backchannel_logout_uri = input.backchannel_logout_uri;
     client.backchannel_logout_session_required = input.backchannel_logout_session_required;
+    client.initiate_login_uri = input.initiate_login_uri;
     client.set_jwks(input.jwks);
     client.jwks_uri = input.jwks_uri;
 
@@ -1073,16 +1100,41 @@ mod tests {
 
     #[test]
     fn backchannel_logout_uri_is_absolute_https_without_fragment() {
-        assert!(validate_backchannel_logout_uri(None).is_ok());
-        assert!(validate_backchannel_logout_uri(Some("https://app.example/logout?x=1")).is_ok());
-        assert!(validate_backchannel_logout_uri(Some("http://localhost:3000/logout")).is_ok());
+        let validate = |uri| {
+            validate_client_endpoint_uri(uri, ErrorCode::OAuthClientBackchannelLogoutUriInvalid)
+        };
+        assert!(validate(None).is_ok());
+        assert!(validate(Some("https://app.example/logout?x=1")).is_ok());
+        assert!(validate(Some("http://localhost:3000/logout")).is_ok());
         for uri in [
             "http://app.example/logout",
             "https://app.example/logout#frag",
             "/logout",
             "https://app.example/log out",
         ] {
-            assert!(validate_backchannel_logout_uri(Some(uri)).is_err(), "{uri}");
+            assert!(validate(Some(uri)).is_err(), "{uri}");
+        }
+    }
+
+    #[test]
+    fn initiate_login_uri_is_absolute_https_without_fragment() {
+        let create_with = |uri: &str| create(serde_json::json!({ "initiateLoginUri": uri }));
+        assert!(create_with("https://app.example/login?tenant=acme").is_ok());
+        assert!(
+            create_with("").is_ok(),
+            "an empty value removes the endpoint"
+        );
+        for uri in [
+            "http://app.example/login",
+            "https://app.example/login#frag",
+            "/login",
+            "https://app.example/log in",
+        ] {
+            assert_eq!(
+                create_with(uri).err(),
+                Some(ErrorCode::OAuthClientInitiateLoginUriInvalid),
+                "{uri}"
+            );
         }
     }
 

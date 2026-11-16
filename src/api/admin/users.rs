@@ -4,6 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::oidc::continuation::LoginContinuation;
 use crate::iam::user::signup::{PendingSignupProfile, SignupOrigin};
 use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
@@ -198,6 +199,65 @@ pub struct CreateUserInvitationRequest {
     pub attrs: Value,
     #[serde(default)]
     pub membership: Option<InitialOrganizationMembershipRequest>,
+    /// OAuth client of the app that should receive the user after signup
+    /// (OpenID Connect Core 1.0 §4).
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// `target_link_uri` for that app; needs `clientId`.
+    #[serde(default)]
+    pub target_link_uri: Option<String>,
+}
+
+/// The app an invitation returns to. The client must exist, be enabled, and
+/// register an `initiate_login_uri`; otherwise the invitation could only end
+/// on Stargate's login page.
+async fn invitation_continuation(
+    client_id: Option<String>,
+    target_link_uri: Option<String>,
+) -> Result<Option<LoginContinuation>, ErrorResponse> {
+    let target_link_uri = target_link_uri.filter(|uri| !uri.trim().is_empty());
+    let Some(client_id) = client_id
+        .map(|client_id| client_id.trim().to_string())
+        .filter(|client_id| !client_id.is_empty())
+    else {
+        if target_link_uri.is_some() {
+            return Err(
+                ErrorResponse::new(ErrorCode::RequestInvalid).with_param("field", "targetLinkUri")
+            );
+        }
+        return Ok(None);
+    };
+    let target_link_uri = match target_link_uri {
+        Some(uri) => {
+            validate_target_link_uri(&uri)?;
+            Some(uri)
+        }
+        None => None,
+    };
+
+    let client = crate::data::db::get_oauth_client_by_client_id(&client_id)
+        .await
+        .map_err(ErrorResponse::internal)?;
+    let continues =
+        client.is_some_and(|client| client.enabled && client.initiate_login_uri.is_some());
+    if !continues {
+        return Err(ErrorResponse::new(ErrorCode::SignupInvitationClientInvalid)
+            .with_param("clientId", client_id));
+    }
+    Ok(Some(LoginContinuation::new(client_id, target_link_uri)))
+}
+
+/// `target_link_uri` is an absolute HTTPS URL without a fragment.
+fn validate_target_link_uri(uri: &str) -> Result<(), ErrorResponse> {
+    let invalid =
+        || ErrorResponse::new(ErrorCode::RequestInvalid).with_param("field", "targetLinkUri");
+    if uri.contains('#') || uri.chars().any(char::is_whitespace) {
+        return Err(invalid());
+    }
+    match url::Url::parse(uri) {
+        Ok(parsed) if parsed.scheme() == "https" => Ok(()),
+        _ => Err(invalid()),
+    }
 }
 
 fn default_attrs() -> Value {
@@ -457,6 +517,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
             .await?;
     }
 
+    let continuation = invitation_continuation(payload.client_id, payload.target_link_uri).await?;
     let profile = PendingSignupProfile {
         origin: SignupOrigin::Invitation,
         email: payload.email,
@@ -473,6 +534,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
         phone_number: payload.phone_number,
         attrs: payload.attrs,
         membership,
+        continuation,
     };
     crate::api::signup::request::send_invitation(profile).await?;
 
@@ -957,9 +1019,10 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
 #[cfg(test)]
 mod tests {
     use super::{
-        InitialOrganizationMembershipRequest, normalize_initial_membership,
-        normalize_membership_role,
+        InitialOrganizationMembershipRequest, invitation_continuation,
+        normalize_initial_membership, normalize_membership_role, validate_target_link_uri,
     };
+    use crate::err::ErrorCode;
 
     #[test]
     fn membership_role_defaults_to_member() {
@@ -1005,5 +1068,119 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn target_link_uri_is_an_absolute_https_url_without_a_fragment() {
+        assert!(validate_target_link_uri("https://app.example/inbox").is_ok());
+        for uri in [
+            "http://app.example/inbox",
+            "https://app.example/inbox#frag",
+            "/inbox",
+            "https://app.example/in box",
+        ] {
+            let error = validate_target_link_uri(uri).unwrap_err();
+            assert_eq!(error.code, ErrorCode::RequestInvalid, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn target_link_uri_needs_a_client() {
+        let error = invitation_continuation(None, Some("https://app.example/inbox".to_string()))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::RequestInvalid);
+        assert_eq!(invitation_continuation(None, None).await.unwrap(), None);
+    }
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod client_tests {
+    use super::invitation_continuation;
+    use crate::data::db::with_test_database;
+    use crate::err::ErrorCode;
+    use crate::iam::oidc::continuation::LoginContinuation;
+    use db::ent::{OAuthClient, TrustedAuditContext};
+
+    fn admin_context() -> TrustedAuditContext {
+        TrustedAuditContext::admin_control_plane(
+            db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
+            db::ent::TrustedAuditRequest::from_http(
+                ulid::Ulid::generate().to_string(),
+                None,
+                None,
+                None,
+            ),
+        )
+    }
+
+    async fn app_client(client_id: &str, enabled: bool, initiate_login_uri: Option<&str>) {
+        let mut client = OAuthClient::new(
+            client_id.to_string(),
+            None,
+            "Orders".to_string(),
+            None,
+            "none".to_string(),
+            vec!["authorization_code".to_string()],
+            vec!["code".to_string()],
+            vec!["https://app.example/callback".to_string()],
+            vec!["openid".to_string()],
+            Vec::new(),
+            serde_json::json!({}),
+        );
+        client.enabled = enabled;
+        client.initiate_login_uri = initiate_login_uri.map(str::to_string);
+        crate::data::db::create_oauth_client(client, admin_context())
+            .await
+            .expect("create client");
+    }
+
+    #[tokio::test]
+    async fn the_invitation_client_must_exist_be_enabled_and_register_an_endpoint() {
+        with_test_database(async {
+            app_client("no-endpoint", true, None).await;
+            app_client("disabled", false, Some("https://app.example/login")).await;
+
+            for client_id in ["unknown", "no-endpoint", "disabled"] {
+                let error = invitation_continuation(Some(client_id.to_string()), None)
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    error.code,
+                    ErrorCode::SignupInvitationClientInvalid,
+                    "{client_id}"
+                );
+            }
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_valid_client_carries_the_target_link() {
+        with_test_database(async {
+            app_client("orders", true, Some("https://app.example/login")).await;
+
+            let continuation = invitation_continuation(
+                Some("orders".to_string()),
+                Some("https://app.example/inbox".to_string()),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                continuation,
+                Some(LoginContinuation::new(
+                    "orders",
+                    Some("https://app.example/inbox".to_string())
+                ))
+            );
+
+            let without_target: Option<LoginContinuation> =
+                invitation_continuation(Some("orders".to_string()), None)
+                    .await
+                    .unwrap();
+            assert_eq!(without_target, Some(LoginContinuation::new("orders", None)));
+        })
+        .await;
     }
 }

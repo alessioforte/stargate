@@ -461,6 +461,8 @@ export interface OAuthClient {
   postLogoutRedirectUris: string[];
   backchannelLogoutUri?: string | null;
   backchannelLogoutSessionRequired: boolean;
+  /** Login-initiation endpoint of the app (OpenID Connect Core 1.0 §4). */
+  initiateLoginUri?: string | null;
   /** `private_key_jwt`: the client's public JWK Set, or the URL serving it. */
   jwks?: JsonValue | null;
   jwksUri?: string | null;
@@ -481,6 +483,7 @@ export interface CreateOAuthClientRequest {
   postLogoutRedirectUris?: string[] | null;
   backchannelLogoutUri?: string | null;
   backchannelLogoutSessionRequired?: boolean | null;
+  initiateLoginUri?: string | null;
   jwks?: JsonValue | null;
   jwksUri?: string | null;
   responseTypes?: OAuthResponseType[] | null;
@@ -502,6 +505,7 @@ export interface UpdateOAuthClientRequest {
   postLogoutRedirectUris?: string[];
   backchannelLogoutUri?: string | null;
   backchannelLogoutSessionRequired?: boolean;
+  initiateLoginUri?: string | null;
   jwks?: JsonValue | null;
   jwksUri?: string | null;
   responseTypes?: OAuthResponseType[];

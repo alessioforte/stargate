@@ -159,6 +159,13 @@ const OAuthClientFormFields: React.FC<Props> = ({
           type: "checkbox",
         })}
       />
+      <TextInput
+        readOnly={disabled}
+        variant="filled"
+        label={t("initiateLoginUri")}
+        description={t("initiateLoginUriDescription")}
+        {...form.getInputProps("initiateLoginUri")}
+      />
       <TagsInput
         disabled={disabled}
         variant="filled"

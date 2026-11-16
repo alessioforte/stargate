@@ -24,6 +24,7 @@ export interface OAuthClientFormValues {
   postLogoutRedirectUris: string[];
   backchannelLogoutUri: string;
   backchannelLogoutSessionRequired: boolean;
+  initiateLoginUri: string;
   /** JWK Set as JSON text (`private_key_jwt`). */
   jwks: string;
   jwksUri: string;
@@ -43,6 +44,7 @@ export const emptyOAuthClientFormValues: OAuthClientFormValues = {
   postLogoutRedirectUris: [],
   backchannelLogoutUri: "",
   backchannelLogoutSessionRequired: false,
+  initiateLoginUri: "",
   jwks: "",
   jwksUri: "",
   scopes: [],
@@ -90,6 +92,7 @@ export function oauthClientToFormValues(
     backchannelLogoutUri: oauthClient.backchannelLogoutUri ?? "",
     backchannelLogoutSessionRequired:
       oauthClient.backchannelLogoutSessionRequired,
+    initiateLoginUri: oauthClient.initiateLoginUri ?? "",
     jwks: oauthClient.jwks ? JSON.stringify(oauthClient.jwks, null, 2) : "",
     jwksUri: oauthClient.jwksUri ?? "",
     scopes: oauthClient.scopes,
@@ -193,6 +196,7 @@ export function toCreateOAuthClientRequest(
     postLogoutRedirectUris: cleanList(values.postLogoutRedirectUris),
     backchannelLogoutUri: optionalString(values.backchannelLogoutUri),
     backchannelLogoutSessionRequired: values.backchannelLogoutSessionRequired,
+    initiateLoginUri: optionalString(values.initiateLoginUri),
     ...clientKeys(values),
     scopes: cleanList(values.scopes),
     audiences: cleanList(values.audiences),
@@ -214,6 +218,7 @@ export function toUpdateOAuthClientRequest(
     postLogoutRedirectUris: cleanList(values.postLogoutRedirectUris),
     backchannelLogoutUri: optionalString(values.backchannelLogoutUri),
     backchannelLogoutSessionRequired: values.backchannelLogoutSessionRequired,
+    initiateLoginUri: optionalString(values.initiateLoginUri),
     ...clientKeys(values),
     scopes: cleanList(values.scopes),
     audiences: cleanList(values.audiences),

@@ -13,7 +13,12 @@ import {
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
+import {
+  getInteractionId,
+  getReturnTo,
+  hrefWithReturnTo,
+  storeReturnTo,
+} from "@/lib/auth-flow";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 
@@ -31,6 +36,7 @@ export default function SignupRequest() {
   const message = useStore((state) => state.message);
   const returnToParam = searchParams.get("return_to");
   const returnTo = getReturnTo(searchParams);
+  const interactionId = getInteractionId(returnTo);
   const loginHref = hrefWithReturnTo("/login", returnTo);
 
   useEffect(() => {
@@ -47,7 +53,7 @@ export default function SignupRequest() {
   });
 
   const handleSubmit = async (values: { email: string }) => {
-    await requestSignup(values.email.trim());
+    await requestSignup(values.email.trim(), interactionId);
   };
 
   if (!features) {

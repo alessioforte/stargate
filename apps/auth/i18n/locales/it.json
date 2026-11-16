@@ -14,6 +14,7 @@
   "signupUnavailableDescription": "I nuovi account vengono creati da un amministratore: chiedi l'accesso a uno di loro.",
   "createAccount": "Crea account",
   "goToLogin": "Torna al login",
+  "continueToApp": "Continua su {{app}}",
   "resetPassword": "Reset Password",
   "accountCreatedMessage": "Il tuo account è stato creato con successo",
   "password": "Password",

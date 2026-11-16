@@ -67,6 +67,18 @@ export interface GeneralResponse {
   params?: ApiMessageParams;
 }
 
+/** Where a completed flow continues, when it started in an app. */
+export interface FlowContinuation {
+  continueUrl: string;
+  clientName: string;
+}
+
+/** A completed flow that may point back at the app it started in. */
+export interface MessageWithContinuation extends GeneralResponse {
+  continueUrl?: string | null;
+  clientName?: string | null;
+}
+
 /** Who may create accounts (`SIGNUP_MODE`). */
 export type SignupMode = "open" | "invite" | "closed";
 

@@ -11,8 +11,13 @@ use smtp::{Smtp, Template};
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ForgotPasswordRequestBody {
     pub email: String,
+    /// The parked authorization request the reset started from, when it began
+    /// in an app: the changed password continues there.
+    #[serde(default)]
+    pub interaction_id: Option<String>,
 }
 
 #[utoipa::path(
@@ -20,7 +25,7 @@ pub struct ForgotPasswordRequestBody {
     path = "/account/credentials",
     tags = ["Account"],
     summary = "Initiate Password Reset",
-    description = "Request a password-reset link for an email address. The response is the same whether or not an account uses the address. While a reset request is pending, a new request resends its link.",
+    description = "Request a password-reset link for an email address. The response is the same whether or not an account uses the address. While a reset request is pending, a new request resends its link. When the reset starts from an app (`interactionId`), the completed reset returns there.",
     request_body = ForgotPasswordRequestBody,
     responses(
         (status = 200, description = "OK", body = MessageResponse),
@@ -32,6 +37,13 @@ pub async fn post_credentials(
     Json(body): Json<ForgotPasswordRequestBody>,
 ) -> Result<Json<MessageResponse>, ErrorResponse> {
     check_and_record_email_request(EmailFlow::PasswordReset, &body.email).await?;
+
+    // Resolved before the account lookup, so an address without an account
+    // takes the same path whether or not the flow started in an app.
+    let continuation =
+        crate::iam::oidc::continuation::from_interaction(body.interaction_id.as_deref())
+            .await
+            .map_err(ErrorResponse::internal)?;
 
     // Email only: a nickname or phone number would select a recipient outside
     // the per-recipient throttle's bucket.
@@ -46,8 +58,15 @@ pub async fn post_credentials(
             .await
             .map_err(ErrorResponse::internal)?
         {
-            Some(sid) => sid,
-            None => pwd::reset::create_change_password_request(&user.email)
+            Some(request) => {
+                if let Some(continuation) = continuation {
+                    pwd::reset::set_continuation(&user.email, continuation)
+                        .await
+                        .map_err(ErrorResponse::internal)?;
+                }
+                request.sid
+            }
+            None => pwd::reset::create_change_password_request(&user.email, continuation)
                 .await
                 .map_err(ErrorResponse::internal)?,
         };
@@ -88,4 +107,56 @@ fn send_reset_email(user: &User, sid: String, locale: tools::Locale) -> anyhow::
         .build()
         .and_then(|smtp| smtp.send())?;
     Ok(())
+}
+
+#[cfg(all(test, feature = "memory", feature = "sqlite"))]
+mod tests {
+    use super::{ForgotPasswordRequestBody, post_credentials};
+    use crate::data::db::with_test_database;
+    use axum::Json;
+    use db::ent::{
+        CredentialType, Profile, TrustedAuditActor, TrustedAuditContext, TrustedAuditRequest,
+    };
+
+    async fn user(email: &str, nickname: &str) {
+        let context = TrustedAuditContext::application(
+            TrustedAuditActor::anonymous(),
+            TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None),
+        );
+        crate::data::db::create_user(
+            Profile::new(email.to_string(), nickname.to_string()),
+            CredentialType::Password,
+            "TEST_PASSWORD_HASH",
+            None,
+            context,
+        )
+        .await
+        .expect("create user");
+    }
+
+    async fn request(email: &str, interaction_id: Option<&str>) -> serde_json::Value {
+        let response = post_credentials(Json(ForgotPasswordRequestBody {
+            email: email.to_string(),
+            interaction_id: interaction_id.map(str::to_string),
+        }))
+        .await
+        .expect("password reset requested");
+        serde_json::to_value(response.0).expect("response json")
+    }
+
+    #[tokio::test]
+    async fn the_reset_request_response_is_the_same_for_known_and_unknown_addresses() {
+        with_test_database(async {
+            user("known@example.com", "known").await;
+
+            let known = request("known@example.com", None).await;
+            let unknown = request("unknown@example.com", None).await;
+            let with_interaction = request("known@example.com", Some("expired")).await;
+
+            assert_eq!(known, unknown);
+            assert_eq!(known, with_interaction);
+            assert_eq!(known["code"], "password.reset_requested");
+        })
+        .await;
+    }
 }

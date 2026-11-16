@@ -494,6 +494,7 @@ async fn creation_invitation_and_login_identifiers_cannot_replace_a_super_admin(
         let _ = crate::api::account::credentials::forgot::post_credentials(
             Json(crate::api::account::credentials::forgot::ForgotPasswordRequestBody {
                 email: recovery_email.clone(),
+                interaction_id: None,
             }),
         )
         .await

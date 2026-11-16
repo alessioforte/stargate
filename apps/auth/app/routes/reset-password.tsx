@@ -12,7 +12,12 @@ import {
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
+import {
+  getInteractionId,
+  getReturnTo,
+  hrefWithReturnTo,
+  storeReturnTo,
+} from "@/lib/auth-flow";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 
@@ -24,6 +29,7 @@ export default function ResetPasswordPage() {
   const message = useStore((state) => state.message);
   const returnToParam = searchParams.get("return_to");
   const returnTo = getReturnTo(searchParams);
+  const interactionId = getInteractionId(returnTo);
 
   useEffect(() => {
     storeReturnTo(returnToParam);
@@ -39,7 +45,7 @@ export default function ResetPasswordPage() {
   });
 
   const handleSubmit = async (values: { email: string }) => {
-    await forgotPassword(values.email.trim());
+    await forgotPassword(values.email.trim(), interactionId);
   };
 
   return (

@@ -47,6 +47,13 @@ pub async fn post_signup(
     super::ensure_self_service(&email)?;
     check_and_record_email_request(EmailFlow::Signup, &email).await?;
 
+    // Resolved before the account lookup, so an existing address takes the
+    // same path whether or not the flow started in an app.
+    let continuation =
+        crate::iam::oidc::continuation::from_interaction(body.interaction_id.as_deref())
+            .await
+            .map_err(ErrorResponse::internal)?;
+
     let requested = crate::web::request::accept_language(&headers);
     let default = smtp::default_locale();
 
@@ -67,6 +74,11 @@ pub async fn post_signup(
             .map_err(ErrorResponse::internal)?
         {
             Some(sid) => {
+                if let Some(continuation) = continuation {
+                    email_verification::set_continuation(&sid, continuation)
+                        .await
+                        .map_err(ErrorResponse::internal)?;
+                }
                 let locale = email_verification::get_email_verification_request(&sid)
                     .await
                     .map_err(ErrorResponse::internal)?
@@ -76,11 +88,13 @@ pub async fn post_signup(
             }
             None => {
                 let locale = profile::resolve_email_locale(None, requested, default);
-                let sid = email_verification::create_email_verification_request(
-                    &PendingSignupProfile::self_service(email.clone(), locale),
-                )
-                .await
-                .map_err(ErrorResponse::internal)?;
+                let profile = PendingSignupProfile {
+                    continuation,
+                    ..PendingSignupProfile::self_service(email.clone(), locale)
+                };
+                let sid = email_verification::create_email_verification_request(&profile)
+                    .await
+                    .map_err(ErrorResponse::internal)?;
                 (SignupEmail::Verify { sid }, locale)
             }
         }
@@ -172,4 +186,91 @@ fn send_signup_email(email: &str, kind: SignupEmail, locale: Locale) -> anyhow::
         .build()
         .and_then(|smtp| smtp.send())?;
     Ok(())
+}
+
+#[cfg(all(test, feature = "memory", feature = "sqlite"))]
+mod tests {
+    use super::super::SignupRequestBody;
+    use super::post_signup;
+    use crate::data::db::with_test_database;
+    use axum::Json;
+    use db::ent::{
+        CredentialType, Profile, TrustedAuditActor, TrustedAuditContext, TrustedAuditRequest,
+    };
+    use http::HeaderMap;
+
+    const CHILD: &str = "STARGATE_TEST_SIGNUP_ENUMERATION";
+
+    async fn send(email: &str, interaction_id: Option<&str>) -> serde_json::Value {
+        let response = post_signup(
+            HeaderMap::new(),
+            Json(SignupRequestBody {
+                email: email.to_string(),
+                interaction_id: interaction_id.map(str::to_string),
+            }),
+        )
+        .await
+        .expect("signup requested");
+        serde_json::to_value(response.0).expect("response json")
+    }
+
+    /// Self-registration needs `SIGNUP_MODE=open`, read once per process, so
+    /// the child runs with that setting.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_signup_response_does_not_reveal_an_existing_account() {
+        if std::env::var_os(CHILD).is_some() {
+            with_test_database(async {
+                let context = TrustedAuditContext::application(
+                    TrustedAuditActor::anonymous(),
+                    TrustedAuditRequest::from_http(
+                        ulid::Ulid::generate().to_string(),
+                        None,
+                        None,
+                        None,
+                    ),
+                );
+                crate::data::db::create_user(
+                    Profile::new("known@example.com".to_string(), "known".to_string()),
+                    CredentialType::Password,
+                    "TEST_PASSWORD_HASH",
+                    None,
+                    context,
+                )
+                .await
+                .expect("create user");
+
+                let known = send("known@example.com", None).await;
+                let unknown = send("unknown@example.com", None).await;
+                let no_interaction = send("unknown@example.com", Some("expired")).await;
+
+                assert_eq!(known, unknown);
+                assert_eq!(known, no_interaction);
+                assert_eq!(known["code"], "signup.requested");
+            })
+            .await;
+            return;
+        }
+
+        let output = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(std::env::current_exe().expect("test binary"))
+                .args([
+                    "--exact",
+                    "api::signup::request::tests::the_signup_response_does_not_reveal_an_existing_account",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("SIGNUP_MODE", "open")
+                .output()
+                .expect("run child test")
+        })
+        .await
+        .expect("child test task");
+
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

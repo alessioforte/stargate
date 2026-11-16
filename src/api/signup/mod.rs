@@ -26,8 +26,13 @@ pub struct SignupVerificationParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SignupRequestBody {
     pub email: String,
+    /// The parked authorization request the signup started from, when it
+    /// began in an app: the completed account returns to that app.
+    #[serde(default)]
+    pub interaction_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

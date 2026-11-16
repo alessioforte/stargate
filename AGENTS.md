@@ -678,6 +678,12 @@ Client notes:
 - Logout metadata are columns (`post_logout_redirect_uris`, same rules as
   `redirect_uris`; `backchannel_logout_uri`, absolute HTTPS or loopback HTTP, no
   fragment; `backchannel_logout_session_required`, informational since `sid` is always sent).
+- `initiate_login_uri` (column, same URL rules as `backchannel_logout_uri`) is where
+  Stargate sends a user once an invitation, a self-registration, or a password reset
+  that began in that app completes (OpenID Connect Core 1.0 §4; `iam/oidc/continuation.rs`).
+  Completions return `continueUrl` (`iss`, `login_hint`, optional `target_link_uri`) and
+  `clientName`; the URL is built on the server and the hosted apps never read a
+  destination from the query.
 - Public clients use `token_endpoint_auth_method = none` and always need PKCE.
 - Client authentication (`src/api/oidc/client_auth.rs`, token/introspect/revoke): one
   method per request, the registered one. `private_key_jwt` clients register exactly
@@ -814,6 +820,14 @@ verification link, a pending signup has its link resent (same `sid`), and an
 existing account gets a `SignupAccountExists` sign-in reminder, so neither the
 response nor its timing reveals the account. Admin invitations
 (`send_invitation`) keep `409` conflicts and wait for delivery.
+
+Continuations: invitations accept `clientId` (the client must exist, be enabled, and
+register `initiate_login_uri`, else `400 signup.invitation_client_invalid`) and an
+optional `targetLinkUri` (absolute HTTPS, only with `clientId`). `POST /signup` and
+`POST /account/credentials` accept `interactionId`, the parked authorization request
+the app derived from its `return_to`; the pending signup or reset keeps the client, so
+the emailed link works in another tab and after the interaction expires. Missing or
+expired interactions mean no continuation, never an error.
 
 Emails: templates come from `apps/mail/emails/*.tsx`; `npm run export` renders
 `<template>.<locale>.html` and `subjects.json` into `.stargate/transactional`
@@ -1149,6 +1163,10 @@ guard; unresponsive peers log at debug level.
   (`lib/env.ts` `socialSignInUrl`), and, in `open` signup mode, a sign-up link; `/signup` without a
   token is the request form (`signup-request.tsx`), or explains that accounts come from
   an administrator.
+  Signup and password-reset completions show "Continue to <app>" from the server's
+  `continueUrl`; the app sends `interactionId` (read from the `return_to` query,
+  `lib/auth-flow.ts` `getInteractionId`) when the flow began in a client, and never
+  reads a destination from the query.
 - `mail`: transactional email templates (`react-email`), rendered at build time
   for every supported locale with localized subjects. A build-time template
   project, **not** a runtime SPA; it does not follow the layering below.

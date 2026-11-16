@@ -10,8 +10,10 @@ import { getAuthAppConfig } from "@/lib/env";
 import services from "@/services";
 import type {
   FeaturesResponse,
+  FlowContinuation,
   LoginMFAResponse,
   LoginResponse,
+  MessageWithContinuation,
 } from "@/services/types";
 import type {
   State,
@@ -95,6 +97,14 @@ function organizationsFailure(message: string): OrganizationsLoadResult {
     status: "error",
     message,
   };
+}
+
+/** The app a completed flow continues on, when the server names one. */
+function flowContinuation(
+  data: MessageWithContinuation,
+): FlowContinuation | undefined {
+  if (!data.continueUrl || !data.clientName) return undefined;
+  return { continueUrl: data.continueUrl, clientName: data.clientName };
 }
 
 export const store: StateCreator<State & Actions> = (set, get) => ({
@@ -329,14 +339,14 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       tokens: response.data,
     };
   },
-  forgotPassword: async (email) => {
+  forgotPassword: async (email, interactionId) => {
     set({
       loading: true,
       message: null,
       error: null,
     });
 
-    const response = await services.auth.forgotPassword(email);
+    const response = await services.auth.forgotPassword(email, interactionId);
 
     if (response.error || !response.data) {
       const message = resolveApiMessage(
@@ -370,14 +380,18 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
       message,
     };
   },
-  requestSignup: async (email) => {
+  requestSignup: async (email, interactionId) => {
     set({
       loading: true,
       message: null,
       error: null,
     });
 
-    const response = await services.auth.requestSignup(email, get().language);
+    const response = await services.auth.requestSignup(
+      email,
+      get().language,
+      interactionId,
+    );
 
     if (response.error || !response.data) {
       const message = resolveApiMessage(
@@ -450,6 +464,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     return {
       status: "success",
       message,
+      continuation: flowContinuation(response.data),
     };
   },
   loadSignup: async (token) => {
@@ -529,6 +544,7 @@ export const store: StateCreator<State & Actions> = (set, get) => ({
     return {
       status: "success",
       message,
+      continuation: flowContinuation(response.data),
     };
   },
   loadAccountOrganizations: async () => {

@@ -92,6 +92,7 @@ pub enum ErrorCode {
     OAuthClientRedirectUriInvalid,
     OAuthClientRedirectUriInsecure,
     OAuthClientBackchannelLogoutUriInvalid,
+    OAuthClientInitiateLoginUriInvalid,
     OAuthClientJwksRequired,
     OAuthClientJwksInvalid,
     OAuthClientJwksUnexpected,
@@ -124,6 +125,7 @@ pub enum ErrorCode {
     SignupDomainNotAllowed,
     SignupUserAlreadyExists,
     SignupRequestAlreadyExists,
+    SignupInvitationClientInvalid,
     PasswordPolicyViolation,
     PasswordResetTokenInvalid,
     PasswordResetRequestInvalid,
@@ -241,6 +243,7 @@ impl ErrorCode {
         Self::OAuthClientRedirectUriInvalid,
         Self::OAuthClientRedirectUriInsecure,
         Self::OAuthClientBackchannelLogoutUriInvalid,
+        Self::OAuthClientInitiateLoginUriInvalid,
         Self::OAuthClientJwksRequired,
         Self::OAuthClientJwksInvalid,
         Self::OAuthClientJwksUnexpected,
@@ -273,6 +276,7 @@ impl ErrorCode {
         Self::SignupDomainNotAllowed,
         Self::SignupUserAlreadyExists,
         Self::SignupRequestAlreadyExists,
+        Self::SignupInvitationClientInvalid,
         Self::PasswordPolicyViolation,
         Self::PasswordResetTokenInvalid,
         Self::PasswordResetRequestInvalid,
@@ -394,6 +398,7 @@ impl ErrorCode {
             Self::OAuthClientBackchannelLogoutUriInvalid => {
                 "oauth_client.backchannel_logout_uri_invalid"
             }
+            Self::OAuthClientInitiateLoginUriInvalid => "oauth_client.initiate_login_uri_invalid",
             Self::OAuthClientJwksRequired => "oauth_client.jwks_required",
             Self::OAuthClientJwksInvalid => "oauth_client.jwks_invalid",
             Self::OAuthClientJwksUnexpected => "oauth_client.jwks_unexpected",
@@ -430,6 +435,7 @@ impl ErrorCode {
             Self::SignupDomainNotAllowed => "signup.domain_not_allowed",
             Self::SignupUserAlreadyExists => "signup.user_already_exists",
             Self::SignupRequestAlreadyExists => "signup.request_already_exists",
+            Self::SignupInvitationClientInvalid => "signup.invitation_client_invalid",
             Self::PasswordPolicyViolation => "password.policy_violation",
             Self::PasswordResetTokenInvalid => "password.reset_token_invalid",
             Self::PasswordResetRequestInvalid => "password.reset_request_invalid",
@@ -717,6 +723,11 @@ impl ErrorCode {
                 Validation,
                 "OAuth client back-channel logout URI must be an absolute HTTPS URL without a fragment",
             ),
+            Self::OAuthClientInitiateLoginUriInvalid => definition(
+                Status::BAD_REQUEST,
+                Validation,
+                "OAuth client initiate login URI must be an absolute HTTPS URL without a fragment",
+            ),
             Self::OAuthClientJwksRequired => definition(
                 Status::BAD_REQUEST,
                 Validation,
@@ -868,6 +879,11 @@ impl ErrorCode {
                 Status::CONFLICT,
                 Conflict,
                 "A signup request already exists for this email",
+            ),
+            Self::SignupInvitationClientInvalid => definition(
+                Status::BAD_REQUEST,
+                Validation,
+                "The invitation client must exist, be enabled, and register an initiate login URI",
             ),
             Self::PasswordPolicyViolation => definition(
                 Status::BAD_REQUEST,

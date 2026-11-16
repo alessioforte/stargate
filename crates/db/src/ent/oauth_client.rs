@@ -21,6 +21,9 @@ pub struct OAuthClient {
     pub backchannel_logout_uri: Option<String>,
     /// Logout tokens must carry `sid` (always true for Stargate's tokens).
     pub backchannel_logout_session_required: bool,
+    /// Login-initiation endpoint (OIDC Core 1.0 §4): where Stargate sends a
+    /// user after a flow that began in this app.
+    pub initiate_login_uri: Option<String>,
     /// Public JWK Set for `private_key_jwt` client authentication.
     pub jwks: Option<sqlx::types::Json<Value>>,
     /// URL serving that JWK Set instead (exclusive with `jwks`).
@@ -61,6 +64,7 @@ impl OAuthClient {
             post_logout_redirect_uris: sqlx::types::Json(Vec::new()),
             backchannel_logout_uri: None,
             backchannel_logout_session_required: false,
+            initiate_login_uri: None,
             jwks: None,
             jwks_uri: None,
             scopes: sqlx::types::Json(scopes),

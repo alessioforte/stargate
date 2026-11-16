@@ -11,6 +11,7 @@ import type {
   GeneralResponse,
   MFAMethodsResponse,
   MfaVerificationResponse,
+  MessageWithContinuation,
   OtpChallengeResponse,
   SignupCompleteRequest,
   SignupVerificationResponse,
@@ -69,17 +70,17 @@ export default class AuthService {
     return response;
   }
 
-  async forgotPassword(email: string) {
+  async forgotPassword(email: string, interactionId?: string | null) {
     const response = await this.http.request<GeneralResponse>({
       method: "POST",
       url: `${this.baseURL}/account/credentials`,
-      data: { email },
+      data: { email, interactionId: interactionId ?? null },
     });
     return response;
   }
 
   async changePassword(password: string, token: string) {
-    const response = await this.http.request<GeneralResponse>({
+    const response = await this.http.request<MessageWithContinuation>({
       method: "PUT",
       url: `${this.baseURL}/account/credentials`,
       data: { password, token },
@@ -94,11 +95,15 @@ export default class AuthService {
     });
   }
 
-  async requestSignup(email: string, locale: string) {
+  async requestSignup(
+    email: string,
+    locale: string,
+    interactionId?: string | null,
+  ) {
     const response = await this.http.request<GeneralResponse>({
       method: "POST",
       url: `${this.baseURL}/signup`,
-      data: { email },
+      data: { email, interactionId: interactionId ?? null },
       headers: { "Accept-Language": locale },
     });
     return response;
@@ -114,7 +119,7 @@ export default class AuthService {
   }
 
   async completeSignup(payload: SignupCompleteRequest) {
-    const response = await this.http.request<GeneralResponse>({
+    const response = await this.http.request<MessageWithContinuation>({
       method: "PUT",
       url: `${this.baseURL}/signup`,
       data: payload,
