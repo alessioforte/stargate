@@ -196,12 +196,24 @@ mod tests {
             app_client("orders", true, Some("https://orders.example/login")).await;
             let email = "ada@example.com";
             let user_id = user(email, "ada").await;
-            let sid = pwd::reset::create_change_password_request(
-                email,
-                Some(LoginContinuation::new("orders", None)),
-            )
-            .await
-            .expect("pending reset");
+            let query = crate::iam::oidc::request::AuthorizationRequest {
+                client_id: Some("orders".to_string()),
+                ..Default::default()
+            };
+            let interaction = crate::iam::oidc::interactions::park(query)
+                .await
+                .expect("parked request");
+            let continuation = crate::iam::oidc::continuation::from_interaction(Some(&interaction))
+                .await
+                .expect("resolve continuation");
+            // The parked request is gone by the time the emailed link is used.
+            crate::iam::oidc::interactions::take(&interaction)
+                .await
+                .expect("take interaction")
+                .expect("parked request");
+            let sid = pwd::reset::create_change_password_request(email, continuation)
+                .await
+                .expect("pending reset");
 
             let response = change_password(&user_id, email, &sid).await;
 
