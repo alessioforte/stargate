@@ -14,6 +14,7 @@
   "signupUnavailableDescription": "New accounts are created by an administrator. Ask one for access.",
   "createAccount": "Create Account",
   "goToLogin": "Go to Login",
+  "continueToApp": "Continue to {{app}}",
   "resetPassword": "Reset Password",
   "accountCreatedMessage": "Account created successfully",
   "password": "Password",

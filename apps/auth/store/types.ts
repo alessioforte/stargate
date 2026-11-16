@@ -2,6 +2,7 @@ import type {
   AccountOrganization,
   ConsentPromptResponse,
   FeaturesResponse,
+  FlowContinuation,
   LoginMFAResponse,
   LoginRequest,
   LoginResponse,
@@ -17,11 +18,7 @@ export interface AppMessage {
 }
 
 export type AuthStatus =
-  | "idle"
-  | "loading"
-  | "mfa_required"
-  | "authenticated"
-  | "error";
+  "idle" | "loading" | "mfa_required" | "authenticated" | "error";
 
 export type AuthActionResult =
   | {
@@ -51,6 +48,8 @@ export type MessageActionResult =
   | {
       status: "success";
       message: string;
+      /** Set when the flow started in an app that should receive the user. */
+      continuation?: FlowContinuation;
     }
   | {
       status: "error";
@@ -154,8 +153,14 @@ export interface Actions {
     challengeId: string,
     code: string,
   ) => Promise<AuthActionResult>;
-  forgotPassword: (email: string) => Promise<MessageActionResult>;
-  requestSignup: (email: string) => Promise<MessageActionResult>;
+  forgotPassword: (
+    email: string,
+    interactionId?: string | null,
+  ) => Promise<MessageActionResult>;
+  requestSignup: (
+    email: string,
+    interactionId?: string | null,
+  ) => Promise<MessageActionResult>;
   changePassword: (
     password: string,
     token: string,

@@ -8,11 +8,13 @@ import {
   Center,
   PasswordInput,
   Stack,
+  Text,
   Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { getReturnTo, hrefWithReturnTo, storeReturnTo } from "@/lib/auth-flow";
 import { useTranslations } from "@/i18n";
+import type { FlowContinuation } from "@/services/types";
 import useStore from "@/store";
 
 interface ChangePasswordValues {
@@ -30,6 +32,10 @@ export default function ChangePasswordPage() {
   const returnTo = getReturnTo(searchParams);
   const token = searchParams.get("token") ?? "";
   const [localError, setLocalError] = useState<string | null>(null);
+  const [completed, setCompleted] = useState(false);
+  const [continuation, setContinuation] = useState<FlowContinuation | null>(
+    null,
+  );
 
   useEffect(() => {
     storeReturnTo(returnToParam);
@@ -55,8 +61,44 @@ export default function ChangePasswordPage() {
     }
 
     setLocalError(null);
-    await changePassword(values.password, token);
+    const result = await changePassword(values.password, token);
+    if (result.status === "success") {
+      setContinuation(result.continuation ?? null);
+      setCompleted(true);
+    }
   };
+
+  if (completed) {
+    return (
+      <Stack gap="lg">
+        <Box>
+          <Center mb="lg">
+            <Title order={1} size="h2">
+              {t("passwordChangedMessage")}
+            </Title>
+          </Center>
+          {message && (
+            <Text c="dimmed" size="sm">
+              {message.text}
+            </Text>
+          )}
+        </Box>
+        {continuation ? (
+          <Button component="a" href={continuation.continueUrl} fullWidth>
+            {t("continueToApp", { app: continuation.clientName })}
+          </Button>
+        ) : (
+          <Button
+            component={Link}
+            to={hrefWithReturnTo("/login", returnTo)}
+            fullWidth
+          >
+            {t("goToLogin")}
+          </Button>
+        )}
+      </Stack>
+    );
+  }
 
   return (
     <Stack gap="lg">
@@ -66,9 +108,6 @@ export default function ChangePasswordPage() {
             {t("changePassword")}
           </Title>
         </Center>
-        {/*<Text c="dimmed" size="sm">
-          Stargate
-        </Text>*/}
       </Box>
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack gap="md">

@@ -105,6 +105,23 @@ export function hrefWithReturnTo(path: string, returnTo: string | null) {
   return `${path}?return_to=${encodeURIComponent(returnTo)}`;
 }
 
+/**
+ * The parked authorization request an app-started flow began in, read from
+ * the `return_to` the server handed this app. It is only a hint sent to the
+ * server; where the browser goes at the end always comes from the server.
+ */
+export function getInteractionId(returnTo: string | null) {
+  if (!returnTo) return null;
+
+  try {
+    return new URL(returnTo, window.location.origin).searchParams.get(
+      "interaction",
+    );
+  } catch {
+    return null;
+  }
+}
+
 export function redirectToReturnTo(
   router: RouterLike,
   returnTo: string | null,
