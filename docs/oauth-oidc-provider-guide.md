@@ -145,6 +145,9 @@ Important fields:
   no fragment, that receives Back-Channel Logout tokens
 - `backchannel_logout_session_required`: the client needs `sid` in logout
   tokens; Stargate always sends it
+- `initiate_login_uri`: absolute HTTPS URL (HTTP only on loopback hosts), no
+  fragment, that starts a login from the app (see "Login Initiated by a Third
+  Party")
 - `scopes`: allowed scopes
 - `audiences`: allowed resource audiences
 - `attrs`: optional client flags
@@ -246,6 +249,51 @@ keys are rejected. `jwksUri` is an absolute HTTPS URL without a fragment
 (HTTP only on loopback hosts). Changing the method to `private_key_jwt` clears
 the client's secret; a `PATCH` that sets one of `jwks` / `jwksUri` clears the
 other.
+
+## Login Initiated by a Third Party
+
+An app that invites users, or that sends them to registration or a password
+reset, can be the place they land afterwards. OpenID Connect Core 1.0 §4 calls
+this _initiating login from a third party_: the client registers an
+`initiate_login_uri`, and Stargate sends the browser there with `iss` and
+`login_hint` so the app starts a normal authorization request.
+
+```json
+{
+  "initiateLoginUri": "https://app.example.com/login"
+}
+```
+
+Where a flow ends:
+
+- **Invitations.** `POST /admin/users/invitations` accepts `clientId` (the
+  client must exist, be enabled, and register `initiate_login_uri`, else `400`
+  `signup.invitation_client_invalid`) and an optional `targetLinkUri` (absolute
+  HTTPS URL, only with `clientId`). Both are stored with the pending signup.
+- **Registration and reset started by an app.** `POST /signup` and
+  `POST /account/credentials` accept `interactionId`, the parked authorization
+  request the app derived from its `return_to`. When that request is gone or
+  expired there is no continuation and no error.
+- **Completion.** `PUT /signup` and `PUT /account/credentials` return
+  `continueUrl` and `clientName` when the client is still enabled and keeps its
+  endpoint: `initiate_login_uri` with `iss`, `login_hint` (the account's email),
+  and `target_link_uri` when the invitation set one. The URL is built by the
+  server, so no destination comes from the page. The hosted app shows
+  "Continue to <app>" instead of "Go to Login".
+
+What the app must do with the request it receives:
+
+1. Check `iss` is the Stargate issuer it trusts, and ignore the request when it
+   is not.
+2. Start an authorization request (`/oauth/authorize`) with `login_hint` set to
+   the address, its own `state` and PKCE; the user signs in once and the flow
+   continues normally. There is no automatic sign-in.
+3. Read `target_link_uri` only as a hint and accept it just when it points at
+   the app itself (its own origin or a known path), never as an open redirect.
+
+The continuation outlives the parked request: the pending signup or reset
+keeps the client, so the emailed link works in another tab and after the
+interaction expires.
 
 ## Rotate Client Secret
 
@@ -443,7 +491,7 @@ Users manage their consents with:
 
 - `GET /account/consents`: applications they allowed, with scopes.
 - `DELETE /account/consents/{client_id}`: revoke (`204`, or `404
-  oauth_consent.not_found`). The next authorization asks again, and the
+oauth_consent.not_found`). The next authorization asks again, and the
   client's refresh tokens stop working (`invalid_grant`, the refresh family is
   dropped). Access tokens already issued stay valid until they expire.
 
@@ -487,12 +535,12 @@ token and refresh-token family issued for it.
 Every login session records how the user signed in, as OpenID Connect `amr`
 values (RFC 8176):
 
-| Sign-in | `amr` | `acr` |
-|---|---|---|
-| Password (hosted login, `/oauth/login`, `/account/login`) | `["pwd"]` | `urn:stargate:acr:single-factor` |
-| Password and email code (login MFA) | `["pwd", "otp", "mfa"]` | `urn:stargate:acr:multi-factor` |
-| Email code only (passwordless) | `["otp"]` | `urn:stargate:acr:single-factor` |
-| Google or GitHub | `["fed"]` | `urn:stargate:acr:single-factor` |
+| Sign-in                                                   | `amr`                   | `acr`                            |
+| --------------------------------------------------------- | ----------------------- | -------------------------------- |
+| Password (hosted login, `/oauth/login`, `/account/login`) | `["pwd"]`               | `urn:stargate:acr:single-factor` |
+| Password and email code (login MFA)                       | `["pwd", "otp", "mfa"]` | `urn:stargate:acr:multi-factor`  |
+| Email code only (passwordless)                            | `["otp"]`               | `urn:stargate:acr:single-factor` |
+| Google or GitHub                                          | `["fed"]`               | `urn:stargate:acr:single-factor` |
 
 `fed` is not registered by RFC 8176; other providers use it for federated
 sign-in. An email code verified later in the session (`POST
