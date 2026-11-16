@@ -199,6 +199,7 @@ struct OAuthClientAuditSnapshot<'a> {
     post_logout_redirect_uris: &'a [String],
     backchannel_logout_uri: Option<&'a str>,
     backchannel_logout_session_required: bool,
+    initiate_login_uri: Option<&'a str>,
     /// Key ids only; the keys themselves are public but bulky.
     jwks_key_ids: Vec<&'a str>,
     jwks_uri: Option<&'a str>,
@@ -218,6 +219,7 @@ impl<'a> From<&'a OAuthClient> for OAuthClientAuditSnapshot<'a> {
             post_logout_redirect_uris: client.post_logout_redirect_uris.as_slice(),
             backchannel_logout_uri: client.backchannel_logout_uri.as_deref(),
             backchannel_logout_session_required: client.backchannel_logout_session_required,
+            initiate_login_uri: client.initiate_login_uri.as_deref(),
             jwks_key_ids: client
                 .jwks
                 .as_ref()
@@ -617,6 +619,9 @@ fn oauth_client_changed_fields(before: &OAuthClient, after: &OAuthClient) -> Vec
     }
     if before.backchannel_logout_session_required != after.backchannel_logout_session_required {
         fields.push("backchannel_logout_session_required");
+    }
+    if before.initiate_login_uri != after.initiate_login_uri {
+        fields.push("initiate_login_uri");
     }
     if before.jwks != after.jwks {
         fields.push("jwks");

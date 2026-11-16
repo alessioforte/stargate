@@ -135,6 +135,37 @@ impl MessageResponse {
     }
 }
 
+/// A completed flow: the usual message plus, when the flow started in an app
+/// (OpenID Connect Core 1.0 §4), where to send the browser next.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageWithContinuation {
+    #[serde(flatten)]
+    pub message: MessageResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continue_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_name: Option<String>,
+}
+
+impl MessageWithContinuation {
+    pub fn new(code: MessageCode) -> Self {
+        Self {
+            message: MessageResponse::new(code),
+            continue_url: None,
+            client_name: None,
+        }
+    }
+
+    /// End the flow on the app named `client_name` instead of Stargate's
+    /// login page.
+    pub fn with_app_redirect(mut self, url: String, client_name: String) -> Self {
+        self.continue_url = Some(url);
+        self.client_name = Some(client_name);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +192,25 @@ mod tests {
         assert_eq!(json["code"], "user.deleted");
         assert_eq!(json["message"], "User deleted successfully");
         assert_eq!(json["params"]["id"], "usr_123");
+    }
+
+    #[test]
+    fn message_with_continuation_carries_the_app_redirect_only_when_set() {
+        let plain =
+            serde_json::to_value(MessageWithContinuation::new(MessageCode::SignupCompleted))
+                .unwrap();
+        assert_eq!(plain["code"], "signup.completed");
+        assert!(plain.get("continueUrl").is_none());
+
+        let continued = serde_json::to_value(
+            MessageWithContinuation::new(MessageCode::SignupCompleted).with_app_redirect(
+                "https://app.example/login?iss=x".to_string(),
+                "Orders".to_string(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(continued["code"], "signup.completed");
+        assert_eq!(continued["continueUrl"], "https://app.example/login?iss=x");
+        assert_eq!(continued["clientName"], "Orders");
     }
 }

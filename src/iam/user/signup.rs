@@ -1,4 +1,5 @@
 use crate::data::store::use_store;
+use crate::iam::oidc::continuation::LoginContinuation;
 use db::ent::NewOrganizationMembership;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,6 +33,8 @@ pub struct PendingSignupProfile {
     pub phone_number: Option<String>,
     pub attrs: Value,
     pub membership: Option<NewOrganizationMembership>,
+    /// The app the flow began in, when it should receive the user afterwards.
+    pub continuation: Option<LoginContinuation>,
 }
 
 impl PendingSignupProfile {
@@ -49,6 +52,7 @@ impl PendingSignupProfile {
             phone_number: None,
             attrs: Value::Object(serde_json::Map::new()),
             membership: None,
+            continuation: None,
         }
     }
 }
@@ -98,7 +102,8 @@ mod tests {
             "membership": {
                 "organizationId": "01JZ0000000000000000000001",
                 "role": "admin"
-            }
+            },
+            "continuation": null
         }))
         .expect("deserialize pending membership");
 

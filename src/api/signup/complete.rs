@@ -7,7 +7,7 @@ use crate::iam::user::{
     signup,
 };
 use crate::iam::{auth::jwt::jwt_config, pwd};
-use crate::web::messages::{MessageCode, MessageResponse};
+use crate::web::messages::{MessageCode, MessageWithContinuation};
 use axum::Json;
 use axum::extract::{FromRequest, Request};
 use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
@@ -20,7 +20,7 @@ use tracing::error;
     tags = ["Signup"],
     request_body = SignupCompleteRequestBody,
     responses(
-        (status = 200, description = "OK", body = MessageResponse),
+        (status = 200, description = "OK, plus the app to continue on when the signup started there", body = MessageWithContinuation),
         (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 403, description = "The email domain is no longer allowed (`signup.domain_not_allowed`)", body = ErrorResponse),
         (status = 404, description = "Not Found, or disabled by `SIGNUP_MODE` (`feature.disabled`)", body = ErrorResponse),
@@ -28,7 +28,7 @@ use tracing::error;
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
-pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResponse> {
+pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, ErrorResponse> {
     let audit_request = audit_request_from(req.extensions());
 
     let Json(body) = Json::<SignupCompleteRequestBody>::from_request(req, &())
@@ -70,6 +70,13 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
     {
         return Err(ErrorResponse::new(ErrorCode::SignupUserAlreadyExists));
     }
+
+    // The app the flow began in still has to be enabled and keep its endpoint
+    // (OpenID Connect Core 1.0 §4).
+    let continuation =
+        crate::iam::oidc::continuation::complete(signup.continuation.as_ref(), &signup.email)
+            .await
+            .map_err(ErrorResponse::internal)?;
 
     let nickname = if body.nickname.trim().is_empty() {
         signup.email.clone()
@@ -142,10 +149,210 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageResponse>, ErrorResp
         error!("Could not send email: {:?}", e);
     }
 
-    Ok(Json(MessageResponse::new(MessageCode::SignupCompleted)))
+    Ok(Json(match continuation {
+        Some(continuation) => MessageWithContinuation::new(MessageCode::SignupCompleted)
+            .with_app_redirect(continuation.url, continuation.client_name),
+        None => MessageWithContinuation::new(MessageCode::SignupCompleted),
+    }))
 }
 
 fn optional_nonempty(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_string())
+}
+
+#[cfg(all(test, feature = "memory", feature = "sqlite"))]
+mod tests {
+    use super::put_signup;
+    use crate::data::db::with_test_database;
+    use crate::iam::oidc::continuation::LoginContinuation;
+    use crate::iam::user::{email_verification, signup};
+    use crate::iam::{
+        auth::jwt::jwt_config,
+        user::signup::{PendingSignupProfile, SignupOrigin},
+    };
+    use crate::web::messages::MessageWithContinuation;
+    use axum::body::Body;
+    use db::ent::{OAuthClient, TrustedAuditContext};
+    use http::{Method, Request, header::CONTENT_TYPE};
+    use tools::Locale;
+
+    const PASSWORD: &str = "Str0ng-Passw0rd!";
+
+    fn admin_context() -> TrustedAuditContext {
+        TrustedAuditContext::admin_control_plane(
+            db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
+            db::ent::TrustedAuditRequest::from_http(
+                ulid::Ulid::generate().to_string(),
+                None,
+                None,
+                None,
+            ),
+        )
+    }
+
+    async fn app_client(client_id: &str, enabled: bool, initiate_login_uri: Option<&str>) {
+        let mut client = OAuthClient::new(
+            client_id.to_string(),
+            None,
+            "Orders".to_string(),
+            None,
+            "none".to_string(),
+            vec!["authorization_code".to_string()],
+            vec!["code".to_string()],
+            vec!["https://orders.example/callback".to_string()],
+            vec!["openid".to_string()],
+            Vec::new(),
+            serde_json::json!({}),
+        );
+        client.enabled = enabled;
+        client.initiate_login_uri = initiate_login_uri.map(str::to_string);
+        crate::data::db::create_oauth_client(client, admin_context())
+            .await
+            .expect("create client");
+    }
+
+    async fn pending_signup(email: &str, continuation: Option<LoginContinuation>) -> String {
+        // Invitations complete in the default signup mode; a self-service
+        // signup proceeds only while `SIGNUP_MODE=open` (see `request`).
+        let profile = PendingSignupProfile {
+            origin: SignupOrigin::Invitation,
+            continuation,
+            ..PendingSignupProfile::self_service(email, Locale::En)
+        };
+        let sid = email_verification::create_email_verification_request(&profile)
+            .await
+            .expect("pending email verification");
+        signup::create_signup_request(&sid, &profile)
+            .await
+            .expect("pending signup");
+        sid
+    }
+
+    async fn complete_signup(sid: &str) -> MessageWithContinuation {
+        let claim = jwt::Claims::default()
+            .subject("signup".to_string())
+            .sub_id(sid.to_string());
+        let token = jwt_config().generate_token(&claim).expect("signup token");
+        let body = serde_json::json!({
+            "token": token,
+            "givenName": "Ada",
+            "familyName": "Lovelace",
+            "nickname": "",
+            "password": PASSWORD,
+            "phoneNumber": null,
+        });
+        let request = Request::builder()
+            .method(Method::PUT)
+            .uri("/signup")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .expect("request");
+        put_signup(request).await.expect("signup completes").0
+    }
+
+    #[tokio::test]
+    async fn a_signup_that_started_in_an_app_continues_there() {
+        with_test_database(async {
+            app_client("orders", true, Some("https://orders.example/login")).await;
+            let sid = pending_signup(
+                "ada@example.com",
+                Some(LoginContinuation::new(
+                    "orders",
+                    Some("https://orders.example/inbox".to_string()),
+                )),
+            )
+            .await;
+
+            let response = complete_signup(&sid).await;
+
+            assert_eq!(
+                response.message.code,
+                crate::web::messages::MessageCode::SignupCompleted
+            );
+            assert_eq!(response.client_name.as_deref(), Some("Orders"));
+            let url = url::Url::parse(response.continue_url.as_deref().expect("continue url"))
+                .expect("absolute endpoint");
+            let params = url
+                .query_pairs()
+                .collect::<std::collections::HashMap<_, _>>();
+            assert_eq!(
+                params.get("iss").map(|value| value.as_ref()),
+                Some(jwt::issuer_from_env().as_str())
+            );
+            assert_eq!(
+                params.get("login_hint").map(|value| value.as_ref()),
+                Some("ada@example.com")
+            );
+            assert_eq!(
+                params.get("target_link_uri").map(|value| value.as_ref()),
+                Some("https://orders.example/inbox")
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_signup_without_an_app_ends_on_the_login_page() {
+        with_test_database(async {
+            let sid = pending_signup("grace@example.com", None).await;
+
+            let response = complete_signup(&sid).await;
+
+            assert_eq!(response.continue_url, None);
+            assert_eq!(response.client_name, None);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn the_link_works_in_another_tab_and_after_the_interaction_expires() {
+        with_test_database(async {
+            app_client("orders", true, Some("https://orders.example/login")).await;
+            let query = crate::iam::oidc::request::AuthorizationRequest {
+                client_id: Some("orders".to_string()),
+                ..Default::default()
+            };
+            let interaction = crate::iam::oidc::interactions::park(query)
+                .await
+                .expect("parked request");
+            let continuation = crate::iam::oidc::continuation::from_interaction(Some(&interaction))
+                .await
+                .expect("resolve continuation");
+            // The parked request is gone by the time the emailed link is used.
+            crate::iam::oidc::interactions::take(&interaction)
+                .await
+                .expect("take interaction")
+                .expect("parked request");
+            let sid = pending_signup("linus@example.com", continuation).await;
+
+            let response = complete_signup(&sid).await;
+
+            assert!(
+                response.continue_url.is_some(),
+                "the continuation lives on the pending signup"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_client_disabled_before_completion_has_no_continuation() {
+        with_test_database(async {
+            app_client("orders", true, Some("https://orders.example/login")).await;
+            let sid = pending_signup(
+                "edsger@example.com",
+                Some(LoginContinuation::new("orders", None)),
+            )
+            .await;
+            crate::data::db::set_oauth_client_enabled("orders", false, admin_context())
+                .await
+                .expect("disable client");
+
+            let response = complete_signup(&sid).await;
+
+            assert_eq!(response.continue_url, None);
+        })
+        .await;
+    }
 }
