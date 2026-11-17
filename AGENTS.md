@@ -57,9 +57,9 @@ stargate/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
 │                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
 │                      #   gateway-performance (opt-in benchmarks and recorded results),
-│                      #   production-checklist, audit-events, monitoring, sizing
+│                      #   redis-failure-bench, production-checklist, audit-events, monitoring, sizing
 ├── k8s/               # Kubernetes manifests
-└── benches/           # Criterion benchmarks; scripts/ has gateway/backend benchmark runners
+└── benches/           # Criterion benchmarks; scripts/ has gateway, backend and Redis failure runners
 ```
 
 Module boundaries in `src/` (each top-level name is 3-4 characters):
