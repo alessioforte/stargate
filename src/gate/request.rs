@@ -13,6 +13,7 @@ use super::{
     },
     routing::router_matches,
     upstream::headers::{UpstreamHeaders, strip_untrusted_forwarded_headers},
+    usage::StoreUsage,
 };
 use crate::{
     ctx::{PropagationDraft, RequestContext, request_id_from, sign::InternalContextRuntime},
@@ -71,6 +72,7 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
         router: "unmatched".to_string(),
         service: "unmatched".to_string(),
     };
+    let mut usage = StoreUsage::default();
 
     let result: Result<Response, ErrorResponse> = async {
         let grpc_timeout = if grpc_request {
@@ -118,11 +120,13 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
                     },
                     admission,
                     &mut labels,
+                    &mut usage,
                 ),
             )
             .await?
     }
     .await;
+    usage.record();
 
     let status = match &result {
         Ok(response) => response.status().as_u16(),
@@ -158,6 +162,7 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_request(
     mut req: Request<Body>,
     runtime: Arc<crate::gate::RuntimeSnapshot>,
@@ -166,6 +171,7 @@ async fn handle_request(
     deadlines: RequestDeadlines,
     admission: Arc<Admission>,
     labels: &mut RouteLabels,
+    usage: &mut StoreUsage,
 ) -> Result<Response, ErrorResponse> {
     #[cfg(all(test, feature = "memory"))]
     if let Some(pause) = req.extensions().get::<IngressPause>().cloned() {
@@ -177,13 +183,16 @@ async fn handle_request(
     let client_ip = req.get_client_ip();
     let upstream_headers = UpstreamHeaders::from_request(&req, crate::srv::tls::listener_enabled());
     strip_untrusted_forwarded_headers(req.headers_mut(), upstream_headers.peer);
-    ingress::apply_ingress_limit(&runtime, &client_ip, execution)
+    ingress::apply_ingress_limit(&runtime, &client_ip, execution, usage)
         .instrument(tracing::debug_span!("gateway.ingress"))
         .await?;
-    let identity = authentication::authenticate(authentication::auth_request(&req))
-        .instrument(tracing::debug_span!("gateway.authenticate"))
-        .await;
+    let (identity, commands) = store::observe::count_commands(
+        authentication::authenticate(authentication::auth_request(&req))
+            .instrument(tracing::debug_span!("gateway.authenticate")),
+    )
+    .await;
     let auth_kind = identity.auth_kind();
+    usage.record_auth(auth_kind, commands);
     let sub = identity.subject();
     tracing::Span::current().record(
         "stargate.auth_kind",
@@ -280,6 +289,7 @@ async fn handle_request(
         &identity,
         &client_ip,
         &mut response_headers,
+        usage,
     )
     .instrument(tracing::debug_span!(
         "gateway.apply_policies",

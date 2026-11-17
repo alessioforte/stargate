@@ -3,36 +3,39 @@ use crate::{
     gate::{
         RuntimeSnapshot,
         limits::{LimitPoint, TrafficLimit, check_traffic_limit, ingress_key},
+        usage::StoreUsage,
     },
     obs::telemetry,
     web::limits::limited_response,
 };
+use lim::LimitKind;
 
 pub(in crate::gate) async fn apply_ingress_limit(
     runtime: &RuntimeSnapshot,
     client_ip: &str,
     execution: &crate::gate::lifecycle::Execution,
+    usage: &mut StoreUsage,
 ) -> Result<(), ErrorResponse> {
     let ingress = &runtime.ingress;
     let key = ingress_key(client_ip);
-    let decision = execution
-        .run(
-            "ingress",
-            None,
-            check_traffic_limit(
-                runtime,
-                LimitPoint::GatewayIngress,
-                ingress.on_store_error,
-                TrafficLimit {
-                    name: &ingress.limit,
-                    key: &key,
-                    scope: "ingress",
-                    cost: None,
-                },
-            ),
-        )
-        .await??;
-    let Some(decision) = decision else {
+    let (decision, commands) = store::observe::count_commands(execution.run(
+        "ingress",
+        None,
+        check_traffic_limit(
+            runtime,
+            LimitPoint::GatewayIngress,
+            ingress.on_store_error,
+            TrafficLimit {
+                name: &ingress.limit,
+                key: &key,
+                scope: "ingress",
+                cost: None,
+            },
+        ),
+    ))
+    .await;
+    usage.record_limit(LimitKind::Rate, commands);
+    let Some(decision) = decision?? else {
         return Ok(());
     };
     if decision.is_allowed() {

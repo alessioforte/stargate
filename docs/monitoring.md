@@ -160,6 +160,8 @@ custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 | `stargate.gateway.internal_context.queue.duration` | H / s | Configured service and dispatch kind | Signing queue wait |
 | `stargate.gateway.internal_context.token.size` | H / By | Same as issues | Compact signed token size |
 | `stargate.limits.store_errors` | C / failures | `stargate.point=gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`, `quota`; `stargate.outcome=allowed` or `denied` | Traffic store errors/timeouts, per replica |
+| `stargate.store.redis.commands` | C / commands | `stargate.path=anonymous`, `api_key`, `session`, `oauth`, `rate_limit`, `quota` | Redis commands issued while handling gateway requests, per replica |
+| `stargate.store.redis.commands_per_request` | H / commands | Same as store commands | Redis commands one gateway request issued, one observation per path it exercised |
 | `stargate.config.reloads` | C / activations | `stargate.config_kind=gateway_config` or `policies`; `stargate.outcome=success`, `error`, `transport_error`, `internal_context_error` | Activation outcomes |
 | `stargate.iam.password_hashing.active` | G / jobs | none | Argon2 jobs executing on the blocking pool |
 | `stargate.iam.password_hashing.rejections` | C / rejections | `stargate.operation=verify`, `hash`, `history`, `rehash_skipped` | Foreground admission timeouts or immediately skipped background upgrades |
@@ -188,6 +190,18 @@ target. Used upstreams shared by several leaf services are counted once. Every
 collection reads the active snapshot; unused upstreams without a balancer are
 omitted, and pinned old requests do not keep obsolete generations in the gauge.
 
+Store command accounting covers gateway requests only. `stargate.path` names the
+pipeline stage that issued the commands: the credential the request carried
+(`anonymous`, `api_key`, `session` for a native session token, `oauth`) or the
+traffic check (`rate_limit` for admission and rate-limit policies, `quota`). A
+request reports only the paths it exercised, so an authenticated request with a
+quota policy observes `session`, `rate_limit` and `quota`. `anonymous` is a real
+observation of zero: unauthenticated credentials cost no store command. Every
+request sent to Redis counts once — a single command, one script call, or a whole
+pipeline — while the commands a Lua script issues internally are not separate
+requests: the histogram matches the store latency a request waits for. In-memory
+store deployments report zeros.
+
 Duration histogram boundaries are explicit, in seconds:
 
 - HTTP server: `[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]`, as recommended by the HTTP conventions.
@@ -195,6 +209,7 @@ Duration histogram boundaries are explicit, in seconds:
 - Transfer: `[0.01, 0.1, 0.5, 1, 5, 10, 30, 60, 300, 900, 3600]`.
 - Signing: `[0.000001, 0.000005, 0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1]`.
 - Signing queue: `[0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2.5, 5]`.
+- Store commands per request: `[1, 2, 3, 4, 5, 6, 8, 10, 16, 32]`.
 
 An overflow bucket captures larger values. Byte histograms remain in `By`.
 
@@ -238,6 +253,7 @@ Build views in the operator's backend using the OTLP catalog:
 - HTTP request counts, latency p50/p95/p99 and error ratio, separately for IAM and gateway, using `http.server.request.duration` and `stargate.request.kind`.
 - Upstream attempts, failover, response latency and target states by configured upstream and replica.
 - Traffic limit store error rates by point and outcome.
+- Store commands per request, and their rate, by path next to the latency of the same paths.
 - Global audit backlog, oldest unpublished/unconfirmed ages, stream length and relay pause/error rates; see [Audit delivery](audit-events.md).
 - Configuration activation rate by kind and outcome; compare active revisions separately when diagnosing drift.
 - SQL pool idle/in-use counts and utilization, preserving instance identity.

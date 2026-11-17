@@ -17,6 +17,7 @@ mod snap;
 pub(crate) mod test_support;
 mod transport;
 mod upstream;
+mod usage;
 
 pub(crate) use policies::org_limits::invalidate as invalidate_org_limits;
 #[cfg(all(test, feature = "memory"))]

@@ -7,6 +7,8 @@ mod grpc;
 mod ingress;
 mod lifecycle;
 mod nested_execution;
+#[cfg(all(feature = "postgres", feature = "redis"))]
+mod paths;
 mod replay;
 mod replay_support;
 #[cfg(feature = "memory")]

@@ -1,6 +1,8 @@
 mod error;
 mod store;
 
+pub mod observe;
+
 pub use error::{StoreError, StoreResult};
 pub use store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 
@@ -11,6 +13,8 @@ pub use memory::MemoryStore;
 
 #[cfg(feature = "redis")]
 mod redis;
+#[cfg(feature = "redis")]
+pub use redis::RedisConnection;
 #[cfg(feature = "redis")]
 pub use redis::RedisPoolConfig;
 #[cfg(feature = "redis")]

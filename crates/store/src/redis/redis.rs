@@ -3,7 +3,7 @@ use crate::error::{StoreError, StoreResult};
 use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
 use redis::AsyncCommands;
-use redis::aio::{ConnectionManager, ConnectionManagerConfig};
+use redis::aio::{ConnectionLike, ConnectionManager, ConnectionManagerConfig};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -212,6 +212,42 @@ impl RedisPoolConfig {
 // Connection Pool
 // =============================================================================
 
+/// A pooled Redis connection that reports each issued command to
+/// [`crate::observe`], so a caller can account for the round trips a request
+/// costs. Counts follow the future that issues them, not the connection.
+#[derive(Clone)]
+pub struct RedisConnection(ConnectionManager);
+
+impl RedisConnection {
+    fn new(connection: ConnectionManager) -> Self {
+        Self(connection)
+    }
+}
+
+impl ConnectionLike for RedisConnection {
+    fn req_packed_command<'a>(
+        &'a mut self,
+        cmd: &'a redis::Cmd,
+    ) -> redis::RedisFuture<'a, redis::Value> {
+        crate::observe::command_issued();
+        self.0.req_packed_command(cmd)
+    }
+
+    fn req_packed_commands<'a>(
+        &'a mut self,
+        pipeline: &'a redis::Pipeline,
+        offset: usize,
+        count: usize,
+    ) -> redis::RedisFuture<'a, Vec<redis::Value>> {
+        crate::observe::command_issued();
+        self.0.req_packed_commands(pipeline, offset, count)
+    }
+
+    fn get_db(&self) -> i64 {
+        self.0.get_db()
+    }
+}
+
 /// A lightweight, lock-free connection pool that distributes work across N
 /// `ConnectionManager` instances using round-robin selection.
 ///
@@ -271,13 +307,12 @@ impl RedisPool {
 
     /// Acquire a connection from the pool using round-robin selection.
     ///
-    /// This is a non-blocking, lock-free operation. The returned
-    /// `ConnectionManager` is a cheap clone (Arc bump) of one of the pooled
-    /// managers, so the caller gets its own handle while the pool retains
-    /// ownership.
-    fn get(&self) -> ConnectionManager {
+    /// This is a non-blocking, lock-free operation. The returned connection is
+    /// a cheap clone (Arc bump) of one of the pooled managers, so the caller
+    /// gets its own handle while the pool retains ownership.
+    fn get(&self) -> RedisConnection {
         let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.connections.len();
-        self.connections[idx].clone()
+        RedisConnection::new(self.connections[idx].clone())
     }
 
     /// Return the number of connections in the pool.
@@ -426,11 +461,12 @@ impl RedisStore {
 
     /// Get a connection from the pool for use with Lua scripts or raw commands.
     ///
-    /// The returned `ConnectionManager` is a cheap Arc-clone of one of the
-    /// pooled connections, selected via round-robin. It can be used directly
-    /// with the `redis` crate's async command API. Raw state commands must use
+    /// The returned connection is a cheap Arc-clone of one of the pooled
+    /// connections, selected via round-robin. It can be used directly with the
+    /// `redis` crate's async command API, and records each command it issues in
+    /// the current [`crate::observe`] counting scope. Raw state commands must use
     /// [`Self::prefixed_key`]; stream commands use their explicit names.
-    pub fn get_connection(&self) -> ConnectionManager {
+    pub fn get_connection(&self) -> RedisConnection {
         self.pool.get()
     }
 
@@ -471,7 +507,7 @@ impl RedisStore {
         })
     }
 
-    pub(super) fn stream_connection(&self) -> ConnectionManager {
+    pub(super) fn stream_connection(&self) -> RedisConnection {
         self.pool.get()
     }
 

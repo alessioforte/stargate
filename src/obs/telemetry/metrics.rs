@@ -23,6 +23,7 @@ const SIGNING_DURATION_BUCKETS: &[f64] = &[
 const QUEUE_DURATION_BUCKETS: &[f64] = &[
     0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0,
 ];
+const COMMAND_COUNT_BUCKETS: &[f64] = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 16.0, 32.0];
 
 struct Metrics {
     http_server_duration: Histogram<f64>,
@@ -58,6 +59,8 @@ struct Metrics {
     audit_outbox_pruned: Counter<u64>,
     config_reloads: Counter<u64>,
     limit_store_errors: Counter<u64>,
+    store_commands: Counter<u64>,
+    store_commands_per_request: Histogram<u64>,
 }
 
 static METRICS: Lazy<Metrics> = Lazy::new(|| {
@@ -195,6 +198,15 @@ static METRICS: Lazy<Metrics> = Lazy::new(|| {
         config_reloads: meter
             .u64_counter("stargate.config.reloads")
             .with_description("Gateway config or policy reload outcomes")
+            .build(),
+        store_commands: meter
+            .u64_counter("stargate.store.redis.commands")
+            .with_description("Redis commands issued while handling gateway requests, by path")
+            .build(),
+        store_commands_per_request: meter
+            .u64_histogram("stargate.store.redis.commands_per_request")
+            .with_description("Redis commands issued by one gateway request, by path")
+            .with_boundaries(COMMAND_COUNT_BUCKETS.to_vec())
             .build(),
     }
 });
@@ -464,6 +476,39 @@ pub fn record_limit_store_error(point: &'static str, outcome: &'static str) {
     );
 }
 
+/// The pipeline path a gateway request's backend work belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StorePath {
+    Anonymous,
+    ApiKey,
+    Session,
+    Oauth,
+    RateLimit,
+    Quota,
+}
+
+impl StorePath {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Anonymous => "anonymous",
+            Self::ApiKey => "api_key",
+            Self::Session => "session",
+            Self::Oauth => "oauth",
+            Self::RateLimit => "rate_limit",
+            Self::Quota => "quota",
+        }
+    }
+}
+
+/// Report the Redis commands one gateway request issued on `path`.
+pub fn record_store_commands(path: StorePath, commands: u32) {
+    let attrs = [KeyValue::new("stargate.path", path.as_str())];
+    METRICS.store_commands.add(u64::from(commands), &attrs);
+    METRICS
+        .store_commands_per_request
+        .record(u64::from(commands), &attrs);
+}
+
 #[cfg(all(feature = "postgres", feature = "redis"))]
 pub fn register_audit_observers() {
     let meter = global::meter(INSTRUMENTATION_NAME);
@@ -520,4 +565,23 @@ pub fn register_audit_observers() {
 #[cfg(all(feature = "postgres", feature = "redis"))]
 pub fn record_audit_outbox_pruned(count: u64) {
     METRICS.audit_outbox_pruned.add(count, &[]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_command_paths_keep_the_documented_bounded_labels() {
+        for (path, label) in [
+            (StorePath::Anonymous, "anonymous"),
+            (StorePath::ApiKey, "api_key"),
+            (StorePath::Session, "session"),
+            (StorePath::Oauth, "oauth"),
+            (StorePath::RateLimit, "rate_limit"),
+            (StorePath::Quota, "quota"),
+        ] {
+            assert_eq!(path.as_str(), label);
+        }
+    }
 }
