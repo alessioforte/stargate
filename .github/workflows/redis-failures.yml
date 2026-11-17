@@ -1,0 +1,70 @@
+name: Redis
+
+# The Redis suites are slow and need disposable containers, so they run only
+# when the code they exercise changes, or on demand. The OIDC conformance
+# workflow is the only place that needs a live provider.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/redis-failures.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'benches/scripts/redis_failures.py'
+      - 'benches/scripts/redis_fixtures.py'
+      - 'benches/scripts/test_redis_prefix.py'
+      - 'crates/lim/**'
+      - 'crates/store/**'
+      - 'docs/health-probes.md'
+      - 'docs/redis-failure-bench.md'
+      - 'src/api/admin/health.rs'
+      - 'src/api/middleware/rate_limit.rs'
+      - 'src/data/store/**'
+      - 'src/gate/limits.rs'
+      - 'src/gate/limits/**'
+      - 'src/gate/policies/**'
+      - 'src/iam/auth/**'
+      - 'src/iam/sess/**'
+      - 'src/main.rs'
+      - 'src/srv/health.rs'
+  workflow_dispatch:
+
+concurrency:
+  group: redis-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  REDIS_IMAGE: redis:7.4-alpine
+  POSTGRES_IMAGE: postgres:17-alpine
+
+jobs:
+  redis:
+    name: Redis suites and failures
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: redis-failures
+      - name: Build the cluster profile
+        run: cargo build --no-default-features --features cluster
+      # test_redis_prefix.py reruns the ignored tests with --offline; build
+      # their targets first so the registry cache is complete.
+      - name: Build the Redis test binaries
+        run: >-
+          cargo test -p store -p lim --locked --features redis
+          --test redis_prefix --no-run
+      - name: Prefix, ACL and session smoke test
+        run: >-
+          python3 benches/scripts/test_redis_prefix.py
+          --redis-image "$REDIS_IMAGE" --postgres-image "$POSTGRES_IMAGE"
+      - name: Failure bench
+        run: >-
+          python3 benches/scripts/redis_failures.py
+          --redis-image "$REDIS_IMAGE" --postgres-image "$POSTGRES_IMAGE"

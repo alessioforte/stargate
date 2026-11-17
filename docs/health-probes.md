@@ -85,6 +85,16 @@ retain the last valid configuration and keep the current readiness behavior.
 Process admission exhaustion and a full/expired internal-context signing queue
 return request-level `503` responses; they do not change probe readiness.
 
+## Failure bench
+
+`benches/scripts/redis_failures.py` reproduces these failures against a
+disposable cluster-profile deployment and asserts the behavior above. It
+injects a Redis restart, an empty restart, a network partition, memory
+exhaustion with `noeviction`, and a missing instance at startup, and reports
+the unexpected responses, the disturbance duration and the recovery time. See
+[the Redis failure bench](redis-failure-bench.md) for the scenarios, the
+commands and the recorded results.
+
 ## Shutdown
 
 The configuration synchronizer is stopped and awaited before the audit relay (when present).
