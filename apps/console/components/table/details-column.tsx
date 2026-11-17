@@ -1,6 +1,6 @@
 import { ActionIcon, Center } from "@mantine/core";
 import type { ColumnDef } from "@tanstack/react-table";
-import { FaAngleRight } from "react-icons/fa";
+import { LuChevronRight } from "react-icons/lu";
 
 export interface DetailsColumnMeta<T> {
   open: () => void;
@@ -19,13 +19,13 @@ export function createDetailsColumn<T>(): ColumnDef<T> {
       return (
         <Center>
           <ActionIcon
-            variant="transparent"
+            color="gray"
             onClick={() => {
               setSelectedItem(props.row.original);
               open();
             }}
           >
-            <FaAngleRight />
+            <LuChevronRight size={16} />
           </ActionIcon>
         </Center>
       );

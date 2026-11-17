@@ -63,12 +63,7 @@ const GatewayEntityForm: React.FC<Props> = ({
               </ActionIcon>
             </Tooltip>
           )}
-          <Button
-            type="button"
-            size="compact-sm"
-            color="teal"
-            onClick={onApply}
-          >
+          <Button type="button" size="compact-sm" onClick={onApply}>
             {t("applyToDraft")}
           </Button>
         </Group>

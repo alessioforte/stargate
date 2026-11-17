@@ -19,6 +19,7 @@ import {
 } from "@tanstack/react-table";
 import React, { useEffect, useState } from "react";
 import { Box } from "@mantine/core";
+import { useTranslations } from "@/i18n";
 import Empty from "../empty/empty";
 import { selectionColumn } from "./selection-column";
 import { type TableProps } from "./types";
@@ -27,12 +28,22 @@ import classes from "./table.module.css";
 export const DEFAULT_PAGE_LIMIT_SMALL = 10;
 export const DEFAULT_PAGE_LIMIT_LARGE = 100;
 
+/** Truncated text stays readable on hover. */
+function cellTitle(value: unknown) {
+  if (typeof value !== "string" || value.length <= 16) return undefined;
+  // Timestamps are formatted by their column and may wrap instead.
+  return /^\d{4}-\d{2}-\d{2}T/.test(value) ? undefined : value;
+}
+
+/** Narrow screens scroll the table sideways instead of crushing columns. */
+const MIN_COLUMN_WIDTH = 110;
+
 const Table = <T, V>({
   columns,
   data = [],
   pagination,
   meta,
-  verticalSpacing = 7,
+  verticalSpacing = 10,
   paginationOptions,
   enableRowSelection = false,
   stickyHeader = false,
@@ -47,6 +58,7 @@ const Table = <T, V>({
   minWidth,
   maxHeight,
 }: TableProps<T, V>) => {
+  const t = useTranslations();
   const [rowSelection, setRowSelection] = React.useState({});
   const [sorting, setSorting] = useState<SortingState>(defaultSorting ?? []);
   const [pageIndex, setPageIndex] = React.useState(
@@ -109,6 +121,15 @@ const Table = <T, V>({
     ? Math.max(1, Math.ceil(totalItems / table.getState().pagination.pageSize))
     : null;
   const showTable = !empty || loading;
+  const pageSize = table.getState().pagination.pageSize;
+  const rangeLabel =
+    Number.isFinite(totalItems) && totalItems > 0
+      ? t("table.range", {
+          from: pageIndex * pageSize + 1,
+          to: Math.min(totalItems, (pageIndex + 1) * pageSize),
+          total: totalItems.toLocaleString(),
+        })
+      : null;
   const skeletonRows = Math.max(
     5,
     paginationOptions?.pageSize ?? DEFAULT_PAGE_LIMIT_SMALL,
@@ -157,86 +178,136 @@ const Table = <T, V>({
   return (
     <>
       <Box className={classes.tableLayout} style={{ height: maxHeight }}>
-        <Box className={classes.tableHeader}>
-          <MantineTable
-            className={classes.table}
-            verticalSpacing={verticalSpacing}
-            highlightOnHover
-            style={{ minWidth }}
+        <Box className={classes.scroller}>
+          <Box
+            className={classes.scrollerInner}
+            style={{
+              minWidth: minWidth ?? visibleColumns.length * MIN_COLUMN_WIDTH,
+            }}
           >
-            {renderColumnGroup()}
-            <MantineTable.Thead className={stickyHeader ? classes.sticky : ""}>
-              {React.Children.toArray(
-                table.getHeaderGroups().map((headerGroup) => (
-                  <MantineTable.Tr key={headerGroup.id}>
-                    {React.Children.toArray(
-                      headerGroup.headers.map(
-                        ({ isPlaceholder, column, getContext }) =>
-                          isPlaceholder ? null : (
-                            <MantineTable.Th key={column.id}>
-                              {flexRender(column.columnDef.header, {
-                                ...getContext(),
-                              })}
-                            </MantineTable.Th>
-                          ),
-                      ),
-                    )}
-                  </MantineTable.Tr>
-                )),
-              )}
-            </MantineTable.Thead>
-          </MantineTable>
-        </Box>
-
-        <TableBodyContainer>
-          {showTable && (
-            <MantineTable
-              className={classes.table}
-              verticalSpacing={verticalSpacing}
-              highlightOnHover
-              style={{ minWidth }}
-            >
-              {renderColumnGroup()}
-              <MantineTable.Tbody>
-                {loading &&
-                  Array.from({ length: skeletonRows }, (_, rowIndex) => (
-                    <MantineTable.Tr key={`skeleton-${rowIndex}`}>
-                      {visibleColumns.map((column) => (
-                        <MantineTable.Td key={column.id}>
-                          <Skeleton height={28} radius="sm" />
-                        </MantineTable.Td>
-                      ))}
-                    </MantineTable.Tr>
-                  ))}
-                {!loading &&
-                  React.Children.toArray(
-                    rows.map((row) => (
-                      <MantineTable.Tr key={row.id}>
+            <Box className={classes.tableHeader}>
+              <MantineTable
+                className={classes.table}
+                verticalSpacing={verticalSpacing}
+                horizontalSpacing="sm"
+                layout="fixed"
+              >
+                {renderColumnGroup()}
+                <MantineTable.Thead
+                  className={stickyHeader ? classes.sticky : ""}
+                >
+                  {React.Children.toArray(
+                    table.getHeaderGroups().map((headerGroup) => (
+                      <MantineTable.Tr key={headerGroup.id}>
                         {React.Children.toArray(
-                          row.getVisibleCells().map((cell) => (
-                            <MantineTable.Td key={cell.column.id}>
-                              {flexRender(cell.column.columnDef.cell, {
-                                ...cell.getContext(),
-                              })}
-                            </MantineTable.Td>
-                          )),
+                          headerGroup.headers.map(
+                            ({ isPlaceholder, column, getContext }) =>
+                              isPlaceholder ? null : (
+                                <MantineTable.Th key={column.id}>
+                                  {flexRender(column.columnDef.header, {
+                                    ...getContext(),
+                                  })}
+                                </MantineTable.Th>
+                              ),
+                          ),
                         )}
                       </MantineTable.Tr>
                     )),
                   )}
-              </MantineTable.Tbody>
-            </MantineTable>
-          )}
-
-          {empty && !loading && (
-            <Box className={classes.emptyState}>
-              <Empty style={{ height: "100%" }} />
+                </MantineTable.Thead>
+              </MantineTable>
             </Box>
-          )}
-        </TableBodyContainer>
+
+            <TableBodyContainer>
+              {showTable && (
+                <MantineTable
+                  className={classes.table}
+                  verticalSpacing={verticalSpacing}
+                  horizontalSpacing="sm"
+                  layout="fixed"
+                  highlightOnHover
+                >
+                  {renderColumnGroup()}
+                  <MantineTable.Tbody>
+                    {loading &&
+                      Array.from({ length: skeletonRows }, (_, rowIndex) => (
+                        <MantineTable.Tr key={`skeleton-${rowIndex}`}>
+                          {visibleColumns.map((column) => (
+                            <MantineTable.Td key={column.id}>
+                              <Skeleton height={14} my={3} maw={180} />
+                            </MantineTable.Td>
+                          ))}
+                        </MantineTable.Tr>
+                      ))}
+                    {!loading &&
+                      React.Children.toArray(
+                        rows.map((row) => (
+                          <MantineTable.Tr key={row.id}>
+                            {React.Children.toArray(
+                              row.getVisibleCells().map((cell) => (
+                                <MantineTable.Td
+                                  key={cell.column.id}
+                                  title={cellTitle(cell.getValue())}
+                                >
+                                  {flexRender(cell.column.columnDef.cell, {
+                                    ...cell.getContext(),
+                                  })}
+                                </MantineTable.Td>
+                              )),
+                            )}
+                          </MantineTable.Tr>
+                        )),
+                      )}
+                  </MantineTable.Tbody>
+                </MantineTable>
+              )}
+
+              {empty && !loading && (
+                <Box className={classes.emptyState}>
+                  <Empty title={t("nothingFound")} />
+                </Box>
+              )}
+            </TableBodyContainer>
+          </Box>
+        </Box>
 
         {pagination && (
           <Group className={classes.pagination}>
+            <Group gap="xs" className={classes.pageSize}>
+              <Text size="xs" c="dimmed">
+                {t("table.rowsPerPage")}
+              </Text>
+              <Select
+                size="xs"
+                aria-label={t("table.rowsPerPage")}
+                value={String(table.getState().pagination.pageSize)}
+                autoComplete="off"
+                w={72}
+                allowDeselect={false}
+                onChange={(value) => {
+                  if (!value) return;
+                  table.setPageSize(Number(value));
+                  setPageIndex(0);
+                  onPaginationChange?.({
+                    pageIndex: 0,
+                    pageSize: Number(value),
+                    sorting: table.getState().sorting,
+                  });
+                }}
+                data={[
+                  { value: "10", label: "10" },
+                  { value: "15", label: "15" },
+                  { value: "20", label: "20" },
+                  { value: "50", label: "50" },
+                  { value: "100", label: "100" },
+                ]}
+              />
+              {rangeLabel && (
+                <Text size="xs" c="dimmed">
+                  {rangeLabel}
+                </Text>
+              )}
+            </Group>
             {pageCount !== null && (
               <Pagination
                 size="sm"
@@ -269,7 +340,7 @@ const Table = <T, V>({
                 >
                   <GoChevronLeft size={11} />
                 </ActionIcon>
-                <ActionIcon size={26} variant="filled" color="primary">
+                <ActionIcon size={26} variant="filled">
                   <Text size="xs" fw={500}>
                     {pageIndex + 1}
                   </Text>
@@ -294,30 +365,6 @@ const Table = <T, V>({
                 </ActionIcon>
               </Group>
             )}
-            <Select
-              size="xs"
-              variant="unstyled"
-              value={String(table.getState().pagination.pageSize)}
-              autoComplete="off"
-              style={{ maxWidth: 70 }}
-              onChange={(value) => {
-                if (!value) return;
-                table.setPageSize(Number(value));
-                setPageIndex(0);
-                onPaginationChange?.({
-                  pageIndex: 0,
-                  pageSize: Number(value),
-                  sorting: table.getState().sorting,
-                });
-              }}
-              data={[
-                { value: "10", label: "10" },
-                { value: "15", label: "15" },
-                { value: "20", label: "20" },
-                { value: "50", label: "50" },
-                { value: "100", label: "100" },
-              ]}
-            />
           </Group>
         )}
       </Box>

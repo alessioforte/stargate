@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import useStore from "@/store";
-import { Table, SearchInput } from "@/components";
+import { Page, Panel, Table, SearchInput } from "@/components";
 import type { User } from "@/services/types";
 import { useTranslations } from "@/i18n";
 import CreateUser from "./create-user";
@@ -84,47 +83,45 @@ const UsersPage = () => {
   };
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("users")}</Title>
-        <SearchInput
-          radius="lg"
-          variant="unstyled"
-          style={{ flex: 1 }}
-          placeholder={`${t("search").toLowerCase()}...`}
-          onSearch={handleSearch}
-        />
+    <Page
+      title={t("users")}
+      description={t("pages.users")}
+      actions={
         <CreateUser
           organizations={organizations?.data?.data ?? []}
           onSave={createUser}
           onInvite={inviteUser}
           invitationsEnabled={invitationsEnabled}
         />
-      </Group>
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 60px)"
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: users?.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        columns={columns}
-        data={users?.data?.data ?? []}
-        empty={users?.data?.data?.length === 0}
-        loading={users?.isLoading() ?? false}
-        meta={{
-          open,
-          superAdminUsers: superAdminUsers?.data ?? [],
-          setSelectedItem: setSelectedUser,
-        }}
-      />
+      }
+    >
+      <Panel
+        toolbar={
+          <SearchInput placeholder={t("search")} onSearch={handleSearch} />
+        }
+      >
+        <Table
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: users?.data?.total,
+          }}
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
+          }}
+          columns={columns}
+          data={users?.data?.data ?? []}
+          empty={users?.data?.data?.length === 0}
+          loading={users?.isLoading() ?? false}
+          meta={{
+            open,
+            superAdminUsers: superAdminUsers?.data ?? [],
+            setSelectedItem: setSelectedUser,
+          }}
+        />
+      </Panel>
       <EditUser
         opened={opened}
         user={selectedUser}
@@ -136,7 +133,7 @@ const UsersPage = () => {
         onDelete={deleteUser}
         onAttrsSave={updateUserAttrs}
       />
-    </Box>
+    </Page>
   );
 };
 

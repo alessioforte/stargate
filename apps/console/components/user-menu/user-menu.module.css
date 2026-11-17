@@ -1,82 +1,61 @@
-.avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 2px solid
-    light-dark(var(--mantine-color-gray-3), var(--mantine-color-gray-8));
-  background-color: light-dark(
-    var(--mantine-color-gray-3),
-    var(--mantine-color-dark-6)
-  );
-}
-
-.actionIcon {
-  width: auto;
-  height: auto;
-  padding: 0;
-  margin: 0;
-}
-
-.actionIcon:hover {
-  background: transparent;
-}
-
-.labels {
+.trigger {
   display: flex;
-  flex-direction: column;
-  text-align: right;
-  margin-right: 20px;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 6px 0 4px;
+  border-radius: var(--mantine-radius-md);
+  color: inherit;
+  transition: background-color 100ms ease;
+
+  &:hover,
+  &[data-expanded] {
+    background-color: var(--app-hover);
+  }
 }
 
-.description {
-  color: var(--mantine-color-primary);
-  font-size: 9px;
+.name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+
+  @media (max-width: $mantine-breakpoint-sm) {
+    display: none;
+  }
 }
 
-.char {
-  color: var(--mantine-color-primary);
+.chevron {
+  color: var(--app-text-muted);
 }
 
 .dropdown {
-  min-width: 200px;
+  min-width: 260px;
 }
 
-.treeRoot {
-  --tree-line-color: light-dark(
-    var(--mantine-color-default-border),
-    var(--mantine-color-gray-3)
-  );
-  --tree-line-width: 1px;
-}
-
-.treeItem {
-  padding: 0;
-  margin-bottom: 0;
-  margin-left: var(--label-offset);
-  border-radius: 4px;
-  max-width: 200px;
+.identity {
   display: flex;
   align-items: center;
-  height: 100%;
-  overflow-x: hidden;
-  &:hover,
-  &:active {
-    .treeItemText {
-      color: var(--mantine-color-primary);
-    }
-  }
+  gap: 10px;
+  padding: 8px 10px 10px;
+  min-width: 0;
 }
 
-.treeItemActive {
-  font-weight: 800;
-  .treeItemText {
-    color: var(--mantine-color-primary);
-  }
+.identityText {
+  min-width: 0;
 }
 
-.treeItemText {
-  padding-left: 5px;
-  display: inline-block;
-  color: light-dark(var(--text-color), var(--mantine-color-dark-0));
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.rowLabel {
+  color: var(--app-text-muted);
 }

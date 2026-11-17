@@ -1,5 +1,5 @@
 import OnStoreErrorSelect from "./on-store-error-select";
-import { Group, Select, TextInput } from "@mantine/core";
+import { Select, SimpleGrid, TextInput } from "@mantine/core";
 import { useTranslations } from "@/i18n";
 import type { JsonValue } from "@/services/types";
 import { getPathRecord, isRecord, type JsonRecord } from "./config-utils";
@@ -23,7 +23,7 @@ const GatewayIngressSettings: React.FC<Props> = ({ config, onChange }) => {
     .sort();
 
   return (
-    <Group p="xs" align="start" grow>
+    <SimpleGrid cols={{ base: 1, md: 3 }} spacing="lg">
       <Select
         label={t("ingressLimit")}
         description={t("ingressLimitDescription")}
@@ -51,7 +51,7 @@ const GatewayIngressSettings: React.FC<Props> = ({ config, onChange }) => {
           onChange({ ...ingress, timeout: event.currentTarget.value })
         }
       />
-    </Group>
+    </SimpleGrid>
   );
 };
 

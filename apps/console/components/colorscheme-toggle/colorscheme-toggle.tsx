@@ -1,35 +1,32 @@
 import React from "react";
-import { ActionIcon, useMantineColorScheme } from "@mantine/core";
-import { useColorScheme } from "@mantine/hooks";
-import { CiLight, CiDark } from "react-icons/ci";
+import {
+  ActionIcon,
+  useComputedColorScheme,
+  useMantineColorScheme,
+} from "@mantine/core";
+import { LuMoon, LuSun } from "react-icons/lu";
 
 interface Props {
-  color?: string;
   className?: string;
-  size?: string;
+  label?: string;
 }
 
 const ColorSchemeToggle: React.FC<Props> = ({
-  color = "gray",
   className,
-  size = "xl",
+  label = "Toggle color scheme",
 }) => {
-  const defaultColorScheme = useColorScheme();
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const t = colorScheme === "auto" ? defaultColorScheme : colorScheme;
+  const { setColorScheme } = useMantineColorScheme();
+  const scheme = useComputedColorScheme("light");
+
   return (
     <ActionIcon
-      size={size}
-      aria-label="Theme toggle"
+      size="lg"
+      color="gray"
+      aria-label={label}
       className={className}
-      variant="transparent"
-      color={color}
-      onClick={() => {
-        const cs = t === "light" ? "dark" : "light";
-        setColorScheme(cs);
-      }}
+      onClick={() => setColorScheme(scheme === "light" ? "dark" : "light")}
     >
-      {t === "dark" ? <CiDark /> : <CiLight />}
+      {scheme === "dark" ? <LuSun size={17} /> : <LuMoon size={17} />}
     </ActionIcon>
   );
 };

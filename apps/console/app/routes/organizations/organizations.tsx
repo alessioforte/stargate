@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import useStore from "@/store";
-import { Table, SearchInput } from "@/components";
+import { Page, Panel, Table, SearchInput } from "@/components";
 import type { Organization } from "@/services/types";
 import { useTranslations } from "@/i18n";
 import CreateOrganization from "./create-organization";
@@ -59,41 +58,37 @@ const OrganizationsPage = () => {
   };
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("organizations")}</Title>
-        <SearchInput
-          radius="lg"
-          variant="unstyled"
-          style={{ flex: 1 }}
-          placeholder={t("search")}
-          onSearch={handleSearch}
+    <Page
+      title={t("organizations")}
+      description={t("pages.organizations")}
+      actions={<CreateOrganization onSave={createOrganization} />}
+    >
+      <Panel
+        toolbar={
+          <SearchInput placeholder={t("search")} onSearch={handleSearch} />
+        }
+      >
+        <Table
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: organizations?.data?.total,
+          }}
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
+          }}
+          columns={columns}
+          data={organizations?.data?.data ?? []}
+          empty={organizations?.data?.data?.length === 0}
+          loading={organizations?.isLoading() ?? false}
+          meta={{
+            open,
+            setSelectedItem: setSelectedOrganization,
+          }}
         />
-        <CreateOrganization onSave={createOrganization} />
-      </Group>
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 60px)"
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: organizations?.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        columns={columns}
-        data={organizations?.data?.data ?? []}
-        empty={organizations?.data?.data?.length === 0}
-        loading={organizations?.isLoading() ?? false}
-        meta={{
-          open,
-          setSelectedItem: setSelectedOrganization,
-        }}
-      />
+      </Panel>
       <EditOrganization
         opened={opened}
         organization={selectedOrganization}
@@ -103,7 +98,7 @@ const OrganizationsPage = () => {
         }}
         onSave={updateOrganization}
       />
-    </Box>
+    </Page>
   );
 };
 

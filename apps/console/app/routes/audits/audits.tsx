@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Box, Group, Select, TextInput, Title } from "@mantine/core";
+import { Select, TextInput } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import useStore from "@/store";
-import { Table } from "@/components";
+import { Page, Panel, Table } from "@/components";
 import type { OutboxEvent, OutboxEventStatus } from "@/services/types";
 import { useTranslations } from "@/i18n";
 import { columns } from "./columns";
@@ -68,81 +68,72 @@ const AuditsPage = () => {
   };
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("audits")}</Title>
-      </Group>
-
-      <Group p="xs" gap="xs" wrap="wrap">
-        <TextInput
-          size="xs"
-          style={{ width: 260 }}
-          variant="filled"
-          placeholder={t("eventId")}
-          value={eventIdFilter}
-          onChange={(event) => {
-            setEventIdFilter(event.currentTarget.value);
-            setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+    <Page title={t("audits")} description={t("pages.audits")}>
+      <Panel
+        toolbar={
+          <>
+            <TextInput
+              style={{ width: 260 }}
+              placeholder={t("eventId")}
+              value={eventIdFilter}
+              onChange={(event) => {
+                setEventIdFilter(event.currentTarget.value);
+                setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+              }}
+            />
+            <TextInput
+              style={{ width: 260 }}
+              placeholder={t("operationId")}
+              value={operationIdFilter}
+              onChange={(event) => {
+                setOperationIdFilter(event.currentTarget.value);
+                setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+              }}
+            />
+            <Select
+              style={{ width: 140 }}
+              clearable
+              placeholder={t("status")}
+              data={statusOptions}
+              value={statusFilter || null}
+              onChange={(value) => {
+                setStatusFilter((value ?? "") as OutboxEventStatus | "");
+                setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+              }}
+            />
+          </>
+        }
+      >
+        <Table
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: outboxEvents?.data?.total,
           }}
-        />
-        <TextInput
-          size="xs"
-          style={{ width: 260 }}
-          variant="filled"
-          placeholder={t("operationId")}
-          value={operationIdFilter}
-          onChange={(event) => {
-            setOperationIdFilter(event.currentTarget.value);
-            setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
           }}
-        />
-        <Select
-          size="xs"
-          style={{ width: 140 }}
-          clearable
-          variant="filled"
-          placeholder={t("status")}
-          data={statusOptions}
-          value={statusFilter || null}
-          onChange={(value) => {
-            setStatusFilter((value ?? "") as OutboxEventStatus | "");
-            setPagination({ pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE });
+          meta={{
+            open,
+            setSelectedItem: (event: OutboxEvent | null) => {
+              setSelectedEvent(event);
+            },
           }}
+          columns={columns}
+          data={outboxEvents?.data?.data ?? []}
+          empty={outboxEvents?.data?.data?.length === 0}
+          loading={outboxEvents?.isLoading() ?? false}
         />
-      </Group>
-
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 100px)"
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: outboxEvents?.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        meta={{
-          open,
-          setSelectedItem: (event: OutboxEvent | null) => {
-            setSelectedEvent(event);
-          },
-        }}
-        columns={columns}
-        data={outboxEvents?.data?.data ?? []}
-        empty={outboxEvents?.data?.data?.length === 0}
-        loading={outboxEvents?.isLoading() ?? false}
-      />
+      </Panel>
 
       <OutboxEventDetail
         event={selectedEvent}
         opened={opened}
         onClose={handleCloseDetail}
       />
-    </Box>
+    </Page>
   );
 };
 

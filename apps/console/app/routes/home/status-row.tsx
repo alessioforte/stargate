@@ -1,4 +1,5 @@
-import { Badge, Group, Stack, Text } from "@mantine/core";
+import { Badge } from "@mantine/core";
+import classes from "./home.module.css";
 
 function StatusRow({
   color,
@@ -13,24 +14,15 @@ function StatusRow({
   status: string;
 }) {
   return (
-    <Group justify="space-between" wrap="nowrap">
-      <Stack gap={0}>
-        <Text size="sm" fw={500}>
-          {label}
-        </Text>
-        {detail && (
-          <Text size="xs" c="dimmed">
-            {detail}
-          </Text>
-        )}
-      </Stack>
-      <Badge
-        variant="light"
-        color={color ?? (status === "healthy" ? "teal" : "red")}
-      >
+    <div className={classes.row}>
+      <div className={classes.rowLabel}>
+        {label}
+        {detail && <div className={classes.rowDetail}>{detail}</div>}
+      </div>
+      <Badge color={color ?? (status === "healthy" ? "teal" : "red")}>
         {status}
       </Badge>
-    </Group>
+    </div>
   );
 }
 

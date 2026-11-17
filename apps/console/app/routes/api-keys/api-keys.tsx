@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Table, SearchInput } from "@/components";
+import { Page, Panel, Table, SearchInput } from "@/components";
 import { useTranslations } from "@/i18n";
 import type { ApiKey } from "@/services/types";
 import useStore from "@/store";
@@ -60,41 +59,37 @@ const APIKeysPage = () => {
   };
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("apiKeys")}</Title>
-        <SearchInput
-          radius="lg"
-          variant="unstyled"
-          style={{ flex: 1 }}
-          placeholder={t("search")}
-          onSearch={handleSearch}
+    <Page
+      title={t("apiKeys")}
+      description={t("pages.apiKeys")}
+      actions={<CreateApiKey onSave={createApiKey} />}
+    >
+      <Panel
+        toolbar={
+          <SearchInput placeholder={t("search")} onSearch={handleSearch} />
+        }
+      >
+        <Table
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: apiKeys?.data?.total,
+          }}
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
+          }}
+          columns={columns}
+          data={apiKeys?.data?.data ?? []}
+          empty={apiKeys?.data?.data?.length === 0}
+          loading={apiKeys?.isLoading() ?? false}
+          meta={{
+            open,
+            setSelectedItem: setSelectedApiKey,
+          }}
         />
-        <CreateApiKey onSave={createApiKey} />
-      </Group>
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 60px)"
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: apiKeys?.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        columns={columns}
-        data={apiKeys?.data?.data ?? []}
-        empty={apiKeys?.data?.data?.length === 0}
-        loading={apiKeys?.isLoading() ?? false}
-        meta={{
-          open,
-          setSelectedItem: setSelectedApiKey,
-        }}
-      />
+      </Panel>
       <EditApiKey
         opened={opened}
         apiKey={selectedApiKey}
@@ -106,7 +101,7 @@ const APIKeysPage = () => {
         onRevoke={revokeApiKey}
         onDelete={deleteApiKey}
       />
-    </Box>
+    </Page>
   );
 };
 

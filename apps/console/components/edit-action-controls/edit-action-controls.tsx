@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { ActionIcon, Button, Group } from "@mantine/core";
-import { FiEdit2 } from "react-icons/fi";
+import { LuPencil } from "react-icons/lu";
 import { useTranslations } from "@/i18n";
 
 type Props = Omit<ComponentProps<typeof Group>, "children"> & {
@@ -27,18 +27,23 @@ const EditActionControls: React.FC<Props> = ({
             type="button"
             size="compact-sm"
             onClick={onCancel}
-            color="gray"
+            variant="default"
           >
             {t("cancel")}
           </Button>
-          <Button type="submit" size="compact-sm" color="teal">
+          <Button type="submit" size="compact-sm">
             {t("save")}
           </Button>
         </>
       )}
       {!editing && (
-        <ActionIcon type="button" color="blue" variant="light" onClick={onEdit}>
-          <FiEdit2 />
+        <ActionIcon
+          type="button"
+          variant="light"
+          aria-label={t("edit")}
+          onClick={onEdit}
+        >
+          <LuPencil size={14} />
         </ActionIcon>
       )}
     </Group>

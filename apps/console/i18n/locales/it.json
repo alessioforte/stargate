@@ -235,7 +235,6 @@
   "accessExpiresAt": "Accesso in scadenza il",
   "gatewayRuntime": "Runtime gateway",
   "runtimeRevision": "Revisione runtime",
-  "auditDelivery": "Consegna audit",
   "deliveryMode": "Modalità di consegna",
   "pendingEvents": "Eventi in attesa",
   "oldestPending": "Più vecchio in attesa",
@@ -598,5 +597,46 @@
   "systemActor": "Sistema",
   "retry": "Riprova",
   "overwrite": "Sovrascrivi",
-  "loadLatestFailed": "Impossibile caricare la versione più recente."
+  "loadLatestFailed": "Impossibile caricare la versione più recente.",
+  "logout": "Esci",
+  "ingress": "Ammissione in ingresso",
+  "signInOptions": "Opzioni di accesso",
+  "shell": {
+    "navigation": "Navigazione",
+    "collapseSidebar": "Comprimi barra laterale",
+    "expandSidebar": "Espandi barra laterale",
+    "toggleColorScheme": "Cambia tema",
+    "statusHealthy": "Tutti i sistemi operativi",
+    "statusDegraded": "Prestazioni ridotte",
+    "statusUnhealthy": "Servizio non disponibile",
+    "statusUnknown": "Stato sconosciuto",
+    "statusConnecting": "Connessione…",
+    "groups": {
+      "identity": "Identità",
+      "credentials": "Credenziali",
+      "gateway": "Gateway",
+      "monitoring": "Monitoraggio"
+    },
+    "nav": {
+      "overview": "Panoramica",
+      "configuration": "Configurazione",
+      "accessControl": "Controllo accessi"
+    }
+  },
+  "table": {
+    "rowsPerPage": "Righe per pagina",
+    "range": "{{from}}–{{to}} di {{total}}"
+  },
+  "pages": {
+    "organizations": "Tenant che raggruppano utenti, service account e le relative policy.",
+    "users": "Persone che possono accedere, con le loro organizzazioni e attributi.",
+    "sessions": "Accessi attivi di utenti e client OAuth. Revocare una sessione la disconnette ovunque.",
+    "serviceAccounts": "Identità macchina che si autenticano con chiavi API.",
+    "apiKeys": "Chiavi che autenticano utenti e service account sul gateway.",
+    "adminKeys": "Chiavi con permessi specifici per l'API di amministrazione.",
+    "oauthClients": "Applicazioni che autenticano utenti o richiedono token tramite OAuth 2.0 e OpenID Connect.",
+    "gateway": "Router, servizi, upstream e limiti serviti dal gateway. Le modifiche salvate si applicano subito.",
+    "accessControl": "Regole valutate per ogni richiesta soggetta a controllo accessi. Valida la bozza prima di salvarla.",
+    "audits": "Eventi di audit registrati a ogni modifica e relativo stato di consegna."
+  }
 }

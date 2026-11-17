@@ -8,8 +8,8 @@ export default function ErrorPage() {
   const signIn = useStore((state) => state.signIn);
 
   return (
-    <Center mih="100vh">
-      <Stack w={380}>
+    <Center mih="100vh" p="md">
+      <Stack w={400} maw="100%">
         <Alert color="red" title="Authentication error">
           {message}
         </Alert>

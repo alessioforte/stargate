@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Table, SearchInput } from "@/components";
+import { Page, Panel, Table, SearchInput } from "@/components";
 import { useTranslations } from "@/i18n";
 import type { OAuthClient } from "@/services/types";
 import useStore from "@/store";
@@ -63,41 +62,37 @@ const OAuthClientsPage = () => {
   };
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("oauthClients")}</Title>
-        <SearchInput
-          radius="lg"
-          variant="unstyled"
-          style={{ flex: 1 }}
-          placeholder={t("search")}
-          onSearch={handleSearch}
+    <Page
+      title={t("oauthClients")}
+      description={t("pages.oauthClients")}
+      actions={<CreateOAuthClient onSave={createOAuthClient} />}
+    >
+      <Panel
+        toolbar={
+          <SearchInput placeholder={t("search")} onSearch={handleSearch} />
+        }
+      >
+        <Table
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: oauthClients?.data?.total,
+          }}
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
+          }}
+          columns={columns}
+          data={oauthClients?.data?.data ?? []}
+          empty={oauthClients?.data?.data?.length === 0}
+          loading={oauthClients?.isLoading() ?? false}
+          meta={{
+            open,
+            setSelectedItem: setSelectedOAuthClient,
+          }}
         />
-        <CreateOAuthClient onSave={createOAuthClient} />
-      </Group>
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 60px)"
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: oauthClients?.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        columns={columns}
-        data={oauthClients?.data?.data ?? []}
-        empty={oauthClients?.data?.data?.length === 0}
-        loading={oauthClients?.isLoading() ?? false}
-        meta={{
-          open,
-          setSelectedItem: setSelectedOAuthClient,
-        }}
-      />
+      </Panel>
       <EditOAuthClient
         opened={opened}
         oauthClient={selectedOAuthClient}
@@ -111,7 +106,7 @@ const OAuthClientsPage = () => {
         onDelete={deleteOAuthClient}
         onRotateSecret={rotateOAuthClientSecret}
       />
-    </Box>
+    </Page>
   );
 };
 

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  ActionIcon,
   Button,
   CopyButton,
   Divider,
@@ -8,11 +7,10 @@ import {
   Stack,
   Text,
   TextInput,
-  Tooltip,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
-import { FaPlus } from "react-icons/fa6";
+import { LuPlus } from "react-icons/lu";
 import { useTranslations } from "@/i18n";
 import type {
   CreateOAuthClientRequest,
@@ -60,16 +58,15 @@ const CreateOAuthClient: React.FC<Props> = ({ onSave }) => {
 
   return (
     <>
-      <Tooltip label={t("newOAuthClient")} position="left" offset={10}>
-        <ActionIcon
-          onClick={() => {
-            setCreatedOAuthClient(null);
-            open();
-          }}
-        >
-          <FaPlus />
-        </ActionIcon>
-      </Tooltip>
+      <Button
+        leftSection={<LuPlus size={16} />}
+        onClick={() => {
+          setCreatedOAuthClient(null);
+          open();
+        }}
+      >
+        {t("newOAuthClient")}
+      </Button>
 
       <EntityDrawer
         opened={opened}
@@ -78,7 +75,7 @@ const CreateOAuthClient: React.FC<Props> = ({ onSave }) => {
       >
         <form onSubmit={form.onSubmit(handleSubmit)}>
           <Group mt="sm" px="sm" justify="flex-end" h={28}>
-            <Button type="submit" size="compact-sm" color="teal">
+            <Button type="submit" size="compact-sm">
               {t("save")}
             </Button>
           </Group>

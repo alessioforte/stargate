@@ -1,0 +1,133 @@
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  background-color: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: var(--mantine-radius-lg);
+  color: inherit;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+a.stat:hover {
+  border-color: light-dark(
+    var(--mantine-color-brand-3),
+    var(--mantine-color-brand-7)
+  );
+  box-shadow: 0 1px 6px light-dark(rgba(15, 85, 196, 0.08), transparent);
+}
+
+.statHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-muted);
+}
+
+.statValue {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.statDetail {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 13px;
+
+  & + & {
+    border-top: 1px solid var(--app-border);
+  }
+}
+
+.rowLabel {
+  min-width: 0;
+  font-weight: 500;
+}
+
+.rowDetail {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--app-text-muted);
+}
+
+.rowValue {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: right;
+  color: var(--app-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+
+  @media (max-width: $mantine-breakpoint-xs) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.metric {
+  padding: 16px 18px;
+
+  & + & {
+    border-left: 1px solid var(--app-border);
+  }
+}
+
+.footnote {
+  padding: 10px 16px;
+  border-top: 1px solid var(--app-border);
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+
+  @media (max-width: $mantine-breakpoint-lg) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.columns[data-wide] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+
+  @media (max-width: $mantine-breakpoint-lg) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

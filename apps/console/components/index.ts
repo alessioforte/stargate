@@ -1,6 +1,9 @@
 export { default as ColorSchemeToggle } from "./colorscheme-toggle/colorscheme-toggle";
 export { default as LanguageSelect } from "./language-select/language-select";
 export { default as Shell } from "./shell/shell";
+export type { NavigationGroup } from "./shell/navigation";
+export { default as Page } from "./page/page";
+export { default as Panel } from "./page/panel";
 export { default as Table } from "./table/table";
 export { createDetailsColumn } from "./table/details-column";
 export { default as Icon } from "./icon/icon";

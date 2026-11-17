@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import useStore from "@/store";
-import { Table, SearchInput } from "@/components";
+import { Page, Panel, Table, SearchInput } from "@/components";
 import type { AdminKey } from "@/services/types";
 import { useTranslations } from "@/i18n";
 import CreateAdminKey from "./create-admin-key";
@@ -61,41 +60,37 @@ const AdminKeysPage = () => {
   };
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("adminKeys")}</Title>
-        <SearchInput
-          radius="lg"
-          variant="unstyled"
-          style={{ flex: 1 }}
-          placeholder={t("search")}
-          onSearch={handleSearch}
+    <Page
+      title={t("adminKeys")}
+      description={t("pages.adminKeys")}
+      actions={<CreateAdminKey onSave={createAdminKey} />}
+    >
+      <Panel
+        toolbar={
+          <SearchInput placeholder={t("search")} onSearch={handleSearch} />
+        }
+      >
+        <Table
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: adminKeys?.data?.total,
+          }}
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
+          }}
+          columns={columns}
+          data={adminKeys?.data?.data ?? []}
+          empty={adminKeys?.data?.data?.length === 0}
+          loading={adminKeys?.isLoading() ?? false}
+          meta={{
+            open,
+            setSelectedItem: setSelectedAdminKey,
+          }}
         />
-        <CreateAdminKey onSave={createAdminKey} />
-      </Group>
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 60px)"
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: adminKeys?.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        columns={columns}
-        data={adminKeys?.data?.data ?? []}
-        empty={adminKeys?.data?.data?.length === 0}
-        loading={adminKeys?.isLoading() ?? false}
-        meta={{
-          open,
-          setSelectedItem: setSelectedAdminKey,
-        }}
-      />
+      </Panel>
       <EditAdminKey
         opened={opened}
         adminKey={selectedAdminKey}
@@ -106,7 +101,7 @@ const AdminKeysPage = () => {
         onSave={updateAdminKeyPermissions}
         onRevoke={revokeAdminKey}
       />
-    </Box>
+    </Page>
   );
 };
 

@@ -1,6 +1,12 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Button, Drawer, Flex, Group, ScrollArea, Title } from "@mantine/core";
-import { IoCloseSharp } from "react-icons/io5";
+import {
+  CloseButton,
+  Drawer,
+  Flex,
+  Group,
+  ScrollArea,
+  Title,
+} from "@mantine/core";
 
 interface Props {
   children: ReactNode;
@@ -29,18 +35,18 @@ const EntityDrawer: React.FC<Props> = ({
       <Drawer.Overlay />
       <Drawer.Content>
         <Flex direction="column" style={{ height: "100vh" }}>
-          <Group p="xs" justify="space-between">
+          <Group
+            px="md"
+            h={56}
+            justify="space-between"
+            wrap="nowrap"
+            style={{
+              flex: "0 0 auto",
+              borderBottom: "1px solid var(--app-border)",
+            }}
+          >
             <Title order={4}>{title}</Title>
-            <Group gap="xs">
-              <Button
-                type="button"
-                size="compact-sm"
-                onClick={onClose}
-                variant="transparent"
-              >
-                <IoCloseSharp />
-              </Button>
-            </Group>
+            <CloseButton onClick={onClose} />
           </Group>
 
           <ScrollArea style={{ flex: 1, overflowY: "auto" }}>

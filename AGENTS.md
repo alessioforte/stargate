@@ -1260,8 +1260,13 @@ createOrganization: async (organization) => {
 
 #### 4. `components/`: agnostic, reusable UI
 
-- Barrel `components/index.ts` (`Table`, `EntityDrawer`, `Shell`, `CodeBox`, `Icon`,
-  `JsonAttributesForm`, `showNotification`, `useConfirmModal`, ...).
+- Barrel `components/index.ts` (`Shell`, `Page`, `Panel`, `Table`, `EntityDrawer`,
+  `CodeBox`, `JsonAttributesForm`, `showNotification`, `useConfirmModal`, ...).
+- Console pages are a `Page` (title, description, badges, actions) holding `Panel`
+  surfaces (optional title, toolbar, actions); tables and editors go inside a panel.
+  The look comes from `app/theme.ts` (Mantine theme) and the `--app-*` variables in
+  `app/globals.css`; the sidebar groups and their labels are declared in
+  `app/routes/layout.tsx`.
 - Props/children only; no store, services, or domain-type imports. A component
   that needs `@/store` or `@/services` belongs in `app/routes/`.
 

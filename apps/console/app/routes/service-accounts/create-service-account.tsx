@@ -1,5 +1,4 @@
 import {
-  ActionIcon,
   Button,
   Flex,
   Group,
@@ -7,11 +6,10 @@ import {
   Stack,
   Textarea,
   TextInput,
-  Tooltip,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
-import { FaPlus } from "react-icons/fa6";
+import { LuPlus } from "react-icons/lu";
 import { useTranslations } from "@/i18n";
 import type {
   CreateServiceAccountRequest,
@@ -67,11 +65,9 @@ const CreateServiceAccount: React.FC<Props> = ({ organizations, onSave }) => {
 
   return (
     <>
-      <Tooltip label={t("newServiceAccount")} position="left" offset={10}>
-        <ActionIcon onClick={open}>
-          <FaPlus />
-        </ActionIcon>
-      </Tooltip>
+      <Button leftSection={<LuPlus size={16} />} onClick={open}>
+        {t("newServiceAccount")}
+      </Button>
 
       <EntityDrawer
         opened={opened}
@@ -85,7 +81,7 @@ const CreateServiceAccount: React.FC<Props> = ({ organizations, onSave }) => {
             style={{ height: "100%" }}
           >
             <Group mt="sm" px="sm" justify="flex-end" h={28}>
-              <Button type="submit" size="compact-sm" color="teal">
+              <Button type="submit" size="compact-sm">
                 {t("save")}
               </Button>
             </Group>
