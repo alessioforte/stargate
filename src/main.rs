@@ -17,7 +17,7 @@ use crate::{
     iam::auth::jwt,
     obs::logging,
     srv::{banner, profile, shutdown, tls},
-    web::{cors, headers},
+    web::headers,
 };
 
 use axum::Extension;
@@ -25,7 +25,6 @@ use axum::middleware::from_fn;
 use dotenvy::dotenv;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_http::{compression::CompressionLayer, normalize_path::NormalizePathLayer};
 use tracing::info;
 
 // =^.^=
@@ -126,10 +125,7 @@ pub async fn run() -> std::io::Result<()> {
     let app = api::server_router(lifecycle.clone(), conf::iam_hosts().clone())
         .layer(Extension(Arc::clone(&gate)))
         .layer(from_fn(headers::security_headers_middleware))
-        .layer(from_fn(logging::trace_middleware))
-        .layer(cors::hyper_configure())
-        .layer(CompressionLayer::new())
-        .layer(NormalizePathLayer::trim_trailing_slash());
+        .layer(from_fn(logging::trace_middleware));
 
     let signal = shutdown::shutdown_signal()?;
 

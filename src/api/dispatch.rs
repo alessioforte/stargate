@@ -6,7 +6,7 @@ use std::{
 };
 use tower::Service;
 
-/// Selects the IAM router before path matching; both routers are always ready.
+/// Selects the IAM planes before path matching; every router is always ready.
 #[derive(Clone)]
 pub(super) struct HostDispatch {
     hosts: IamHosts,
@@ -15,11 +15,11 @@ pub(super) struct HostDispatch {
 }
 
 impl HostDispatch {
-    pub(super) fn new(hosts: IamHosts, iam: Router) -> Self {
+    pub(super) fn new(hosts: IamHosts, iam: Router, gateway: Router) -> Self {
         Self {
             hosts,
             iam,
-            gateway: Router::new().fallback_service(tower::service_fn(crate::gate::service)),
+            gateway,
         }
     }
 }

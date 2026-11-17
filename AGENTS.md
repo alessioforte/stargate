@@ -1080,12 +1080,19 @@ Entries are validated once at startup, compared in lowercase without the request
 port, and must include the host of `conf::public_base_url()` (`OAUTH_BASE_URL`, else
 the issuer). Schemes, ports, paths, and wildcards in entries stop startup.
 
-`api::server_router` mounts probes on every host, including pod IPs and hostless
-requests. Its `dispatch::HostDispatch` sends allowed hosts through the IAM router
-and its ingress limit, with the gateway as fallback. Other hosts and hostless
-requests go directly to the gateway when `IAM_HOSTS` is configured, where the
-gateway ingress limit still applies. `main.rs` adds security headers, tracing,
-CORS, compression, and normalize-path to all requests.
+`api::server_router` composes one router per plane (`api::plane::Plane`):
+management (`/livez`, `/readyz`), identity (well-known metadata, OIDC, accounts,
+sign-up, social sign-in, the hosted auth app, docs, i18n, the internal-context
+JWKS), admin (`/admin/*` and the Console), and the gateway. It mounts probes on
+every host, including pod IPs and hostless requests. Its `dispatch::HostDispatch`
+sends allowed hosts through the identity and admin planes and their shared
+ingress limit, with the gateway as fallback. Other hosts and hostless requests go
+directly to the gateway when `IAM_HOSTS` is configured, where the gateway ingress
+limit still applies. Path normalization, CORS, and compression belong to the
+planes Stargate answers itself: a trailing slash is trimmed before those routes
+match and the gateway plane restores the client's URI, so an upstream receives
+the path the client sent and owns its own preflights and content encoding.
+`main.rs` adds security headers and tracing to every request.
 
 IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's
 ingress allowance, the same `ingress:ip:{ip}` bucket as the gateway, before
