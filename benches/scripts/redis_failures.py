@@ -458,6 +458,7 @@ class Load:
         sample = {
             "name": name,
             "at": started,
+            "done": time.monotonic(),
             "status": status,
             "allowance": "x-ratelimit-limit" in headers,
             "code": body.get("code") if isinstance(body, dict) else None,
@@ -550,7 +551,14 @@ def windows(
     before_end=None,
 ):
     before = between(samples, baseline_start, (before_end or fault_start) - start_guard)
-    during = between(samples, fault_start + start_guard, fault_end - end_guard)
+    # A request belongs to the disturbed window only when it both started and
+    # finished inside it: a store call that outlives the fault can succeed.
+    during = [
+        sample
+        for sample in samples
+        if sample["at"] >= fault_start + start_guard
+        and sample["done"] <= fault_end - end_guard
+    ]
     after = between(samples, recovered + start_guard, time.monotonic())
     return before, during, after
 
@@ -604,7 +612,7 @@ def scenario_restart(ctx):
     )
     require(request(server.url("/readyz"))[0] == 200, "readiness followed Redis")
 
-    time.sleep(0.3)
+    time.sleep(1)
     docker("start", redis)
     fault_end = time.monotonic()
     wait_redis(redis)
@@ -667,7 +675,7 @@ def scenario_empty(ctx):
     status, _, _, _ = request(server.url("/account/profile"), token=token)
     require(status != 200, f"profile succeeded while the store was down: {status}")
 
-    time.sleep(0.3)
+    time.sleep(1)
     docker("start", redis)
     fault_end = time.monotonic()
     wait_redis(redis)
@@ -786,10 +794,10 @@ def scenario_partition(ctx):
             relay.kill()
             relay.wait()
 
-    # Only requests started early enough that their store timeout expires before
-    # the partition ends belong to the disturbed window.
+    # Only requests that finished before the partition was lifted belong to the
+    # disturbed window; their store timeout expired while the fault was active.
     before, during, after = windows(
-        load.snapshot(), baseline_start, fault_start, fault_end, recovered, 0.3, 5.5
+        load.snapshot(), baseline_start, fault_start, fault_end, recovered, 0.3, 0.3
     )
     for window, label in ((before, "before"), (during, "during"), (after, "after")):
         require_samples(window, label)
@@ -871,7 +879,7 @@ def scenario_memory_full(ctx):
     )
     require(request(server.url("/readyz"))[0] == 200, "readiness followed Redis")
 
-    time.sleep(0.5)
+    time.sleep(1)
     fault_end = time.monotonic()
     keys = redis_command(redis, "--scan", "--pattern", "filler:*").stdout.split()
     if keys:
@@ -897,7 +905,11 @@ def scenario_memory_full(ctx):
     # The fault begins when Redis starts rejecting writes, after the fill.
     samples = load.snapshot()
     before = between(samples, baseline_start, fill_start - 0.3)
-    during = between(samples, fault_start + 0.2, fault_end - 0.3)
+    during = [
+        sample
+        for sample in samples
+        if sample["at"] >= fault_start + 0.2 and sample["done"] <= fault_end - 0.3
+    ]
     after = between(samples, recovered + 0.3, time.monotonic())
     for window, label in ((before, "before"), (during, "during"), (after, "after")):
         require_samples(window, label)
