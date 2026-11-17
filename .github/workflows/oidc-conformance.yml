@@ -8,6 +8,10 @@ on:
   push:
     branches: [main]
     paths:
+      - "src/main.rs"
+      - "src/api/mod.rs"
+      - "src/api/plane.rs"
+      - "src/api/dispatch.rs"
       - "crates/jwt/**"
       - "crates/oidc/**"
       - "src/api/oidc/**"
@@ -29,6 +33,10 @@ on:
       - ".github/workflows/oidc-conformance.yml"
   pull_request:
     paths:
+      - "src/main.rs"
+      - "src/api/mod.rs"
+      - "src/api/plane.rs"
+      - "src/api/dispatch.rs"
       - "crates/jwt/**"
       - "crates/oidc/**"
       - "src/api/oidc/**"
