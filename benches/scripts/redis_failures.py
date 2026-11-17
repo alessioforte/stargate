@@ -359,7 +359,6 @@ def start_server(ctx, name, redis_url, bootstrap=True):
         SERVER_DRAIN_DELAY_SECS="0",
     )
     require(BINARY.exists(), f"{BINARY} is missing; run cargo build --features cluster")
-    require(BINARY.exists(), f"{BINARY} is missing; run cargo build --features cluster")
     if bootstrap:
         result = run(
             [
