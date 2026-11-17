@@ -114,7 +114,7 @@ while True:
 ENDPOINTS = {
     "public": ("/bench/public", 3),
     "deny": ("/bench/deny", 3),
-    "profile": ("/account/profile", 8),
+    "profile": ("/account/profile", 20),
 }
 
 
@@ -495,7 +495,7 @@ def unavailable_sample(sample):
         "deny": lambda s: (
             s["status"] == 503 and s["code"] == "gateway.limiter_unavailable"
         ),
-        "profile": lambda s: s["status"] != 200,
+        "profile": lambda s: s["status"] is not None and s["status"] >= 500,
     }[sample["name"]](sample)
 
 
@@ -518,7 +518,7 @@ def settled(server, token):
         if status != 200 or "x-ratelimit-limit" not in headers:
             return False
         status, _, _, _ = request(
-            server.url("/account/profile"), token=token, timeout=8
+            server.url("/account/profile"), token=token, timeout=20
         )
         if status != 200:
             return False
@@ -602,8 +602,11 @@ def scenario_restart(ctx):
         status == 503 and body["code"] == "gateway.limiter_unavailable",
         f"deny route during stop: {status} {body}",
     )
-    status, _, _, _ = request(server.url("/account/profile"), token=token)
-    require(status != 200, f"profile succeeded while the store was down: {status}")
+    status, _, _, _ = request(server.url("/account/profile"), token=token, timeout=20)
+    require(
+        status is not None and status >= 500,
+        f"profile did not fail closed while the store was down: {status}",
+    )
     health = server.health()
     require(health["redis"]["status"] == "unhealthy", "health missed the Redis outage")
     require(
@@ -671,8 +674,11 @@ def scenario_empty(ctx):
     require(not redis_ready(redis), "Redis still answers after stop")
     # The outage starts once the graceful stop has completed.
     fault_start = time.monotonic()
-    status, _, _, _ = request(server.url("/account/profile"), token=token)
-    require(status != 200, f"profile succeeded while the store was down: {status}")
+    status, _, _, _ = request(server.url("/account/profile"), token=token, timeout=20)
+    require(
+        status is not None and status >= 500,
+        f"profile did not fail closed while the store was down: {status}",
+    )
 
     time.sleep(1)
     docker("start", redis)
@@ -774,8 +780,11 @@ def scenario_partition(ctx):
         )
         require(request(server.url("/readyz"))[0] == 200, "readiness followed Redis")
         # A store read waits for the 5s response timeout, then fails closed.
-        status, _, _, _ = request(server.url("/account/profile"), token=token)
-        require(status != 200, f"profile succeeded during the partition: {status}")
+        status, _, _, _ = request(server.url("/account/profile"), token=token, timeout=20)
+        require(
+            status is not None and status >= 500,
+            f"profile did not fail closed during the partition: {status}",
+        )
 
         fault_end = time.monotonic()
         os.kill(relay.pid, signal.SIGCONT)
@@ -868,7 +877,7 @@ def scenario_memory_full(ctx):
         status >= 500,
         f"sign-in reported success while session writes were rejected: {status}",
     )
-    status, _, _, _ = request(server.url("/account/profile"), token=token)
+    status, _, _, _ = request(server.url("/account/profile"), token=token, timeout=20)
     require(status == 200, f"store reads stopped working at maxmemory: {status}")
     health = server.health()
     require(health["redis"]["status"] == "healthy", "PING failed at maxmemory")
