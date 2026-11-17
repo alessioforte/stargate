@@ -239,7 +239,7 @@ impl ConnectionLike for RedisConnection {
         offset: usize,
         count: usize,
     ) -> redis::RedisFuture<'a, Vec<redis::Value>> {
-        crate::observe::commands_issued(count);
+        crate::observe::command_issued();
         self.0.req_packed_commands(pipeline, offset, count)
     }
 

@@ -196,10 +196,11 @@ pipeline stage that issued the commands: the credential the request carried
 traffic check (`rate_limit` for admission and rate-limit policies, `quota`). A
 request reports only the paths it exercised, so an authenticated request with a
 quota policy observes `session`, `rate_limit` and `quota`. `anonymous` is a real
-observation of zero: unauthenticated credentials cost no store command. Only
-round trips are counted, not the commands a Lua script issues internally, so the
-histogram matches the store latency a request waits for. In-memory store
-deployments report zeros.
+observation of zero: unauthenticated credentials cost no store command. Every
+request sent to Redis counts once — a single command, one script call, or a whole
+pipeline — while the commands a Lua script issues internally are not separate
+requests: the histogram matches the store latency a request waits for. In-memory
+store deployments report zeros.
 
 Duration histogram boundaries are explicit, in seconds:
 

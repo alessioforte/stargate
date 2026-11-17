@@ -1,9 +1,10 @@
 //! Per-task accounting of commands issued to the state store.
 //!
 //! A caller wraps the part of a request it wants to attribute in
-//! [`count_commands`]; backends report each command they send with
-//! [`command_issued`] or [`commands_issued`]. Reports outside a counting scope
-//! are ignored, so an unwatched request pays one thread-local read per command.
+//! [`count_commands`]; backends report every request they send to the store with
+//! [`command_issued`], whether it is one command, a script call or a whole
+//! pipeline. Reports outside a counting scope are ignored, so an unwatched
+//! request pays one thread-local read per command.
 //! Scopes nest: an outer counter also sees the commands of an inner one, which
 //! reports only its own share.
 
@@ -42,11 +43,6 @@ pub fn command_issued() {
     add(1);
 }
 
-/// Records `count` commands issued by the current task in one pipeline.
-pub fn commands_issued(count: usize) {
-    add(u32::try_from(count).unwrap_or(u32::MAX));
-}
-
 fn add(count: u32) {
     let _ = ISSUED.try_with(|counter| counter.fetch_add(count, Ordering::Relaxed));
 }
@@ -56,11 +52,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn counts_only_commands_issued_inside_the_scope() {
+    async fn counts_only_commands_sent_inside_the_scope() {
         command_issued();
         let (result, commands) = count_commands(async {
             command_issued();
-            commands_issued(3);
+            command_issued();
+            command_issued();
+            command_issued();
             tokio::task::yield_now().await;
             command_issued();
             "done"
@@ -76,7 +74,8 @@ mod tests {
         let (outer, outer_commands) = count_commands(async {
             command_issued();
             let (inner, inner_commands) = count_commands(async {
-                commands_issued(2);
+                command_issued();
+                command_issued();
             })
             .await;
             assert_eq!((inner, inner_commands), ((), 2));

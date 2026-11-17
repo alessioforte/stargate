@@ -1304,7 +1304,8 @@ a new reusable primitive.
   attribute gateway store work to the pipeline path that issued it
   (`stargate.path=anonymous`, `api_key`, `session`, `oauth`, `rate_limit`,
   `quota`). Counting lives in `crates/store` (`observe`, one task-local scope per
-  stage) and covers round trips, not the commands a Lua script issues internally.
+  stage): each request sent to Redis counts once (a command, a script call or a
+  whole pipeline), not the commands a Lua script issues internally.
 - Gateway performance workloads are opt-in (`src/gate/performance/`,
   `src/gate/tests/paths.rs`, `benches/scripts/`).
 
