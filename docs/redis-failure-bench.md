@@ -71,15 +71,16 @@ is zero for a passing run.
 
 | Scenario            | Requests | Unexpected | Disturbance (s) | Recovery (s) | Final state             |
 | ------------------- | -------- | ---------- | --------------- | ------------ | ----------------------- |
-| `restart`           | 174      | 0          | 7.95            | 1.60         | healthy                 |
-| `empty`             | 167      | 0          | 5.44            | 4.01         | signed-out then healthy |
-| `partition`         | 148      | 0          | 8.55            | 0.06         | healthy                 |
-| `memory-full`       | 315      | 0          | 0.91            | 0.87         | healthy                 |
-| `absent-at-startup` | 0        | 0          | 9.54            | —            | failed at startup       |
+| `restart`           | 165      | 0          | 8.65            | 0.73         | healthy                 |
+| `empty`             | 172      | 0          | 6.11            | 3.31         | signed-out then healthy |
+| `partition`         | 159      | 0          | 8.54            | 0.07         | healthy                 |
+| `memory-full`       | 214      | 0          | 1.04            | 0.20         | healthy                 |
+| `absent-at-startup` | 0        | 0          | 9.49            | —            | failed at startup       |
 
 The `restart` and `empty` disturbances include the deliberate
 `/account/profile` probe, which waits for the store's 5s response timeout
-before failing closed; without it the outage itself is under a second. The
+before failing closed, and a one-second hold under load so the sampled windows
+stay meaningful; without them the outage itself is under a second. The
 `partition` disturbance is intentionally longer than that timeout so the same
 probe has time to fail; shorter blackholes only exercise the 250ms ingress and
 policy deadlines. The `absent-at-startup` duration is the connection retry
