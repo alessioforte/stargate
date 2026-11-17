@@ -5,6 +5,7 @@ pub(in crate::gate) mod org_limits;
 use self::limits::{OrgScopedLimit, SelectedLimit, SelectedLimitPolicies, apply_limits};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::RuntimeSnapshot;
+use crate::gate::usage::StoreUsage;
 use crate::{
     ctx::build_env_from,
     iam::{
@@ -21,6 +22,7 @@ use gate::{
     graph::{PolicyNode, RouterNode},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_policies(
     router: &RouterNode,
     runtime: &RuntimeSnapshot,
@@ -29,6 +31,7 @@ pub async fn apply_policies(
     identity: &VerifiedIdentity,
     client_ip: &str,
     response_headers: &mut HeaderMap,
+    usage: &mut StoreUsage,
 ) -> Result<(), ErrorResponse> {
     let subject = identity.subject();
     let mut selected_limits = SelectedLimitPolicies {
@@ -149,6 +152,7 @@ pub async fn apply_policies(
         client_ip,
         response_headers,
         selected_limits,
+        usage,
     )
     .await
 }

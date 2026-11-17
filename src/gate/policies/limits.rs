@@ -1,6 +1,7 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::RuntimeSnapshot;
 use crate::gate::policies::org_limits::OrgLimitOverrides;
+use crate::gate::usage::StoreUsage;
 use crate::{
     gate::limits::{LimitPoint, TrafficLimit, attribute_name, check_traffic_limit, validate_limit},
     web::limits::{insert_limit_headers, limited_response},
@@ -86,6 +87,7 @@ pub async fn apply_limits(
     client_ip: &str,
     headers: &mut HeaderMap,
     policies: SelectedLimitPolicies,
+    usage: &mut StoreUsage,
 ) -> Result<(), ErrorResponse> {
     let org_id = subject.and_then(|subject| subject.org_id.as_deref());
 
@@ -105,6 +107,7 @@ pub async fn apply_limits(
         headers,
         policies,
         &org_overrides,
+        usage,
     )
     .await
 }
@@ -160,6 +163,7 @@ async fn apply_selected_limits(
     headers: &mut HeaderMap,
     policies: SelectedLimitPolicies,
     overrides: &OrgLimitOverrides,
+    usage: &mut StoreUsage,
 ) -> Result<(), ErrorResponse> {
     let selected = select_limits(
         subject,
@@ -225,7 +229,7 @@ async fn apply_selected_limits(
     let mut quota_checks = Vec::with_capacity(2);
     for check in checks {
         let cost = (check.kind == LimitKind::Quota).then_some(policies.quota_cost);
-        let Some(decision) = run_check(runtime, &check, cost).await? else {
+        let Some(decision) = run_check(runtime, &check, cost, usage).await? else {
             continue;
         };
         match check.kind {
@@ -266,12 +270,13 @@ async fn run_check(
     runtime: &RuntimeSnapshot,
     check: &LimitCheck,
     cost: Option<u64>,
+    usage: &mut StoreUsage,
 ) -> Result<Option<RateLimitDecision>, ErrorResponse> {
     let point = match check.kind {
         LimitKind::Rate => LimitPoint::RateLimit,
         LimitKind::Quota => LimitPoint::Quota,
     };
-    check_traffic_limit(
+    let (decision, commands) = store::observe::count_commands(check_traffic_limit(
         runtime,
         point,
         check.on_store_error,
@@ -281,8 +286,10 @@ async fn run_check(
             scope: check.scope,
             cost,
         },
-    )
-    .await
+    ))
+    .await;
+    usage.record_limit(check.kind, commands);
+    decision
 }
 
 fn push_rate_check(

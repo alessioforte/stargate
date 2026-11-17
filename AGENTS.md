@@ -1289,7 +1289,7 @@ a new reusable primitive.
 - OTLP resources identify each replica with `service.instance.id`, preserving
   explicit resource attributes and defaulting to a stable ULID per process.
 - Application-owned metric attributes use the `stargate.` namespace (`point`,
-  `outcome`, `router`, `service`, `kind`, `phase`). RPC status uses stable
+  `outcome`, `router`, `service`, `kind`, `phase`, `path`). RPC status uses stable
   `rpc.status_code` with canonical gRPC status names. Resource attributes use
   `stargate.profile`, `stargate.database_backend` and `stargate.state_backend`.
 - Telemetry follows OpenTelemetry HTTP semantic conventions: server operations
@@ -1300,8 +1300,13 @@ a new reusable primitive.
 - SQL pool gauges sample the initialized pool; upstream gauges read the current
   snapshot and never advance circuit state. Metric attributes are bounded;
   URLs and request identities stay out of metric dimensions.
+- `stargate.store.redis.commands` and `stargate.store.redis.commands_per_request`
+  attribute gateway store work to the pipeline path that issued it
+  (`stargate.path=anonymous`, `api_key`, `session`, `oauth`, `rate_limit`,
+  `quota`). Counting lives in `crates/store` (`observe`, one task-local scope per
+  stage) and covers round trips, not the commands a Lua script issues internally.
 - Gateway performance workloads are opt-in (`src/gate/performance/`,
-  `benches/scripts/`).
+  `src/gate/tests/paths.rs`, `benches/scripts/`).
 
 Cluster workload measurements and connection/memory calculations are in
 `docs/sizing.md`; the external driver is `benches/scripts/benchmark_cluster.mjs`.

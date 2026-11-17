@@ -1,4 +1,5 @@
 use super::*;
+use crate::gate::usage::StoreUsage;
 use crate::{
     gate::{prepare_config, test_support},
     iam::auth::subject::SubjectType,
@@ -102,6 +103,7 @@ async fn invalid_subject_and_org_names_and_strategies_fail_before_any_resource_b
             &mut headers,
             org_policies(OnMissingOrg::Deny),
             &overrides,
+            &mut StoreUsage::default(),
         )
         .await
         .unwrap_err();
@@ -138,6 +140,7 @@ async fn route_precedence_ignores_unselected_subject_overrides_and_known_limits_
             subject_quota: Some("daily".into()),
             ..Default::default()
         },
+        &mut StoreUsage::default(),
     )
     .await
     .unwrap();
@@ -190,6 +193,7 @@ async fn absent_quotas_and_explicit_org_skip_do_not_select_or_consume_a_bucket()
         &mut headers,
         org_policies(OnMissingOrg::Skip),
         &overrides,
+        &mut StoreUsage::default(),
     )
     .await
     .unwrap();
@@ -228,6 +232,7 @@ async fn org_ip_fallback_uses_the_policy_names_and_original_namespaces() {
         &mut headers,
         org_policies(OnMissingOrg::IpFallback),
         &overrides,
+        &mut StoreUsage::default(),
     )
     .await
     .unwrap();
@@ -275,6 +280,7 @@ async fn malformed_selected_attributes_are_errors_and_diagnostics_are_bounded() 
                 IP,
                 &mut HeaderMap::new(),
                 SelectedLimitPolicies::default(),
+                &mut StoreUsage::default(),
             )
             .await
             .unwrap_err();
@@ -300,6 +306,7 @@ async fn malformed_selected_attributes_are_errors_and_diagnostics_are_bounded() 
         IP,
         &mut HeaderMap::new(),
         SelectedLimitPolicies::default(),
+        &mut StoreUsage::default(),
     )
     .await
     .unwrap_err();
@@ -384,6 +391,7 @@ async fn organization_sql_failure_remains_closed_with_allow_and_has_its_own_avai
             IP,
             &mut headers,
             org_policies(OnMissingOrg::Deny),
+            &mut StoreUsage::default(),
         )
         .await
         .unwrap_err();

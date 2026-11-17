@@ -178,6 +178,7 @@ fn resource() -> Resource {
         .build()
 }
 
+pub(crate) use metrics::StorePath;
 #[cfg(all(feature = "postgres", feature = "redis"))]
 pub use metrics::record_audit_relay_batch;
 pub use metrics::{
@@ -187,6 +188,7 @@ pub use metrics::{
     record_gateway_response_disposal, record_gateway_timeout, record_gateway_transfer,
     record_gateway_upstream_attempt, record_http_server_request, record_internal_context_issue,
     record_internal_context_queue, record_limit_store_error, record_propagation_draft,
+    record_store_commands,
 };
 #[cfg(test)]
 pub use propagation::trace_id_from_headers;
