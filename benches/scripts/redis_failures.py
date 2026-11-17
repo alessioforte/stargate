@@ -550,20 +550,40 @@ def windows(
     before_end=None,
 ):
     before = between(samples, baseline_start, (before_end or fault_start) - start_guard)
-    # A request belongs to the disturbed window only when it both started and
-    # finished inside it: a store call that outlives the fault can succeed.
-    during = [
-        sample
-        for sample in samples
-        if sample["at"] >= fault_start + start_guard
-        and sample["done"] <= fault_end - end_guard
-    ]
+    disturbed = between(samples, fault_start + start_guard, fault_end - end_guard)
+    # Assertions require a request that both started and finished inside the
+    # fault: a store call that outlives it can still succeed.
+    during = [sample for sample in disturbed if sample["done"] <= fault_end - end_guard]
     after = between(samples, recovered + start_guard, time.monotonic())
-    return before, during, after
+    return before, during, disturbed, after
+
+
+def count_errors(samples):
+    """Failed responses observed while the fault was active.
+
+    `unexpected` checks the phase expectation and stops the run, so it is always
+    zero in a passing report. This counts the responses that failed during the
+    disturbance: no status (client timeout) or `>= 400`.
+    """
+    errors = {"total": 0, "public": 0, "deny": 0, "profile": 0}
+    for sample in samples:
+        if sample["status"] is None or sample["status"] >= 400:
+            errors["total"] += 1
+            errors[sample["name"]] += 1
+    return errors
 
 
 def finish(
-    name, load, before, during, after, during_predicate, disturbance, recovery, final
+    name,
+    load,
+    before,
+    during,
+    disturbed,
+    after,
+    during_predicate,
+    disturbance,
+    recovery,
+    final,
 ):
     unexpected = (
         expect(before, healthy_sample, f"{name} before")
@@ -574,6 +594,7 @@ def finish(
         "name": name,
         "requests": len(load.snapshot()),
         "unexpected": unexpected,
+        "errors": count_errors(disturbed),
         "disturbance_seconds": round(disturbance, 2),
         "recovery_seconds": round(recovery, 2),
         "final": final,
@@ -629,7 +650,7 @@ def scenario_restart(ctx):
     load.stop()
     server.stop()
 
-    before, during, after = windows(
+    before, during, disturbed, after = windows(
         load.snapshot(),
         baseline_start,
         fault_start,
@@ -646,6 +667,7 @@ def scenario_restart(ctx):
         load,
         before,
         during,
+        disturbed,
         after,
         unavailable_sample,
         fault_end - fault_start,
@@ -712,7 +734,7 @@ def scenario_empty(ctx):
 
     # The post-restart window uses the new session: the old one is signed out,
     # the service is not permanently broken.
-    before, during, after = windows(
+    before, during, disturbed, after = windows(
         load.snapshot(),
         baseline_start,
         fault_start,
@@ -729,6 +751,7 @@ def scenario_empty(ctx):
         load,
         before,
         during,
+        disturbed,
         after,
         unavailable_sample,
         fault_end - fault_start,
@@ -804,7 +827,7 @@ def scenario_partition(ctx):
 
     # Only requests that finished before the partition was lifted belong to the
     # disturbed window; their store timeout expired while the fault was active.
-    before, during, after = windows(
+    before, during, disturbed, after = windows(
         load.snapshot(), baseline_start, fault_start, fault_end, recovered, 0.3, 0.3
     )
     for window, label in ((before, "before"), (during, "during"), (after, "after")):
@@ -814,6 +837,7 @@ def scenario_partition(ctx):
         load,
         before,
         during,
+        disturbed,
         after,
         unavailable_sample,
         fault_end - fault_start,
@@ -913,11 +937,8 @@ def scenario_memory_full(ctx):
     # The fault begins when Redis starts rejecting writes, after the fill.
     samples = load.snapshot()
     before = between(samples, baseline_start, fill_start - 0.3)
-    during = [
-        sample
-        for sample in samples
-        if sample["at"] >= fault_start + 0.2 and sample["done"] <= fault_end - 0.3
-    ]
+    disturbed = between(samples, fault_start + 0.2, fault_end - 0.3)
+    during = [sample for sample in disturbed if sample["done"] <= fault_end - 0.3]
     after = between(samples, recovered + 0.3, time.monotonic())
     for window, label in ((before, "before"), (during, "during"), (after, "after")):
         require_samples(window, label)
@@ -926,6 +947,7 @@ def scenario_memory_full(ctx):
         load,
         before,
         during,
+        disturbed,
         after,
         memory_during,
         fault_end - fault_start,
@@ -971,6 +993,7 @@ def scenario_absent(ctx):
         "name": "absent-at-startup",
         "requests": 0,
         "unexpected": 0,
+        "errors": {"total": 0, "public": 0, "deny": 0, "profile": 0},
         "disturbance_seconds": round(elapsed, 2),
         "recovery_seconds": 0,
         "final": final,
@@ -1033,15 +1056,22 @@ def main():
         ctx.containers.cleanup()
 
     print(
-        f"{'scenario':<20}{'requests':>9}{'unexpected':>12}"
+        f"{'scenario':<20}{'requests':>9}{'unexpected':>12}{'errors':>8}"
+        f"{'public':>8}{'deny':>7}{'profile':>9}"
         f"{'disturbance_s':>15}{'recovery_s':>12}  final"
     )
     for result in results:
+        errors = result["errors"]
         print(
             f"{result['name']:<20}{result['requests']:>9}{result['unexpected']:>12}"
-            f"{result['disturbance_seconds']:>15}{result['recovery_seconds']:>12}"
-            f"  {result['final']}"
+            f"{errors['total']:>8}{errors['public']:>8}{errors['deny']:>7}"
+            f"{errors['profile']:>9}{result['disturbance_seconds']:>15}"
+            f"{result['recovery_seconds']:>12}  {result['final']}"
         )
+    print(
+        "errors = responses in the disturbed window with no status or status >= 400;"
+        " public/deny/profile break it down."
+    )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(results, indent=2) + "\n")
