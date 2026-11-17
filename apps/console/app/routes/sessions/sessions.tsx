@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Group, Title } from "@mantine/core";
-import { SearchInput, Table, useConfirmModal } from "@/components";
+import { Alert } from "@mantine/core";
+import { Page, Panel, SearchInput, Table, useConfirmModal } from "@/components";
 import { useTranslations } from "@/i18n";
 import type { AdminSession, ListAdminSessionsQuery } from "@/services/types";
 import useStore from "@/store";
@@ -98,70 +98,59 @@ export default function SessionsPage() {
   usePolling(refresh, { interval: 5000 });
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("sessions")}</Title>
-      </Group>
-
-      <Group px="xs" pb="xs" gap="xs" wrap="wrap">
-        <SearchInput
-          size="xs"
-          variant="filled"
-          style={{ width: 240 }}
-          placeholder={t("filterByUserId")}
-          onSearch={(value) => updateFilter("userId", value)}
-        />
-        <SearchInput
-          size="xs"
-          variant="filled"
-          style={{ width: 240 }}
-          placeholder={t("filterByOrganizationId")}
-          onSearch={(value) => updateFilter("organizationId", value)}
-        />
-        <SearchInput
-          size="xs"
-          variant="filled"
-          style={{ width: 240 }}
-          placeholder={t("filterByClientId")}
-          onSearch={(value) => updateFilter("clientId", value)}
-        />
-      </Group>
-
+    <Page title={t("sessions")} description={t("pages.sessions")}>
       {adminSessions.isError() && (
-        <Alert color="red" mx="xs" mb="xs">
-          {adminSessions.message}
-        </Alert>
+        <Alert color="red">{adminSessions.message}</Alert>
       )}
 
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 90px)"
-        minWidth={1320}
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: adminSessions.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        columns={columns}
-        data={adminSessions.data?.data ?? []}
-        empty={adminSessions.data?.data?.length === 0}
-        meta={{
-          onRevokeSession: (session: AdminSession) => {
-            void confirmSessionRevocation(session);
-          },
-          onRevokeUserSessions: (session: AdminSession) => {
-            void confirmUserRevocation(session);
-          },
-        }}
-      />
+      <Panel
+        toolbar={
+          <>
+            <SearchInput
+              w={220}
+              placeholder={t("filterByUserId")}
+              onSearch={(value) => updateFilter("userId", value)}
+            />
+            <SearchInput
+              w={220}
+              placeholder={t("filterByOrganizationId")}
+              onSearch={(value) => updateFilter("organizationId", value)}
+            />
+            <SearchInput
+              w={220}
+              placeholder={t("filterByClientId")}
+              onSearch={(value) => updateFilter("clientId", value)}
+            />
+          </>
+        }
+      >
+        <Table
+          minWidth={1660}
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: adminSessions.data?.total,
+          }}
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
+          }}
+          columns={columns}
+          data={adminSessions.data?.data ?? []}
+          empty={adminSessions.data?.data?.length === 0}
+          meta={{
+            onRevokeSession: (session: AdminSession) => {
+              void confirmSessionRevocation(session);
+            },
+            onRevokeUserSessions: (session: AdminSession) => {
+              void confirmUserRevocation(session);
+            },
+          }}
+        />
+      </Panel>
 
       {confirmModal}
-    </Box>
+    </Page>
   );
 }

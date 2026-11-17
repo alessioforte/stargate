@@ -1,4 +1,5 @@
 import { TextInput, type TextInputProps } from "@mantine/core";
+import { LuSearch } from "react-icons/lu";
 import useDebounce from "@/hooks/use-debounce";
 
 interface SearchInputProps extends TextInputProps {
@@ -17,7 +18,17 @@ const SearchInput = (props: SearchInputProps) => {
     debouncedOnSearch(e.target.value);
   };
 
-  return <TextInput {...rest} onChange={handleChange} />;
+  return (
+    <TextInput
+      size="sm"
+      w={280}
+      maw="100%"
+      type="search"
+      leftSection={<LuSearch size={15} />}
+      {...rest}
+      onChange={handleChange}
+    />
+  );
 };
 
 export default SearchInput;

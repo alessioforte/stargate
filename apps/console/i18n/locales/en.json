@@ -235,7 +235,6 @@
   "accessExpiresAt": "Access expires at",
   "gatewayRuntime": "Gateway runtime",
   "runtimeRevision": "Runtime revision",
-  "auditDelivery": "Audit delivery",
   "deliveryMode": "Delivery mode",
   "pendingEvents": "Pending events",
   "oldestPending": "Oldest pending",
@@ -598,5 +597,46 @@
   "systemActor": "System",
   "retry": "Retry",
   "overwrite": "Overwrite",
-  "loadLatestFailed": "Unable to load the latest version."
+  "loadLatestFailed": "Unable to load the latest version.",
+  "logout": "Sign out",
+  "ingress": "Ingress admission",
+  "signInOptions": "Sign-in options",
+  "shell": {
+    "navigation": "Navigation",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar",
+    "toggleColorScheme": "Toggle color scheme",
+    "statusHealthy": "All systems operational",
+    "statusDegraded": "Degraded performance",
+    "statusUnhealthy": "Service disruption",
+    "statusUnknown": "Status unknown",
+    "statusConnecting": "Connecting…",
+    "groups": {
+      "identity": "Identity",
+      "credentials": "Credentials",
+      "gateway": "Gateway",
+      "monitoring": "Monitoring"
+    },
+    "nav": {
+      "overview": "Overview",
+      "configuration": "Configuration",
+      "accessControl": "Access control"
+    }
+  },
+  "table": {
+    "rowsPerPage": "Rows per page",
+    "range": "{{from}}–{{to}} of {{total}}"
+  },
+  "pages": {
+    "organizations": "Tenants that group users, service accounts and their policies.",
+    "users": "People who can sign in, their organizations and attributes.",
+    "sessions": "Active sign-ins across users and OAuth clients. Revoke a session to sign it out everywhere.",
+    "serviceAccounts": "Machine identities that authenticate with API keys.",
+    "apiKeys": "Keys that authenticate users and service accounts at the gateway.",
+    "adminKeys": "Keys with scoped permissions for the admin API.",
+    "oauthClients": "Applications that sign users in or request tokens through OAuth 2.0 and OpenID Connect.",
+    "gateway": "Routers, services, upstreams and limits served by the gateway. Saved changes apply immediately.",
+    "accessControl": "Rules evaluated for every access-controlled request. Validate a draft before saving it.",
+    "audits": "Audit events recorded with each change and their delivery state."
+  }
 }

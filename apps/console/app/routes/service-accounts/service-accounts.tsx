@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { Box, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Table, SearchInput } from "@/components";
+import { Page, Panel, Table, SearchInput } from "@/components";
 import { useTranslations } from "@/i18n";
 import type { ServiceAccount } from "@/services/types";
 import useStore from "@/store";
@@ -66,44 +65,42 @@ const ServiceAccountsPage = () => {
   };
 
   return (
-    <Box>
-      <Group p="xs" justify="space-between">
-        <Title order={4}>{t("serviceAccounts")}</Title>
-        <SearchInput
-          radius="lg"
-          variant="unstyled"
-          style={{ flex: 1 }}
-          placeholder={t("search")}
-          onSearch={handleSearch}
-        />
+    <Page
+      title={t("serviceAccounts")}
+      description={t("pages.serviceAccounts")}
+      actions={
         <CreateServiceAccount
           organizations={organizations?.data?.data ?? []}
           onSave={createServiceAccount}
         />
-      </Group>
-      <Table
-        stickyHeader
-        enableScrollContainer
-        maxHeight="calc(var(--page-height) - 60px)"
-        pagination
-        paginationOptions={{
-          defaultPageSize: DEFAULT_PAGE_SIZE,
-          pageIndex: pagination.pageIndex,
-          pageSize: pagination.pageSize,
-          totalItems: serviceAccounts?.data?.total,
-        }}
-        onPaginationChange={({ pageIndex, pageSize }) => {
-          setPagination({ pageIndex, pageSize });
-        }}
-        columns={columns}
-        data={serviceAccounts?.data?.data ?? []}
-        empty={serviceAccounts?.data?.data?.length === 0}
-        loading={serviceAccounts?.isLoading() ?? false}
-        meta={{
-          open,
-          setSelectedItem: setSelectedServiceAccount,
-        }}
-      />
+      }
+    >
+      <Panel
+        toolbar={
+          <SearchInput placeholder={t("search")} onSearch={handleSearch} />
+        }
+      >
+        <Table
+          pagination
+          paginationOptions={{
+            defaultPageSize: DEFAULT_PAGE_SIZE,
+            pageIndex: pagination.pageIndex,
+            pageSize: pagination.pageSize,
+            totalItems: serviceAccounts?.data?.total,
+          }}
+          onPaginationChange={({ pageIndex, pageSize }) => {
+            setPagination({ pageIndex, pageSize });
+          }}
+          columns={columns}
+          data={serviceAccounts?.data?.data ?? []}
+          empty={serviceAccounts?.data?.data?.length === 0}
+          loading={serviceAccounts?.isLoading() ?? false}
+          meta={{
+            open,
+            setSelectedItem: setSelectedServiceAccount,
+          }}
+        />
+      </Panel>
       <EditServiceAccount
         opened={opened}
         organizations={organizations?.data?.data ?? []}
@@ -115,7 +112,7 @@ const ServiceAccountsPage = () => {
         onSave={updateServiceAccount}
         onDelete={deleteServiceAccount}
       />
-    </Box>
+    </Page>
   );
 };
 

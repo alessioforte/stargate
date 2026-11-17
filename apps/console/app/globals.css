@@ -1,3 +1,109 @@
+:root {
+  --app-bg: #f6f7f9;
+  --app-surface: #ffffff;
+  --app-surface-muted: #fafbfc;
+  --app-border: #e3e6ea;
+  --app-hover: #eef0f3;
+  --app-text-muted: #5c6470;
+  --app-accent-bg: var(--mantine-color-brand-0);
+  --app-accent-text: var(--mantine-color-brand-7);
+  --app-brand-mark: #e3a008;
+
+  --mantine-color-body: var(--app-bg);
+  --mantine-color-default-border: var(--app-border);
+  --mantine-color-dimmed: var(--app-text-muted);
+}
+
+/* light-dark() cannot be used on :root, so the dark palette is explicit. */
+:root[data-mantine-color-scheme="dark"] {
+  --app-bg: var(--mantine-color-dark-8);
+  --app-surface: var(--mantine-color-dark-7);
+  --app-surface-muted: var(--mantine-color-dark-6);
+  --app-border: var(--mantine-color-dark-5);
+  --app-hover: var(--mantine-color-dark-6);
+  --app-text-muted: var(--mantine-color-dark-1);
+  --app-accent-bg: rgba(68, 128, 225, 0.16);
+  --app-accent-text: var(--mantine-color-brand-3);
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
 body {
-  font-family: "JetBrains Mono", monospace;
+  font-feature-settings: "cv11", "ss01";
+  font-size: 14px;
+  line-height: 1.5;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  text-decoration: none;
+}
+
+/* Surfaces drawn by Mantine follow the console palette. */
+.mantine-Card-root,
+.mantine-Paper-root,
+.mantine-Modal-content,
+.mantine-Modal-header,
+.mantine-Drawer-content,
+.mantine-Drawer-header,
+.mantine-Menu-dropdown,
+.mantine-Popover-dropdown,
+.mantine-Combobox-dropdown {
+  background-color: var(--app-surface);
+}
+
+.mantine-Tabs-list::before {
+  border-color: var(--app-border);
+}
+
+/* Form fields: bordered on the surface, muted while read-only. */
+.mantine-Input-input[data-variant="filled"] {
+  background-color: var(--app-surface);
+  border-color: var(--app-border);
+
+  &:focus,
+  &:focus-within {
+    border-color: var(--mantine-primary-color-filled);
+  }
+
+  &[data-error] {
+    border-color: var(--mantine-color-error);
+  }
+
+  &[readonly],
+  &:disabled {
+    background-color: var(--app-surface-muted);
+  }
+}
+
+.mantine-InputWrapper-label {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mantine-InputWrapper-description {
+  color: var(--app-text-muted);
+}
+
+/* Code editors sit flush inside panels and drawers. */
+.cm-editor {
+  font-size: 12.5px;
+}
+
+.cm-editor .cm-scroller {
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.cm-editor.cm-focused {
+  outline: none;
 }

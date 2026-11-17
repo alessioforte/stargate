@@ -1,37 +1,39 @@
-import { Card, Group, Skeleton, Stack, Text, ThemeIcon } from "@mantine/core";
+import { Skeleton } from "@mantine/core";
+import { Link } from "react-router";
+import classes from "./home.module.css";
 
 interface MetricCardProps {
   detail: string;
   icon: React.ReactNode;
   label: string;
   loading: boolean;
+  to: string;
   value?: number;
 }
 
-function MetricCard({ detail, icon, label, loading, value }: MetricCardProps) {
+function MetricCard({
+  detail,
+  icon,
+  label,
+  loading,
+  to,
+  value,
+}: MetricCardProps) {
   return (
-    <Card withBorder radius="md" p={8}>
-      <Group justify="space-between" align="center" wrap="nowrap">
-        <Text c="dimmed" size="xs" fw={600} tt="uppercase">
-          {label}
-        </Text>
-        <ThemeIcon variant="transparent" size="md">
-          {icon}
-        </ThemeIcon>
-      </Group>
-      <Stack gap={3}>
-        {loading ? (
-          <Skeleton h={30} w={70} mt={3} />
-        ) : (
-          <Text fw={700} size="xl">
-            {value?.toLocaleString() ?? "—"}
-          </Text>
-        )}
-        <Text c="dimmed" size="xs">
-          {detail}
-        </Text>
-      </Stack>
-    </Card>
+    <Link to={to} className={classes.stat}>
+      <div className={classes.statHead}>
+        {label}
+        {icon}
+      </div>
+      {loading ? (
+        <Skeleton h={32} w={72} />
+      ) : (
+        <div className={classes.statValue}>
+          {value?.toLocaleString() ?? "—"}
+        </div>
+      )}
+      <div className={classes.statDetail}>{detail}</div>
+    </Link>
   );
 }
 

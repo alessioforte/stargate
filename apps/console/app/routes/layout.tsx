@@ -1,75 +1,126 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { Center, Stack, Text } from "@mantine/core";
-import { RiHomeLine } from "react-icons/ri";
 import {
-  HiOutlineKey,
-  HiOutlineServerStack,
-  HiOutlineUsers,
-} from "react-icons/hi2";
-import { GoOrganization, GoShieldLock } from "react-icons/go";
-import { AiOutlineAppstoreAdd } from "react-icons/ai";
-import { GrGateway } from "react-icons/gr";
-import { BsFillJournalBookmarkFill } from "react-icons/bs";
-import { MdLocalPolice } from "react-icons/md";
-import { LuMonitorSmartphone } from "react-icons/lu";
-import { Shell, Loader } from "@/components";
-import { TranslationProvider } from "@/i18n";
+  LuAppWindow,
+  LuBot,
+  LuBuilding2,
+  LuKeyRound,
+  LuLayoutDashboard,
+  LuMonitorSmartphone,
+  LuRoute,
+  LuScale,
+  LuScrollText,
+  LuShieldCheck,
+  LuUsers,
+} from "react-icons/lu";
+import { Shell, Loader, type NavigationGroup } from "@/components";
+import { TranslationProvider, useTranslations } from "@/i18n";
 import useStore from "@/store";
 
 function currentReturnPath(pathname: string, query: string) {
   return query ? `${pathname}${query}` : pathname;
 }
 
-const sidebarItems = [
-  { label: "Home", path: "/", icon: <RiHomeLine size={18} /> },
+const ICON_SIZE = 17;
+
+const navigationGroups = [
   {
-    label: "Organizations",
-    path: "/organizations",
-    icon: <GoOrganization size={18} />,
-  },
-  { label: "Users", path: "/users", icon: <HiOutlineUsers size={18} /> },
-  {
-    label: "Sessions",
-    path: "/sessions",
-    icon: <LuMonitorSmartphone size={18} />,
-  },
-  {
-    label: "Service Accounts",
-    path: "/service-accounts",
-    icon: <HiOutlineServerStack size={18} />,
+    items: [
+      {
+        labelKey: "shell.nav.overview",
+        path: "/",
+        icon: <LuLayoutDashboard size={ICON_SIZE} />,
+      },
+    ],
   },
   {
-    label: "API Keys",
-    path: "/api-keys",
-    icon: <HiOutlineKey size={18} />,
+    labelKey: "shell.groups.identity",
+    items: [
+      {
+        labelKey: "organizations",
+        path: "/organizations",
+        icon: <LuBuilding2 size={ICON_SIZE} />,
+      },
+      { labelKey: "users", path: "/users", icon: <LuUsers size={ICON_SIZE} /> },
+      {
+        labelKey: "sessions",
+        path: "/sessions",
+        icon: <LuMonitorSmartphone size={ICON_SIZE} />,
+      },
+      {
+        labelKey: "serviceAccounts",
+        path: "/service-accounts",
+        icon: <LuBot size={ICON_SIZE} />,
+      },
+    ],
   },
   {
-    label: "Admin Keys",
-    path: "/admin-keys",
-    icon: <GoShieldLock size={18} />,
+    labelKey: "shell.groups.credentials",
+    items: [
+      {
+        labelKey: "apiKeys",
+        path: "/api-keys",
+        icon: <LuKeyRound size={ICON_SIZE} />,
+      },
+      {
+        labelKey: "adminKeys",
+        path: "/admin-keys",
+        icon: <LuShieldCheck size={ICON_SIZE} />,
+      },
+      {
+        labelKey: "oauthClients",
+        path: "/oauth-clients",
+        icon: <LuAppWindow size={ICON_SIZE} />,
+      },
+    ],
   },
   {
-    label: "OAuth Clients",
-    path: "/oauth-clients",
-    icon: <AiOutlineAppstoreAdd size={18} />,
+    labelKey: "shell.groups.gateway",
+    items: [
+      {
+        labelKey: "shell.nav.configuration",
+        path: "/gateway",
+        icon: <LuRoute size={ICON_SIZE} />,
+      },
+      {
+        labelKey: "shell.nav.accessControl",
+        path: "/access-control-policies",
+        icon: <LuScale size={ICON_SIZE} />,
+      },
+    ],
   },
   {
-    label: "Gateway Configurations",
-    path: "/gateway",
-    icon: <GrGateway size={18} />,
-  },
-  {
-    label: "Access Control Policies",
-    path: "/access-control-policies",
-    icon: <MdLocalPolice size={18} />,
-  },
-  {
-    label: "Audits",
-    path: "/audits",
-    icon: <BsFillJournalBookmarkFill size={18} />,
+    labelKey: "shell.groups.monitoring",
+    items: [
+      {
+        labelKey: "audits",
+        path: "/audits",
+        icon: <LuScrollText size={ICON_SIZE} />,
+      },
+    ],
   },
 ];
+
+type ShellProps = Omit<React.ComponentProps<typeof Shell>, "navigation">;
+
+/** Resolves the navigation labels inside the translation provider. */
+const ConsoleShell: React.FC<ShellProps> = (props) => {
+  const t = useTranslations();
+  const navigation = useMemo<NavigationGroup[]>(
+    () =>
+      navigationGroups.map((group) => ({
+        label: group.labelKey ? t(group.labelKey) : undefined,
+        items: group.items.map(({ labelKey, ...item }) => ({
+          ...item,
+          label: t(labelKey),
+        })),
+      })),
+    [t],
+  );
+
+  return <Shell {...props} navigation={navigation} />;
+};
 
 const Layout = () => {
   const location = useLocation();
@@ -121,9 +172,9 @@ const Layout = () => {
   if (adminSessionStatus !== "ready") {
     return (
       <Center mih="100vh">
-        <Stack>
+        <Stack align="center">
           <Loader />
-          <Text c="dimmed">
+          <Text c="dimmed" size="sm">
             {adminSessionStatus === "redirecting"
               ? "Redirecting to sign in"
               : "Checking session"}
@@ -135,17 +186,16 @@ const Layout = () => {
 
   return (
     <TranslationProvider language={language}>
-      <Shell
+      <ConsoleShell
         adminMe={adminMe}
         adminStatus={adminStatus}
         language={language}
         onLanguageChange={setLanguage}
         onLogout={() => void logout(returnPath)}
-        sidebarItems={sidebarItems}
       >
         {loading && <Loader />}
         {!loading && <Outlet />}
-      </Shell>
+      </ConsoleShell>
     </TranslationProvider>
   );
 };

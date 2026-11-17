@@ -1,24 +1,14 @@
-import { Badge, createTheme, MantineProvider } from "@mantine/core";
+import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { createRoot } from "react-dom/client";
 import App from "./app.tsx";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
+import "@fontsource-variable/inter";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
 import "./globals.css";
-
-const theme = createTheme({
-  primaryColor: "yellow",
-  defaultRadius: "sm",
-  components: {
-    Badge: Badge.extend({
-      defaultProps: {
-        radius: "sm",
-      },
-    }),
-  },
-});
+import { theme } from "./theme";
 
 createRoot(document.getElementById("root")!).render(
   <MantineProvider theme={theme} defaultColorScheme="auto">

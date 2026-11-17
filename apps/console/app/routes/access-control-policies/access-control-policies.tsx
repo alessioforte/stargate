@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Box, Group, Stack, Tabs } from "@mantine/core";
-import { RevisionConflictDialog, Table, useConfirmModal } from "@/components";
+import { Alert, Badge, Group, Stack, Tabs } from "@mantine/core";
+import {
+  Page,
+  Panel,
+  RevisionConflictDialog,
+  Table,
+  useConfirmModal,
+} from "@/components";
 import { useTranslations } from "@/i18n";
 import useStore from "@/store";
 import type {
@@ -130,7 +136,39 @@ const AccessControlPolicies = () => {
   };
 
   return (
-    <Box>
+    <Page
+      title={t("accessControlPolicies")}
+      description={t("pages.accessControl")}
+      badges={
+        <>
+          {saved?.revision && (
+            <Badge color="gray" ff="monospace">
+              {saved.revision.slice(0, 19)}
+            </Badge>
+          )}
+          {valid !== undefined && (
+            <Badge color={valid ? "teal" : "red"}>
+              {valid ? t("valid") : t("invalid")}
+            </Badge>
+          )}
+          {dirty && <Badge color="orange">{t("unsavedChanges")}</Badge>}
+        </>
+      }
+      actions={
+        <AccessControlToolbar
+          dirty={dirty}
+          loading={accessControlRules.isLoading()}
+          saveDisabled={
+            !dirty || valid !== true || accessControlRules.isLoading()
+          }
+          validating={accessControlValidation.isLoading()}
+          onReload={handleReload}
+          onReset={handleReset}
+          onSave={handleSave}
+          onValidate={handleValidate}
+        />
+      }
+    >
       {confirmModal}
       <RevisionConflictDialog
         opened={accessControlRulesConflict !== null}
@@ -163,55 +201,34 @@ const AccessControlPolicies = () => {
         }}
         onRetry={refreshAccessControlRulesConflict}
       />
-      <AccessControlToolbar
-        dirty={dirty}
-        loading={accessControlRules.isLoading()}
-        revision={saved?.revision}
-        saveDisabled={
-          !dirty || valid !== true || accessControlRules.isLoading()
-        }
-        valid={valid}
-        validating={accessControlValidation.isLoading()}
-        onReload={handleReload}
-        onReset={handleReset}
-        onSave={handleSave}
-        onValidate={handleValidate}
-      />
+      {accessControlRules.isError() && (
+        <Alert color="red">{accessControlRules.message}</Alert>
+      )}
 
-      <Stack mt="xs" gap="sm">
-        {accessControlRules.isError() && (
-          <Alert color="red" variant="light">
-            {accessControlRules.message}
-          </Alert>
-        )}
+      <Tabs defaultValue="list">
+        <Tabs.List mb="md">
+          <Tabs.Tab value="list">
+            <Group gap={6}>
+              {t("rules")}
+              <Badge size="sm" color="gray">
+                {rows.length}
+              </Badge>
+            </Group>
+          </Tabs.Tab>
+          <Tabs.Tab value="document">{t("document")}</Tabs.Tab>
+          <Tabs.Tab value="evaluator">{t("evaluator")}</Tabs.Tab>
+          <Tabs.Tab value="capabilities">{t("capabilities")}</Tabs.Tab>
+        </Tabs.List>
 
-        <Tabs defaultValue="list">
-          <Tabs.List>
-            <Tabs.Tab value="list">
-              <Group gap={6}>
-                {t("rules")}
-                <Badge size="sm" variant="light">
-                  {rows.length}
-                </Badge>
-              </Group>
-            </Tabs.Tab>
-            <Tabs.Tab value="document">{t("document")}</Tabs.Tab>
-            <Tabs.Tab value="evaluator">{t("evaluator")}</Tabs.Tab>
-            <Tabs.Tab value="capabilities">{t("capabilities")}</Tabs.Tab>
-          </Tabs.List>
-
-          <Tabs.Panel value="list">
-            <Stack gap="sm">
-              {dirty && !activeValidation && (
-                <Alert m="xs" color="yellow">
-                  {t("validateToRefreshRules")}
-                </Alert>
-              )}
-              {diagnostics.length > 0 && (
-                <Alert m="xs" color="red">
-                  {t("rulesInvalid")}
-                </Alert>
-              )}
+        <Tabs.Panel value="list">
+          <Stack gap="sm">
+            {dirty && !activeValidation && (
+              <Alert color="yellow">{t("validateToRefreshRules")}</Alert>
+            )}
+            {diagnostics.length > 0 && (
+              <Alert color="red">{t("rulesInvalid")}</Alert>
+            )}
+            <Panel>
               <Table
                 columns={accessControlRuleColumns}
                 data={rows}
@@ -221,10 +238,12 @@ const AccessControlPolicies = () => {
                   accessControlValidation.isLoading()
                 }
               />
-            </Stack>
-          </Tabs.Panel>
+            </Panel>
+          </Stack>
+        </Tabs.Panel>
 
-          <Tabs.Panel value="document">
+        <Tabs.Panel value="document">
+          <Panel>
             <DocumentEditor
               content={content}
               diagnostics={diagnostics}
@@ -232,18 +251,22 @@ const AccessControlPolicies = () => {
                 setContent(value);
               }}
             />
-          </Tabs.Panel>
+          </Panel>
+        </Tabs.Panel>
 
-          <Tabs.Panel value="evaluator">
+        <Tabs.Panel value="evaluator">
+          <Panel padded>
             <RuleEvaluator
               error={accessControlEvaluation.message}
               loading={accessControlEvaluation.isLoading()}
               result={accessControlEvaluation.data}
               onEvaluate={handleEvaluate}
             />
-          </Tabs.Panel>
+          </Panel>
+        </Tabs.Panel>
 
-          <Tabs.Panel value="capabilities">
+        <Tabs.Panel value="capabilities">
+          <Panel padded>
             <CapabilityEvaluator
               error={
                 accessControlCapabilitiesEvaluation.isError()
@@ -258,10 +281,10 @@ const AccessControlPolicies = () => {
               }
               onEvaluate={handleEvaluateCapabilities}
             />
-          </Tabs.Panel>
-        </Tabs>
-      </Stack>
-    </Box>
+          </Panel>
+        </Tabs.Panel>
+      </Tabs>
+    </Page>
   );
 };
 

@@ -4,9 +4,25 @@
   min-height: 0;
 }
 
+.scroller {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: auto;
+}
+
+.scrollerInner {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .tableHeader {
   flex: 0 0 auto;
-  overflow: hidden;
+  background-color: var(--app-surface-muted);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .tableBody {
@@ -15,36 +31,70 @@
 }
 
 .table {
+  --table-border-color: var(--app-border);
+  --table-hover-color: var(--app-surface-muted);
+
   table-layout: fixed;
   width: 100%;
+  font-size: 13px;
+}
+
+.table thead tr {
+  border-bottom: 0;
 }
 
 .table th {
+  padding-top: 9px;
+  padding-bottom: 9px;
   font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.table tr {
-  font-size: 12px;
+.table th::first-letter {
+  text-transform: uppercase;
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: 16px;
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: 16px;
+}
+
+/* Long plain values are cut with an ellipsis; the title keeps them readable. */
+.table td[title] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sticky {
-  background-color: light-dark(
-    var(--mantine-color-white),
-    var(--mantine-color-dark-9)
-  );
+  background-color: var(--app-surface-muted);
 }
 
 .pagination {
-  border-top: 1px solid
-    light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
   flex: 0 0 auto;
-  justify-content: end;
-  align-items: flex-end;
-  min-height: 54px;
-  padding: var(--mantine-spacing-sm);
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--app-border);
+}
+
+.pageSize {
+  flex-wrap: nowrap;
 }
 
 .emptyState {
-  height: 100%;
-  min-height: 300px;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

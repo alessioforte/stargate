@@ -12,7 +12,7 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
-import { FaPlus } from "react-icons/fa6";
+import { LuPlus } from "react-icons/lu";
 import { GoCheck, GoCopy } from "react-icons/go";
 import { useTranslations } from "@/i18n";
 import type {
@@ -82,16 +82,15 @@ const CreateAdminKey: React.FC<Props> = ({ onSave }) => {
 
   return (
     <>
-      <Tooltip label={t("newAdminKey")} position="left" offset={10}>
-        <ActionIcon
-          onClick={() => {
-            setCreatedAdminKey(null);
-            open();
-          }}
-        >
-          <FaPlus />
-        </ActionIcon>
-      </Tooltip>
+      <Button
+        leftSection={<LuPlus size={16} />}
+        onClick={() => {
+          setCreatedAdminKey(null);
+          open();
+        }}
+      >
+        {t("newAdminKey")}
+      </Button>
 
       <EntityDrawer
         opened={opened}
@@ -101,7 +100,7 @@ const CreateAdminKey: React.FC<Props> = ({ onSave }) => {
         <form style={{ flex: 1 }} onSubmit={form.onSubmit(handleSubmit)}>
           <Stack p="sm">
             <Group justify="flex-end" h={28}>
-              <Button type="submit" size="compact-sm" color="teal">
+              <Button type="submit" size="compact-sm">
                 {t("save")}
               </Button>
             </Group>

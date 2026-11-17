@@ -1,29 +1,29 @@
-import { Center } from "@mantine/core";
-import Icon from "../icon/icon";
-import type * as CSS from "csstype";
+import { Stack, Text, ThemeIcon } from "@mantine/core";
+import { LuInbox } from "react-icons/lu";
 
-interface NoDataProps {
-  icon?: string | React.ReactNode;
-  size?: number;
-  style?: CSS.Properties;
+interface Props {
+  description?: React.ReactNode;
+  icon?: React.ReactNode;
+  title?: React.ReactNode;
 }
 
-const Empty: React.FC<NoDataProps> = ({
-  icon = "sauropod",
-  size = 120,
-  style = {},
-}) => {
+const Empty: React.FC<Props> = ({ description, icon, title }) => {
   return (
-    <Center
-      style={{ minHeight: "200px", ...style }}
-      data-testid="NoDataComponent"
-    >
-      {typeof icon === "string" ? (
-        <Icon name={icon} color="primary" size={size} />
-      ) : (
-        icon
+    <Stack align="center" justify="center" gap={6} py={56} px="md">
+      <ThemeIcon size={44} radius="xl" variant="light" color="gray" mb={6}>
+        {icon ?? <LuInbox size={22} />}
+      </ThemeIcon>
+      {title && (
+        <Text size="sm" fw={600}>
+          {title}
+        </Text>
       )}
-    </Center>
+      {description && (
+        <Text size="sm" c="dimmed" ta="center" maw={360}>
+          {description}
+        </Text>
+      )}
+    </Stack>
   );
 };
 

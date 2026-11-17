@@ -1,5 +1,4 @@
 import {
-  ActionIcon,
   Button,
   Divider,
   TextInput,
@@ -9,13 +8,12 @@ import {
   Group,
   Select,
   Text,
-  Tooltip,
   SegmentedControl,
 } from "@mantine/core";
 import { useState } from "react";
 import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
-import { FaPlus } from "react-icons/fa6";
+import { LuPlus } from "react-icons/lu";
 import { useTranslations } from "@/i18n";
 import type {
   CreateUserInvitationRequest,
@@ -135,15 +133,14 @@ const CreateUser: React.FC<Props> = ({
 
   return (
     <>
-      <Tooltip label={t("newUser")} position="left" offset={10}>
-        <ActionIcon
-          onClick={() => {
-            open();
-          }}
-        >
-          <FaPlus />
-        </ActionIcon>
-      </Tooltip>
+      <Button
+        leftSection={<LuPlus size={16} />}
+        onClick={() => {
+          open();
+        }}
+      >
+        {t("newUser")}
+      </Button>
 
       <EntityDrawer opened={opened} onClose={handleCancel} title={t("user")}>
         <form style={{ flex: 1 }} onSubmit={form.onSubmit(handleSubmit)}>
@@ -153,7 +150,7 @@ const CreateUser: React.FC<Props> = ({
             style={{ height: "100%" }}
           >
             <Group mt="sm" px="sm" justify="flex-end" h={28}>
-              <Button type="submit" size="compact-sm" color="teal">
+              <Button type="submit" size="compact-sm">
                 {t("save")}
               </Button>
             </Group>

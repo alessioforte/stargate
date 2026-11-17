@@ -1,14 +1,10 @@
-import { Text } from "@mantine/core";
+import classes from "./home.module.css";
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div>
-      <Text size="xs" c="dimmed">
-        {label}
-      </Text>
-      <Text size="xl" fw={700}>
-        {value.toLocaleString()}
-      </Text>
+    <div className={classes.metric}>
+      <div className={classes.statHead}>{label}</div>
+      <div className={classes.statValue}>{value.toLocaleString()}</div>
     </div>
   );
 }

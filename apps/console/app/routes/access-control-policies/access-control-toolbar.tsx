@@ -1,14 +1,16 @@
-import { Badge, Button, Group, Title } from "@mantine/core";
-import { FiRefreshCw, FiRotateCcw, FiSave } from "react-icons/fi";
-import { LuWandSparkles } from "react-icons/lu";
+import { Button } from "@mantine/core";
+import {
+  LuRefreshCw,
+  LuRotateCcw,
+  LuSave,
+  LuWandSparkles,
+} from "react-icons/lu";
 import { useTranslations } from "@/i18n";
 
 interface Props {
   dirty: boolean;
   loading: boolean;
-  revision?: string;
   saveDisabled: boolean;
-  valid?: boolean;
   validating: boolean;
   onReload: () => void;
   onReset: () => void;
@@ -19,9 +21,7 @@ interface Props {
 const AccessControlToolbar: React.FC<Props> = ({
   dirty,
   loading,
-  revision,
   saveDisabled,
-  valid,
   validating,
   onReload,
   onReset,
@@ -31,64 +31,44 @@ const AccessControlToolbar: React.FC<Props> = ({
   const t = useTranslations();
 
   return (
-    <Group p="xs" justify="space-between">
-      <Group gap="xs">
-        <Title order={4}>{t("accessControlPolicies")}</Title>
-        {revision && <Badge color="cyan">{revision.slice(0, 19)}</Badge>}
-        {valid !== undefined && (
-          <Badge color={valid ? "teal" : "red"}>
-            {valid ? t("valid") : t("invalid")}
-          </Badge>
-        )}
-        {dirty && <Badge color="orange">{t("unsavedChanges")}</Badge>}
-      </Group>
-
-      <Group gap="xs">
-        <Button
-          type="button"
-          size="compact-sm"
-          color="gray"
-          variant="transparent"
-          leftSection={<FiRefreshCw />}
-          loading={loading}
-          onClick={onReload}
-        >
-          {t("reload")}
-        </Button>
-        <Button
-          type="button"
-          size="compact-sm"
-          color="teal"
-          variant="outline"
-          leftSection={<FiRotateCcw />}
-          disabled={!dirty}
-          onClick={onReset}
-        >
-          {t("resetChanges")}
-        </Button>
-        <Button
-          type="button"
-          size="compact-sm"
-          color="indigo"
-          leftSection={<LuWandSparkles />}
-          loading={validating}
-          onClick={onValidate}
-        >
-          {t("validateDraft")}
-        </Button>
-        <Button
-          type="button"
-          size="compact-sm"
-          color="teal"
-          leftSection={<FiSave />}
-          disabled={saveDisabled}
-          loading={loading}
-          onClick={onSave}
-        >
-          {t("saveChanges")}
-        </Button>
-      </Group>
-    </Group>
+    <>
+      <Button
+        type="button"
+        variant="default"
+        leftSection={<LuRefreshCw size={15} />}
+        loading={loading}
+        onClick={onReload}
+      >
+        {t("reload")}
+      </Button>
+      <Button
+        type="button"
+        variant="default"
+        leftSection={<LuRotateCcw size={15} />}
+        disabled={!dirty}
+        onClick={onReset}
+      >
+        {t("resetChanges")}
+      </Button>
+      <Button
+        type="button"
+        variant="light"
+        leftSection={<LuWandSparkles size={15} />}
+        loading={validating}
+        onClick={onValidate}
+      >
+        {t("validateDraft")}
+      </Button>
+      <Button
+        type="button"
+        leftSection={<LuSave size={15} />}
+        disabled={saveDisabled}
+        loading={loading}
+        onClick={onSave}
+      >
+        {t("saveChanges")}
+      </Button>
+    </>
   );
 };
 
