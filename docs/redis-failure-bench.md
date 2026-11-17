@@ -17,7 +17,7 @@ a fail-open response is a `200` without allowance headers.
 
 | Scenario            | Injection                                                                                                                                                     | Documented behavior asserted                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `restart`           | Stop and start the Redis container (AOF on, state survives).                                                                                                  | Limits fail open: `/bench/public` returns `200` without allowance headers, `/bench/deny` returns `503 gateway.limiter_unavailable`, `/account/profile` never returns `200`, `/readyz` stays `200`, `/admin/health` reports Redis `unhealthy` and `limits.storeDegraded`. After the restart the same session works, limits are enforced again, `storeDegraded` clears and Stargate never restarts. |
+| `restart`           | Stop and start the Redis container (AOF on, state survives).                                                                                                  | Limits fail open: `/bench/public` returns `200` without allowance headers, `/bench/deny` returns `503 gateway.limiter_unavailable`, `/account/profile` fails closed with `5xx`, `/readyz` stays `200`, `/admin/health` reports Redis `unhealthy` and `limits.storeDegraded`. After the restart the same session works, limits are enforced again, `storeDegraded` clears and Stargate never restarts. |
 | `empty`             | Stop and start Redis with persistence off.                                                                                                                    | The session key is gone: the old access token gets `401 auth.token_invalid` from `/account/profile`, the old refresh token gets `401`, and a fresh sign-in works. Limits and health recover; there is no permanent error.                                                                                                                                                                         |
 | `partition`         | A localhost TCP relay forwards to Redis; `SIGSTOP` on the relay blackholes every packet while its sockets stay open. Held past the 5s store response timeout. | Same fail-open and fail-closed split as `restart`, with `/admin/health` also reporting overall `unhealthy` and `limits.storeDegraded`; readiness does not follow Redis. `SIGCONT` restores every check without restarting Stargate.                                                                                                                                                               |
 | `memory-full`       | Redis starts with `maxmemory 2mb` and `noeviction`; filler keys are written, then `maxmemory` is pinned below the stored data so every write is rejected.     | Reads keep working (`/account/profile` returns `200`), limit checks fail open or closed as configured, sign-in fails closed (`5xx`) because the session write is rejected, `PING` keeps the Redis component `healthy` while `limits.storeDegraded` is true and the overall status is `degraded`. Freeing the filler keys and restoring `maxmemory` restores writes without a restart.             |
@@ -49,8 +49,9 @@ test. Run it with the same images.
 
 `.github/workflows/redis-failures.yml` runs on pull requests that touch
 `crates/store`, `crates/lim`, `src/data/store`, the session and authentication
-code, the gateway limits and policies, the bench scripts or this guide, and on
-manual dispatch:
+code, the gateway limits and policies, startup and readiness (`src/main.rs`,
+`src/srv/health.rs`), the admin health report (`src/api/admin/health.rs`), the
+bench scripts and their fixture or this guide, and on manual dispatch:
 
 ```bash
 gh workflow run redis-failures.yml --ref main
@@ -66,22 +67,29 @@ Recorded 2026-11-17 on Apple M1 Pro (10 CPUs), macOS 27.2.1, Docker 29.9.3,
 above. Durations are indicative: `disturbance_seconds` runs from the injection
 to the end of the fault, and `recovery_seconds` from there to the documented
 healthy state (limits enforced, sessions usable, `/admin/health` healthy).
-`unexpected` counts load responses that did not match the phase expectation and
-is zero for a passing run.
 
-| Scenario            | Requests | Unexpected | Disturbance (s) | Recovery (s) | Final state             |
-| ------------------- | -------- | ---------- | --------------- | ------------ | ----------------------- |
-| `restart`           | 165      | 0          | 8.65            | 0.73         | healthy                 |
-| `empty`             | 172      | 0          | 6.11            | 3.31         | signed-out then healthy |
-| `partition`         | 159      | 0          | 8.54            | 0.07         | healthy                 |
-| `memory-full`       | 214      | 0          | 1.04            | 0.20         | healthy                 |
-| `absent-at-startup` | 0        | 0          | 9.49            | —            | failed at startup       |
+| Scenario            | Requests | Unexpected | Errors | public | deny | profile | Disturbance (s) | Recovery (s) | Final state             |
+| ------------------- | -------- | ---------- | ------ | ------ | ---- | ------- | --------------- | ------------ | ----------------------- |
+| `restart`           | 200      | 0          | 38     | 0      | 38   | 0       | 11.99           | 1.76         | healthy                 |
+| `empty`             | 188      | 0          | 34     | 0      | 32   | 2       | 10.57           | 1.33         | signed-out then healthy |
+| `partition`         | 159      | 0          | 26     | 0      | 26   | 0       | 8.78            | 0.08         | healthy                 |
+| `memory-full`       | 214      | 0          | 10     | 0      | 10   | 0       | 1.04            | 0.18         | healthy                 |
+| `absent-at-startup` | 0        | 0          | 0      | 0      | 0    | 0       | 9.50            | —            | failed at startup       |
 
-The `restart` and `empty` disturbances include the deliberate
-`/account/profile` probe, which waits for the store's 5s response timeout
-before failing closed, and a one-second hold under load so the sampled windows
-stay meaningful; without them the outage itself is under a second. The
-`partition` disturbance is intentionally longer than that timeout so the same
-probe has time to fail; shorter blackholes only exercise the 250ms ingress and
-policy deadlines. The `absent-at-startup` duration is the connection retry
-time before the process exits, not a timeout of the bench.
+`unexpected` counts the samples that contradicted the expectation of their
+phase; a single one fails the run, so it is always zero in a passing report.
+`errors` counts the responses with no status or `>= 400` among the requests
+started while the fault was active, split by endpoint (`public`/`deny`/`profile`):
+that is the observable cost of the disturbance, and the fail-closed route's
+`503` makes it non-zero even in a passing run. A request that outlives the fault
+is excluded from the `during` assertions (a session read can still succeed after
+Redis returns) but still counted in `errors` when it fails.
+
+The `restart` and `empty` disturbances include the deliberate `/account/profile`
+probe. The store pool waits for reconnection before sending a command, so the
+probe observes the documented `5xx` only after its retries are exhausted (about
+ten seconds), while a request that outlives the fault can complete once Redis
+returns; the one-second hold keeps the sampled windows non-empty. The
+`partition` disturbance is held past the store timeout for the same reason, and
+`absent-at-startup` measures the connection retry time before the process
+exits, not a timeout of the bench.
