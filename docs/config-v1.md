@@ -485,6 +485,13 @@ Path matcher operators:
 - `template`, for example `/api/users/{id}`
 - `regex`
 
+The gateway matches the path exactly as the client sends it. Stargate does not
+strip a trailing slash, so `exact: /health` does not match `/health/` and a
+`template` such as `/api/users/{id}` does not match `/api/users/42/`; use
+`prefix` or `regex` to accept both forms. On gateway routes Stargate forwards
+`OPTIONS` preflights to the upstream, adds no CORS headers, and does not
+compress the responses: CORS and content encoding belong to the upstream.
+
 Value matcher operators for `host`, `header`, `query`, and `cookie`:
 
 - `eq`
