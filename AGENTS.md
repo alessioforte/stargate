@@ -55,7 +55,7 @@ stargate/
 │   └── mail/          # Transactional email templates (react-email, build-time only)
 ├── migrations/        # sqlx migrations split by backend: postgres/, sqlite/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
-│                      #   password-policies, health-probes, internal-context-*, cli, docker, api errors,
+│                      #   password-policies, health-probes, listeners, internal-context-*, cli, docker, api errors,
 │                      #   gateway-performance (opt-in benchmarks and recorded results),
 │                      #   redis-failure-bench, production-checklist, audit-events, monitoring, sizing
 ├── k8s/               # Kubernetes manifests
@@ -168,13 +168,19 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   the chart sets it to the pod name and also supplies pod/namespace attributes
   through ordered downward-API environment entries. The chart rejects duplicate
   `POD_NAME`, `POD_NAMESPACE` and `OTEL_RESOURCE_ATTRIBUTES` settings.
-- `srv/`: listeners, listener TLS, health lifecycle/probes (`health.rs`), profile
-  validation, startup banner, shutdown signal and drain (`shutdown.rs`).
-  Listener TLS is validated and cached once at startup; request forwarding and
-  HTTPS detection use the cached setting rather than reading `TLS_ENABLED` again.
-  `tls::served_over_https()`: listener TLS or an `https://` public base URL (a proxy
-  terminates TLS); it decides the `Secure` cookie attribute, HSTS, and the request's own
-  origin scheme.
+- `srv/`: the listener manager (`mod.rs`) with its validated settings
+  (`settings.rs`), listener TLS (`tls.rs`), health lifecycle/probes (`health.rs`),
+  profile validation, startup banner, shutdown signal and drain (`shutdown.rs`).
+  `LISTENERS` declares named listeners with an address, planes, a TLS switch, and a
+  connection cap; without it one implicit listener serves every plane on
+  `0.0.0.0:$PORT` (see "Listeners"). All listeners bind before any serves, every
+  connection gets hyper timeouts, HTTP/2 limits, `TCP_NODELAY`, and a slot from its
+  listener's cap, and a failed accept backs off. Each request carries
+  `srv::ConnectionInfo` (peer and the listener's name, planes, TLS): read connection
+  facts from it instead of a process-wide setting.
+  `tls::served_over_https()`: the implicit listener's TLS (`TLS_ENABLED`) or an
+  `https://` public base URL (a proxy terminates TLS); it decides the `Secure` cookie
+  attribute, HSTS, and the request's own origin scheme.
 - `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
   trusted-origin middleware), security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
@@ -193,6 +199,29 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   set; one alone stops startup). `GET /account/features` (public) lists the sign-in
   options for the hosted apps; `/admin/health` reports `features`.
   Guide: `docs/features.md`.
+
+### Listeners
+
+`srv::settings` reads and validates `LISTENERS` and, for each declared name,
+`LISTENER_<NAME>_ADDRESS`, `_PLANES`, `_TLS`, and `_MAX_CONNECTIONS` once at
+startup. Invalid or duplicate names, shared addresses, incomplete addresses,
+unknown planes, a management plane sharing its listener, TLS on a management
+listener, `PORT`/`TLS_ENABLED`/`MAX_CONNECTIONS` alongside `LISTENERS`, and an
+unknown `LISTENER_*` variable all stop it. Without `LISTENERS` the implicit
+listener is `0.0.0.0:$PORT` with every plane, `TLS_ENABLED`, and
+`MAX_CONNECTIONS`. Names are 1–32 ASCII letters or digits starting with a letter;
+addresses are literal IPs with a port, IPv6 included.
+
+`main.rs` builds one router per listener with `api::listener_router` and applies
+the gateway extension, security headers, and tracing once, never per connection;
+`srv::serve` binds them all, logs each one, and runs the accept loops. TLS
+listeners share `TLS_CERT` and `TLS_KEY` and offer ALPN `h2` and `http/1.1`.
+Per connection: 10 s header read (HTTP/1) and TLS handshake timeouts, 100 HTTP/2
+concurrent streams, a 32 KiB HTTP/2 header list, a 30 s keep-alive PING with a 10 s
+timeout, `TCP_NODELAY`, and a slot from the listener's connection cap (default
+1024); a failed accept backs off 100 ms. Every request carries
+`srv::ConnectionInfo` (peer, listener name, planes, TLS) next to the legacy
+`ConnectInfo` extension. Guide: `docs/listeners.md`.
 
 ### Gateway Runtime (`src/gate/`)
 
@@ -893,7 +922,9 @@ the same logical columns on PostgreSQL and SQLite.
 | `CONFIG_PATH`                                                                          | `.stargate`                            | Directory for gateway/policy seed files; also holds other runtime assets                                                            |
 | `CONFIG_FILENAME`                                                                      | `config.yaml`                          | Gateway seed filename, used only when its database document is absent                                                               |
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
-| `PORT`                                                                                 | 5050                                   | HTTP listen port                                                                                                                    |
+| `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |
+| `MAX_CONNECTIONS`                                                                      | 1024                                   | Concurrent connections of the implicit listener; stops startup with `LISTENERS`                                                     |
+| `LISTENERS` / `LISTENER_<NAME>_*`                                                      | -                                      | Named listeners: `_ADDRESS` and `_PLANES` required, `_TLS` on except management, `_MAX_CONNECTIONS` 1024 (see "Listeners")           |
 | `STARGATE_RUNTIME_PROFILE`                                                             | -                                      | `edge` or `cluster` (validated against the build)                                                                                   |
 | `JWT_ALGORITHM`                                                                        | active key / `RS256`                   | Must match the active key when set; picks the first generated key                                                                   |
 | `JWT_SECRET`                                                                           | -                                      | HMAC key for HS* algorithms                                                                                                         |
@@ -933,7 +964,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_STREAM_MAXLEN`                                                                  | 100000                                 | Stream capacity target (protected trimming with groups; 0 = unbounded)                                                                                       |
 | `AUDIT_STREAM_CONSUMER_GROUPS` | empty | Distinct comma-separated consumer groups; protect unacknowledged stream entries |
 | `AUDIT_OUTBOX_RETENTION` | 30d | Cluster published-row retention (duration or `none`); never prunes pending rows |
-| `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | Listener TLS; with it off, an `https://` public base URL still marks the deployment HTTPS                                           |
+| `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | TLS of the implicit listener (`TLS_ENABLED` stops startup with `LISTENERS`); the certificate is shared. With listener TLS off, an `https://` public base URL still marks the deployment HTTPS |
 | `TRUSTED_PROXIES`                                                                      | -                                      | Proxy IP/CIDRs allowed to set client IP headers                                                                                     |
 | `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins                                                                                                                |
 | `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints                                                                                 |
@@ -1080,19 +1111,21 @@ Entries are validated once at startup, compared in lowercase without the request
 port, and must include the host of `conf::public_base_url()` (`OAUTH_BASE_URL`, else
 the issuer). Schemes, ports, paths, and wildcards in entries stop startup.
 
-`api::server_router` composes one router per plane (`api::plane::Plane`):
-management (`/livez`, `/readyz`), identity (well-known metadata, OIDC, accounts,
-sign-up, social sign-in, the hosted auth app, docs, i18n, the internal-context
-JWKS), admin (`/admin/*` and the Console), and the gateway. It mounts probes on
-every host, including pod IPs and hostless requests. Its `dispatch::HostDispatch`
-sends allowed hosts through the identity and admin planes and their shared
-ingress limit, with the gateway as fallback. Other hosts and hostless requests go
+`api::listener_router(planes, lifecycle, hosts)` composes the router a listener
+serves from the planes it declares (`api::plane::PlaneSet`): management (`/livez`,
+`/readyz`), identity (well-known metadata, OIDC, accounts, sign-up, social
+sign-in, the hosted auth app, docs, i18n, the internal-context JWKS), admin
+(`/admin/*` and the Console), and the gateway. `api::server_router` is the same
+composition with every plane, for tests. Probes are mounted on every host,
+including pod IPs and hostless requests. `dispatch::HostDispatch` sends allowed
+hosts through the IAM planes and their shared ingress limit; the gateway is their
+fallback only when the listener serves it. Other hosts and hostless requests go
 directly to the gateway when `IAM_HOSTS` is configured, where the gateway ingress
 limit still applies. Path normalization, CORS, and compression belong to the
 planes Stargate answers itself: a trailing slash is trimmed before those routes
 match and the gateway plane restores the client's URI, so an upstream receives
 the path the client sent and owns its own preflights and content encoding.
-`main.rs` adds security headers and tracing to every request.
+`main.rs` adds security headers and tracing to every listener's router.
 
 IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's
 ingress allowance, the same `ingress:ip:{ip}` bucket as the gateway, before
@@ -1140,7 +1173,7 @@ or `ingress`. `429` `retry-after` is whole seconds rounded up (missing duration
 
 SIGTERM/SIGINT -> readiness off -> wait `SERVER_DRAIN_DELAY_SECS` -> gateway admission
 closes and active work is cancelled (WebSockets send Close `1001`, `gateway shutting down`,
-to both peers in parallel) -> listeners close and connections drain
+to both peers in parallel) -> every listener stops accepting and its connections drain
 (`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop configuration synchronization -> stop
 audit relay -> save in-memory store -> flush telemetry.
 
