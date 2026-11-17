@@ -13,6 +13,7 @@ python3 benches/scripts/benchmark_gateway.py --seconds 3 --runs 3 --output /tmp/
 python3 benches/scripts/benchmark_gateway.py --seconds 3 --runs 3 --scenarios plain,context_signing,mixed_signing_short --output /tmp/signing.json
 python3 benches/scripts/benchmark_gateway.py --seconds 15 --runs 1 --scenarios slow_mirror,status_failover,transport_failover,slow_failure,replay_saturation --output /tmp/sustained.json
 python3 benches/scripts/benchmark_gateway_backends.py --verify --output /tmp/backends.json
+python3 benches/scripts/benchmark_request_paths.py --output /tmp/request-paths.json
 python3 benches/scripts/benchmark_gateway.py --verify --seconds 3 --runs 3 --output /tmp/combined.json
 cargo bench --locked -p ctx --bench internal_context_signing -- --quick
 ```
@@ -206,6 +207,63 @@ These round trips add latency outside the in-memory gateway CPU work. Docker's
 local VM/network and the default pools matter; remote stores, contention,
 failover, and full application authentication are separate integration concerns.
 There is no cluster throughput claim here.
+
+## Request paths with cluster backends
+
+`benchmark_request_paths.py` runs `cluster_request_path_workload`
+(`src/gate/tests/paths.rs`): it creates a real user, native session, cached API
+key and first-party OAuth access token in its own migrated PostgreSQL database,
+stores its session in Redis, serves the gateway on localhost, and measures one
+request path at a time. The script starts disposable `redis:latest` and
+`postgres:17-alpine` containers on localhost, runs the workload with the
+application's own store and database settings, and removes its containers; it
+never reads `.env` or a deployment database.
+
+Recorded 2026-11-17 from `09a38e4`, on the machine above (Apple M1 Pro, 10 CPUs,
+16 GiB, macOS 27.2.1), Rust 1.99.1, release `cluster` build. The local
+`redis:latest` (`sha256:cbe38bd4d562`) and `postgres:17-alpine`
+(`sha256:6b75136145dd`) images are `linux/amd64` on this arm64 host, so both
+backends run emulated. Sixteen closed-loop clients for five seconds, median of
+three runs. Responses are `direct_response` 200 without a body, so upstream work
+is excluded; client, gateway, PostgreSQL and Redis share the machine.
+
+| Path | Successful requests/s | Body p50 / p95 / p99, ms | Redis round trips per request | Redis commands per request |
+| --- | ---: | --- | ---: | ---: |
+| `anonymous` | 10,643 | 1.45 / 2.00 / 2.74 | 2 | 8 |
+| `api_key` | 7,644 | 2.03 / 2.70 / 3.61 | 3 | 9 |
+| `session` | 5,955 | 2.62 / 3.42 / 4.38 | 4 | 10 |
+| `oauth` | 2,509 | 6.03 / 8.13 / 10.82 | 6 | 12 |
+| `rate_limit` | 10,681 | 1.45 / 1.99 / 2.76 | 2 | 8 |
+| `quota` | 7,556 | 2.06 / 2.71 / 3.70 | 3 | 13 |
+
+Round trips are counted client-side by the store command accounting behind
+`stargate.store.redis.commands_per_request`. Server-side commands also include
+what each Lua script issues internally, which is why one GCRA check costs four
+commands (`EVALSHA`, `GET`, `SET`, `TIME`) but one round trip.
+
+The paths compose: every request pays the ingress admission check and the
+subject rate check (two round trips, both GCRA scripts), and then:
+
+- `anonymous` adds nothing: unauthenticated credentials cost no store command.
+- `api_key` adds the cached subject `GET`. A cold key adds a PostgreSQL lookup
+  and the cache `SET`; the warmup resolves it, so the row is the steady state.
+- `session` adds the subject `GET`. Native access tokens carry no `jti`, so
+  their revocation check issues no command.
+- `oauth` adds the revocation `EXISTS`, the session directory `EXISTS` and
+  `HGET`, and the subject `GET`, plus a PostgreSQL client lookup that is not a
+  Redis round trip. It is the most expensive path per request.
+- `rate_limit` selects a named bucket for the existing subject rate check
+  instead of the default one. It adds no round trip; only the bucket differs.
+- `quota` adds the quota tracker script (`EVALSHA`, `GET`, `SET`, `INCRBY`,
+  `TTL`, `TIME`) on top of the default rate check.
+
+One application store read (`redis_get_1k`, a 1 KiB MessagePack subject) measured
+inside the same workload: **0.289 / 0.408 / 0.613 ms** at p50/p95/p99. At that
+round-trip cost the two admission checks alone explain most of the p50 gap from
+the memory-store matrix (0.470 ms body p50 for `plain`): the Redis-backed gateway
+is bounded by the number of store round trips a path needs, not by its own CPU
+work. Round-trip and command counts were identical across the three runs; latency
+and throughput vary between runs on a shared machine.
 
 ## Sustained bounded work
 
