@@ -1,4 +1,5 @@
 use super::*;
+use std::net::SocketAddr;
 
 #[test]
 fn forwarding_uses_the_connection_peer_and_original_host_or_authority() {

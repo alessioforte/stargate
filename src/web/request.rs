@@ -147,9 +147,7 @@ fn from_hex(b: u8) -> Option<u8> {
 }
 
 fn peer_addr<B>(req: &Request<B>) -> Option<SocketAddr> {
-    req.extensions()
-        .get::<axum::extract::ConnectInfo<SocketAddr>>()
-        .map(|ci| ci.0)
+    crate::srv::ConnectionInfo::peer_of(req)
 }
 
 /// Resolve the real client IP from an `X-Forwarded-For` header value,

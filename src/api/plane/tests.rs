@@ -1,11 +1,18 @@
 use crate::{
-    api::server_router, conf::hosts::IamHosts, gate::test_support, srv::health::Lifecycle,
+    api::{listener_router, plane::PlaneSet, server_router},
+    conf::hosts::IamHosts,
+    gate::test_support,
+    srv::{self, HttpSettings, Listener, health::Lifecycle, settings},
 };
 use axum::{Extension, Router, body::Body, response::Response, routing::get};
 use http::{Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
-use std::sync::Arc;
-use tokio::{net::TcpListener, task::JoinHandle};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    task::JoinHandle,
+};
 use tower::ServiceExt;
 
 struct Upstream {
@@ -105,6 +112,161 @@ async fn text(response: Response) -> String {
             .to_vec(),
     )
     .unwrap()
+}
+
+#[tokio::test]
+async fn a_listener_serves_only_the_planes_it_declares() {
+    let upstream = Upstream::start().await;
+    let gate = Arc::new(test_support::gate(config(&upstream.url)));
+    let identity = spawn_listener(
+        "identity",
+        PlaneSet::parse("identity").unwrap(),
+        gate.clone(),
+    )
+    .await;
+    let api = spawn_listener(
+        "api",
+        PlaneSet::parse("admin,gateway").unwrap(),
+        gate.clone(),
+    )
+    .await;
+    let probes = spawn_listener("probes", PlaneSet::parse("management").unwrap(), gate).await;
+
+    // Identity: its own routes only; no admin and no gateway fallback.
+    assert_eq!(
+        status(identity.address, "/docs").await,
+        StatusCode::OK.as_u16()
+    );
+    assert_eq!(
+        status(identity.address, "/admin/health").await,
+        StatusCode::NOT_FOUND.as_u16()
+    );
+    assert_eq!(
+        status(identity.address, "/assets/").await,
+        StatusCode::NOT_FOUND.as_u16()
+    );
+    assert_eq!(
+        status(identity.address, "/livez").await,
+        StatusCode::NOT_FOUND.as_u16()
+    );
+
+    // Admin and gateway: the admin API answers and everything else is proxied.
+    assert_eq!(
+        status(api.address, "/admin/health").await,
+        StatusCode::FORBIDDEN.as_u16()
+    );
+    assert_eq!(
+        status(api.address, "/assets/").await,
+        StatusCode::OK.as_u16()
+    );
+
+    // Management: probes, and nothing else.
+    assert_eq!(
+        status(probes.address, "/livez").await,
+        StatusCode::OK.as_u16()
+    );
+    assert_eq!(
+        status(probes.address, "/docs").await,
+        StatusCode::NOT_FOUND.as_u16()
+    );
+
+    identity.stop().await;
+    api.stop().await;
+    probes.stop().await;
+}
+
+struct RunningListener {
+    address: SocketAddr,
+    stop: tokio::sync::oneshot::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+impl RunningListener {
+    async fn stop(self) {
+        let _ = self.stop.send(());
+        tokio::time::timeout(Duration::from_secs(5), self.task)
+            .await
+            .expect("the listener stops")
+            .unwrap();
+    }
+}
+
+async fn spawn_listener(
+    name: &str,
+    planes: PlaneSet,
+    gate: Arc<crate::gate::Gate>,
+) -> RunningListener {
+    let router =
+        listener_router(planes, Lifecycle::default(), IamHosts::default()).layer(Extension(gate));
+    let settings = settings::Listener {
+        name: name.to_string(),
+        address: "127.0.0.1:0".parse().unwrap(),
+        planes,
+        tls: false,
+        max_connections: 16,
+    };
+    let bound = srv::bind(vec![Listener { settings, router }], None)
+        .await
+        .unwrap();
+    let address = bound[0].address;
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(srv::run(
+        bound,
+        HttpSettings::default(),
+        async move {
+            let _ = stopped.await;
+        },
+        Duration::from_secs(1),
+    ));
+    RunningListener {
+        address,
+        stop,
+        task,
+    }
+}
+
+async fn status(address: SocketAddr, path: &str) -> u16 {
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    while !response.windows(4).any(|window| window == b"\r\n\r\n") {
+        let mut buffer = [0u8; 1024];
+        let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer))
+            .await
+            .expect("a response within the deadline")
+            .unwrap();
+        assert!(read > 0, "the listener closed before responding");
+        response.extend_from_slice(&buffer[..read]);
+    }
+    let response = String::from_utf8_lossy(&response);
+    response.split_whitespace().nth(1).unwrap().parse().unwrap()
+}
+
+#[test]
+fn plane_sets_parse_and_print_their_planes() {
+    let planes = PlaneSet::parse("identity, gateway").unwrap();
+    assert!(planes.contains(crate::api::plane::Plane::Identity));
+    assert!(planes.contains(crate::api::plane::Plane::Gateway));
+    assert!(!planes.contains(crate::api::plane::Plane::Admin));
+    assert_eq!(planes.to_string(), "identity,gateway");
+    assert_eq!(
+        PlaneSet::parse("management").unwrap().to_string(),
+        "management"
+    );
+    assert!(PlaneSet::parse("").is_err());
+    assert!(PlaneSet::parse("identity,").is_err());
+    assert!(PlaneSet::parse("control").is_err());
+    assert!(PlaneSet::parse("identity,identity").is_err());
+    assert_eq!(
+        PlaneSet::parse("ADMIN").unwrap(),
+        PlaneSet::of(crate::api::plane::Plane::Admin)
+    );
 }
 
 #[tokio::test]

@@ -12,7 +12,8 @@ pub mod plane;
 pub mod signup;
 pub mod social;
 
-use plane::Plane;
+pub use plane::listener_router;
+
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -136,26 +137,16 @@ use utoipa::OpenApi;
 )]
 pub struct ApiDoc;
 
+/// The implicit listener's router: every plane on one address, for tests of
+/// the composition and the handlers.
+#[cfg(test)]
 pub fn server_router(
     lifecycle: crate::srv::health::Lifecycle,
     hosts: crate::conf::hosts::IamHosts,
 ) -> axum::Router {
-    let gateway = Plane::Gateway.router(lifecycle.clone());
-    // The gateway fallback is added after the IAM planes take their layers, so
-    // unmatched IAM-host paths reach it exactly as they do on any other host.
-    let iam = Plane::Identity
-        .router(lifecycle.clone())
-        .merge(Plane::Admin.router(lifecycle.clone()))
-        .fallback_service(gateway.clone());
-    Plane::Management.router(lifecycle).fallback_service(
-        // Trailing slashes are trimmed before the server's own routes match.
-        // The gateway plane restores the client's URI, so an upstream always
-        // receives the path the client sent.
-        tower::ServiceBuilder::new()
-            .layer(axum::middleware::from_fn(plane::keep_client_uri))
-            .layer(tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash())
-            .service(dispatch::HostDispatch::new(hosts, iam, gateway)),
-    )
+    // The single implicit listener serves every plane. A listener that declares
+    // only some of them composes the same way with `plane::listener_router`.
+    plane::listener_router(plane::PlaneSet::ALL, lifecycle, hosts)
 }
 
 /// IAM routes without the plane layers, for tests of the handlers themselves.

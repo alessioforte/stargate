@@ -167,10 +167,7 @@ pub async fn trace_middleware(
     let user_agent = req.get_user_agent();
     sanitize_ingress_headers(req.headers_mut(), &request_id)
         .expect("generated request id must be a valid header value");
-    let peer_ip = req
-        .extensions()
-        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|ci| ci.0.ip().to_string());
+    let peer_ip = crate::srv::ConnectionInfo::peer_of(&req).map(|peer| peer.ip().to_string());
     let client_ip_addr = req.get_client_ip_addr();
     let ip_address = client_ip_addr.map(|ip| ip.to_string());
 
