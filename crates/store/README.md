@@ -278,9 +278,14 @@ Atomic operations that Redis does not provide natively are implemented as Lua sc
 ### Raw connection access
 
 ```rust
-let mut conn = store.get_connection(); // ConnectionManager (Arc clone)
+let mut conn = store.get_connection(); // RedisConnection (Arc clone), counted in the current observe scope
 let pool_n   = store.pool_size();
 ```
+
+Wrap the part of a request you want to account for in
+`store::observe::count_commands`: the returned tuple carries the output and the
+number of requests sent to Redis inside it. Outside a counting scope the reports
+are ignored.
 
 ---
 
