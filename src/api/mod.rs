@@ -8,9 +8,11 @@ pub mod i18n;
 pub mod internal_context;
 pub mod middleware;
 pub mod oidc;
+pub mod plane;
 pub mod signup;
 pub mod social;
 
+use plane::Plane;
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -138,35 +140,28 @@ pub fn server_router(
     lifecycle: crate::srv::health::Lifecycle,
     hosts: crate::conf::hosts::IamHosts,
 ) -> axum::Router {
-    let iam = router()
-        .layer(axum::middleware::from_fn(
-            crate::api::middleware::rate_limit::ingress_limit_middleware,
-        ))
-        .layer(axum::middleware::from_fn(
-            middleware::telemetry::record_route,
-        ))
-        .fallback_service(tower::service_fn(crate::gate::service));
-    health::router(lifecycle).fallback_service(dispatch::HostDispatch::new(hosts, iam))
+    let gateway = Plane::Gateway.router(lifecycle.clone());
+    // The gateway fallback is added after the IAM planes take their layers, so
+    // unmatched IAM-host paths reach it exactly as they do on any other host.
+    let iam = Plane::Identity
+        .router(lifecycle.clone())
+        .merge(Plane::Admin.router(lifecycle.clone()))
+        .fallback_service(gateway.clone());
+    Plane::Management.router(lifecycle).fallback_service(
+        // Trailing slashes are trimmed before the server's own routes match.
+        // The gateway plane restores the client's URI, so an upstream always
+        // receives the path the client sent.
+        tower::ServiceBuilder::new()
+            .layer(axum::middleware::from_fn(plane::keep_client_uri))
+            .layer(tower_http::normalize_path::NormalizePathLayer::trim_trailing_slash())
+            .service(dispatch::HostDispatch::new(hosts, iam, gateway)),
+    )
 }
 
-pub fn router() -> axum::Router {
-    use axum::routing::get;
-
-    axum::Router::new()
-        .route(
-            "/.well-known/stargate-context-jwks.json",
-            get(internal_context::get_internal_context_jwks),
-        )
-        .route("/docs", get(docs::get_api_doc))
-        .route("/docs/errors", get(docs::get_error_catalog))
-        .route("/i18n/{locale}", get(i18n::get_api_messages))
-        .merge(signup::router())
-        .merge(oidc::router())
-        .merge(social::router())
-        .merge(account::router())
-        .merge(apps::auth::router())
-        .merge(apps::console::router())
-        .merge(admin::router())
+/// IAM routes without the plane layers, for tests of the handlers themselves.
+#[cfg(test)]
+fn router() -> axum::Router {
+    plane::identity_routes().merge(plane::admin_routes())
 }
 
 #[cfg(test)]
