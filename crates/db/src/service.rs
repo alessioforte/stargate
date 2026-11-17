@@ -5486,6 +5486,8 @@ mod tests {
 
 #[cfg(all(test, feature = "sqlite"))]
 mod pool_stats_tests {
+    use std::time::Duration;
+
     #[tokio::test]
     async fn pool_samples_follow_acquisition_and_release() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -5499,10 +5501,19 @@ mod pool_stats_tests {
         assert_eq!(busy.max, 3);
         assert_eq!(busy.in_use, 1);
         drop(connection);
-        // sqlx returns connections to the idle queue asynchronously.
-        pool.acquire().await.unwrap().close().await.unwrap();
+        // sqlx hands a dropped connection back from a task it spawns, so the
+        // sample only settles a few scheduler turns later. Wait for the settled
+        // state instead of reading it straight after the drop.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while service.pool_stats().in_use != 0 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the released connection is still reported in use: {:?}",
+                service.pool_stats()
+            );
+            tokio::task::yield_now().await;
+        }
         let stats = service.pool_stats();
-        assert_eq!(stats.in_use, 0);
         assert!(stats.idle + stats.in_use <= stats.max);
     }
 }
