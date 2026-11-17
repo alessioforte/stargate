@@ -15,3 +15,5 @@ NOTE.md
 /certificate
 
 users.csv
+
+__pycache__/

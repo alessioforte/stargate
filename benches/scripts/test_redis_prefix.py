@@ -19,6 +19,8 @@ import time
 import urllib.error
 import urllib.request
 
+from redis_fixtures import write_transactional_templates
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -61,6 +63,7 @@ def main():
         redis_cmd('CONFIG', 'RESETSTAT')
         with tempfile.TemporaryDirectory(prefix='redis-prefix-test-') as directory:
             folder = Path(directory)
+            write_transactional_templates(folder)
             # Run outside the checkout so dotenv never reads the operator's .env.
             env = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'RUSTUP_HOME', 'CARGO_HOME') if key in os.environ}
             with socket.socket() as sock:
