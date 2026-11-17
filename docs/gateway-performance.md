@@ -214,27 +214,27 @@ There is no cluster throughput claim here.
 (`src/gate/tests/paths.rs`): it creates a real user, native session, cached API
 key and first-party OAuth access token in its own migrated PostgreSQL database,
 stores its session in Redis, serves the gateway on localhost, and measures one
-request path at a time. The script starts disposable `redis:latest` and
-`postgres:17-alpine` containers on localhost, runs the workload with the
+request path at a time. The script starts disposable `redis:8.10-alpine` and
+`postgres:17` containers on localhost from index digests pinned in the script, so
+every host pulls its own native platform manifest, runs the workload with the
 application's own store and database settings, and removes its containers; it
 never reads `.env` or a deployment database.
 
-Recorded 2026-11-17 from `09a38e4`, on the machine above (Apple M1 Pro, 10 CPUs,
-16 GiB, macOS 27.2.1), Rust 1.99.1, release `cluster` build. The local
-`redis:latest` (`sha256:cbe38bd4d562`) and `postgres:17-alpine`
-(`sha256:6b75136145dd`) images are `linux/amd64` on this arm64 host, so both
-backends run emulated. Sixteen closed-loop clients for five seconds, median of
-three runs. Responses are `direct_response` 200 without a body, so upstream work
-is excluded; client, gateway, PostgreSQL and Redis share the machine.
+Recorded 2026-11-17 from `8690dfa`, on the machine above (Apple M1 Pro, 10 CPUs,
+16 GiB, macOS 27.2.1), Rust 1.99.1, release `cluster` build, with both backends
+running natively (`sha256:71885d8cc6e4` and `sha256:3b0cda93be7c` index digests).
+Sixteen closed-loop clients for five seconds, median of three runs. Responses are
+`direct_response` 200 without a body, so upstream work is excluded; client,
+gateway, PostgreSQL and Redis share the machine.
 
 | Path | Successful requests/s | Body p50 / p95 / p99, ms | Redis round trips per request | Redis commands per request |
 | --- | ---: | --- | ---: | ---: |
-| `anonymous` | 10,643 | 1.45 / 2.00 / 2.74 | 2 | 8 |
-| `api_key` | 7,644 | 2.03 / 2.70 / 3.61 | 3 | 9 |
-| `session` | 5,955 | 2.62 / 3.42 / 4.38 | 4 | 10 |
-| `oauth` | 2,509 | 6.03 / 8.13 / 10.82 | 6 | 12 |
-| `rate_limit` | 10,681 | 1.45 / 1.99 / 2.76 | 2 | 8 |
-| `quota` | 7,556 | 2.06 / 2.71 / 3.70 | 3 | 13 |
+| `anonymous` | 10,446 | 1.48 / 2.05 / 2.77 | 2 | 8 |
+| `api_key` | 7,548 | 2.06 / 2.73 / 3.58 | 3 | 9 |
+| `session` | 5,988 | 2.61 / 3.35 / 4.28 | 4 | 10 |
+| `oauth` | 2,719 | 5.73 / 7.18 / 9.19 | 6 | 12 |
+| `rate_limit` | 10,009 | 1.50 / 2.18 / 3.13 | 2 | 8 |
+| `quota` | 7,272 | 2.12 / 2.94 / 4.23 | 3 | 13 |
 
 Round trips are counted client-side by the store command accounting behind
 `stargate.store.redis.commands_per_request`. Server-side commands also include
@@ -258,7 +258,7 @@ subject rate check (two round trips, both GCRA scripts), and then:
   `TTL`, `TIME`) on top of the default rate check.
 
 One application store read (`redis_get_1k`, a 1 KiB MessagePack subject) measured
-inside the same workload: **0.289 / 0.408 / 0.613 ms** at p50/p95/p99. At that
+inside the same workload: **0.288 / 0.393 / 0.600 ms** at p50/p95/p99. At that
 round-trip cost the two admission checks alone explain most of the p50 gap from
 the memory-store matrix (0.470 ms body p50 for `plain`): the Redis-backed gateway
 is bounded by the number of store round trips a path needs, not by its own CPU
