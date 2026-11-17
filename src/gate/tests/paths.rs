@@ -158,7 +158,7 @@ impl Fixtures {
         .await
         .unwrap();
 
-        let mut claims = oidc::claims::user_access_claims(
+        let claims = oidc::claims::user_access_claims(
             &oidc::claims::UserClaimsProfile {
                 id: user.id.clone(),
                 email: user.email.clone(),
@@ -178,8 +178,6 @@ impl Fixtures {
                 acr: oidc::authentication::ACR_SINGLE_FACTOR.to_string(),
             },
         );
-        // Issued OAuth access tokens carry a jti, so verification checks it.
-        claims.jti = Some(ulid::Ulid::generate().to_string());
         let oauth_token = session_jwt::jwt_config()
             .generate_oauth_access_token(claims)
             .unwrap();

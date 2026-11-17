@@ -247,8 +247,8 @@ subject rate check (two round trips, both GCRA scripts), and then:
 - `anonymous` adds nothing: unauthenticated credentials cost no store command.
 - `api_key` adds the cached subject `GET`. A cold key adds a PostgreSQL lookup
   and the cache `SET`; the warmup resolves it, so the row is the steady state.
-- `session` adds the subject `GET`. Native access tokens carry no `jti`, so
-  their revocation check issues no command.
+- `session` adds the revocation `EXISTS` on the token `jti` and the subject
+  `GET`.
 - `oauth` adds the revocation `EXISTS`, the session directory `EXISTS` and
   `HGET`, and the subject `GET`, plus a PostgreSQL client lookup that is not a
   Redis round trip. It is the most expensive path per request.
