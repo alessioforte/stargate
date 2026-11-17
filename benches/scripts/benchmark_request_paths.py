@@ -5,6 +5,10 @@ Starts a single Redis and PostgreSQL container on localhost, runs the ignored
 release workload `cluster_request_path_workload` (per-credential and
 per-policy Redis command counts plus latency), and writes the results with the
 machine, image and commit they belong to.
+
+Both images are pinned by their OCI index digest: every host pulls its own
+native platform manifest, so the containers run natively while their content
+stays fixed.
 """
 
 import argparse
@@ -20,8 +24,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+REDIS_IMAGE = "redis:8.10-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80"
+POSTGRES_IMAGE = "postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1"
+
+
 def output(*args: str) -> str:
     return subprocess.check_output(args, text=True).strip()
+
+
+def ensure_image(reference: str) -> None:
+    """Pull the pinned digest only when it is not already local."""
+    present = subprocess.run(
+        ["docker", "image", "inspect", reference],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if present.returncode != 0:
+        subprocess.run(["docker", "pull", reference], check=True)
 
 
 def probe(container: str, command: list[str]) -> bool:
@@ -73,9 +92,9 @@ def main() -> None:
         "commit": output("git", "-C", str(root), "rev-parse", "HEAD"),
     }
     images: list[tuple[str, int, list[str]]] = [
-        ("redis:latest", 6379, []),
+        (REDIS_IMAGE, 6379, []),
         (
-            "postgres:17-alpine",
+            POSTGRES_IMAGE,
             5432,
             [
                 "-e",
@@ -89,6 +108,7 @@ def main() -> None:
     ]
     try:
         for image, port, options in images:
+            ensure_image(image)
             name = "stargate-request-paths-" + uuid.uuid4().hex[:12]
             identifier = output(
                 "docker",
@@ -133,8 +153,8 @@ def main() -> None:
                 raise RuntimeError(f"{image} did not become ready")
         with tempfile.TemporaryDirectory(prefix="stargate-request-paths-") as directory:
             result = Path(directory) / "results.json"
-            redis_port = backends["redis:latest"]["port"]
-            postgres_port = backends["postgres:17-alpine"]["port"]
+            redis_port = backends[REDIS_IMAGE]["port"]
+            postgres_port = backends[POSTGRES_IMAGE]["port"]
             env = os.environ.copy()
             env.update(
                 {
