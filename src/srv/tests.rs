@@ -10,7 +10,7 @@ use std::{
     },
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
 
@@ -96,6 +96,13 @@ fn echo_router() -> Router {
     Router::new().fallback(|| async { "stargate" })
 }
 
+fn short_header_timeout() -> HttpSettings {
+    HttpSettings {
+        header_read_timeout: Duration::from_millis(300),
+        ..HttpSettings::default()
+    }
+}
+
 fn server_tls_config() -> Arc<rustls::ServerConfig> {
     tls::install_crypto_provider();
     let certs = CertificateDer::pem_slice_iter(crate::gate::test_support::SERVER_CERT)
@@ -141,12 +148,15 @@ async fn read_headers(stream: &mut TcpStream, within: Duration) -> String {
     String::from_utf8_lossy(&response).into_owned()
 }
 
-async fn read_until_eof(stream: &mut TcpStream, within: Duration) {
+async fn read_until_eof<R: AsyncRead + Unpin>(stream: &mut R, within: Duration) {
     let read = async {
         loop {
             let mut buffer = [0u8; 256];
-            if stream.read(&mut buffer).await.unwrap() == 0 {
-                return;
+            // A transport error is a closed connection too: dropping the socket
+            // without a TLS close_notify surfaces here.
+            match stream.read(&mut buffer).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
             }
         }
     };
@@ -217,6 +227,76 @@ async fn incomplete_request_headers_are_closed_at_the_read_timeout() {
         .await
         .unwrap();
     read_until_eof(&mut slow, Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn a_mute_connection_is_closed_at_the_first_request_timeout() {
+    let server = Server::start(
+        plain_listener(),
+        echo_router(),
+        None,
+        short_header_timeout(),
+        Duration::from_secs(1),
+    )
+    .await;
+    let mut mute = TcpStream::connect(server.address).await.unwrap();
+    read_until_eof(&mut mute, Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn a_connection_stopped_after_the_http2_preface_is_closed() {
+    let server = Server::start(
+        plain_listener(),
+        echo_router(),
+        None,
+        short_header_timeout(),
+        Duration::from_secs(1),
+    )
+    .await;
+    let mut stalled = TcpStream::connect(server.address).await.unwrap();
+    stalled.write_all(b"PRI * HTTP/2.0\r\n").await.unwrap();
+    read_until_eof(&mut stalled, Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn a_tls_connection_that_stays_silent_is_closed_at_the_first_request_timeout() {
+    let server = Server::start(
+        tls_listener(),
+        echo_router(),
+        Some(server_tls_config()),
+        short_header_timeout(),
+        Duration::from_secs(1),
+    )
+    .await;
+    let stream = TcpStream::connect(server.address).await.unwrap();
+    let connector = tokio_rustls::TlsConnector::from(client_tls_config());
+    let mut tls = connector
+        .connect(ServerName::try_from("localhost").unwrap(), stream)
+        .await
+        .unwrap();
+    read_until_eof(&mut tls, Duration::from_secs(5)).await;
+}
+
+#[tokio::test]
+async fn a_mute_connection_frees_its_slot_at_the_first_request_timeout() {
+    let server = Server::start(
+        listener(false, 1),
+        echo_router(),
+        None,
+        short_header_timeout(),
+        Duration::from_secs(1),
+    )
+    .await;
+    let mut mute = TcpStream::connect(server.address).await.unwrap();
+    read_until_eof(&mut mute, Duration::from_secs(5)).await;
+
+    let mut client = TcpStream::connect(server.address).await.unwrap();
+    client
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let response = read_headers(&mut client, Duration::from_secs(5)).await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
 }
 
 #[tokio::test]

@@ -30,7 +30,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
-    sync::{Semaphore, watch},
+    sync::{Notify, Semaphore, watch},
     task::JoinSet,
 };
 use tokio_rustls::TlsAcceptor;
@@ -46,8 +46,10 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
 /// traffic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HttpSettings {
-    /// Time a client has to send the complete request headers (HTTP/1). It
-    /// closes slowloris connections; hyper's own timer is disabled without it.
+    /// Time a client has to send the complete request headers (HTTP/1), and the
+    /// time any connection has to send its first request before the protocol is
+    /// recognized. It closes slowloris connections, mute connections, and a
+    /// client that stops after the HTTP/2 preface.
     pub header_read_timeout: Duration,
     /// Largest request header list on HTTP/2. It covers the session cookie,
     /// bearer tokens, and a normal browser's headers with headroom, and bounds
@@ -292,6 +294,7 @@ async fn serve_listener<S: Accept + Send + 'static>(
             router: router.clone(),
             peer,
             listener: Arc::clone(&info),
+            started: Arc::new(Notify::new()),
         };
         let acceptor = tls.clone();
         let mut rx = stop.clone();
@@ -342,6 +345,7 @@ async fn connection<I>(
 ) where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    let started = Arc::clone(&service.started);
     let mut builder = Builder::new(TokioExecutor::new());
     builder
         .http1()
@@ -361,6 +365,15 @@ async fn connection<I>(
     if draining {
         connection.as_mut().graceful_shutdown();
     }
+    // hyper runs its header timer only once it recognizes the protocol, so a
+    // connection that sends nothing, or stops after the HTTP/2 preface, would
+    // hold its slot forever. The deadline ends when the first request reaches
+    // the router; after that hyper's per-protocol timers take over.
+    let first_request = started.notified();
+    tokio::pin!(first_request);
+    let deadline = tokio::time::sleep(http.header_read_timeout);
+    tokio::pin!(deadline);
+    let mut requested = false;
     loop {
         tokio::select! {
             result = &mut connection => {
@@ -371,6 +384,11 @@ async fn connection<I>(
                 if changed.is_err() { return; }
                 draining = true;
                 connection.as_mut().graceful_shutdown();
+            }
+            _ = &mut first_request, if !requested => requested = true,
+            _ = &mut deadline, if !requested => {
+                debug!("No request arrived before the header read timeout");
+                return;
             }
         }
     }
@@ -383,6 +401,9 @@ struct Connection {
     router: Router,
     peer: SocketAddr,
     listener: Arc<ListenerInfo>,
+    /// Signalled when the first request reaches the router: the first-request
+    /// deadline stops there.
+    started: Arc<Notify>,
 }
 
 impl Service<Request<Incoming>> for Connection {
@@ -395,6 +416,7 @@ impl Service<Request<Incoming>> for Connection {
     }
 
     fn call(&mut self, mut request: Request<Incoming>) -> Self::Future {
+        self.started.notify_one();
         request.extensions_mut().insert(ConnectionInfo {
             peer: self.peer,
             listener: Arc::clone(&self.listener),
