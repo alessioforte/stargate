@@ -2,9 +2,10 @@
 use super::*;
 use authorization::Permission;
 use axum::{
-    Router,
+    Extension, Router,
     body::Body,
-    routing::{delete, post, put},
+    middleware::from_fn,
+    routing::{delete, get, post, put},
 };
 use db::{
     DbStore,
@@ -667,6 +668,131 @@ async fn admin_keys_cannot_control_or_create_clients_trusted_by_the_admin_api() 
             );
             assert_eq!(f.snapshot().await, before);
         }
+    })
+    .await;
+}
+
+async fn verified_api_key_subject(secret: &str) -> crate::iam::auth::subject::Subject {
+    let mut req = Request::new(Body::empty());
+    req.headers_mut()
+        .insert("x-api-key", secret.parse().expect("header value"));
+    crate::iam::auth::verification::verify_api_key(&req)
+        .await
+        .expect("valid api key")
+        .subject()
+        .expect("api key identity")
+        .clone()
+}
+
+#[tokio::test]
+async fn api_key_attribute_writes_reach_the_next_request() {
+    crate::data::db::with_test_database(async {
+        let f = Fixture::new(false).await;
+        let uri = format!("/admin/api-keys/{}/attrs", f.key.id);
+
+        // The first verification caches the subject.
+        let cached = verified_api_key_subject(&f.user_secret).await;
+        assert_eq!(cached.id, f.key.id);
+        assert_eq!(cached.org_id.as_deref(), Some(f.org_id.as_str()));
+        assert_eq!(cached.attrs, json!({}));
+
+        // A grant, a partial reduction and a full removal of the attributes
+        // must each be visible to the next request, not at the cache TTL.
+        for (method, attrs, expected) in [
+            (
+                "PUT",
+                json!({"tier": "pro", "capabilities": ["read", "write"]}),
+                json!({"tier": "pro", "capabilities": ["read", "write"]}),
+            ),
+            (
+                "PATCH",
+                json!({"tier": "basic", "capabilities": ["read"]}),
+                json!({"tier": "basic", "capabilities": ["read"]}),
+            ),
+            ("PUT", json!({}), json!({})),
+        ] {
+            let response = router()
+                .oneshot(f.request(method, &uri, json!({"attrs": attrs}), true).await)
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{method}");
+            let subject = verified_api_key_subject(&f.user_secret).await;
+            assert_eq!(subject.attrs, expected, "{method}");
+            assert_eq!(subject.org_id.as_deref(), Some(f.org_id.as_str()));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn oauth_tokens_without_a_backing_session_cannot_reach_the_admin_api() {
+    crate::data::db::with_test_database(async {
+        let f = Fixture::new(true).await;
+        let client_id = "stargate_console";
+        crate::data::db::create_oauth_client(
+            db::ent::OAuthClient::new(
+                client_id.to_string(),
+                None,
+                "Console".to_string(),
+                None,
+                "none".to_string(),
+                vec!["authorization_code".into()],
+                vec!["code".into()],
+                vec!["https://console.example.test/callback".into()],
+                vec!["openid".into()],
+                vec![],
+                json!({"first_party": true}),
+            ),
+            context(&f.actor.id),
+        )
+        .await
+        .unwrap();
+
+        let token = |sid: Option<&str>| {
+            jwt_config()
+                .generate_oauth_access_token(jwt::Claims {
+                    sub: f.target.id.clone(),
+                    sub_id: Some(f.target.id.clone()),
+                    sid: sid.map(str::to_string),
+                    azp: Some(client_id.to_string()),
+                    scope: Some("openid".into()),
+                    auth_time: Some(1),
+                    ..Default::default()
+                })
+                .unwrap()
+        };
+        let request = |token: String| async move {
+            Router::new()
+                .route("/admin/me", get(me::get_admin_me))
+                .layer(from_fn(extract_admin_authorization))
+                .layer(Extension(std::sync::Arc::new(
+                    crate::gate::test_support::gate(gate::cfg::Config::default()),
+                )))
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin/me")
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        };
+
+        // The same token reaches the control plane only through its session.
+        let response = request(token(Some(&f.sid))).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["user"]["id"], f.target.id);
+
+        let response = request(token(None)).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["code"], "auth.token_invalid");
     })
     .await;
 }

@@ -864,6 +864,10 @@ the app derived from its `return_to`; the pending signup or reset keeps the clie
 the emailed link works in another tab and after the interaction expires. Missing or
 expired interactions mean no continuation, never an error.
 
+SMTP sender and recipient addresses reject non-ASCII whitespace and control
+characters. Signup reports these addresses as `400 request.invalid`.
+A quoted local part in `SMTP_FROM` is preserved.
+
 Emails: templates come from `apps/mail/emails/*.tsx`; `npm run export` renders
 `<template>.<locale>.html` and `subjects.json` into `.stargate/transactional`
 for every supported locale (`en`, `it`). Templates and subjects are localized;

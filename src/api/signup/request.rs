@@ -201,6 +201,23 @@ mod tests {
 
     const CHILD: &str = "STARGATE_TEST_SIGNUP_ENUMERATION";
 
+    #[tokio::test]
+    async fn signup_rejects_a_non_ascii_control_in_the_email_address() {
+        let response = post_signup(
+            HeaderMap::new(),
+            Json(SignupRequestBody {
+                email: "alice\u{0085}smith@example.com".to_string(),
+                interaction_id: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(response.status, http::StatusCode::BAD_REQUEST);
+        assert_eq!(response.code, crate::err::ErrorCode::RequestInvalid);
+        assert_eq!(response.params["field"], "email");
+    }
+
     async fn send(email: &str, interaction_id: Option<&str>) -> serde_json::Value {
         let response = post_signup(
             HeaderMap::new(),
