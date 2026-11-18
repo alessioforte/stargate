@@ -128,6 +128,24 @@ struct AuthorizationResolution {
     authorization: Option<AdminAuthorization>,
 }
 
+/// The live native session behind a user-delegated OAuth access token.
+///
+/// Control-plane access requires it: a token without a `sid`, or one whose
+/// session ended, has no session whose state an administrator could act on.
+async fn oauth_session_sid(claims: &jwt::Claims) -> Option<String> {
+    let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref()) else {
+        return None;
+    };
+    match crate::iam::sess::registry::get_active_session(sid, user_id).await {
+        Ok(Some(_)) => Some(sid.to_string()),
+        Ok(None) => None,
+        Err(err) => {
+            tracing::error!("Failed to resolve backing OAuth session: {}", err);
+            None
+        }
+    }
+}
+
 async fn resolve_authorization(
     token: Option<String>,
     raw_key: Option<String>,
@@ -172,41 +190,21 @@ async fn resolve_authorization(
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None) {
             match crate::iam::auth::revocation::is_revoked(&claims).await {
                 Ok(false) => {
-                    let client_id = claims.azp.as_deref().unwrap_or_default();
-                    let user_id = claims.sub_id.as_deref();
-                    let active_session = match (claims.sid.as_deref(), user_id) {
-                        (Some(sid), Some(user_id)) => {
-                            match crate::iam::sess::registry::get_active_session(sid, user_id).await
-                            {
-                                Ok(session) => session,
-                                Err(err) => {
-                                    tracing::error!(
-                                        "Failed to resolve backing OAuth session: {}",
-                                        err
-                                    );
-                                    None
-                                }
-                            }
+                    if let Some(sid) = oauth_session_sid(&claims).await {
+                        authenticated = true;
+                        let client_id = claims.azp.as_deref().unwrap_or_default();
+                        if crate::iam::oidc::client_is_trusted_first_party(client_id).await
+                            && let Some(user_id) = claims.sub_id.as_deref()
+                            && grant_super_admin_if_allowed(user_id, Some(&sid)).await
+                        {
+                            let user_id = user_id.to_string();
+                            actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
+                            authorization = Some(AdminAuthorization::super_admin_user(
+                                user_id,
+                                AdminAuthenticationKind::OAuth,
+                                Box::new(claims),
+                            ));
                         }
-                        // Access tokens minted before stable sessions were
-                        // introduced remain valid until their normal expiry.
-                        (None, _) => None,
-                        _ => None,
-                    };
-                    authenticated = claims.sid.is_none() || active_session.is_some();
-                    let step_up_sid = claims.sid.as_deref();
-                    if crate::iam::oidc::client_is_trusted_first_party(client_id).await
-                        && authenticated
-                        && let Some(user_id) = user_id
-                        && grant_super_admin_if_allowed(user_id, step_up_sid).await
-                    {
-                        let user_id = user_id.to_string();
-                        actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
-                        authorization = Some(AdminAuthorization::super_admin_user(
-                            user_id,
-                            AdminAuthenticationKind::OAuth,
-                            Box::new(claims),
-                        ));
                     }
                 }
                 Ok(true) => {}

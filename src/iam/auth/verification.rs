@@ -1,35 +1,25 @@
+use super::identity::VerifiedIdentity;
 use crate::{iam::auth::subject::Subject, web::request::RequestExt};
-use lru::LruCache;
-use std::cell::RefCell;
-use std::num::NonZeroUsize;
 use store::Store;
 use tracing::error;
 
-const HASH_CACHE_MAX_SIZE: usize = 256;
-
-thread_local! {
-    static HASH_CACHE: RefCell<LruCache<Box<str>, Box<str>>> =
-        RefCell::new(LruCache::new(NonZeroUsize::new(HASH_CACHE_MAX_SIZE).unwrap()));
-}
-
-use super::identity::VerifiedIdentity;
-
-fn cached_hash_api_key(api_key: &str) -> String {
-    HASH_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(hash) = cache.get(api_key) {
-            return hash.to_string();
-        }
-        let hash = pw::hash_api_key(api_key);
-        cache.put(Box::from(api_key), Box::from(hash.as_str()));
-        hash
-    })
-}
+/// How long a verified API key subject stays cached.
+///
+/// Attribute and organization writes purge the entry, so the TTL only bounds
+/// the staleness of a change made outside those flows (a direct database
+/// edit). A few minutes is enough to keep the cache useful without letting a
+/// stale identity outlive a deliberate revocation by much.
+const API_KEY_SUBJECT_TTL_SECS: u64 = 300;
 
 /// Verify an API key and return its persisted or cached effective identity.
 pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedIdentity> {
     let api_key = req.get_api_key()?;
-    let hash_key = cached_hash_api_key(&api_key);
+    // Hashing costs ~0.35 us for a 46-byte key (crates/pw/benches/api_key_hash.rs),
+    // three orders of magnitude less than the subject read that follows
+    // (docs/gateway-performance.md, "Request paths with cluster backends"). A
+    // cache of cleartext keys would keep secrets, and the keys of anyone who
+    // sends one, in memory for no measurable gain.
+    let hash_key = pw::hash_api_key(&api_key);
     let store = crate::data::store::use_store();
     let session = store.get::<Subject>(&hash_key).await.unwrap_or(None);
 
@@ -51,7 +41,7 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedI
         }
 
         let subject = Subject::from(auth);
-        let ttl = Some(3600);
+        let ttl = Some(API_KEY_SUBJECT_TTL_SECS);
         match store.set(&hash_key, &subject, ttl).await {
             Ok(_) => (),
             Err(e) => {
@@ -65,16 +55,21 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedI
     None
 }
 
-/// Remove cached auth subjects for the given API key hashes. Call after
-/// revoking keys so they stop authenticating immediately instead of when
-/// the cache entry expires. Best-effort: failures are logged and the cache
+/// Drop the cached subject of one API key. Call after writing its attributes
+/// or organization so the next request reads the new state instead of waiting
+/// for the cache entry to expire. Best-effort: failures are logged and the
 /// entry dies at its TTL.
+pub async fn purge_api_key_subject(key_hash: &str) {
+    if let Err(e) = crate::data::store::use_store().delete(key_hash).await {
+        error!("Failed to purge cached api key subject: {}", e);
+    }
+}
+
+/// Drop the cached subjects of several API keys, for flows that delete keys in
+/// bulk (deleting an owner or an organization).
 pub async fn purge_api_key_subjects(key_hashes: &[String]) {
-    let store = crate::data::store::use_store();
     for hash in key_hashes {
-        if let Err(e) = store.delete(hash).await {
-            error!("Failed to purge cached api key subject: {}", e);
-        }
+        purge_api_key_subject(hash).await;
     }
 }
 

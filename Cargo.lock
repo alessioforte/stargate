@@ -2767,6 +2767,7 @@ version = "0.2.0"
 dependencies = [
  "argon2",
  "base64 0.23.1",
+ "criterion",
  "hex",
  "password-hash",
  "rand 0.10.3",

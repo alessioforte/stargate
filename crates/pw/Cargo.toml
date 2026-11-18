@@ -20,4 +20,9 @@ serde = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 serde_json = { workspace = true }
+
+[[bench]]
+name = "api_key_hash"
+harness = false
