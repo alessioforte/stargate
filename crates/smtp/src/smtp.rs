@@ -408,19 +408,27 @@ impl Smtp {
 mod tests {
     use super::{
         Locale, Smtp, SmtpError, SmtpSettings, SmtpTls, Template, TemplateValidationError,
-        subjects_path, template_path, validate_templates_at,
+        is_valid_address, subjects_path, template_path, validate_templates_at,
     };
     use std::path::{Path, PathBuf};
 
     #[test]
     fn build_rejects_invalid_recipient_email() {
-        let mut smtp = Smtp::new();
-        let result = smtp
-            .template(Template::SignupRequest)
-            .to("not-an-email".to_string())
-            .build();
+        for email in [
+            "not-an-email",
+            "alice\u{00a0}smith@example.com",
+            "alice\u{0085}smith@example.com",
+        ] {
+            assert!(!is_valid_address(email), "{email:?}");
 
-        assert!(matches!(result, Err(SmtpError::InvalidRecipient { .. })));
+            let mut smtp = Smtp::new();
+            let result = smtp.to(email.to_string()).build();
+
+            assert!(
+                matches!(result, Err(SmtpError::InvalidRecipient { .. })),
+                "{email:?}"
+            );
+        }
     }
 
     #[test]
@@ -440,6 +448,29 @@ mod tests {
             .build();
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn builds_a_message_when_the_recipient_name_contains_a_line_break() {
+        for name in ["Alice\rSmith", "Alice\nSmith"] {
+            let mut smtp = Smtp::new();
+            smtp.to("alice@example.com".to_string())
+                .name(Some(name.to_string()))
+                .subject("Verification code")
+                .html_body("<p>123456</p>")
+                .build()
+                .unwrap();
+
+            let message = smtp.message.as_ref().unwrap();
+            let [recipient] = message.envelope().to() else {
+                panic!("expected one recipient");
+            };
+            assert_eq!(recipient.to_string(), "alice@example.com");
+            assert_eq!(
+                smtp.recipient_mailbox().unwrap().to_string(),
+                r#""Alice Smith" <alice@example.com>"#
+            );
+        }
     }
 
     #[test]
