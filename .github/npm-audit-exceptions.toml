@@ -25,11 +25,14 @@
 id = "GHSA-fc5q-39xc-vjpf"
 apps = ["auth", "console"]
 reason = """
-ReDoS in picomatch, which these apps use only to build: vite 8.3.8 depends on
-picomatch ^4.0.7 (through tinyglobby and fdir) and matches glob patterns written
-in this repository, never a visitor's input. No fixed release exists: 4.0.7 is
-the latest published version, so npm proposes downgrading vite to 6.2.7. The
-package is a development dependency and is not part of the served bundles."""
+ReDoS in picomatch, which these apps use only to build: vite 8.3.8 requires
+picomatch ^4.0.7 directly and through tinyglobby (which depends on fdir and on
+picomatch itself), and the Mantine PostCSS preset reaches it too
+(postcss-preset-mantine -> postcss-mixins -> tinyglobby). It matches glob
+patterns written in this repository, never a visitor's input. No fixed release
+exists: 4.0.7 is the latest published version, so npm proposes downgrading vite
+to 6.2.7. The package is a development dependency and is not part of the served
+bundles."""
 remove_when = """
 A picomatch release that fixes this advisory is published, and the vite 8 line
 the apps build with depends on it."""
