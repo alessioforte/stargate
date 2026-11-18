@@ -133,7 +133,13 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, E
         audit_context,
     )
     .await
-    .map_err(ErrorResponse::internal)?;
+    .map_err(|error| {
+        if db::is_unique_violation(&error) {
+            ErrorResponse::new(ErrorCode::SignupUserAlreadyExists)
+        } else {
+            ErrorResponse::internal(error)
+        }
+    })?;
 
     let _ = signup::delete_signup_request(&sid).await;
     let _ = email_verification::delete_email_verification_request(&sid).await;

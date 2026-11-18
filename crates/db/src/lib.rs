@@ -47,3 +47,8 @@ pub const CONFIG_CHANNEL: &str = "stargate_config";
 /// publish) another test's rows. Insert-only tests don't need it.
 #[cfg(all(test, feature = "postgres"))]
 pub(crate) static OUTBOX_CLAIM_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Classify a database uniqueness conflict without exposing the SQL driver to callers.
+pub fn is_unique_violation(error: &anyhow::Error) -> bool {
+    matches!(error.downcast_ref::<sqlx::Error>(), Some(sqlx::Error::Database(error)) if error.is_unique_violation())
+}
