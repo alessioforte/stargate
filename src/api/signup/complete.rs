@@ -38,9 +38,11 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, E
         })?;
 
     let jwt_cfg = jwt_config();
-    let claim = jwt_cfg.validate_token(&body.token).map_err(|error| {
-        ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
-    })?;
+    let claim = jwt_cfg
+        .validate_signup_token(&body.token)
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
+        })?;
 
     if claim.sub != "signup" {
         return Err(ErrorResponse::new(ErrorCode::SignupTokenInvalid));
@@ -232,8 +234,17 @@ mod tests {
     async fn complete_signup(sid: &str) -> MessageWithContinuation {
         let claim = jwt::Claims::default()
             .subject("signup".to_string())
-            .sub_id(sid.to_string());
-        let token = jwt_config().generate_token(&claim).expect("signup token");
+            .sub_id(sid.to_string())
+            .email(
+                signup::get_signup_request(sid)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .email,
+            );
+        let token = jwt_config()
+            .generate_signup_token(claim)
+            .expect("signup token");
         let body = serde_json::json!({
             "token": token,
             "givenName": "Ada",

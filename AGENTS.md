@@ -792,6 +792,10 @@ its permit even after client cancellation. Startup precomputes the dummy hash.
 Metrics: `stargate.iam.password_hashing.active` and `.rejections`, with rejection
 attribute `stargate.operation=verify|hash|history|rehash_skipped`.
 
+Reset, signup email-verification and signup completion JWTs require separate
+purpose types (`pwd_reset`, `signup_verification`, `signup`); untyped tokens are
+rejected. Each credential token lasts one hour and carries its own `jti`.
+
 Forgot password (`POST /account/credentials`): always `200 password.reset_requested`,
 whether or not an account uses the address (only exact email matches get a link,
 never nickname/phone). The JWT and SMTP delivery run on `spawn_blocking`, so

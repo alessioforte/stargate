@@ -172,7 +172,7 @@ fn send_signup_email(email: &str, kind: SignupEmail, locale: Locale) -> anyhow::
                 .subject("signup_request".to_string())
                 .sid(sid)
                 .email(email.to_string());
-            let token = jwt_config().generate_token(&claim)?;
+            let token = jwt_config().generate_signup_verification_token(claim)?;
             (Template::SignupRequest, signup_url(&token))
         }
         SignupEmail::AccountExists => (Template::SignupAccountExists, login_url()),

@@ -35,7 +35,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
 
     let token = body.token.clone();
     let claims = jwt_config()
-        .validate_token(&token)
+        .validate_password_reset_token(&token)
         .map_err(|_| ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid))?;
 
     let email = claims
@@ -57,6 +57,10 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
+
+    if claims.sub_id.as_deref() != Some(user.id.as_str()) {
+        return Err(ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid));
+    }
 
     pwd::policy::validate_for_user(&user, &body.password).await?;
 
@@ -179,7 +183,9 @@ mod tests {
             .sub_id(user_id.to_string())
             .email(email.to_string())
             .sid(sid.to_string());
-        let token = jwt_config().generate_token(&claim).expect("reset token");
+        let token = jwt_config()
+            .generate_password_reset_token(claim)
+            .expect("reset token");
         let body = serde_json::json!({ "token": token, "password": PASSWORD });
         let request = Request::builder()
             .method(Method::PUT)
