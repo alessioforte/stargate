@@ -2,9 +2,10 @@
 use super::*;
 use authorization::Permission;
 use axum::{
-    Router,
+    Extension, Router,
     body::Body,
-    routing::{delete, post, put},
+    middleware::from_fn,
+    routing::{delete, get, post, put},
 };
 use db::{
     DbStore,
@@ -719,6 +720,79 @@ async fn api_key_attribute_writes_reach_the_next_request() {
             assert_eq!(subject.attrs, expected, "{method}");
             assert_eq!(subject.org_id.as_deref(), Some(f.org_id.as_str()));
         }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn oauth_tokens_without_a_backing_session_cannot_reach_the_admin_api() {
+    crate::data::db::with_test_database(async {
+        let f = Fixture::new(true).await;
+        let client_id = "stargate_console";
+        crate::data::db::create_oauth_client(
+            db::ent::OAuthClient::new(
+                client_id.to_string(),
+                None,
+                "Console".to_string(),
+                None,
+                "none".to_string(),
+                vec!["authorization_code".into()],
+                vec!["code".into()],
+                vec!["https://console.example.test/callback".into()],
+                vec!["openid".into()],
+                vec![],
+                json!({"first_party": true}),
+            ),
+            context(&f.actor.id),
+        )
+        .await
+        .unwrap();
+
+        let token = |sid: Option<&str>| {
+            jwt_config()
+                .generate_oauth_access_token(jwt::Claims {
+                    sub: f.target.id.clone(),
+                    sub_id: Some(f.target.id.clone()),
+                    sid: sid.map(str::to_string),
+                    azp: Some(client_id.to_string()),
+                    scope: Some("openid".into()),
+                    auth_time: Some(1),
+                    ..Default::default()
+                })
+                .unwrap()
+        };
+        let request = |token: String| async move {
+            Router::new()
+                .route("/admin/me", get(me::get_admin_me))
+                .layer(from_fn(extract_admin_authorization))
+                .layer(Extension(std::sync::Arc::new(
+                    crate::gate::test_support::gate(gate::cfg::Config::default()),
+                )))
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin/me")
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        };
+
+        // The same token reaches the control plane only through its session.
+        let response = request(token(Some(&f.sid))).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["user"]["id"], f.target.id);
+
+        let response = request(token(None)).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["code"], "auth.token_invalid");
     })
     .await;
 }
