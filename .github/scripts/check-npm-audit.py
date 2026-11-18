@@ -101,13 +101,31 @@ def load_exceptions(path=EXCEPTIONS):
     return entries
 
 
+def report_error(report):
+    """Return why npm's output is not a complete vulnerability report, or None.
+
+    An unreachable registry answers with a `message`/`error` object and no
+    vulnerabilities map: reading it as a clean report would hide the failure.
+    """
+    if not isinstance(report, dict):
+        return 'no JSON object'
+    if report.get('auditReportVersion') == 2 and isinstance(report.get('vulnerabilities'), dict) and 'error' not in report:
+        return None
+    details = (report.get('message'), json.dumps(report['error']) if 'error' in report else '')
+    return ' '.join(part for part in details if part) or 'the report has no vulnerabilities map'
+
+
 def audit_report(app_dir):
     """Run `npm audit --json`, which exits non-zero when it reports advisories."""
     result = subprocess.run(['npm', 'audit', '--json'], cwd=app_dir, capture_output=True, text=True)
     try:
-        return json.loads(result.stdout)
+        report = json.loads(result.stdout)
     except json.JSONDecodeError:
         raise SystemExit(f'npm audit produced no JSON in {app_dir}:\n{result.stderr.strip()}')
+    error = report_error(report)
+    if error:
+        raise SystemExit(f'npm audit could not be read in {app_dir}: {error}\n{result.stderr.strip()}')
+    return report
 
 
 def main(argv):

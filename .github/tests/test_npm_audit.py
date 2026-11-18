@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -13,9 +14,19 @@ spec = importlib.util.spec_from_file_location('check_npm_audit', Path(__file__).
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
-ADVISORY = 'GHSA-aaaa-bbbb-cccc'
+FIXTURES = Path(__file__).parent / 'fixtures'
+ADVISORY = 'GHSA-fc5q-39xc-vjpf'
 TODAY = datetime.date(2026, 11, 18)
 REVIEW_BY = datetime.date(2026, 12, 17)
+
+
+def fixture(name):
+    return json.loads((FIXTURES / name).read_text())
+
+
+def failed_audit():
+    """The `npm audit --json` run of a registry that cannot be reached."""
+    return subprocess.CompletedProcess(['npm', 'audit', '--json'], 1, (FIXTURES / 'npm-audit-unreachable.json').read_text(), 'npm error audit endpoint returned an error')
 
 
 def report(*advisories):
@@ -51,7 +62,8 @@ class NpmAuditTests(unittest.TestCase):
         return [(violation.rule, violation.advisory, violation.app) for violation in module.check(app, audit, lock, exceptions, today)]
 
     def test_excepted_development_advisory(self):
-        audit = report(('picomatch', ADVISORY, 'high'))
+        audit = fixture('npm-audit-auth.json')
+        self.assertTrue(any(isinstance(via, str) for vulnerability in audit['vulnerabilities'].values() for via in vulnerability['via']))
         self.assertEqual(self.check(audit, [('picomatch', True)], [self.exception()]), [])
 
     def test_unexcepted_advisory(self):
@@ -94,6 +106,26 @@ class NpmAuditTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, '1'):
                     module.main(['check-npm-audit', str(app_dir)])
         self.assertEqual(output.getvalue().strip(), f'app auth: {module.UNEXCEPTED}: {ADVISORY} (critical, picomatch)')
+
+    def test_cli_fails_when_npm_audit_cannot_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app_dir = Path(directory) / 'mail'
+            app_dir.mkdir()
+            (app_dir / 'package-lock.json').write_text(json.dumps(lockfile()))
+            with patch.object(module.subprocess, 'run', return_value=failed_audit()):
+                with self.assertRaises(SystemExit) as raised:
+                    module.main(['check-npm-audit', str(app_dir)])
+        message = str(raised.exception)
+        self.assertIn('ECONNREFUSED 127.0.0.1:9', message)
+        self.assertIn('audit endpoint returned an error', message)
+
+    def test_incomplete_reports_are_rejected(self):
+        for report in ({'message': 'request failed', 'error': {'summary': '', 'detail': ''}}, {'error': {'code': 'ENOLOCK'}}, {'auditReportVersion': 2}, {'auditReportVersion': 3, 'vulnerabilities': {}}, []):
+            with self.subTest(report=report):
+                self.assertIsNotNone(module.report_error(report))
+
+    def test_a_complete_report_is_accepted(self):
+        self.assertIsNone(module.report_error(fixture('npm-audit-auth.json')))
 
     def test_shipped_exceptions_are_complete(self):
         for exception in module.load_exceptions():
