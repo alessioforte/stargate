@@ -73,6 +73,15 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
 
     let password = pwd::hash::hash_password(body.password.clone()).await?;
 
+    // Consume the request before writing: failed or concurrent consumption must
+    // never leave a successful password change with a reusable reset link.
+    if !pwd::reset::delete_change_password_request(&email)
+        .await
+        .map_err(ErrorResponse::internal)?
+    {
+        return Err(ErrorResponse::new(ErrorCode::PasswordResetRequestInvalid));
+    }
+
     let audit_context = db::ent::TrustedAuditContext::application(
         db::ent::TrustedAuditActor::user(&user.id),
         audit_request,
@@ -84,7 +93,9 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
             ErrorResponse::new(ErrorCode::PasswordUpdateFailed)
         })?;
 
-    let _ = pwd::reset::delete_change_password_request(&email).await;
+    crate::iam::sess::registry::revoke_all_sessions(&user.id)
+        .await
+        .map_err(ErrorResponse::internal)?;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();

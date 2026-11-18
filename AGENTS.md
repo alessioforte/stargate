@@ -792,6 +792,9 @@ its permit even after client cancellation. Startup precomputes the dummy hash.
 Metrics: `stargate.iam.password_hashing.active` and `.rejections`, with rejection
 attribute `stargate.operation=verify|hash|history|rehash_skipped`.
 
+Password reset and expired-password completion consume the pending request before
+writing the new password and revoke all of the user's login sessions. Linked OAuth
+refresh families are rejected and removed when used after the session ends.
 Reset, signup email-verification and signup completion JWTs require separate
 purpose types (`pwd_reset`, `signup_verification`, `signup`); untyped tokens are
 rejected. Each credential token lasts one hour and carries its own `jti`.
