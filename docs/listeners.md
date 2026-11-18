@@ -100,17 +100,30 @@ Every listener applies the same per-connection limits:
 
 | Limit                          | Value   | Why                                                                 |
 | ------------------------------ | ------- | ------------------------------------------------------------------- |
-| Header read timeout (HTTP/1)   | 10 s    | Closes slowloris connections that never finish their headers        |
+| First request and header read  | 10 s    | Ends a connection that sends no complete request                     |
 | TLS handshake timeout          | 10 s    | A client that never completes the handshake releases its slot       |
 | HTTP/2 concurrent streams      | 100     | Bounds work per connection; clients wait or open another one        |
 | HTTP/2 header list size        | 32 KiB  | Covers cookies and bearer tokens with headroom; bounds decode work  |
 | HTTP/2 keep-alive              | 30 s / 10 s | Detects silent peers and releases their slots within 40 s       |
 | Concurrent connections         | 1024    | Bounds descriptors and tasks; the kernel backlog holds the rest     |
 
+The first-request timeout covers what hyper's own header timer cannot: it runs
+from the accepted connection (or the completed TLS handshake) until the first
+request reaches the router, so a mute connection, a client that stops after the
+HTTP/2 preface, and a slowloris connection all release their slot. It also
+applies to each HTTP/1 keep-alive connection between requests, which means an
+idle HTTP/1 connection closes after 10 s: a proxy that reuses connections to
+Stargate must keep them for less. Traefik's
+`serversTransport.forwardingTimeouts.idleConnTimeout` must stay below 10 s;
+otherwise a request can start on a connection Stargate is closing, and a
+non-idempotent request that Go does not retry can fail as `502`.
+
 `LISTENER_<NAME>_MAX_CONNECTIONS` (`MAX_CONNECTIONS` for the implicit
 listener) raises or lowers the cap per listener. A failed accept backs off for
 100 ms before retrying, so an exhausted descriptor table cannot spin a core.
-`TCP_NODELAY` is set on every accepted connection.
+`TCP_NODELAY` is set on every accepted connection. An upgraded WebSocket leaves
+the cap as soon as the upgrade completes: those connections are bounded by the
+gateway's admission (`runtime` primary and mirror slots), not by the listener.
 
 Each accepted connection carries the peer address and the listener's name,
 planes, and TLS state; rules that differ per listener read them from there

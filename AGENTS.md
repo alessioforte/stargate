@@ -216,12 +216,18 @@ addresses are literal IPs with a port, IPv6 included.
 the gateway extension, security headers, and tracing once, never per connection;
 `srv::serve` binds them all, logs each one, and runs the accept loops. TLS
 listeners share `TLS_CERT` and `TLS_KEY` and offer ALPN `h2` and `http/1.1`.
-Per connection: 10 s header read (HTTP/1) and TLS handshake timeouts, 100 HTTP/2
-concurrent streams, a 32 KiB HTTP/2 header list, a 30 s keep-alive PING with a 10 s
-timeout, `TCP_NODELAY`, and a slot from the listener's connection cap (default
-1024); a failed accept backs off 100 ms. Every request carries
-`srv::ConnectionInfo` (peer, listener name, planes, TLS) next to the legacy
-`ConnectInfo` extension. Guide: `docs/listeners.md`.
+Per connection: a 10 s first-request and header-read timeout (it also closes a
+mute connection, a client that stops after the HTTP/2 preface, and an idle HTTP/1
+keep-alive connection), a 10 s TLS handshake timeout, 100 HTTP/2 concurrent
+streams, a 32 KiB HTTP/2 header list, a 30 s keep-alive PING with a 10 s timeout,
+`TCP_NODELAY`, and a slot from the listener's connection cap (default 1024); a
+failed accept backs off 100 ms. Upgraded WebSockets leave the cap and are bounded
+by gateway admission, and a proxy that reuses connections needs an idle timeout
+below 10 s (Traefik: `serversTransport.forwardingTimeouts.idleConnTimeout`).
+Every request carries only `srv::ConnectionInfo` (peer, listener name, planes,
+TLS); handlers must not extract `ConnectInfo`, which remains only as a
+`ConnectionInfo::peer_of` fallback for tests that build requests themselves.
+Guide: `docs/listeners.md`.
 
 ### Gateway Runtime (`src/gate/`)
 
