@@ -166,12 +166,19 @@ pub async fn rotate_refresh_token(
         return Ok(false);
     };
     if current.current_jti != presented_jti {
+        revoke_session(sid).await?;
         return Ok(false);
     }
 
-    store
+    let rotated = store
         .compare_and_swap(&key, &current, &next, Some(ttl_secs))
-        .await
+        .await?;
+    // A competing rotation consumed this token too. Treat concurrent reuse the
+    // same as a replay observed before the CAS.
+    if !rotated {
+        revoke_session(sid).await?;
+    }
+    Ok(rotated)
 }
 
 /// Renew session metadata after a refresh token was successfully rotated.
@@ -690,9 +697,13 @@ mod index_tests {
                 .unwrap()
         );
 
-        let record = get_session(&sid).await.unwrap().unwrap();
-        assert_eq!(record.id, sid);
-        assert!(use_store().exists(&record.id).await.unwrap());
+        assert!(get_session(&sid).await.unwrap().is_none());
+        assert!(!use_store().exists(&sid).await.unwrap());
+        assert!(
+            !rotate_refresh_token(&sid, "jti-2", "jti-4", 60)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

@@ -378,6 +378,7 @@ under `account:session-refresh:{sid}`. The store keeps a per-user index plus the
 `account:sessions:directory` hash (sid, org, times, linked OAuth client ids).
 Removing a session invalidates linked OAuth tokens for Stargate's own checks
 (admin, userinfo, introspection, OAuth refresh). Admin endpoints list/revoke sessions.
+A native refresh-token replay revokes the entire session.
 Every function in `iam/sess/registry.rs` that ends sessions (`end_session` for a user's
 own logout, `revoke_session`, `revoke_all_sessions`, `revoke_org_sessions`) also
 notifies the linked clients through OIDC Back-Channel Logout (`iam/oidc/backchannel_logout.rs`).
