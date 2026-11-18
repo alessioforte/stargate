@@ -830,9 +830,7 @@ the emailed link works in another tab and after the interaction expires. Missing
 expired interactions mean no continuation, never an error.
 
 SMTP sender and recipient addresses reject non-ASCII whitespace and control
-characters. Signup reports these addresses as `400 request.invalid`. An
-existing account with such an address needs an address correction for email
-delivery.
+characters. Signup reports these addresses as `400 request.invalid`.
 A quoted local part in `SMTP_FROM` is preserved.
 
 Emails: templates come from `apps/mail/emails/*.tsx`; `npm run export` renders
