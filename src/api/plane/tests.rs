@@ -175,6 +175,25 @@ async fn a_listener_serves_only_the_planes_it_declares() {
     probes.stop().await;
 }
 
+#[tokio::test]
+async fn a_gateway_only_listener_forwards_the_client_path_unchanged() {
+    let upstream = Upstream::start().await;
+    let gate = Arc::new(test_support::gate(config(&upstream.url)));
+    let gateway = spawn_listener("gateway", PlaneSet::parse("gateway").unwrap(), gate).await;
+
+    // No normalisation and no IAM routes: the upstream receives the path the
+    // client sent, and the server's own routes are not served here.
+    for path in ["/assets/", "/docs/"] {
+        assert_eq!(
+            body(gateway.address, path).await,
+            format!("GET {path} 0"),
+            "{path}"
+        );
+    }
+
+    gateway.stop().await;
+}
+
 struct RunningListener {
     address: SocketAddr,
     stop: tokio::sync::oneshot::Sender<()>,
@@ -223,6 +242,25 @@ async fn spawn_listener(
         stop,
         task,
     }
+}
+
+async fn body(address: SocketAddr, path: &str) -> String {
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
+        .await
+        .expect("a response within the deadline")
+        .unwrap();
+    let response = String::from_utf8_lossy(&response);
+    let (_, body) = response.split_once("\r\n\r\n").expect("headers and a body");
+    body.to_string()
 }
 
 async fn status(address: SocketAddr, path: &str) -> u16 {
