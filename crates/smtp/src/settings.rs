@@ -344,6 +344,14 @@ mod tests {
     }
 
     #[test]
+    fn preserves_the_quoted_sender_local_part() {
+        let settings =
+            settings_from(&[("SMTP_FROM", r#"Stargate <"no reply"@example.com>"#)]).unwrap();
+
+        assert_eq!(settings.from.email.to_string(), r#""no reply"@example.com"#);
+    }
+
+    #[test]
     fn rejects_hosts_tls_cannot_verify() {
         for tls in ["starttls", "implicit"].iter() {
             for value in [
