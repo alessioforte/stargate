@@ -670,3 +670,55 @@ async fn admin_keys_cannot_control_or_create_clients_trusted_by_the_admin_api() 
     })
     .await;
 }
+
+async fn verified_api_key_subject(secret: &str) -> crate::iam::auth::subject::Subject {
+    let mut req = Request::new(Body::empty());
+    req.headers_mut()
+        .insert("x-api-key", secret.parse().expect("header value"));
+    crate::iam::auth::verification::verify_api_key(&req)
+        .await
+        .expect("valid api key")
+        .subject()
+        .expect("api key identity")
+        .clone()
+}
+
+#[tokio::test]
+async fn api_key_attribute_writes_reach_the_next_request() {
+    crate::data::db::with_test_database(async {
+        let f = Fixture::new(false).await;
+        let uri = format!("/admin/api-keys/{}/attrs", f.key.id);
+
+        // The first verification caches the subject.
+        let cached = verified_api_key_subject(&f.user_secret).await;
+        assert_eq!(cached.id, f.key.id);
+        assert_eq!(cached.org_id.as_deref(), Some(f.org_id.as_str()));
+        assert_eq!(cached.attrs, json!({}));
+
+        // A grant, a partial reduction and a full removal of the attributes
+        // must each be visible to the next request, not at the cache TTL.
+        for (method, attrs, expected) in [
+            (
+                "PUT",
+                json!({"tier": "pro", "capabilities": ["read", "write"]}),
+                json!({"tier": "pro", "capabilities": ["read", "write"]}),
+            ),
+            (
+                "PATCH",
+                json!({"tier": "basic", "capabilities": ["read"]}),
+                json!({"tier": "basic", "capabilities": ["read"]}),
+            ),
+            ("PUT", json!({}), json!({})),
+        ] {
+            let response = router()
+                .oneshot(f.request(method, &uri, json!({"attrs": attrs}), true).await)
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{method}");
+            let subject = verified_api_key_subject(&f.user_secret).await;
+            assert_eq!(subject.attrs, expected, "{method}");
+            assert_eq!(subject.org_id.as_deref(), Some(f.org_id.as_str()));
+        }
+    })
+    .await;
+}
