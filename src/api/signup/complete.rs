@@ -140,16 +140,20 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, E
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
-    if let Err(e) = Smtp::new()
-        .template(smtp::Template::SignupCompleted)
-        .locale(locale)
-        .to(user.email)
-        .name(Some(format_name(&given_name, &family_name)))
-        .build()
-        .and_then(|smtp| smtp.send())
-    {
-        error!("Could not send email: {:?}", e);
-    }
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = Smtp::new()
+            .template(smtp::Template::SignupCompleted)
+            .locale(locale)
+            .to(user.email)
+            .name(Some(format_name(&given_name, &family_name)))
+            .build()
+            .and_then(|smtp| smtp.send())
+        {
+            error!("Could not send email: {:?}", e);
+        }
+    })
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     Ok(Json(match continuation {
         Some(continuation) => MessageWithContinuation::new(MessageCode::SignupCompleted)

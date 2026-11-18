@@ -100,16 +100,20 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
     let locale = user_locale(&user).unwrap_or_else(smtp::default_locale);
-    if let Err(e) = Smtp::new()
-        .template(Template::PasswordChangedNotification)
-        .locale(locale)
-        .to(user.email.clone())
-        .name(Some(format_name(&given_name, &family_name)))
-        .build()
-        .and_then(|smtp| smtp.send())
-    {
-        error!("Could not send email: {:?}", e);
-    }
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = Smtp::new()
+            .template(Template::PasswordChangedNotification)
+            .locale(locale)
+            .to(user.email.clone())
+            .name(Some(format_name(&given_name, &family_name)))
+            .build()
+            .and_then(|smtp| smtp.send())
+        {
+            error!("Could not send email: {:?}", e);
+        }
+    })
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     Ok(Json(match continuation {
         Some(continuation) => MessageWithContinuation::new(MessageCode::PasswordChanged)
