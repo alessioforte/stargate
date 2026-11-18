@@ -214,7 +214,7 @@ fn normalized(router: Router) -> Router {
     )
 }
 
-/// The URI the client sent, before the IAM plan trimmed a trailing slash for
+/// The URI the client sent, before the IAM plane trimmed a trailing slash for
 /// matching.
 #[derive(Clone)]
 struct ClientUri(http::Uri);
