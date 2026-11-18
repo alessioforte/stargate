@@ -415,6 +415,10 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
         .await
         .map_err(ErrorResponse::internal)?;
 
+    // Attributes feed access control, limits and quota: a reduction must
+    // reach the next request, not the cache TTL.
+    crate::iam::auth::verification::purge_api_key_subject(&updated.key_hash).await;
+
     Ok(Json(updated).into_response())
 }
 
@@ -467,6 +471,10 @@ pub async fn patch_api_key_attrs(mut req: Request) -> Result<Response, ErrorResp
     let updated = crate::data::db::update_api_key(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
+
+    // Attributes feed access control, limits and quota: a reduction must
+    // reach the next request, not the cache TTL.
+    crate::iam::auth::verification::purge_api_key_subject(&updated.key_hash).await;
 
     Ok(Json(updated).into_response())
 }
