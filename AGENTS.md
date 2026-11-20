@@ -436,9 +436,18 @@ linked user OAuth/OIDC tokens. The subject lives under `{s:<sid>}:subject` and
 native refresh rotation stores the current `jti` under `{s:<sid>}:refresh`
 (`store::keys::session`). The store keeps a per-user index plus the
 `{g}:sessions` directory hash (sid, org, times, linked OAuth client ids).
-Removing a session invalidates linked OAuth tokens for Stargate's own checks
-(admin, userinfo, introspection, OAuth refresh). Admin endpoints list/revoke sessions.
-A native refresh-token replay revokes the entire session.
+User-delegated OAuth access tokens need a `sid` for a live session owned by the
+token's `sub_id` on the admin API, profile, UserInfo, introspection, and gateway.
+Client-credentials tokens are sessionless. OAuth refresh requires the family's
+live session. Admin endpoints list and revoke sessions, and a native refresh-token
+replay revokes the entire session.
+
+After an attribute, profile, or membership write commits, IAM rebuilds each active
+session's stored `Subject` from SQL, keeping its org and reading the current role.
+Sessions acting in a removed organization are revoked. Native refresh extends
+the subject's TTL and OAuth refresh leaves its value and TTL alone. Post-commit
+errors are logged. A failed update can leave the subject stale until a successful
+update or the session ends.
 Every function in `iam/sess/registry.rs` that ends sessions (`end_session` for a user's
 own logout, `revoke_session`, `revoke_all_sessions`, `revoke_org_sessions`) also
 notifies the linked clients through OIDC Back-Channel Logout (`iam/oidc/backchannel_logout.rs`).

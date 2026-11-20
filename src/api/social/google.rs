@@ -96,13 +96,13 @@ pub(super) async fn sign_in(
     if user.picture.is_none()
         && let Some(picture) = google_user.picture.clone()
     {
-        let updated = user.clone().picture(Some(picture));
-        crate::data::db::update_user(updated, audit_context)
+        let updated = user.picture(Some(picture));
+        return crate::iam::user::profile::update_user(updated, audit_context)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to update Google OAuth user picture: {}", e);
                 ErrorResponse::new(ErrorCode::SystemInternal)
-            })?;
+            });
     }
     Ok(user)
 }

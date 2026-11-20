@@ -133,8 +133,10 @@ async fn verify_oauth_claims(
         return Ok(None);
     }
 
-    let session = crate::iam::sess::registry::get_active_session(sid, user_id).await?;
-    if !session.is_some_and(|session| session.client_ids.iter().any(|linked| linked == client_id)) {
+    let Some(session) = crate::iam::sess::registry::active_token_session(&claims).await? else {
+        return Ok(None);
+    };
+    if !session.client_ids.iter().any(|linked| linked == client_id) {
         return Ok(None);
     }
     let subject = crate::data::store::use_store()

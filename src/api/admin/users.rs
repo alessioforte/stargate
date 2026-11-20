@@ -602,7 +602,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     .attrs(existing.attrs.clone());
     updated.id = existing.id;
 
-    let user = crate::data::db::update_user(updated, ctx)
+    let user = crate::iam::user::profile::update_user(updated, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -664,7 +664,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
         existing.phone_number = payload.phone_number.clone();
     }
 
-    let user = crate::data::db::update_user(existing, ctx)
+    let user = crate::iam::user::profile::update_user(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -703,7 +703,7 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
 
     existing.attrs = payload.attrs.clone();
 
-    let user = crate::data::db::update_user(existing, ctx)
+    let user = crate::iam::user::profile::update_user(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -752,7 +752,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
 
     super::limit_attrs::validate(&runtime.core.limiter, &existing.attrs, false)?;
 
-    let user = crate::data::db::update_user(existing, ctx)
+    let user = crate::iam::user::profile::update_user(existing, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -953,6 +953,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
     crate::data::db::add_user_to_organization(&user_id, &org_id, &role, mutation, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
+    crate::iam::sess::registry::refresh_user_subjects(&user_id).await;
 
     Ok(Json(MessageResponse::new(MessageCode::UserAddedToOrganization)).into_response())
 }
@@ -1006,12 +1007,8 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
     // The membership is gone: org-bound keys were revoked in the same
     // transaction (purge their cached subjects), and sessions acting in
     // this org die now. Org-less and other-org sessions survive.
-    let key_revocations =
-        crate::iam::auth::verification::purge_revoked_api_keys(&revoked_key_hashes).await;
-    let session_revocations =
-        crate::iam::sess::registry::revoke_org_sessions(&user_id, &org_id).await;
-    session_revocations?;
-    key_revocations?;
+    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
+    crate::iam::sess::registry::membership_removed(&user_id, &org_id).await;
 
     Ok(Json(MessageResponse::new(
         MessageCode::UserRemovedFromOrganization,
