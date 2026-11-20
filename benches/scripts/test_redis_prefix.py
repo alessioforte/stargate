@@ -57,7 +57,7 @@ def main():
             time.sleep(.2)
         else:
             raise AssertionError('fixture startup timeout')
-        assert redis_cmd('ACL', 'SETUSER', 'stargate', 'reset', 'on', 'nopass', '~stargate:*', '~audit.raw', '+@all', '-@admin', '-@dangerous') == '"OK"'
+        assert redis_cmd('ACL', 'SETUSER', 'stargate', 'reset', 'on', 'nopass', '~tenant:stargate:v1:*', '~audit.raw', '+@all', '-@admin', '-@dangerous') == '"OK"'
         redis_cmd('XGROUP', 'CREATE', 'audit.raw', 'redis-prefix-test', '0', 'MKSTREAM')
         redis_cmd('ACL', 'LOG', 'RESET')
         redis_cmd('CONFIG', 'RESETSTAT')
@@ -69,7 +69,7 @@ def main():
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
-            env.update(CONFIG_PATH=directory, POSTGRES_ENDPOINT=f'127.0.0.1:{pg_port}', POSTGRES_USERNAME='postgres', POSTGRES_PASSWORD='', POSTGRES_DATABASE='postgres', POSTGRES_CREATE_DATABASE='false', POSTGRES_SSLMODE='disable', REDIS_URL=f'redis://127.0.0.1:{redis_port}', REDIS_USERNAME='stargate', REDIS_PASSWORD='', REDIS_KEY_PREFIX='stargate:', MFA_MODE='off', JWT_ALGORITHM='HS256', JWT_SECRET=secrets.token_urlsafe(48), JWT_ISSUER=f'http://127.0.0.1:{port}', PORT=str(port), LOG_FORMAT='json', AUDIT_REDIS_STREAM='audit.raw', AUDIT_STREAM_CONSUMER_GROUPS='redis-prefix-test', OTEL_ENABLED='false', SERVER_DRAIN_DELAY_SECS='0', REDIS_PREFIX_TEST_URL=f'redis://stargate@127.0.0.1:{redis_port}')
+            env.update(CONFIG_PATH=directory, POSTGRES_ENDPOINT=f'127.0.0.1:{pg_port}', POSTGRES_USERNAME='postgres', POSTGRES_PASSWORD='', POSTGRES_DATABASE='postgres', POSTGRES_CREATE_DATABASE='false', POSTGRES_SSLMODE='disable', REDIS_URL=f'redis://127.0.0.1:{redis_port}', REDIS_USERNAME='stargate', REDIS_PASSWORD='', REDIS_KEY_PREFIX='tenant:', MFA_MODE='off', JWT_ALGORITHM='HS256', JWT_SECRET=secrets.token_urlsafe(48), JWT_ISSUER=f'http://127.0.0.1:{port}', PORT=str(port), LOG_FORMAT='json', AUDIT_REDIS_STREAM='audit.raw', AUDIT_STREAM_CONSUMER_GROUPS='redis-prefix-test', OTEL_ENABLED='false', SERVER_DRAIN_DELAY_SECS='0', REDIS_PREFIX_TEST_URL=f'redis://stargate@127.0.0.1:{redis_port}')
             (folder / 'config.yaml').write_text('''schema: stargate/v1
 ingress:
   limit: ingress
@@ -144,7 +144,10 @@ http:
                     time.sleep(.1)
                 else:
                     raise AssertionError('relay did not publish audit.raw')
-                # Exercise all store operations and every Lua limiter under the same ACL.
+                # The crate suites that need no live Redis, then the ignored
+                # operations against the isolated instance under the same ACL.
+                result = subprocess.run(['cargo', 'test', '-p', 'store', '-p', 'lim', '--features', 'redis', '--locked', '--offline'], cwd=ROOT, env=env, capture_output=True, text=True)
+                assert result.returncode == 0, 'Redis crate tests failed: ' + result.stdout + result.stderr
                 result = subprocess.run(['cargo', 'test', '-p', 'store', '-p', 'lim', '--features', 'redis', '--locked', '--offline', '--test', 'redis_prefix', '--', '--ignored'], cwd=ROOT, env=env, capture_output=True, text=True)
                 assert result.returncode == 0, 'Redis prefix integration tests failed: ' + result.stdout + result.stderr
                 result = subprocess.run(['cargo', 'test', '--no-default-features', '--features', 'cluster', '--locked', '--offline', '--bin', 'stargate', 'credential_security::credential_flows', '--', '--ignored'], cwd=ROOT, env=env, capture_output=True, text=True)
@@ -156,8 +159,11 @@ http:
                 commands = sorted(line.split(':', 1)[0].removeprefix('cmdstat_') for line in stats.splitlines() if line.startswith('cmdstat_'))
                 keys = json.loads(redis_cmd('KEYS', '*'))
                 assert 'audit.raw' in keys
-                assert 'stargate:audit.raw' not in keys
-                assert all(key == 'audit.raw' or key.startswith('stargate:') for key in keys)
+                assert 'tenant:audit.raw' not in keys
+                assert all(
+                    key == 'audit.raw' or key.startswith('tenant:stargate:v1:')
+                    for key in keys
+                ), keys
                 print('PASS: login, refresh, revoke, fail-closed gateway limiter, all Lua limiters, relay; zero NOPERM; all state keys prefixed, audit.raw unchanged.')
                 print('Observed Redis commands (including fixture diagnostics): ' + ', '.join(commands))
     finally:
