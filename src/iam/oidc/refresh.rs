@@ -73,7 +73,7 @@ mod tests {
         let sid = ulid::Ulid::generate().to_string();
         use store::Store;
         crate::data::store::use_store()
-            .set(&sid, &true, Some(60))
+            .set(&store::keys::session::subject(&sid), &true, Some(60))
             .await
             .unwrap();
         crate::iam::sess::registry::register_session(

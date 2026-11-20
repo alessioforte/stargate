@@ -2,15 +2,14 @@
 //!
 //! The small subset of `organizations.attrs` the gateway needs on the hot
 //! path — the org's named limit overrides — cached in the store under
-//! `org:ctx:{org_id}` with a short TTL. Admin org mutations delete the key
-//! (see [`invalidate`]) so attr changes propagate on the next request
-//! instead of waiting out the TTL.
+//! `stargate:v1:{org:<org_id>}:limit-overrides` with a short TTL. Admin org
+//! mutations delete the key (see [`invalidate`]) so attr changes propagate on
+//! the next request instead of waiting out the TTL.
 
 use crate::data::store::use_store;
 use serde::{Deserialize, Serialize};
 use store::Store;
 
-const ORG_CTX_PREFIX: &str = "org:ctx";
 const ORG_CTX_TTL_SECS: u64 = 60;
 
 /// Named limit overrides from org attrs, mirroring the subject-attrs
@@ -24,7 +23,7 @@ pub struct OrgLimitOverrides {
 }
 
 fn ctx_key(org_id: &str) -> String {
-    format!("{ORG_CTX_PREFIX}:{org_id}")
+    store::keys::limits::org_overrides(org_id)
 }
 
 /// Extract the gateway-relevant subset from org attrs. Accepts snake_case

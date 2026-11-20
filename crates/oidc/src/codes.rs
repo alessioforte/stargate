@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use store::Store;
 
-const CODE_KEY_PREFIX: &str = "oauth:authorization-code:";
 /// How long a redeemed code is remembered, so a replay can still be detected
 /// and the tokens it issued revoked (RFC 6749 §4.1.2). Matches the code TTL.
 const REDEEMED_MARKER_TTL_SECS: u64 = crate::scopes::AUTHORIZATION_CODE_TTL_SECS as u64;
@@ -49,7 +48,7 @@ pub enum CodeLookup {
 }
 
 pub fn code_key(code_hash: &str) -> String {
-    format!("{CODE_KEY_PREFIX}{code_hash}")
+    store::keys::oauth::authorization_code(code_hash)
 }
 
 pub fn authorization_code() -> String {

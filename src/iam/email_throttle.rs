@@ -9,10 +9,8 @@
 //! last counted request even while a flood continues.
 
 use crate::err::{ErrorCode, ErrorResponse};
-use sha2::{Digest, Sha256};
 use store::AtomicStore;
 
-const KEY_PREFIX: &str = "account:email:recipient";
 const WINDOW_SECS: u64 = 60 * 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,15 +70,10 @@ pub async fn check_and_record_email_request(
     Ok(())
 }
 
-/// Case and surrounding whitespace never select another bucket. The address is
-/// hashed: keys stay bounded and the store holds no recipient addresses.
+/// Case and surrounding whitespace never select another bucket. The schema
+/// hashes the address, so keys stay bounded and hold no recipient addresses.
 fn recipient_key(flow: EmailFlow, email: &str) -> String {
-    let digest = Sha256::digest(db::ent::canonical_email(email).as_bytes());
-    let hex = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("{KEY_PREFIX}:{}:{hex}", flow.name())
+    store::keys::account::email_throttle(flow.name(), &db::ent::canonical_email(email))
 }
 
 fn rate_limited() -> ErrorResponse {
@@ -100,7 +93,8 @@ mod tests {
             key,
             recipient_key(EmailFlow::PasswordReset, "  victim@EXAMPLE.COM ")
         );
-        assert!(key.starts_with("account:email:recipient:password_reset:"));
+        assert!(key.starts_with("stargate:v1:{em:"));
+        assert!(key.ends_with("}:email:password_reset"));
         assert!(!key.contains("example"));
         assert_ne!(key, recipient_key(EmailFlow::Signup, "victim@example.com"));
         assert_ne!(

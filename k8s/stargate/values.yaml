@@ -184,8 +184,10 @@ runtimeConfig:
   annotations: {}
   data:
     LOG_FORMAT: json
-    # Literal Redis state namespace; empty preserves existing deployments.
-    # Set stargate: for ACL ~stargate:*; AUDIT_REDIS_STREAM stays independent.
+    # State keys already start with the stargate:v1: schema root; the empty
+    # default needs ACL ~stargate:v1:* ~audit.raw. A literal prefix such as
+    # tenant: precedes that root and needs ~tenant:stargate:v1:*; braces are
+    # rejected. See docs/redis-keys.md. AUDIT_REDIS_STREAM stays independent.
     REDIS_KEY_PREFIX: ""
 
 # JWT signing keys. Edge keeps them on the PVC (generated as RS256 on first

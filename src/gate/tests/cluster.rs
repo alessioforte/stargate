@@ -225,14 +225,20 @@ async fn cluster_gateway_redis_integration() {
     drop(occupied);
     assert!(
         state
-            .get_i64(&format!("{namespace}:ingress:ip:203.0.113.40"))
+            .get_i64(&format!(
+                "{}:{namespace}",
+                store::keys::limits::ingress("203.0.113.40")
+            ))
             .await
             .unwrap()
             .is_none()
     );
 
     // A real Redis type error fails closed; restoring the key restores service.
-    let corrupt = format!("{namespace}:ingress:ip:203.0.113.50");
+    let corrupt = format!(
+        "{}:{namespace}",
+        store::keys::limits::ingress("203.0.113.50")
+    );
     let mut connection = state.get_connection();
     redis::cmd("LPUSH")
         .arg(&corrupt)
@@ -323,7 +329,7 @@ async fn cluster_gateway_redis_integration() {
         ("quota_tracker", json!({"limit":6,"period":"day"}), 3, 2),
     ] {
         let mut tasks = tokio::task::JoinSet::new();
-        let key = format!("{namespace}:{strategy}");
+        let key = format!("stargate:v1:{{test:{namespace}}}:{strategy}");
         let barrier = Arc::new(tokio::sync::Barrier::new(32));
         for index in 0..32 {
             let limit: gate::cfg::Limit = serde_json::from_value(

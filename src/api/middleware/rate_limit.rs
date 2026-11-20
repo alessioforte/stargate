@@ -307,14 +307,20 @@ mod tests {
         let gate = test_support::gate(config(1, 2));
         let runtime = gate.snapshot();
         for remaining in [1, 0] {
-            let decision = charge_admin_principal(&runtime, "lim:admin:key:automation")
-                .await
-                .unwrap();
+            let decision = charge_admin_principal(
+                &runtime,
+                &store::keys::limits::admin_principal("key:automation"),
+            )
+            .await
+            .unwrap();
             assert_eq!(decision.unwrap().remaining, remaining);
         }
-        let error = charge_admin_principal(&runtime, "lim:admin:key:automation")
-            .await
-            .unwrap_err();
+        let error = charge_admin_principal(
+            &runtime,
+            &store::keys::limits::admin_principal("key:automation"),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.code, crate::err::ErrorCode::IamRateLimitExceeded);
         let response = axum::response::IntoResponse::into_response(error);
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
@@ -323,9 +329,12 @@ mod tests {
 
         // The exhausted automation key does not affect the console user, and
         // neither touches the per-IP ingress allowance.
-        charge_admin_principal(&runtime, "lim:admin:user:console")
-            .await
-            .unwrap();
+        charge_admin_principal(
+            &runtime,
+            &store::keys::limits::admin_principal("user:console"),
+        )
+        .await
+        .unwrap();
         let ingress = runtime
             .core
             .limiter

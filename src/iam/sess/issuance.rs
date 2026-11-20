@@ -62,7 +62,7 @@ pub async fn start_user_session(
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
     store
-        .set(&sid, &subject, Some(sttl))
+        .set(&store::keys::session::subject(&sid), &subject, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
     if let Err(error) = registry::register_session(
@@ -78,7 +78,7 @@ pub async fn start_user_session(
     )
     .await
     {
-        let _ = store.delete(&sid).await;
+        let _ = store.delete(&store::keys::session::subject(&sid)).await;
         return Err(ErrorResponse::internal(error));
     }
 

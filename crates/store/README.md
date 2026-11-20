@@ -29,6 +29,7 @@ store = { path = "crates/store", features = ["redis", "compression"] }
 crates/store/
 ├── src/
 │   ├── lib.rs              # Public re-exports (feature-gated)
+│   ├── keys.rs             # Canonical state-key schema shared by every crate
 │   ├── store.rs            # Store + AtomicStore traits
 │   ├── error.rs            # StoreError enum + StoreResult<T>
 │   ├── memory/
@@ -65,6 +66,19 @@ Values are serialized to/from **MessagePack** (`rmp-serde`) in both backends.
 Mixing types on the same key returns `StoreError::TypeMismatch`.
 
 ---
+
+## State key schema
+
+`store::keys` is the only place that names application state. Every logical key
+is `stargate:v1:{<entity>}:<name>[:<qualifier>...]`: a versioned root, one hash
+tag per entity (keys used together share a Redis Cluster slot), and a name.
+Free-form components (emails, login identifiers, OTP subjects) are hashed into
+the tag. `RedisStore::with_key_prefix` adds the operator prefix before the root.
+
+Batch operations group their keys by tag and issue one pipeline per slot, so a
+batch spanning entities still works on a cluster instead of failing with
+`CROSSSLOT`. Audit streams are explicit names outside the schema. The full table
+lives in `docs/redis-keys.md` at the repository root.
 
 ## Store trait
 

@@ -166,7 +166,7 @@ impl Fixture {
         let sid = ulid::Ulid::generate().to_string();
         crate::data::store::use_store()
             .set(
-                &sid,
+                &store::keys::session::subject(&sid),
                 &crate::iam::auth::subject::Subject::from(target.clone()),
                 Some(3600),
             )
@@ -351,7 +351,8 @@ impl Fixture {
             "credentials":svc.get_credential(&self.target.id, CredentialType::Password).await.unwrap(),
             "audit":svc.query_outbox_events(&OutboxEventFilter::default(),1000,0).await.unwrap().into_iter().map(|row| row.payload).collect::<Vec<_>>(),
             "session":crate::iam::sess::registry::get_session(&self.sid).await.unwrap(),
-            "subject":crate::data::store::use_store().get::<Value>(&self.sid).await.unwrap(),
+            "subject":crate::data::store::use_store()
+                .get::<Value>(&store::keys::session::subject(&self.sid)).await.unwrap(),
         })
     }
 }

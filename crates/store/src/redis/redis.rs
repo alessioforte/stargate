@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use redis::AsyncCommands;
 use redis::aio::{ConnectionLike, ConnectionManager, ConnectionManagerConfig};
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -419,15 +419,17 @@ impl RedisStore {
         })
     }
 
-    /// Set the literal prefix for state keys (empty by default).
-    /// Stream methods always use the explicit stream name without this prefix.
+    /// Set the operator prefix for state keys (empty by default). It is
+    /// prepended before the `stargate:v1:` root from [`crate::keys`]; stream
+    /// methods always use the explicit stream name without it.
     pub fn with_key_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.key_prefix = prefix.into();
         self
     }
 
-    /// Convert a logical state key for raw commands and Lua scripts.
-    /// Call exactly once at the dispatch boundary; never prefix hash fields.
+    /// Convert a logical key from [`crate::keys`] for raw commands and Lua
+    /// scripts. Call exactly once at the dispatch boundary; never prefix hash
+    /// fields.
     pub fn prefixed_key<'a>(&self, key: &'a str) -> Cow<'a, str> {
         if self.key_prefix.is_empty() {
             Cow::Borrowed(key)
@@ -935,8 +937,11 @@ impl Store for RedisStore {
 // Batch operations
 // =============================================================================
 
+/// One serialized `batch_set` entry: physical key, value, TTL.
+type BatchSetOperation = (String, Vec<u8>, Option<u64>);
+
 impl RedisStore {
-    /// Batch get in a single MGET round trip - RedisStore specific.
+    /// Batch get in one MGET round trip per hash tag.
     ///
     /// Fails on the first invalid key or unreadable value.
     pub async fn batch_get<T: DeserializeValue>(
@@ -950,16 +955,20 @@ impl RedisStore {
             return Ok(Vec::new());
         }
 
+        let physical = self.physical_keys(keys);
+        let groups = group_by_slot(&physical);
         let mut con = self.pool.get();
-
-        let values: Vec<Option<Vec<u8>>> = con
-            .mget(
-                keys.iter()
-                    .map(|key| self.prefixed_key(key))
-                    .collect::<Vec<_>>(),
-            )
-            .await
-            .map_err(|e| StoreError::RedisFailed(format!("Failed to mget keys: {}", e)))?;
+        let mut values: Vec<Option<Vec<u8>>> = vec![None; keys.len()];
+        for indices in groups.values() {
+            let group_keys: Vec<&str> = indices.iter().map(|&i| physical[i].as_ref()).collect();
+            let group_values: Vec<Option<Vec<u8>>> = con
+                .mget(group_keys)
+                .await
+                .map_err(|e| StoreError::RedisFailed(format!("Failed to mget keys: {}", e)))?;
+            for (&index, value) in indices.iter().zip(group_values) {
+                values[index] = value;
+            }
+        }
 
         let mut results = Vec::with_capacity(values.len());
         for (key, value) in keys.iter().zip(values) {
@@ -980,40 +989,49 @@ impl RedisStore {
         Ok(results)
     }
 
-    /// Batch set in a single pipelined round trip - RedisStore specific.
+    /// Batch set in one pipelined round trip per hash tag.
     ///
     /// Fails on the first invalid key, zero TTL, or unserializable value.
     pub async fn batch_set<T: SerializeValue>(
         &self,
         operations: &[(&str, &T, Option<u64>)],
     ) -> StoreResult<()> {
-        let mut pipe = redis::pipe();
+        if operations.is_empty() {
+            return Ok(());
+        }
+
+        let mut groups: BTreeMap<String, Vec<BatchSetOperation>> = BTreeMap::new();
         for &(key, value, ttl) in operations {
             self.validate_key(key)?;
             if ttl == Some(0) {
                 return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
             }
             let serialized = self.serialize(value)?;
-            match ttl {
-                Some(ttl) => pipe
-                    .set_ex(self.prefixed_key(key), serialized, ttl)
-                    .ignore(),
-                None => pipe.set(self.prefixed_key(key), serialized).ignore(),
-            };
-        }
-        if operations.is_empty() {
-            return Ok(());
+            let physical = self.prefixed_key(key).into_owned();
+            groups
+                .entry(slot_key(&physical).to_string())
+                .or_default()
+                .push((physical, serialized, ttl));
         }
 
         let mut con = self.pool.get();
-        pipe.query_async::<()>(&mut con)
-            .await
-            .map_err(|e| StoreError::RedisFailed(format!("Failed to set keys: {}", e)))?;
+        for operations in groups.values() {
+            let mut pipe = redis::pipe();
+            for (key, serialized, ttl) in operations {
+                match ttl {
+                    Some(ttl) => pipe.set_ex(key, serialized, *ttl).ignore(),
+                    None => pipe.set(key, serialized).ignore(),
+                };
+            }
+            pipe.query_async::<()>(&mut con)
+                .await
+                .map_err(|e| StoreError::RedisFailed(format!("Failed to set keys: {}", e)))?;
+        }
 
         Ok(())
     }
 
-    /// Batch delete in a single pipelined round trip - RedisStore specific.
+    /// Batch delete in one pipelined round trip per hash tag.
     /// Returns whether each key existed.
     pub async fn batch_delete(&self, keys: &[&str]) -> StoreResult<Vec<bool>> {
         for key in keys {
@@ -1023,21 +1041,28 @@ impl RedisStore {
             return Ok(Vec::new());
         }
 
-        let mut pipe = redis::pipe();
-        for key in keys {
-            pipe.del(self.prefixed_key(key));
+        let physical = self.physical_keys(keys);
+        let groups = group_by_slot(&physical);
+        let mut con = self.pool.get();
+        let mut deleted = vec![false; keys.len()];
+        for indices in groups.values() {
+            let mut pipe = redis::pipe();
+            for &index in indices {
+                pipe.del(physical[index].as_ref());
+            }
+            let group_deleted: Vec<i32> = pipe
+                .query_async(&mut con)
+                .await
+                .map_err(|e| StoreError::RedisFailed(format!("Failed to delete keys: {}", e)))?;
+            for (&index, count) in indices.iter().zip(group_deleted) {
+                deleted[index] = count > 0;
+            }
         }
 
-        let mut con = self.pool.get();
-        let deleted: Vec<i32> = pipe
-            .query_async(&mut con)
-            .await
-            .map_err(|e| StoreError::RedisFailed(format!("Failed to delete keys: {}", e)))?;
-
-        Ok(deleted.into_iter().map(|n| n > 0).collect())
+        Ok(deleted)
     }
 
-    /// Batch exists in a single pipelined round trip - RedisStore specific.
+    /// Batch exists in one pipelined round trip per hash tag.
     pub async fn batch_exists(&self, keys: &[&str]) -> StoreResult<Vec<bool>> {
         for key in keys {
             self.validate_key(key)?;
@@ -1046,18 +1071,55 @@ impl RedisStore {
             return Ok(Vec::new());
         }
 
-        let mut pipe = redis::pipe();
-        for key in keys {
-            pipe.exists(self.prefixed_key(key));
-        }
-
+        let physical = self.physical_keys(keys);
+        let groups = group_by_slot(&physical);
         let mut con = self.pool.get();
-        let exists: Vec<bool> = pipe.query_async(&mut con).await.map_err(|e| {
-            StoreError::RedisFailed(format!("Failed to check existence of keys: {}", e))
-        })?;
+        let mut exists = vec![false; keys.len()];
+        for indices in groups.values() {
+            let mut pipe = redis::pipe();
+            for &index in indices {
+                pipe.exists(physical[index].as_ref());
+            }
+            let group_exists: Vec<bool> = pipe.query_async(&mut con).await.map_err(|e| {
+                StoreError::RedisFailed(format!("Failed to check existence of keys: {}", e))
+            })?;
+            for (&index, value) in indices.iter().zip(group_exists) {
+                exists[index] = value;
+            }
+        }
 
         Ok(exists)
     }
+
+    fn physical_keys<'k>(&self, keys: &[&'k str]) -> Vec<Cow<'k, str>> {
+        keys.iter().map(|key| self.prefixed_key(key)).collect()
+    }
+}
+
+/// The Redis Cluster slot unit of a key: the text between the first `{` and the
+/// following `}`. Keys without a hash tag are their own slot unit.
+fn slot_key(key: &str) -> &str {
+    let Some(open) = key.find('{') else {
+        return key;
+    };
+    let rest = &key[open + 1..];
+    match rest.find('}') {
+        Some(close) if close > 0 => &rest[..close],
+        _ => key,
+    }
+}
+
+/// Indices of `keys` grouped by slot, preserving the caller's order inside
+/// each group. One group means one command, as for keys of a single entity.
+fn group_by_slot<'a>(keys: &'a [Cow<'a, str>]) -> BTreeMap<&'a str, Vec<usize>> {
+    let mut groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (index, key) in keys.iter().enumerate() {
+        groups
+            .entry(slot_key(key.as_ref()))
+            .or_default()
+            .push(index);
+    }
+    groups
 }
 
 // =============================================================================

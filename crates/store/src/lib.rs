@@ -1,6 +1,7 @@
 mod error;
 mod store;
 
+pub mod keys;
 pub mod observe;
 
 pub use error::{StoreError, StoreResult};

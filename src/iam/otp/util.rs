@@ -1,10 +1,6 @@
 use crate::err::{ErrorCode, ErrorResponse};
 
 use super::settings::otp_settings;
-use super::{
-    MFA_CHALLENGE_KEY_PREFIX, MFA_PENDING_LOGIN_KEY_PREFIX, MFA_VERIFIED_KEY_PREFIX,
-    PASSWORDLESS_EMAIL_KEY_PREFIX,
-};
 
 pub(crate) fn normalize_email(value: &str) -> Result<String, ErrorResponse> {
     crate::iam::otp::input::trim_required(value, "email")
@@ -61,19 +57,19 @@ pub(crate) fn ttl_until(expires_at: u64, now: u64) -> u64 {
 }
 
 pub(crate) fn passwordless_email_key(challenge_id: &str) -> String {
-    format!("{PASSWORDLESS_EMAIL_KEY_PREFIX}:{challenge_id}")
+    store::keys::otp::passwordless(challenge_id)
 }
 
 pub(crate) fn pending_login_key(challenge_id: &str) -> String {
-    format!("{MFA_PENDING_LOGIN_KEY_PREFIX}:{challenge_id}")
+    store::keys::otp::pending_login(challenge_id)
 }
 
 pub(crate) fn mfa_challenge_key(user_id: &str, challenge_id: &str) -> String {
-    format!("{MFA_CHALLENGE_KEY_PREFIX}:{user_id}:{challenge_id}")
+    store::keys::otp::challenge(user_id, challenge_id)
 }
 
 pub(crate) fn mfa_verified_key(sid: &str, purpose: &str) -> String {
-    format!("{MFA_VERIFIED_KEY_PREFIX}:{sid}:{purpose}")
+    store::keys::otp::verified(sid, purpose)
 }
 
 pub(crate) fn random_challenge_id() -> Result<String, ErrorResponse> {

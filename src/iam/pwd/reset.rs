@@ -3,8 +3,6 @@ use crate::iam::oidc::continuation::LoginContinuation;
 use serde::{Deserialize, Serialize};
 use store::Store;
 
-const KEY_PREFIX: &str = "change_password_requests";
-
 /// Lifetime of a change-password request (and the reset tokens minted for it).
 pub const CHANGE_PASSWORD_REQUEST_TTL_SECS: u64 = 60 * 60;
 
@@ -25,7 +23,7 @@ pub async fn create_change_password_request(
     let store = use_store();
     let sid = ulid::Ulid::generate().to_string();
 
-    let key = format!("{}:{}", KEY_PREFIX, email);
+    let key = store::keys::account::password_reset(email);
     let request = ChangePasswordRequest {
         sid: sid.clone(),
         continuation,
@@ -44,7 +42,7 @@ pub async fn get_change_password_request(
     email: &str,
 ) -> Result<Option<ChangePasswordRequest>, store::StoreError> {
     let store = use_store();
-    let key = format!("{}:{}", KEY_PREFIX, email);
+    let key = store::keys::account::password_reset(email);
     store.get::<ChangePasswordRequest>(key.as_str()).await
 }
 
@@ -61,7 +59,7 @@ pub async fn set_continuation(
         return Ok(());
     }
     request.continuation = Some(continuation);
-    let key = format!("{}:{}", KEY_PREFIX, email);
+    let key = store::keys::account::password_reset(email);
     use_store()
         .set(
             key.as_str(),
@@ -73,6 +71,6 @@ pub async fn set_continuation(
 
 pub async fn delete_change_password_request(email: &str) -> Result<bool, store::StoreError> {
     let store = use_store();
-    let key = format!("{}:{}", KEY_PREFIX, email);
+    let key = store::keys::account::password_reset(email);
     store.delete(key.as_str()).await
 }

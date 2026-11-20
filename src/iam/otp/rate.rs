@@ -2,18 +2,15 @@ use crate::err::{ErrorCode, ErrorResponse};
 use store::AtomicStore;
 
 use super::util::otp_unavailable;
-use super::{
-    MAX_OTP_SOURCE_REQUESTS, MAX_OTP_SUBJECT_REQUESTS, OTP_REQUEST_KEY_PREFIX,
-    OTP_REQUEST_LOCKOUT_SECS,
-};
+use super::{MAX_OTP_SOURCE_REQUESTS, MAX_OTP_SUBJECT_REQUESTS, OTP_REQUEST_LOCKOUT_SECS};
 
 pub(crate) async fn check_and_record_otp_request(
     client_ip: &str,
     subject: &str,
 ) -> Result<(), ErrorResponse> {
     let store = crate::data::store::use_store();
-    let source_key = format!("{OTP_REQUEST_KEY_PREFIX}:ip:{client_ip}");
-    let subject_key = format!("{OTP_REQUEST_KEY_PREFIX}:subject:{subject}:ip:{client_ip}");
+    let source_key = store::keys::otp::request_ip(client_ip);
+    let subject_key = store::keys::otp::request_subject(subject, client_ip);
     let ttl = Some(OTP_REQUEST_LOCKOUT_SECS);
 
     let source_attempts = store

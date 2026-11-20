@@ -27,6 +27,44 @@ from pathlib import Path
 REDIS_IMAGE = "redis:8.10-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80"
 POSTGRES_IMAGE = "postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1"
 
+# Maximum Redis round trips one request may cost on each measured path.
+# docs/gateway-performance.md records the baseline these caps protect.
+ROUND_TRIP_CAPS = {
+    "anonymous": 2,
+    "rate_limit": 2,
+    "api_key": 3,
+    "quota": 3,
+    "session": 4,
+    "oauth": 6,
+}
+
+
+def enforce_round_trip_caps(
+    results: dict,
+    selected: list[str] | None = None,
+    caps: dict[str, int] = ROUND_TRIP_CAPS,
+) -> None:
+    """Fail when a selected path is missing or costs more Redis round trips.
+
+    With no `selected` list every capped path is required, so a workload that
+    stops producing a path or renames its count fails the check instead of
+    passing vacuously. Paths without a cap are ignored.
+    """
+    measured = {
+        path.get("path"): path.get("redis_round_trips")
+        for path in results.get("paths", [])
+    }
+    required = sorted(name for name in (selected or caps) if name in caps)
+    problems = []
+    for name in required:
+        value = measured.get(name)
+        if type(value) is not int:
+            problems.append(f"{name}: no integer Redis round trip count")
+        elif value > caps[name]:
+            problems.append(f"{name}: {value} > {caps[name]}")
+    if problems:
+        raise SystemExit("Redis round trips exceed the caps: " + ", ".join(problems))
+
 
 def output(*args: str) -> str:
     return subprocess.check_output(args, text=True).strip()
@@ -80,7 +118,13 @@ def main() -> None:
         default="",
         help="comma-separated subset: anonymous,api_key,session,oauth,rate_limit,quota",
     )
+    parser.add_argument(
+        "--check-round-trips",
+        action="store_true",
+        help="fail when a path exceeds its Redis round-trip cap",
+    )
     args = parser.parse_args()
+    selected = [name for name in args.scenarios.split(",") if name] or None
     root = Path(__file__).resolve().parents[2]
     containers: list[str] = []
     backends: dict[str, dict[str, str]] = {}
@@ -196,18 +240,25 @@ def main() -> None:
                 env=env,
                 check=True,
             )
+            results = json.loads(result.read_text())
             path = args.output.resolve()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
                 json.dumps(
                     {
                         "metadata": {**metadata, "backends": backends},
-                        "results": json.loads(result.read_text()),
+                        "results": results,
                     },
                     indent=2,
                 )
                 + "\n"
             )
+            if args.check_round_trips:
+                enforce_round_trip_caps(results, selected)
+            for measured in results.get("paths", []):
+                print(
+                    f"{measured['path']}: {measured['redis_round_trips']} Redis round trips"
+                )
             print(f"Results written to {path}")
     finally:
         failures = []

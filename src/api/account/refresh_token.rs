@@ -45,7 +45,7 @@ pub async fn put_refresh_token(
 
     let store = crate::data::store::use_store();
     let session = store
-        .get::<Subject>(&sid)
+        .get::<Subject>(&store::keys::session::subject(&sid))
         .await
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
@@ -138,7 +138,7 @@ pub async fn put_refresh_token(
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
     store
-        .set(&sid, &subject, Some(sttl))
+        .set(&store::keys::session::subject(&sid), &subject, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
 

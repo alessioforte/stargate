@@ -2,7 +2,8 @@
 Token Bucket Rate Limiter
 using Redis TIME for consistent timing
 
-KEYS[1] = base key (e.g., "token_bucket:{user_id}")
+KEYS[1] = token count key
+KEYS[2] = last update key (microseconds)
 ARGV[1] = capacity (maximum tokens in bucket)
 ARGV[2] = refill_rate (tokens added per second)
 ARGV[3] = cost (tokens to consume)
@@ -11,12 +12,12 @@ ARGV[4] = ttl (key expiration in seconds)
 Returns:
 { allowed (1 or 0), remaining (tokens after operation), retry_after_ms (milliseconds until enough tokens) }
 
-The bucket stores two values:
-- {key}:tokens - current token count (as integer, scaled by 1000 for precision)
-- {key}:time - last update timestamp in microseconds
+Both keys carry the same entity hash tag, so they live in the same Redis
+Cluster slot. They are declared in KEYS instead of being derived here: a script
+may only access declared keys on a cluster node.
 ]]
-
-local base_key    = KEYS[1]
+local tokens_key  = KEYS[1]
+local time_key    = KEYS[2]
 local capacity    = tonumber(ARGV[1])
 local refill_rate = tonumber(ARGV[2])
 local cost        = tonumber(ARGV[3])
@@ -38,10 +39,6 @@ end
 if not ttl or ttl <= 0 then
     return redis.error_reply("Invalid ttl argument")
 end
-
--- Keys for storing state
-local tokens_key = base_key .. ":tokens"
-local time_key = base_key .. ":time"
 
 -- Get Redis time (seconds, microseconds)
 local time_parts = redis.call("TIME")
