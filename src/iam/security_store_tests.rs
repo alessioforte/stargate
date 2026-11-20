@@ -8,11 +8,7 @@ async fn login_guard_and_recipient_throttle_stay_closed_on_store_errors() {
         crate::data::store::init().await.unwrap();
         let throttle =
             super::auth::login_guard::LoginThrottle::for_identifier("203.0.113.1", "user");
-        assert!(
-            super::auth::login_guard::check_login_allowed(&throttle)
-                .await
-                .is_err()
-        );
+        assert!(throttle.reserve().await.is_err());
         let error = super::email_throttle::check_and_record_email_request(
             super::email_throttle::EmailFlow::PasswordReset,
             "user@example.com",

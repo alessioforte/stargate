@@ -1,111 +1,278 @@
 use crate::data::store::use_store;
-use store::{AtomicStore, Store};
+use serde::{Deserialize, Serialize};
+use store::{Store, StoreError, StoreResult};
 
-const MAX_SOURCE_ATTEMPTS: u32 = 20;
-const MAX_SUBJECT_ATTEMPTS: u32 = 5;
-const LOCKOUT_SECS: u64 = 300; // 5 minutes
+const MAX_IP_ATTEMPTS: u32 = 20;
+const MAX_SUBJECT_IP_ATTEMPTS: u32 = 5;
+const BACKOFF_THRESHOLD: u32 = 5;
+const WINDOW_MS: i64 = 300_000;
+const MAX_BACKOFF_SECS: u64 = 30;
+const MAX_CAS_ATTEMPTS: usize = 32;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoginThrottle {
-    source_key: String,
-    subject_key: String,
+struct Bucket {
+    key: String,
+    policy: Policy,
 }
+
+#[derive(Clone, Copy)]
+enum Policy {
+    FixedWindow { limit: u32 },
+    AccountBackoff,
+}
+
+pub(crate) struct LoginThrottle {
+    buckets: [Bucket; 3],
+}
+
+pub(crate) enum Admission<T> {
+    Allowed(T),
+    Limited { retry_after: u64 },
+}
+
+/// A reservation holds capacity before password verification begins. A wrong
+/// password leaves it charged; only refund a reservation that did not fail.
+#[must_use]
+pub(crate) struct LoginAttempt<'a>(Vec<Reservation<'a>>);
 
 impl LoginThrottle {
-    pub fn for_user(client_ip: &str, user_id: &str) -> Self {
+    pub(crate) fn for_user(client_ip: &str, user_id: &str) -> Self {
+        Self::new(client_ip, |ip| {
+            store::keys::account::login_user(user_id, ip)
+        })
+    }
+
+    pub(crate) fn for_identifier(client_ip: &str, identifier: &str) -> Self {
+        Self::new(client_ip, |ip| {
+            store::keys::account::login_identifier(identifier, ip)
+        })
+    }
+
+    fn new(client_ip: &str, subject_key: impl Fn(Option<&str>) -> String) -> Self {
         Self {
-            source_key: source_key(client_ip),
-            subject_key: user_key(client_ip, user_id),
+            buckets: [
+                Bucket {
+                    key: store::keys::account::login_ip(client_ip),
+                    policy: Policy::FixedWindow {
+                        limit: MAX_IP_ATTEMPTS,
+                    },
+                },
+                Bucket {
+                    key: subject_key(Some(client_ip)),
+                    policy: Policy::FixedWindow {
+                        limit: MAX_SUBJECT_IP_ATTEMPTS,
+                    },
+                },
+                Bucket {
+                    key: subject_key(None),
+                    policy: Policy::AccountBackoff,
+                },
+            ],
         }
     }
 
-    pub fn for_identifier(client_ip: &str, identifier: &str) -> Self {
-        Self {
-            source_key: source_key(client_ip),
-            subject_key: identifier_key(client_ip, identifier),
+    pub(crate) async fn reserve(&self) -> StoreResult<Admission<LoginAttempt<'_>>> {
+        let store = use_store();
+        let mut attempt = LoginAttempt(Vec::with_capacity(self.buckets.len()));
+        // IP and account have different Redis slots. Each bucket enforces its
+        // own limit atomically. Only verify once every reservation succeeds.
+        for bucket in &self.buckets {
+            match bucket.reserve(store).await {
+                Ok(Admission::Allowed(reservation)) => attempt.0.push(reservation),
+                Ok(Admission::Limited { retry_after }) => {
+                    attempt.refund().await;
+                    return Ok(Admission::Limited { retry_after });
+                }
+                Err(error) => {
+                    attempt.refund().await;
+                    return Err(error);
+                }
+            }
+        }
+        Ok(Admission::Allowed(attempt))
+    }
+}
+
+impl LoginAttempt<'_> {
+    pub(crate) async fn refund(self) {
+        for reservation in self.0.into_iter().rev() {
+            if let Err(error) = reservation.refund(use_store()).await {
+                tracing::warn!(%error, "login attempt refund failed");
+            }
         }
     }
 }
 
-pub async fn check_login_allowed(throttle: &LoginThrottle) -> Result<bool, store::StoreError> {
-    let source_attempts = read_attempts(&throttle.source_key).await?;
-    if source_attempts >= MAX_SOURCE_ATTEMPTS {
-        return Ok(false);
+#[derive(Clone, Copy, Serialize, Deserialize)]
+struct Attempts {
+    generation: [u8; 16],
+    count: u32,
+    last_reserved_at: i64,
+    expires_at: i64,
+}
+
+impl Attempts {
+    fn new(now: i64) -> Self {
+        Self {
+            generation: ulid::Ulid::generate().to_bytes(),
+            count: 0,
+            last_reserved_at: now,
+            expires_at: now + WINDOW_MS,
+        }
     }
 
-    let subject_attempts = read_attempts(&throttle.subject_key).await?;
-    Ok(subject_attempts < MAX_SUBJECT_ATTEMPTS)
-}
-
-pub async fn record_failed_attempt(throttle: &LoginThrottle) -> Result<(), store::StoreError> {
-    let store = use_store();
-    let ttl = Some(LOCKOUT_SECS);
-
-    let _ = store.incr_i64(&throttle.source_key, 1, ttl).await?;
-    let _ = store.incr_i64(&throttle.subject_key, 1, ttl).await?;
-
-    Ok(())
-}
-
-pub async fn clear_subject_attempts(throttle: &LoginThrottle) -> Result<(), store::StoreError> {
-    let store = use_store();
-    // Keep the broader per-IP bucket so successful logins do not erase source-wide spray signals.
-    let _ = store.delete(&throttle.subject_key).await?;
-    Ok(())
-}
-
-pub fn lockout_seconds() -> u64 {
-    LOCKOUT_SECS
-}
-
-fn source_key(client_ip: &str) -> String {
-    store::keys::account::login_ip(client_ip)
-}
-
-fn user_key(client_ip: &str, user_id: &str) -> String {
-    store::keys::account::login_user(user_id, client_ip)
-}
-
-fn identifier_key(client_ip: &str, identifier: &str) -> String {
-    store::keys::account::login_identifier(identifier, client_ip)
-}
-
-async fn read_attempts(key: &str) -> Result<u32, store::StoreError> {
-    let store = use_store();
-    let attempts = store.get_i64(key).await?.unwrap_or(0);
-    Ok(saturating_attempts(attempts))
-}
-
-fn saturating_attempts(value: i64) -> u32 {
-    if value <= 0 {
-        return 0;
+    fn ttl(self, now: i64) -> Option<u64> {
+        Some(self.expires_at.abs_diff(now).div_ceil(1000))
     }
+}
 
-    u32::try_from(value).unwrap_or(u32::MAX)
+impl Policy {
+    fn decide(self, attempts: Attempts, now: i64) -> Admission<Attempts> {
+        let blocked_until = match self {
+            Self::FixedWindow { limit } if attempts.count >= limit => attempts.expires_at,
+            Self::AccountBackoff if attempts.count >= BACKOFF_THRESHOLD => {
+                let exponent = (attempts.count - BACKOFF_THRESHOLD).min(4);
+                let delay = (2_u64 << exponent).min(MAX_BACKOFF_SECS);
+                attempts.last_reserved_at + (delay * 1000) as i64
+            }
+            _ => now,
+        };
+        if blocked_until > now {
+            return Admission::Limited {
+                retry_after: blocked_until.abs_diff(now).div_ceil(1000),
+            };
+        }
+
+        let last_reserved_at = attempts.last_reserved_at.max(now);
+        let expires_at = match self {
+            Self::FixedWindow { .. } => attempts.expires_at,
+            Self::AccountBackoff => last_reserved_at + WINDOW_MS,
+        };
+        Admission::Allowed(Attempts {
+            count: attempts.count.saturating_add(1),
+            last_reserved_at,
+            expires_at,
+            ..attempts
+        })
+    }
+}
+
+struct Reservation<'a> {
+    key: &'a str,
+    generation: [u8; 16],
+}
+
+impl Bucket {
+    async fn reserve(&self, store: &impl Store) -> StoreResult<Admission<Reservation<'_>>> {
+        for _ in 0..MAX_CAS_ATTEMPTS {
+            let current = store.get::<Attempts>(&self.key).await?;
+            let now = chrono::Utc::now().timestamp_millis();
+            let attempts = current
+                .filter(|attempts| attempts.expires_at > now)
+                .unwrap_or_else(|| Attempts::new(now));
+            let next = match self.policy.decide(attempts, now) {
+                Admission::Allowed(next) => next,
+                Admission::Limited { retry_after } => {
+                    return Ok(Admission::Limited { retry_after });
+                }
+            };
+            let reserved = match current {
+                Some(current) => {
+                    store
+                        .compare_and_swap(&self.key, &current, &next, next.ttl(now))
+                        .await?
+                }
+                None => store.set_if_absent(&self.key, &next, next.ttl(now)).await?,
+            };
+            if reserved {
+                return Ok(Admission::Allowed(Reservation {
+                    key: &self.key,
+                    generation: next.generation,
+                }));
+            }
+        }
+        Err(StoreError::Timeout(
+            "login attempt reservation contention".into(),
+        ))
+    }
+}
+
+impl Reservation<'_> {
+    async fn refund(self, store: &impl Store) -> StoreResult<()> {
+        for _ in 0..MAX_CAS_ATTEMPTS {
+            let Some(current) = store.get::<Attempts>(self.key).await? else {
+                return Ok(());
+            };
+            let now = chrono::Utc::now().timestamp_millis();
+            // A delayed refund must never credit a replacement window.
+            if current.generation != self.generation || current.expires_at <= now {
+                return Ok(());
+            }
+            let next = Attempts {
+                count: current.count.saturating_sub(1),
+                ..current
+            };
+            if store
+                .compare_and_swap(self.key, &current, &next, next.ttl(now))
+                .await?
+            {
+                return Ok(());
+            }
+        }
+        Err(StoreError::Timeout(
+            "login attempt refund contention".into(),
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::LoginThrottle;
+    use super::*;
 
-    #[test]
-    fn login_throttle_for_user_uses_canonical_user_bucket() {
-        let throttle = LoginThrottle::for_user("127.0.0.1", "user_123");
+    #[cfg(feature = "memory")]
+    #[tokio::test]
+    async fn refund_cannot_credit_a_replacement_window() {
+        let store = store::MemoryStore::new();
+        let bucket = Bucket {
+            key: "login-test".into(),
+            policy: Policy::FixedWindow { limit: 1 },
+        };
+        let old = Attempts {
+            count: 1,
+            ..Attempts::new(0)
+        };
+        // Simulate an expired logical window still present in the store.
+        store.set(&bucket.key, &old, Some(60)).await.unwrap();
+        let stale = Reservation {
+            key: &bucket.key,
+            generation: old.generation,
+        };
 
-        assert_eq!(throttle.source_key, "stargate:v1:{ip:127.0.0.1}:login");
-        assert_eq!(
-            throttle.subject_key,
-            "stargate:v1:{u:user_123}:login:127.0.0.1"
-        );
+        assert!(matches!(
+            bucket.reserve(&store).await.unwrap(),
+            Admission::Allowed(_)
+        ));
+        stale.refund(&store).await.unwrap();
+        assert!(matches!(
+            bucket.reserve(&store).await.unwrap(),
+            Admission::Limited { .. }
+        ));
     }
 
     #[test]
-    fn login_throttle_for_identifier_uses_identifier_bucket() {
-        let throttle = LoginThrottle::for_identifier("127.0.0.1", "alice@example.com");
-
-        assert_eq!(throttle.source_key, "stargate:v1:{ip:127.0.0.1}:login");
-        assert!(throttle.subject_key.starts_with("stargate:v1:{id:"));
-        assert!(throttle.subject_key.ends_with("}:login:127.0.0.1"));
-        assert!(!throttle.subject_key.contains("alice"));
+    fn account_backoff_is_progressive_and_bounded() {
+        for (count, seconds) in [(5, 2), (6, 4), (7, 8), (8, 16), (9, 30), (40, 30)] {
+            let attempts = Attempts {
+                count,
+                ..Attempts::new(0)
+            };
+            let policy = Policy::AccountBackoff;
+            assert!(
+                matches!(policy.decide(attempts, 0), Admission::Limited { retry_after } if retry_after == seconds)
+            );
+            assert!(matches!(
+                policy.decide(attempts, seconds as i64 * 1000),
+                Admission::Allowed(_)
+            ));
+        }
     }
 }

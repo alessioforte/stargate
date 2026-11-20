@@ -152,6 +152,7 @@ http:
                 assert result.returncode == 0, 'Redis prefix integration tests failed: ' + result.stdout + result.stderr
                 for test in (
                     'credential_security::credential_flows',
+                    'concurrent_password_attempts_respect_login_limits',
                     'concurrent_callbacks_consume_social_state_once',
                 ):
                     result = subprocess.run(['cargo', 'test', '--no-default-features', '--features', 'cluster', '--locked', '--offline', '--bin', 'stargate', test, '--', '--ignored'], cwd=ROOT, env=env, capture_output=True, text=True)

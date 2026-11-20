@@ -32,11 +32,15 @@ fn admin_context() -> TrustedAuditContext {
 }
 
 async fn create_user() -> User {
+    create_user_with_password_hash("original-hash").await
+}
+
+async fn create_user_with_password_hash(hash: &str) -> User {
     let id = ulid::Ulid::generate().to_string();
     crate::data::db::create_user(
         Profile::new(format!("{id}@example.com"), id),
         CredentialType::Password,
-        "original-hash",
+        hash,
         None,
         TrustedAuditContext::application(
             TrustedAuditActor::anonymous(),
@@ -274,9 +278,10 @@ async fn reset_revokes_every_session(expired: bool) {
         .unwrap()
         .unwrap();
     assert!(
-        pwd::hash::verify_password(PASSWORD.to_string(), credential.value)
+        pwd::hash::check_password(PASSWORD.to_string(), credential.value)
             .await
             .unwrap()
+            .valid
     );
     assert!(
         registry::authenticated_session(Some(unaffected.access_token))
@@ -462,5 +467,152 @@ async fn credential_flows() {
         crate::data::store::init().await.unwrap();
         crate::data::db::init().await.unwrap();
         suite().await;
+    }
+}
+
+async fn assert_parallel_password_limit(distributed: bool) {
+    use crate::api::account::login::verify_login_password;
+
+    let password_hash = pwd::hash::hash_password(PASSWORD.to_string())
+        .await
+        .unwrap();
+    let user = create_user_with_password_hash(&password_hash).await;
+    let base = if distributed {
+        "2001:db8:1"
+    } else {
+        "2001:db8:2"
+    };
+    let outcomes = futures_util::future::join_all((0..16).map(|index| {
+        let user = &user;
+        async move {
+            let ip = if distributed {
+                format!("{base}::{index:x}")
+            } else {
+                format!("{base}::1")
+            };
+            // Both login names resolve to the same account.
+            let login = if index % 2 == 0 {
+                &user.email
+            } else {
+                &user.nickname
+            };
+            verify_login_password(&ip, login, "wrong-password")
+                .await
+                .unwrap_err()
+        }
+    }))
+    .await;
+
+    let mut checked = 0;
+    let mut limited = 0;
+    for error in outcomes {
+        match error.code {
+            ErrorCode::AuthInvalidCredentials => checked += 1,
+            ErrorCode::AuthLoginRateLimited => {
+                use axum::response::IntoResponse;
+                let response = error.into_response();
+                let seconds: u64 = response.headers()["retry-after"]
+                    .to_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                if distributed {
+                    assert!((1..=2).contains(&seconds));
+                } else {
+                    assert!((31..=300).contains(&seconds));
+                }
+                limited += 1;
+            }
+            other => panic!("unexpected login result: {other:?}"),
+        }
+    }
+    assert_eq!((checked, limited), (5, 11));
+}
+
+async fn assert_success_refunds_only_its_attempt() {
+    use crate::api::account::login::verify_login_password;
+
+    let password_hash = pwd::hash::hash_password(PASSWORD.to_string())
+        .await
+        .unwrap();
+    let user = create_user_with_password_hash(&password_hash).await;
+    let ip = "2001:db8:3::1";
+    for _ in 0..6 {
+        assert!(
+            verify_login_password(ip, &user.email, PASSWORD)
+                .await
+                .is_ok()
+        );
+    }
+    for _ in 0..2 {
+        assert_eq!(
+            verify_login_password(ip, &user.email, "wrong-password")
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::AuthInvalidCredentials
+        );
+    }
+    assert!(
+        verify_login_password(ip, &user.email, PASSWORD)
+            .await
+            .is_ok()
+    );
+    for _ in 0..3 {
+        assert_eq!(
+            verify_login_password(ip, &user.email, "wrong-password")
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::AuthInvalidCredentials
+        );
+    }
+    assert_eq!(
+        verify_login_password(ip, &user.email, PASSWORD)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AuthLoginRateLimited
+    );
+}
+
+async fn assert_remaining_address_allowance(ip: &str, remaining: usize) {
+    use crate::iam::auth::login_guard::{Admission, LoginThrottle};
+
+    let results = futures_util::future::join_all((0..24).map(|index| async move {
+        let throttle = LoginThrottle::for_identifier(ip, &format!("address-test-{index}"));
+        matches!(throttle.reserve().await.unwrap(), Admission::Allowed(_))
+    }))
+    .await;
+    assert_eq!(
+        results.into_iter().filter(|allowed| *allowed).count(),
+        remaining
+    );
+}
+
+async fn login_guard_suite() {
+    assert_parallel_password_limit(false).await;
+    assert_parallel_password_limit(true).await;
+    assert_success_refunds_only_its_attempt().await;
+    // Each address had five failed verifications. Successful and refused
+    // requests leave capacity for fifteen more before the source cap of twenty.
+    for ip in ["2001:db8:2::1", "2001:db8:3::1"] {
+        assert_remaining_address_allowance(ip, 15).await;
+    }
+}
+
+#[tokio::test]
+#[cfg_attr(
+    feature = "redis",
+    ignore = "requires the disposable PostgreSQL/Redis fixture"
+)]
+async fn concurrent_password_attempts_respect_login_limits() {
+    #[cfg(feature = "memory")]
+    crate::data::db::with_test_database(login_guard_suite()).await;
+    #[cfg(feature = "redis")]
+    {
+        crate::data::store::init().await.unwrap();
+        crate::data::db::init().await.unwrap();
+        login_guard_suite().await;
     }
 }

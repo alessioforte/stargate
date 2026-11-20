@@ -260,9 +260,8 @@ a denial returns `429 iam.rate_limit_exceeded`. These buckets have their own
 namespace and never share state with gateway subject, org, or ingress buckets.
 Requests without an authenticated admin principal are bounded by ingress only.
 
-Credential brute-force protection is separate from these limits: the login
-guard throttles failed logins per IP and per account, and OTP flows have their
-own request and attempt throttles. These security checks remain fail-closed on
+The [password login guard](#password-login-guard) and OTP flows enforce
+their own request and attempt throttles. These security checks remain fail-closed on
 store errors, as do JWT revocation/session checks and OAuth codes, refresh
 families and interactions. Password-reset, signup, and passwordless
 requests are also limited per recipient address, whatever the client IP
@@ -273,6 +272,35 @@ gateway page exposes the mandatory ingress limit, store-check timeout and
 `on_store_error`, as well as the failure setting for each rate/quota policy. Editing
 named objects preserves this top-level binding; when renaming/removing its
 selected limit, select an existing replacement before saving.
+
+## Password login guard
+
+The JSON login and the hosted OAuth password form share the same guard. Before
+Argon2 runs, each request reserves one attempt in every applicable bucket.
+A wrong password keeps its reservations. A correct password or a verification
+error such as hash-worker overload refunds that request's reservations.
+A denied request refunds any reservations it had already made. Outstanding
+reservations after cancellation or a failed refund expire with their buckets.
+
+- **Per source IP** allows 20 attempts in a five-minute window. The larger
+  budget accommodates several users sharing an address and limits password
+  spraying across different accounts.
+- **Per account and source IP** allows five attempts in a five-minute window.
+  This gives users a few chances to correct a password while constraining
+  repeated guesses from one address. Both fixed windows begin with the
+  first reservation.
+- **Per account across all IPs** applies a two-second pause after the fifth
+  outstanding or failed attempt, doubling after each additional attempt
+  to a maximum of 30 seconds. This slows distributed guessing while letting
+  a subsequent attempt through after each pause. The bucket expires five
+  minutes after its last reservation. Email and nickname share an account
+  bucket. Unknown login names use the same policy with their normalized
+  identifier.
+
+Rejections leave the charged attempts and their deadlines in place, so
+repeated requests during a pause do not extend it. The JSON API returns
+`429 auth.login_rate_limited` with `Retry-After` for the bucket that refused
+the request, rounded up to whole seconds.
 
 ## HTTP and WebSocket transport
 

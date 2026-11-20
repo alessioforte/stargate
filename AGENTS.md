@@ -1185,7 +1185,11 @@ credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
 the console or other keys behind the same IP. `ingress.on_store_error` governs both IAM checks: store errors/timeouts pass
 without allowance headers by default; `deny` returns `503 iam.limiter_unavailable`
 with `Retry-After: 10`. Invalid limit configuration remains `500`.
-Login brute force is handled separately by `iam/auth/login_guard.rs` and OTP throttles.
+Password verification reserves an attempt atomically in each of three buckets
+(`iam/auth/login_guard.rs`): per IP, per account and IP, and per account across IPs.
+A valid password refunds its own reservations. The account-wide bucket uses
+bounded progressive backoff. See "Password login guard" in `docs/config-v1.md`
+for defaults and retry behavior. OTP flows have their own throttles.
 
 ## Error Response Format
 
