@@ -89,7 +89,7 @@ QuotaTracker::new(store, clock, 1_000, TimeWindow::Hour);   // 1k req/hour
 
 `TimeWindow`: `Second`, `Minute`, `Hour`, `Day`, `Week`, `Month` (avg), `Year` (avg), `Custom(Duration)`. Parses from `&str` (`"minute"`, `"hours"`, etc.); unknown strings fall back to `Custom(300s)`.
 
-Key form: `{key}:{window_secs}:{window_start}` — windows rotate naturally as the timestamp advances. TTL = window + 1s.
+State is one key: the window marker and the counter are hash fields (`w:<window_secs>`, `c:<window_secs>`). The Redis script reads `TIME`, rotates the counter when the window advances and sets a TTL of window + 1s. The in-memory backend keeps one entry per window internally.
 
 ## Limiter Registry
 
@@ -107,7 +107,7 @@ if !decision.is_allowed() {
 }
 ```
 
-`Limiter::check` validates that `key` is non-empty and ≤ 256 chars. If `limiter_name` is unknown, it returns an `allowed` decision — fail-open. Override the cost via the `cost: Option<u64>` parameter (defaults to 1).
+`Limiter::check` validates that `key` is non-empty and ≤ 256 chars and appends `:{limiter_name}` so named limits never share state. An unknown `limiter_name` returns `RateLimitError::UnknownLimit` — fail closed. Override the cost via the `cost: Option<u64>` parameter (defaults to 1).
 
 ## Decision
 

@@ -57,7 +57,7 @@ stargate/
 ├── docs/              # Guides: config-v1, features, oauth-oidc-provider, oidc-conformance, multi-org,
 │                      #   password-policies, health-probes, listeners, internal-context-*, cli, docker, api errors,
 │                      #   gateway-performance (opt-in benchmarks and recorded results),
-│                      #   redis-failure-bench, production-checklist, audit-events, monitoring, sizing
+│                      #   redis-keys, redis-failure-bench, production-checklist, audit-events, monitoring, sizing
 ├── k8s/               # Kubernetes manifests
 └── benches/           # Criterion benchmarks; scripts/ has gateway, backend and Redis failure runners
 ```
@@ -144,11 +144,16 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   verified TLS for `rediss://`, public roots by default or `REDIS_CA_FILE`, and
   separate credentials without URL encoding. The store, limiter, and audit relay
   share the same pool; URL credentials cannot be combined with separate fields.
-  `REDIS_KEY_PREFIX` (empty by default) literally prefixes all state keys at the
-  store boundary, including batch/atomic operations and limiter Lua keys. Hash
-  fields are unchanged; audit stream methods use the explicit `AUDIT_REDIS_STREAM`
-  name without the prefix. Changing the prefix hides existing sessions, revocations
-  and counters; coordinate migration/draining across replicas.
+  `crates/store/src/keys.rs` owns every state-key name:
+  `stargate:v1:{<entity>}:<name>[:<qualifier>...]`. The version is part of the
+  root, every key carries one entity hash tag (co-accessed keys share it), and
+  batch operations split by tag so a Redis Cluster slot never mixes entities.
+  `REDIS_KEY_PREFIX` (empty by default) is prepended literally before that root,
+  including batch/atomic operations and limiter Lua keys. Hash fields are
+  unchanged; audit streams use the explicit `AUDIT_REDIS_STREAM` name without the
+  schema or prefix. Changing the schema version or the prefix hides existing
+  sessions, revocations and counters; coordinate migration/draining across
+  replicas. Guide: `docs/redis-keys.md`.
   A configured `REDIS_CA_FILE` requires `rediss://`; a cleartext URL fails startup.
 - `obs/`: logging (`logging/settings.rs` parses the format and sinks), and the
   telemetry provider (`telemetry/metrics.rs`, `telemetry/propagation.rs`). OTLP
@@ -408,9 +413,10 @@ Super-admins read delivery state via `GET /admin/outbox-events[/{event_id}]` (re
 ### Sessions
 
 Each login has a stable JWT `sid`, shared by native access/refresh tokens and
-linked user OAuth/OIDC tokens. Native refresh rotation stores the current `jti`
-under `account:session-refresh:{sid}`. The store keeps a per-user index plus the
-`account:sessions:directory` hash (sid, org, times, linked OAuth client ids).
+linked user OAuth/OIDC tokens. The subject lives under `{s:<sid>}:subject` and
+native refresh rotation stores the current `jti` under `{s:<sid>}:refresh`
+(`store::keys::session`). The store keeps a per-user index plus the
+`{g}:sessions` directory hash (sid, org, times, linked OAuth client ids).
 Removing a session invalidates linked OAuth tokens for Stargate's own checks
 (admin, userinfo, introspection, OAuth refresh). Admin endpoints list/revoke sessions.
 A native refresh-token replay revokes the entire session.
@@ -584,7 +590,7 @@ Endpoints:
 Provider login (one login UI, the hosted auth app):
 
 - `/oauth/authorize` without a usable session parks the request under
-  `oauth:authorize-interaction:{id}` (10 min) and redirects to
+  `{i:<id>}:authorize` (10 min) and redirects to
   `/auth/login?return_to=<issuer>/oauth/authorize?interaction={id}` (+ `login_hint`),
   setting the `oauth_interaction` cookie (`SameSite=Strict`, `Path=/oauth/login`).
 - With JS the SPA signs in via `/account/login` and follows `return_to`; a session
@@ -626,7 +632,7 @@ Back-Channel Logout 1.0):
   redirect, or unknown client -> `400`, no redirect, session kept. A cross-site `POST`
   (no `SameSite=Lax` session cookie) is bounced to the `GET` form.
 - A hint naming the browser's current session (user and `sid`) ends it at once.
-  Otherwise the request is parked (`oauth:logout-request:{id}`, 10 min, id in the
+  Otherwise the request is parked (`{i:<id>}:logout`, 10 min, id in the
   `oauth_logout` cookie, `SameSite=Strict`, `Path=/oauth/logout`) and the user confirms
   on the prerendered `/auth/logout` page, whose form posts natively to
   `/oauth/logout/confirm` (`action=logout|cancel`). Then `post_logout_redirect_uri`
@@ -703,10 +709,11 @@ Scopes/claims:
 Provider state:
 
 - SQL: `oauth_clients`, `oauth_consents`.
-- Store: `oauth:authorization-code:{code_hash}` (pending/redeemed, TTL),
-  `oauth:refresh-family:{family_id}` (CAS rotation), `oauth:authorize-interaction:{id}`,
-  `oauth:logout-request:{id}`, `oauth:client-assertion:{client_id}:{jti_hash}` (assertion
-  replay, until `exp`), and JWT `jti` revocations until expiry.
+- Store: `{c:<code_hash>}:code` (pending/redeemed, TTL),
+  `{f:<family_id>}:refresh` (CAS rotation), `{i:<id>}:authorize`,
+  `{i:<id>}:logout`, `{a:<client_id>}:assertion:<jti_hash>` (assertion replay,
+  until `exp`), and JWT `jti` revocations under `{j:<jti>}:revoked` until expiry
+  (`store::keys::oauth`).
 
 Client notes:
 
@@ -794,9 +801,11 @@ MFA policy:
 - `MFA_ADMIN_STEP_UP_REQUIRED=true`: super-admin user sessions need an `admin`
   step-up marker before admin grants (admin API keys unaffected). TTL `MFA_STEP_UP_TTL_SECS`.
 
-OTP state keys: `account:login:otp:email:{challenge_id}`,
-`account:mfa:pending-login:{challenge_id}`, `account:mfa:challenge:{user_id}:{challenge_id}`,
-`account:mfa:verified:{sid}:{purpose}`, throttling under `account:otp:request:*`.
+OTP state keys follow the schema in `docs/redis-keys.md`: passwordless and
+pending-login challenges under `{otp:<challenge_id>}`, the authenticated challenge
+under `{u:<user_id>}:mfa:<challenge_id>`, the step-up marker under
+`{s:<sid>}:mfa:<purpose>`, and request throttling under `{ip:<ip>}:otp-request`
+and `{otp:<subject hash>}:requests:<ip>`.
 
 Delivery: `smtp::Smtp` on `spawn_blocking`; passwordless delivery is backgrounded
 against enumeration timing. `SMTP_TLS` selects `starttls` (default, required
@@ -807,7 +816,7 @@ primitives only.
 Per-recipient email throttle (`src/iam/email_throttle.rs`): unauthenticated flows
 that email an address from the request body (`POST /account/credentials`,
 `POST /signup`, `POST /account/login/otp/email`) charge
-`account:email:recipient:{flow}:{sha256(lowercased, trimmed address)}` before any
+`{em:<sha256(lowercased, trimmed address)>}:email:<flow>` before any
 account lookup, so denials look the same for unknown addresses. Limits per hour:
 5 for password reset and signup, 10 for passwordless OTP; flows have separate
 buckets. Over-limit requests are not counted (the window does not slide under a
@@ -839,7 +848,7 @@ Forgot password (`POST /account/credentials`): always `200 password.reset_reques
 whether or not an account uses the address (only exact email matches get a link,
 never nickname/phone). The JWT and SMTP delivery run on `spawn_blocking`, so
 response time does not reveal the account either; delivery errors are only logged.
-A pending request (`change_password_requests:{email}`, 1h) is reused and its link
+A pending request (`{em:<email hash>}:password-reset`, 1h) is reused and its link
 resent, bounded by the per-recipient throttle, so a failed delivery can be retried.
 
 Account creation (`SIGNUP_MODE`, `src/conf/features.rs`; administrators can always use
@@ -963,7 +972,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `DB_POOL_MAX`                                                                          | 20                                     | Positive maximum connections in each SQL pool; invalid values stop startup                                                                                                |
 | `DB_MIGRATE_ON_START`                                                                  | true                                   | true/false; false checks the schema without migrating; run `stargate db migrate` separately                                         |
 | `REDIS_URL`                                                                            | redis://localhost:6379                 | Redis endpoint; `rediss://` verifies the server and hostname                                                                        |
-| `REDIS_KEY_PREFIX` | empty | Literal state-key prefix, including limiter Lua keys; excludes audit stream names. Coordinate changes across replicas. |
+| `REDIS_KEY_PREFIX` | empty | Literal prefix before the `stargate:v1:` schema root, including limiter Lua keys; excludes audit stream names. Coordinate changes across replicas (`docs/redis-keys.md`). |
 | `REDIS_POOL_SIZE` | 4 | Positive connections per Redis pool; invalid values stop startup |
 | `REDIS_USERNAME` / `REDIS_PASSWORD`                                                    | -                                      | Optional ACL credentials, passed without URL encoding; cannot be combined with URL credentials                                      |
 | `REDIS_CA_FILE`                                                                        | -                                      | Private CA PEM roots for `rediss://`; replace public roots                                                                          |
@@ -1146,10 +1155,11 @@ the path the client sent and owns its own preflights and content encoding.
 `main.rs` adds security headers and tracing to every listener's router.
 
 IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's
-ingress allowance, the same `ingress:ip:{ip}` bucket as the gateway, before
+ingress allowance, the same `{ip:<ip>}:ingress` bucket as the gateway, before
 credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
 `/admin/*` principals then charge their own `default` bucket, keyed
-`lim:admin:user:{id}` / `lim:admin:key:{id}` in `extract_admin_authorization`
+`{admin:user:<id>}:requests` / `{admin:key:<id>}:requests` in
+`extract_admin_authorization`
 (`429 iam.rate_limit_exceeded`, scope `subject`), so one admin key cannot throttle
 the console or other keys behind the same IP. `ingress.on_store_error` governs both IAM checks: store errors/timeouts pass
 without allowance headers by default; `deny` returns `503 iam.limiter_unavailable`
@@ -1358,6 +1368,11 @@ a new reusable primitive.
 - SQL pool gauges sample the initialized pool; upstream gauges read the current
   snapshot and never advance circuit state. Metric attributes are bounded;
   URLs and request identities stay out of metric dimensions.
+- All Redis and in-memory state keys are built in `store::keys` as
+  `stargate:v1:{<entity>}:<name>`; scripts declare their keys and batch
+  operations split by tag. `docs/redis-keys.md` is the operator and developer
+  reference; the Redis CI job runs the single-instance and 3+3 cluster suites
+  plus the per-path round-trip caps.
 - `stargate.store.redis.commands` and `stargate.store.redis.commands_per_request`
   attribute gateway store work to the pipeline path that issued it
   (`stargate.path=anonymous`, `api_key`, `session`, `oauth`, `rate_limit`,
