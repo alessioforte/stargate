@@ -223,7 +223,9 @@ impl Fixture {
                 Box::default(),
             )
         } else {
-            let resolution = resolve_authorization(None, Some(self.admin_secret.clone())).await;
+            let resolution = resolve_authorization(None, Some(self.admin_secret.clone()))
+                .await
+                .unwrap();
             assert!(resolution.authentication.authenticated);
             let auth = resolution.authorization.unwrap();
             assert!(!auth.super_admin);
@@ -509,13 +511,16 @@ async fn creation_invitation_and_login_identifiers_cannot_replace_a_super_admin(
 async fn even_a_super_admin_owned_user_api_key_is_not_an_admin_credential() {
     crate::data::db::with_test_database(async {
         let f = Fixture::new(true).await;
-        let resolution = resolve_authorization(None, Some(f.user_secret.clone())).await;
+        let resolution = resolve_authorization(None, Some(f.user_secret.clone()))
+            .await
+            .unwrap();
         assert!(resolution.authorization.is_none());
         let mut req = Request::new(Body::empty());
         req.headers_mut()
             .insert("x-api-key", f.user_secret.parse().unwrap());
         let identity = crate::iam::auth::verification::verify_api_key(&req)
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(identity.subject().unwrap().id, f.key.id);
         assert_eq!(
@@ -679,6 +684,7 @@ async fn verified_api_key_subject(secret: &str) -> crate::iam::auth::subject::Su
         .insert("x-api-key", secret.parse().expect("header value"));
     crate::iam::auth::verification::verify_api_key(&req)
         .await
+        .unwrap()
         .expect("valid api key")
         .subject()
         .expect("api key identity")

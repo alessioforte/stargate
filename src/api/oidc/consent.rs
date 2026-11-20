@@ -175,10 +175,7 @@ async fn decided(
     user_id: &str,
     decision: ConsentDecision,
 ) -> Result<Json<ConsentDecisionResponse>, ErrorResponse> {
-    if !interactions::decide_consent(interaction_id, user_id, decision)
-        .await
-        .map_err(oauth_internal)?
-    {
+    if !interactions::decide_consent(interaction_id, user_id, decision).await? {
         return Err(ErrorResponse::new(ErrorCode::OAuthInteractionNotFound));
     }
 
@@ -197,8 +194,7 @@ async fn pending_consent(
     user_id: &str,
 ) -> Result<(PendingAuthorization, ConsentStage), ErrorResponse> {
     let pending = interactions::get(interaction_id)
-        .await
-        .map_err(oauth_internal)?
+        .await?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::OAuthInteractionNotFound))?;
     let stage = pending
         .consent
@@ -217,10 +213,6 @@ async fn interaction_client(
         .map_err(ErrorResponse::internal)?
         .filter(|client| client.enabled)
         .ok_or_else(|| ErrorResponse::new(ErrorCode::OAuthInteractionNotFound))
-}
-
-fn oauth_internal(error: crate::err::OAuthErrorResponse) -> ErrorResponse {
-    ErrorResponse::internal(error.description())
 }
 
 /// Previously granted values plus the new ones, without duplicates.

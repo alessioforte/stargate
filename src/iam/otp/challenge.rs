@@ -169,11 +169,7 @@ pub(crate) async fn has_valid_mfa_verification(
     let now = current_unix_time()?;
     let key = mfa_verified_key(sid, purpose);
     let store = crate::data::store::use_store();
-    let Some(marker) = store
-        .get::<MfaVerificationMarker>(&key)
-        .await
-        .map_err(ErrorResponse::internal)?
-    else {
+    let Some(marker) = store.get::<MfaVerificationMarker>(&key).await? else {
         return Ok(false);
     };
 

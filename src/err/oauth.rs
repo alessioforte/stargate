@@ -115,6 +115,27 @@ impl fmt::Display for OAuthErrorResponse {
 
 impl std::error::Error for OAuthErrorResponse {}
 
+impl From<ErrorResponse> for OAuthErrorResponse {
+    fn from(error: ErrorResponse) -> Self {
+        if error.code != ErrorCode::AuthStateUnavailable {
+            return Self::internal(error);
+        }
+        let mut response = Self::from_code(
+            StatusCode::SERVICE_UNAVAILABLE,
+            oidc::OAuthErrorCode::ServerError,
+            ErrorCode::AuthStateUnavailable.message(),
+        );
+        response.insert_header("Retry-After", "10");
+        response
+    }
+}
+
+impl From<store::StoreError> for OAuthErrorResponse {
+    fn from(error: store::StoreError) -> Self {
+        ErrorResponse::from(error).into()
+    }
+}
+
 impl From<oidc::OAuthError> for OAuthErrorResponse {
     fn from(error: oidc::OAuthError) -> Self {
         match error.code {
@@ -140,11 +161,16 @@ impl From<OAuthErrorResponse> for ErrorResponse {
             StatusCode::UNAUTHORIZED => ErrorCode::AuthTokenInvalid,
             StatusCode::FORBIDDEN => ErrorCode::AuthInsufficientPermissions,
             StatusCode::INTERNAL_SERVER_ERROR => ErrorCode::SystemInternal,
+            StatusCode::SERVICE_UNAVAILABLE => ErrorCode::AuthStateUnavailable,
             _ => ErrorCode::RequestInvalid,
         };
         let mut response = Self::new(code).with_message(error.description());
         for (key, value) in error.headers {
-            response.insert_header(&key, &value);
+            if error.status != StatusCode::SERVICE_UNAVAILABLE
+                || !key.eq_ignore_ascii_case("Retry-After")
+            {
+                response.insert_header(&key, &value);
+            }
         }
         response
     }

@@ -58,6 +58,7 @@ pub enum ErrorCode {
     AuthOpenidScopeRequired,
     AuthLoginRateLimited,
     AuthLoginUnavailable,
+    AuthStateUnavailable,
     SessionOrganizationMembershipRequired,
     SessionNotFound,
     UserNotFound,
@@ -209,6 +210,7 @@ impl ErrorCode {
         Self::AuthOpenidScopeRequired,
         Self::AuthLoginRateLimited,
         Self::AuthLoginUnavailable,
+        Self::AuthStateUnavailable,
         Self::SessionOrganizationMembershipRequired,
         Self::SessionNotFound,
         Self::UserNotFound,
@@ -360,6 +362,7 @@ impl ErrorCode {
             Self::AuthOpenidScopeRequired => "auth.openid_scope_required",
             Self::AuthLoginRateLimited => "auth.login_rate_limited",
             Self::AuthLoginUnavailable => "auth.login_unavailable",
+            Self::AuthStateUnavailable => "auth.state_unavailable",
             Self::SessionOrganizationMembershipRequired => {
                 "session.organization_membership_required"
             }
@@ -575,6 +578,11 @@ impl ErrorCode {
                 Status::TOO_MANY_REQUESTS,
                 RateLimit,
                 "Too many failed login attempts",
+            ),
+            Self::AuthStateUnavailable => definition(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorType::Availability,
+                "Authentication state is temporarily unavailable",
             ),
             Self::AuthLoginUnavailable => definition(
                 Status::SERVICE_UNAVAILABLE,

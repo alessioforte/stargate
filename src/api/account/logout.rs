@@ -1,11 +1,10 @@
-use crate::data::store::use_store;
+use crate::data::store::delete_confirmed;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
 use crate::web::messages::{MessageCode, MessageResponse};
 use crate::web::request::RequestExt;
 use axum::Json;
 use axum::extract::Request;
-use store::Store;
 
 #[utoipa::path(
     delete,
@@ -29,24 +28,18 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let sid = claims.sid.clone().unwrap_or_default();
-    crate::iam::auth::revocation::revoke_claims(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let revoked = crate::iam::auth::revocation::revoke_claims(&claims).await;
 
     match claims.sub_id.as_deref() {
         Some(user_id) => {
-            crate::iam::sess::registry::end_session(user_id, &sid)
-                .await
-                .map_err(ErrorResponse::internal)?;
+            crate::iam::sess::registry::end_session(user_id, &sid).await?;
         }
         None => {
-            use_store()
-                .delete(&store::keys::session::subject(&sid))
-                .await
-                .map_err(ErrorResponse::internal)?;
+            delete_confirmed(&store::keys::session::subject(&sid)).await?;
         }
     }
 
+    revoked?;
     Ok(Json(MessageResponse::new(MessageCode::LogoutCompleted)))
 }
 
@@ -67,9 +60,7 @@ pub async fn post_logout_all(req: Request) -> Result<Json<MessageResponse>, Erro
 
     let session = crate::iam::sess::registry::authenticated_session(req.get_token()).await?;
 
-    let revoked = crate::iam::sess::registry::revoke_all_sessions(&session.user.id)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let revoked = crate::iam::sess::registry::revoke_all_sessions(&session.user.id).await?;
     tracing::info!(user_id = %session.user.id, revoked, "user logged out everywhere");
 
     Ok(Json(MessageResponse::new(

@@ -1,4 +1,4 @@
-use crate::err::{OAuthErrorResponse, OAuthResult};
+use crate::err::OAuthResult;
 use chrono::{DateTime, Utc};
 
 pub use oidc::refresh::RefreshTokenFamily;
@@ -41,9 +41,7 @@ pub async fn rotate(
         return Ok(None);
     };
     if let Some(sid) = family.sid.as_deref()
-        && !crate::iam::sess::registry::touch_session(sid, &family.user_id)
-            .await
-            .map_err(OAuthErrorResponse::internal)?
+        && !crate::iam::sess::registry::touch_session(sid, &family.user_id).await?
     {
         if let Some((family_id, _)) = oidc::refresh::parse_refresh_token(token) {
             revoke_family(family_id).await?;
@@ -55,12 +53,7 @@ pub async fn rotate(
 
 /// Drop a refresh-token family so none of its tokens rotate again.
 pub async fn revoke_family(family_id: &str) -> OAuthResult<()> {
-    use store::Store;
-
-    crate::data::store::use_store()
-        .delete(&oidc::refresh::family_key(family_id))
-        .await
-        .map_err(OAuthErrorResponse::internal)?;
+    crate::data::store::delete_confirmed(&oidc::refresh::family_key(family_id)).await?;
     Ok(())
 }
 

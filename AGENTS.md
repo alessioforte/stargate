@@ -150,6 +150,15 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `stargate:v1:{<entity>}:<name>[:<qualifier>...]`. The version is part of the
   root, every key carries one entity hash tag (co-accessed keys share it), and
   batch operations split by tag so a Redis Cluster slot never mixes entities.
+  The pool opens connections on demand and requires `COMMAND INFO HEXPIRE`
+  to succeed on every socket (Redis 7.4+ or Valkey 9.0+). An unavailable or
+  unsupported backend does not block startup. The security-state request budget
+  (`REDIS_SECURITY_TIMEOUT_MS`, default 1000) includes ingress and all security
+  store waits. Store outages yield `503 auth.state_unavailable` (OAuth keeps its
+  error envelope), with `Retry-After: 10`. Optional replication confirmation
+  uses a separate pool connection and a plain pipeline containing the security
+  write and `WAIT`. It covers session logout/revocation, token revocation and
+  revoked API key cache deletion. The default replica target is zero.
   `REDIS_KEY_PREFIX` (empty by default) is prepended literally before that root,
   including batch/atomic operations and limiter Lua keys. Hash fields are
   unchanged; audit streams use the explicit `AUDIT_REDIS_STREAM` name without the
@@ -354,8 +363,8 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   mirror 5s, request 60s. Capacity fields require a restart.
 - Ingress and rate/quota policies accept `on_store_error: allow | deny` (default
   `allow`). Ingress also governs IAM ingress and the admin principal limit.
-  `ingress.timeout` bounds each complete traffic store check, including Redis
-  reconnection waits. Failed-open checks produce no allowance headers; configuration
+  `ingress.timeout` is shared by all traffic checks for one request, including Redis
+  connection waits. An exhausted check immediately follows its failure policy. Failed-open checks produce no allowance headers; configuration
   errors remain `500`. `gate/limits/store.rs` shares enforcement and process-lifetime
   degradation indicators across generations and application points. Indicators
   expire 60s after the last store error or clear on a subsequent successful check;
@@ -409,7 +418,7 @@ application boundary.
   `seq` order with `FOR UPDATE SKIP LOCKED`, publishes to `AUDIT_REDIS_STREAM`
   (default `audit.raw`) as a single `payload` field, then marks them published and
   commits. At-least-once: consumers dedupe on `event_id`. Errors roll back and back off.
-  With `AUDIT_STREAM_CONSUMER_GROUPS`, Redis/Valkey >= 6.2 is required: the relay
+  With `AUDIT_STREAM_CONSUMER_GROUPS`, the relay
   trims only below the oldest protected ID across groups (pending first, otherwise
   last delivered), including while paused. XADD never trims in this mode; stream
   capacity pauses new claims, retaining the backlog in SQL. Without groups, MAXLEN
@@ -995,6 +1004,10 @@ the same logical columns on PostgreSQL and SQLite.
 | `REDIS_KEY_PREFIX` | empty | Literal prefix before the `stargate:v1:` schema root, including limiter Lua keys; braces are rejected; excludes audit stream names. Coordinate changes across replicas (`docs/redis-keys.md`). |
 | `REDIS_POOL_SIZE` | 4 | Positive connections per Redis pool; invalid values stop startup |
 | `REDIS_USERNAME` / `REDIS_PASSWORD`                                                    | -                                      | Optional ACL credentials, passed without URL encoding; cannot be combined with URL credentials                                      |
+| `REDIS_SECURITY_TIMEOUT_MS` | 1000 | Positive total Redis time for request security state, including ingress wait |
+| `REDIS_WAIT_REPLICAS` | 0 | Number of replicas to acknowledge security writes. Zero disables WAIT |
+| `REDIS_WAIT_TIMEOUT_MS` | 250 | Positive milliseconds to wait for replica acknowledgments |
+| `REDIS_WAIT_FAIL_ON_TIMEOUT` | true | Return `503` on replication shortfall. With false, warn and return success |
 | `REDIS_CA_FILE`                                                                        | -                                      | Private CA PEM roots for `rediss://`; replace public roots                                                                          |
 | `STORE_MAX_MEMORY_MB`                                                                  | 100                                    | In-memory store limit in MiB (`edge`); positive integer, invalid values stop startup                                                |
 | `RUST_LOG`                                                                             | -                                      | Tracing/log filter directives                                                                                                       |
@@ -1120,7 +1133,7 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
 
 - `GET /livez` (process liveness), `GET /readyz` (initialized, not draining, SQL up).
   Redis does not gate readiness. Traffic limits fail open by default on store
-  errors/timeouts; public routes, static pages, JWKS and SQL-verified API/admin keys
+  errors/timeouts; public routes, static pages, JWKS and SQL-verified admin keys
   remain usable. `/admin/health` returns `200` with healthy SQL even when Redis is
   unhealthy and exposes `limits.storeDegraded`. Login guard, OTP/email throttles,
   sessions/JWT revocation and OAuth state remain fail-closed. See `docs/health-probes.md`.

@@ -14,7 +14,7 @@
 //! Every function that ends sessions here also notifies the relying parties
 //! linked to them (OIDC Back-Channel Logout, see `backchannel_logout`).
 
-use crate::data::store::use_store;
+use crate::data::store::{delete_confirmed, use_store};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
 use crate::iam::auth::subject::{Subject, SubjectType};
@@ -339,9 +339,7 @@ pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreErr
     let Some(record) = get_session(sid).await? else {
         return Ok(None);
     };
-    store
-        .delete(&store::keys::session::subject(&record.id))
-        .await?;
+    delete_confirmed(&store::keys::session::subject(&record.id)).await?;
     store.delete(&refresh_rotation_key(&record.id)).await?;
     store.hdel(&index_key(&record.user_id), sid).await?;
     store.hdel(&directory_key(), sid).await?;
@@ -357,7 +355,7 @@ pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, Sto
     let record = get_session(sid)
         .await?
         .filter(|record| record.user_id == user_id);
-    store.delete(&store::keys::session::subject(sid)).await?;
+    delete_confirmed(&store::keys::session::subject(sid)).await?;
     store.delete(&refresh_rotation_key(sid)).await?;
     store.hdel(&index_key(user_id), sid).await?;
     store.hdel(&directory_key(), sid).await?;
@@ -374,7 +372,7 @@ pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
         if record.user_id != user_id {
             continue;
         }
-        store.delete(&store::keys::session::subject(&sid)).await?;
+        delete_confirmed(&store::keys::session::subject(&sid)).await?;
         store.delete(&refresh_rotation_key(&sid)).await?;
         store.hdel(&directory_key(), &sid).await?;
         revoked.push(record);
@@ -399,14 +397,12 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
         let matches = entry.org_id.as_deref() == Some(org_id);
         if matches && !expired {
             if let Some(record) = get_session(&sid).await? {
-                store
-                    .delete(&store::keys::session::subject(&record.id))
-                    .await?;
+                delete_confirmed(&store::keys::session::subject(&record.id)).await?;
                 store.delete(&refresh_rotation_key(&record.id)).await?;
                 store.hdel(&directory_key(), &sid).await?;
                 revoked += 1;
                 records.push(record);
-            } else if store.delete(&store::keys::session::subject(&sid)).await? {
+            } else if delete_confirmed(&store::keys::session::subject(&sid)).await? {
                 store.delete(&refresh_rotation_key(&sid)).await?;
                 revoked += 1;
             }
@@ -441,18 +437,14 @@ pub async fn authenticated_session(
         .validate_session_access_token(&token)
         .map_err(|_| invalid())?;
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if crate::iam::auth::revocation::is_revoked(&claims).await? {
         return Err(invalid());
     }
 
     let sid = claims.sid.clone().ok_or_else(invalid)?;
     let subject = use_store()
         .get::<Subject>(&store::keys::session::subject(&sid))
-        .await
-        .map_err(|_| invalid())?
+        .await?
         .ok_or_else(invalid)?;
 
     if subject.sub_type != SubjectType::User {

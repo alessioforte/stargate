@@ -160,6 +160,8 @@ custom gateway transfer durations cover long-lived body/WebSocket lifetimes.
 | `stargate.gateway.internal_context.queue.duration` | H / s | Configured service and dispatch kind | Signing queue wait |
 | `stargate.gateway.internal_context.token.size` | H / By | Same as issues | Compact signed token size |
 | `stargate.limits.store_errors` | C / failures | `stargate.point=gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`, `quota`; `stargate.outcome=allowed` or `denied` | Traffic store errors/timeouts, per replica |
+| `stargate.store.redis.incompatible_connections` | C / connections | none | Connections rejected by the `HEXPIRE` capability check |
+| `stargate.store.redis.replication_timeouts` | C / writes | `stargate.outcome=error\|warn` | Critical writes whose `WAIT` reply fell short of the required replica count |
 | `stargate.store.redis.commands` | C / commands | `stargate.path=anonymous`, `api_key`, `session`, `oauth`, `rate_limit`, `quota` | Redis commands issued while handling gateway requests, per replica |
 | `stargate.store.redis.commands_per_request` | H / commands | Same as store commands | Redis commands one gateway request issued, one observation per path it exercised |
 | `stargate.config.reloads` | C / activations | `stargate.config_kind=gateway_config` or `policies`; `stargate.outcome=success`, `error`, `transport_error`, `internal_context_error` | Activation outcomes |

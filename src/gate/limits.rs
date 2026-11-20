@@ -1,5 +1,7 @@
 mod store;
-pub(crate) use store::{LimitPoint, LimitStoreHealth, TrafficLimit, check_traffic_limit};
+pub(crate) use store::{
+    LimitPoint, LimitStoreHealth, TrafficLimit, check_traffic_limit, with_traffic_budget,
+};
 
 use crate::{
     err::{ErrorCode, ErrorResponse},

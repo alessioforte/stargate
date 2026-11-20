@@ -797,10 +797,11 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
 
     // Kill everything that could still authenticate as this user: cached
     // subjects of the just-revoked keys, and every live session.
-    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
-    if let Err(error) = crate::iam::sess::registry::revoke_all_sessions(&id).await {
-        tracing::error!(user_id = %id, "failed to revoke sessions after user delete: {error}");
-    }
+    let key_revocations =
+        crate::iam::auth::verification::purge_revoked_api_keys(&revoked_key_hashes).await;
+    let session_revocations = crate::iam::sess::registry::revoke_all_sessions(&id).await;
+    session_revocations?;
+    key_revocations?;
 
     Ok(Json(MessageResponse::new(MessageCode::UserDeleted).with_param("id", id)).into_response())
 }
@@ -1005,14 +1006,12 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
     // The membership is gone: org-bound keys were revoked in the same
     // transaction (purge their cached subjects), and sessions acting in
     // this org die now. Org-less and other-org sessions survive.
-    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
-    if let Err(error) = crate::iam::sess::registry::revoke_org_sessions(&user_id, &org_id).await {
-        tracing::error!(
-            user_id = %user_id,
-            org_id = %org_id,
-            "failed to revoke org sessions after membership removal: {error}"
-        );
-    }
+    let key_revocations =
+        crate::iam::auth::verification::purge_revoked_api_keys(&revoked_key_hashes).await;
+    let session_revocations =
+        crate::iam::sess::registry::revoke_org_sessions(&user_id, &org_id).await;
+    session_revocations?;
+    key_revocations?;
 
     Ok(Json(MessageResponse::new(
         MessageCode::UserRemovedFromOrganization,
