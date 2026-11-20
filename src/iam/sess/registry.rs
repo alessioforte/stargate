@@ -444,31 +444,90 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
     .await
 }
 
-#[derive(PartialEq)]
 struct SubjectState {
-    attrs: serde_json::Value,
+    base: Subject,
     roles: HashMap<String, String>,
 }
 
 impl SubjectState {
-    async fn load(user_id: &str) -> anyhow::Result<Option<Self>> {
-        let Some(user) = crate::data::db::get_user_by_id(user_id).await? else {
-            return Ok(None);
-        };
-        let roles = crate::data::db::get_user_organizations(user_id)
-            .await?
-            .into_iter()
-            .map(|membership| (membership.organization.id, membership.role))
-            .collect();
-        Ok(Some(Self {
-            attrs: user.attrs,
-            roles,
-        }))
+    fn for_org(&self, org_id: Option<&str>) -> Option<Subject> {
+        let mut subject = self.base.clone();
+        if let Some(org_id) = org_id {
+            subject.org_role = Some(self.roles.get(org_id)?.clone());
+            subject.org_id = Some(org_id.to_string());
+        }
+        Some(subject)
     }
 }
 
+async fn publish_current_subjects<T, Fut>(
+    user_id: &str,
+    publish: impl FnOnce(SubjectState) -> Fut + Send + 'static,
+) -> anyhow::Result<Option<T>>
+where
+    T: Send + 'static,
+    Fut: std::future::Future<Output = T> + Send + 'static,
+{
+    let db = crate::data::db::service();
+    let user_id = user_id.to_owned();
+    #[cfg(test)]
+    let pause = super::test_support::Pause::current();
+
+    // A cancelled HTTP request must not release the SQL lock while a queued
+    // Redis write can still run on its multiplexed connection.
+    tokio::spawn(async move {
+        #[cfg(test)]
+        if let Some(pause) = &pause {
+            pause.hit(super::test_support::Stage::SubjectLock).await;
+        }
+
+        db.with_locked_user_profile(&user_id, |user, memberships| async move {
+            let state = SubjectState {
+                base: Subject::from(user),
+                roles: memberships
+                    .into_iter()
+                    .map(|membership| (membership.organization.id, membership.role))
+                    .collect(),
+            };
+            #[cfg(test)]
+            if let Some(pause) = &pause {
+                pause.hit(super::test_support::Stage::SubjectWrite).await;
+            }
+            publish(state).await
+        })
+        .await
+    })
+    .await?
+}
+
+/// Reconcile a session after registration and before returning its tokens.
+pub(super) async fn reconcile_new_session(
+    user_id: &str,
+    sid: &str,
+    org_id: Option<&str>,
+) -> Result<(), ErrorResponse> {
+    let key = store::keys::session::subject(sid);
+    let org_id = org_id.map(str::to_owned);
+    publish_current_subjects(user_id, |state| async move {
+        let subject = state
+            .for_org(org_id.as_deref())
+            .ok_or_else(|| ErrorResponse::new(ErrorCode::SessionOrganizationMembershipRequired))?;
+        if !use_store()
+            .replace(&key, &subject)
+            .await
+            .map_err(ErrorResponse::internal)?
+        {
+            return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(ErrorResponse::internal)?
+    .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
+}
+
 /// Rebuild the user's live subjects after a committed profile or membership
-/// mutation. The response waits for the update, and store failures are logged
+/// mutation. The response waits for the update, and failures are logged
 /// because the SQL mutation has already committed.
 pub async fn refresh_user_subjects(user_id: &str) {
     if let Err(error) = refresh_subjects_from_db(user_id).await {
@@ -481,33 +540,22 @@ async fn refresh_subjects_from_db(user_id: &str) -> anyhow::Result<()> {
     let entries = store
         .hgetall::<SessionIndexEntry>(&index_key(user_id))
         .await?;
-    let now = now_unix();
-    let active: Vec<_> = entries
-        .into_iter()
-        .filter(|(_, entry)| entry.expires_at_unix > now)
-        .collect();
-    if active.is_empty() {
+    if entries.is_empty() {
         return Ok(());
     }
 
-    let mut latest = SubjectState::load(user_id).await?;
-    while let Some(state) = latest {
+    publish_current_subjects(user_id, move |state| async move {
+        let user_id = &state.base.id;
+        let now = now_unix();
         let mut missing_orgs = HashSet::new();
-        for (sid, entry) in &active {
-            let mut subject = Subject::new(
-                user_id.to_string(),
-                SubjectType::User,
-                Some(state.attrs.clone()),
-            );
-            if let Some(org_id) = &entry.org_id {
-                let Some(role) = state.roles.get(org_id) else {
-                    missing_orgs.insert(org_id);
-                    continue;
-                };
-                subject.org_id = Some(org_id.clone());
-                subject.org_role = Some(role.clone());
+        for (sid, entry) in &entries {
+            if entry.expires_at_unix <= now {
+                continue;
             }
-
+            let Some(subject) = state.for_org(entry.org_id.as_deref()) else {
+                missing_orgs.extend(entry.org_id.as_deref());
+                continue;
+            };
             if let Err(error) = store
                 .replace(&store::keys::session::subject(sid), &subject)
                 .await
@@ -518,14 +566,8 @@ async fn refresh_subjects_from_db(user_id: &str) -> anyhow::Result<()> {
         for org_id in missing_orgs {
             revoke_removed_org_sessions(user_id, org_id).await;
         }
-
-        // A concurrent SQL write and its fan-out can finish in either order.
-        // Reconcile again if the persisted state changed while publishing.
-        latest = SubjectState::load(user_id).await?;
-        if latest.as_ref() == Some(&state) {
-            break;
-        }
-    }
+    })
+    .await?;
     Ok(())
 }
 

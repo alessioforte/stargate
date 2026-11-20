@@ -61,6 +61,10 @@ pub async fn start_user_session(
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
+    #[cfg(test)]
+    if let Some(pause) = super::test_support::Pause::current() {
+        pause.hit(super::test_support::Stage::Registration).await;
+    }
     store
         .set(&store::keys::session::subject(&sid), &subject, Some(sttl))
         .await?;
@@ -79,6 +83,15 @@ pub async fn start_user_session(
     {
         let _ = store.delete(&store::keys::session::subject(&sid)).await;
         return Err(error.into());
+    }
+
+    if let Err(error) =
+        registry::reconcile_new_session(&user.id, &sid, subject.org_id.as_deref()).await
+    {
+        if let Err(revoke_error) = registry::revoke_session(&sid).await {
+            tracing::error!(sid, %revoke_error, "Failed to revoke an unconfirmed session");
+        }
+        return Err(error);
     }
 
     Ok(IssuedSession {
