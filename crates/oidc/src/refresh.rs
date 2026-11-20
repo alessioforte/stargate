@@ -33,7 +33,13 @@ pub fn refresh_token(family_id: &str, secret: &str) -> String {
 pub fn parse_refresh_token(token: &str) -> Option<(&str, &str)> {
     let token = token.strip_prefix(TOKEN_PREFIX)?;
     let (family_id, secret) = token.split_once('.')?;
-    (!family_id.is_empty() && !secret.is_empty()).then_some((family_id, secret))
+    if family_id.is_empty() || secret.is_empty() {
+        return None;
+    }
+    // Family ids are ULIDs; rejecting anything else keeps an untrusted token
+    // from steering the state key (and its hash tag).
+    ulid::Ulid::from_string(family_id).ok()?;
+    Some((family_id, secret))
 }
 
 fn ttl_until(expires_at: DateTime<Utc>) -> Option<u64> {
@@ -155,6 +161,13 @@ pub async fn rotate<S: Store>(
 mod tests {
     use super::*;
     use store::MemoryStore;
+
+    #[test]
+    fn refresh_tokens_require_a_ulid_family_id() {
+        assert!(parse_refresh_token("rt_}x.secret").is_none());
+        assert!(parse_refresh_token("rt_{x}.secret").is_none());
+        assert!(parse_refresh_token("rt_01ARZ3NDEKTSV4RRFFQ69G5FAV.secret").is_some());
+    }
 
     #[tokio::test]
     async fn refresh_token_rotates_once_and_replay_revokes_family() {

@@ -30,7 +30,11 @@ pub async fn create_oauth_state(record: &OAuthState) -> Result<String, store::St
 }
 
 /// The record `state` was issued with, consumed so each state works once.
+/// States are ULIDs; anything else cannot name a record and is not looked up.
 pub async fn take_oauth_state(state: &str) -> Result<Option<OAuthState>, store::StoreError> {
+    if ulid::Ulid::from_string(state).is_err() {
+        return Ok(None);
+    }
     let store = use_store();
     let key = store::keys::oauth::state(state);
     let record = store.get::<OAuthState>(key.as_str()).await?;
@@ -38,4 +42,15 @@ pub async fn take_oauth_state(state: &str) -> Result<Option<OAuthState>, store::
         store.delete(key.as_str()).await?;
     }
     Ok(record)
+}
+
+#[cfg(all(test, feature = "memory"))]
+mod tests {
+    use super::take_oauth_state;
+
+    #[tokio::test]
+    async fn a_state_that_is_not_an_id_is_ignored() {
+        assert!(take_oauth_state("}").await.unwrap().is_none());
+        assert!(take_oauth_state("{x}").await.unwrap().is_none());
+    }
 }
