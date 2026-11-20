@@ -598,6 +598,18 @@ impl Store for RedisStore {
         }
     }
 
+    async fn take<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
+        self.validate_key(key)?;
+        let key = self.prefixed_key(key);
+        let mut con = self.pool.get();
+        let value: Option<Vec<u8>> = redis::cmd("GETDEL")
+            .arg(key.as_ref())
+            .query_async(&mut con)
+            .await
+            .map_err(|e| StoreError::RedisFailed(format!("Failed to take key '{}': {}", key, e)))?;
+        value.map(|data| self.deserialize(&data)).transpose()
+    }
+
     async fn set<T: SerializeValue>(
         &self,
         key: &str,

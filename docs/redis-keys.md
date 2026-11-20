@@ -45,7 +45,7 @@ subjects never appear in a key or a tag.
 | `{f:<family id>}:refresh` | Rotating OAuth refresh-token family | refresh-token TTL |
 | `{i:<id>}:authorize` | Parked authorization request | 10 min |
 | `{i:<id>}:logout` | Parked RP-initiated logout request | 10 min |
-| `{o:<state>}:state` | Social sign-in state | 5 min |
+| `{o:<state>}:state` | Social sign-in state consumed with `GETDEL` | 5 min |
 | `{a:<client id>}:assertion:<jti hash>` | Accepted `private_key_jwt` assertion | assertion expiry |
 | `{otp:<challenge>}:passwordless` | Passwordless email login challenge | OTP TTL |
 | `{otp:<challenge>}:login` | MFA challenge of a pending login | OTP TTL |

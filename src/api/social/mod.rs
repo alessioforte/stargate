@@ -182,7 +182,7 @@ async fn callback(req: Request, provider: Provider) -> Response {
     };
     let record = match nonempty(query.state.as_deref()) {
         Some(state) => take_oauth_state(state).await.unwrap_or_else(|error| {
-            tracing::error!(%error, "failed to read OAuth state");
+            tracing::error!(%error, "failed to consume OAuth state");
             None
         }),
         None => None,
@@ -418,6 +418,48 @@ pub fn router() -> axum::Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[cfg_attr(feature = "redis", ignore = "requires the disposable Redis fixture")]
+    async fn concurrent_callbacks_consume_social_state_once() {
+        #[cfg(feature = "redis")]
+        crate::data::store::init().await.unwrap();
+
+        let state = create_oauth_state(&OAuthState {
+            browser: Some(BrowserSignIn {
+                provider: Provider::Google.slug().into(),
+                return_to: None,
+            }),
+        })
+        .await
+        .unwrap();
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let callback_task = || {
+            let barrier = barrier.clone();
+            let request = Request::builder()
+                .uri(format!("/oauth/google?state={state}&error=access_denied"))
+                .header(http::header::COOKIE, format!("{STATE_COOKIE}={state}"))
+                .body(axum::body::Body::empty())
+                .unwrap();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                let response = callback(request, Provider::Google).await;
+                assert_eq!(response.status(), StatusCode::FOUND);
+                response.headers()[LOCATION].to_str().unwrap().to_string()
+            })
+        };
+        let (first, second) = tokio::join!(callback_task(), callback_task());
+        let redirects = [first.unwrap(), second.unwrap()];
+        // Only the callback that consumed the record can reach the provider
+        // cancellation branch. This requires no live social provider.
+        for code in ["social_cancelled", "social_failed"] {
+            assert_eq!(
+                redirects.iter().filter(|url| url.contains(code)).count(),
+                1,
+                "{redirects:?}"
+            );
+        }
+    }
 
     fn bases() -> Vec<String> {
         vec![
