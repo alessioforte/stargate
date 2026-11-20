@@ -1288,8 +1288,10 @@ Setting `cost` on a `quota` policy is a compile error pointing at `quota_cost`.
 
 `rate_limit` and `quota` policies accept a `scope` (default `subject`). With
 `scope: org` the check consumes the bucket of the subject's active
-organization (`lim:org:{org_id}` / `quota:org:{org_id}`), shared by every
-member and org-bound API key acting in it. A router may carry one rate limit
+organization (`{org:<org_id>}:rate:<limit name>` /
+`{org:<org_id>}:quota:<limit name>`, under the state-key schema in
+`docs/redis-keys.md`), shared by every member and org-bound API key acting in
+it. A router may carry one rate limit
 and one quota **per scope**, so subject and org limits enforce side by side:
 
 ```yaml
