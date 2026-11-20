@@ -17,7 +17,7 @@ async fn all_lua_limiters_use_the_store_prefix() -> Result<(), Box<dyn std::erro
     let store = Arc::new(
         store::RedisStore::new(&std::env::var("REDIS_PREFIX_TEST_URL")?)
             .await?
-            .with_key_prefix("stargate:"),
+            .with_key_prefix("tenant:"),
     );
     let clock = CachedClock::new();
     let gcra = Gcra::new(
@@ -27,23 +27,15 @@ async fn all_lua_limiters_use_the_store_prefix() -> Result<(), Box<dyn std::erro
     );
     let token = TokenBucket::new(store.clone(), clock.clone(), TokenBucketConfig::new(1, 0));
     let quota = QuotaTracker::new(store, clock, 1, TimeWindow::Day);
+    let tag = format!("test:{}", ulid::Ulid::generate());
     for (name, limiter) in [
         ("gcra", &gcra as &dyn RateLimit),
         ("token", &token as &dyn RateLimit),
         ("quota", &quota as &dyn RateLimit),
     ] {
-        assert!(
-            limiter
-                .check(&format!("lim:prefix:{name}"), 1)
-                .await?
-                .allowed
-        );
-        assert!(
-            !limiter
-                .check(&format!("lim:prefix:{name}"), 1)
-                .await?
-                .allowed
-        );
+        let key = store::keys::scoped(&tag, name);
+        assert!(limiter.check(&key, 1).await?.allowed);
+        assert!(!limiter.check(&key, 1).await?.allowed);
     }
     Ok(())
 }

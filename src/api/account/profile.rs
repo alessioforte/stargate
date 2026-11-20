@@ -208,7 +208,11 @@ mod tests {
                 .unwrap();
             let sid = ulid::Ulid::generate().to_string();
             use_store()
-                .set(&sid, &Subject::from(user.clone()), Some(3600))
+                .set(
+                    &store::keys::session::subject(&sid),
+                    &Subject::from(user.clone()),
+                    Some(3600),
+                )
                 .await
                 .unwrap();
             register_session(

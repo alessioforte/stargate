@@ -6,8 +6,6 @@ use serde_json::Value;
 use store::Store;
 use tools::Locale;
 
-const KEY_PREFIX: &str = "signup_requests";
-
 /// How a pending signup started, which decides whether `SIGNUP_MODE` still
 /// lets it complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,7 +61,7 @@ pub async fn create_signup_request(
 ) -> Result<(), store::StoreError> {
     let store = use_store();
 
-    let key = format!("{}:{}", KEY_PREFIX, sid);
+    let key = store::keys::account::signup(sid);
     let ttl = Some(60 * 60); // 60 minutes
     store.set(key.as_str(), profile, ttl).await
 }
@@ -72,13 +70,13 @@ pub async fn get_signup_request(
     sid: &str,
 ) -> Result<Option<PendingSignupProfile>, store::StoreError> {
     let store = use_store();
-    let key = format!("{}:{}", KEY_PREFIX, sid);
+    let key = store::keys::account::signup(sid);
     store.get::<PendingSignupProfile>(key.as_str()).await
 }
 
 pub async fn delete_signup_request(sid: &str) -> Result<bool, store::StoreError> {
     let store = use_store();
-    let key = format!("{}:{}", KEY_PREFIX, sid);
+    let key = store::keys::account::signup(sid);
     store.delete(key.as_str()).await
 }
 

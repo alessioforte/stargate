@@ -156,10 +156,11 @@ async fn iam_ingress_and_principal_denials_emit_integer_retry_after_and_keep_rat
         .await;
 
         let runtime = gate("default", duration).snapshot();
-        let response = charge_admin_principal(&runtime, "lim:admin:key:test")
-            .await
-            .unwrap_err()
-            .into_response();
+        let response =
+            charge_admin_principal(&runtime, &store::keys::limits::admin_principal("key:test"))
+                .await
+                .unwrap_err()
+                .into_response();
         assert_eq!(response.headers()["x-ratelimit-scope"], "subject");
         assert_denial(response, expected, "x-ratelimit", "iam.rate_limit_exceeded").await;
     }

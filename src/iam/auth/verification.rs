@@ -21,7 +21,8 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedI
     // sends one, in memory for no measurable gain.
     let hash_key = pw::hash_api_key(&api_key);
     let store = crate::data::store::use_store();
-    let session = store.get::<Subject>(&hash_key).await.unwrap_or(None);
+    let cache_key = store::keys::api_key::subject(&hash_key);
+    let session = store.get::<Subject>(&cache_key).await.unwrap_or(None);
 
     if let Some(subject) = session {
         return VerifiedIdentity::api_key(subject);
@@ -42,7 +43,7 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedI
 
         let subject = Subject::from(auth);
         let ttl = Some(API_KEY_SUBJECT_TTL_SECS);
-        match store.set(&hash_key, &subject, ttl).await {
+        match store.set(&cache_key, &subject, ttl).await {
             Ok(_) => (),
             Err(e) => {
                 error!("Failed to store subject in the session store: {}", e);
@@ -60,7 +61,10 @@ pub async fn verify_api_key<R: RequestExt + ?Sized>(req: &R) -> Option<VerifiedI
 /// for the cache entry to expire. Best-effort: failures are logged and the
 /// entry dies at its TTL.
 pub async fn purge_api_key_subject(key_hash: &str) {
-    if let Err(e) = crate::data::store::use_store().delete(key_hash).await {
+    if let Err(e) = crate::data::store::use_store()
+        .delete(&store::keys::api_key::subject(key_hash))
+        .await
+    {
         error!("Failed to purge cached api key subject: {}", e);
     }
 }
@@ -91,7 +95,10 @@ async fn verify_session_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> 
 
     let store = crate::data::store::use_store();
     let sid = claims.sid.clone()?;
-    match store.get::<Subject>(&sid).await {
+    match store
+        .get::<Subject>(&store::keys::session::subject(&sid))
+        .await
+    {
         Ok(Some(subject)) => VerifiedIdentity::jwt(subject, sid, claims.auth_time),
         Ok(None) => None,
         Err(e) => {
@@ -140,7 +147,10 @@ async fn verify_oauth_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> {
         return None;
     }
 
-    let subject = match crate::data::store::use_store().get::<Subject>(&sid).await {
+    let subject = match crate::data::store::use_store()
+        .get::<Subject>(&store::keys::session::subject(&sid))
+        .await
+    {
         Ok(Some(subject)) if subject.id == user_id => subject,
         Ok(_) => return None,
         Err(e) => {

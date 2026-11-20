@@ -15,7 +15,7 @@ async fn cluster_backend_round_trips() {
     let state = Arc::new(store::RedisStore::new(&redis_url).await.unwrap());
     let database = db::service::init(&database_url).await.unwrap();
     database.migrate().await.unwrap();
-    let key = format!("benchmark:{}", ulid::Ulid::generate());
+    let key = store::keys::scoped(&format!("benchmark:{}", ulid::Ulid::generate()), "subject");
     let subject = crate::iam::auth::subject::Subject::new(
         key.clone(),
         crate::iam::auth::subject::SubjectType::User,

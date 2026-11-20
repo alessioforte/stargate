@@ -1,7 +1,6 @@
 use crate::data::store::use_store;
 use store::{AtomicStore, Store};
 
-const KEY_PREFIX: &str = "login_attempts:v2";
 const MAX_SOURCE_ATTEMPTS: u32 = 20;
 const MAX_SUBJECT_ATTEMPTS: u32 = 5;
 const LOCKOUT_SECS: u64 = 300; // 5 minutes
@@ -60,15 +59,15 @@ pub fn lockout_seconds() -> u64 {
 }
 
 fn source_key(client_ip: &str) -> String {
-    format!("{KEY_PREFIX}:ip:{client_ip}")
+    store::keys::account::login_ip(client_ip)
 }
 
 fn user_key(client_ip: &str, user_id: &str) -> String {
-    format!("{KEY_PREFIX}:user:{user_id}:ip:{client_ip}")
+    store::keys::account::login_user(user_id, client_ip)
 }
 
 fn identifier_key(client_ip: &str, identifier: &str) -> String {
-    format!("{KEY_PREFIX}:identifier:{identifier}:ip:{client_ip}")
+    store::keys::account::login_identifier(identifier, client_ip)
 }
 
 async fn read_attempts(key: &str) -> Result<u32, store::StoreError> {
@@ -93,10 +92,10 @@ mod tests {
     fn login_throttle_for_user_uses_canonical_user_bucket() {
         let throttle = LoginThrottle::for_user("127.0.0.1", "user_123");
 
-        assert_eq!(throttle.source_key, "login_attempts:v2:ip:127.0.0.1");
+        assert_eq!(throttle.source_key, "stargate:v1:{ip:127.0.0.1}:login");
         assert_eq!(
             throttle.subject_key,
-            "login_attempts:v2:user:user_123:ip:127.0.0.1"
+            "stargate:v1:{u:user_123}:login:127.0.0.1"
         );
     }
 
@@ -104,10 +103,9 @@ mod tests {
     fn login_throttle_for_identifier_uses_identifier_bucket() {
         let throttle = LoginThrottle::for_identifier("127.0.0.1", "alice@example.com");
 
-        assert_eq!(throttle.source_key, "login_attempts:v2:ip:127.0.0.1");
-        assert_eq!(
-            throttle.subject_key,
-            "login_attempts:v2:identifier:alice@example.com:ip:127.0.0.1"
-        );
+        assert_eq!(throttle.source_key, "stargate:v1:{ip:127.0.0.1}:login");
+        assert!(throttle.subject_key.starts_with("stargate:v1:{id:"));
+        assert!(throttle.subject_key.ends_with("}:login:127.0.0.1"));
+        assert!(!throttle.subject_key.contains("alice"));
     }
 }

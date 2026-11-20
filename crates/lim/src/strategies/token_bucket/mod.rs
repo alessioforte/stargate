@@ -279,8 +279,15 @@ impl RateLimit for TokenBucket {
         let refill_rate = self.refill_rate;
         let ttl = self.ttl;
 
+        // Both keys carry the same hash tag as `key`, so they share its slot.
+        let tokens = format!("{key}:tokens");
+        let time = format!("{key}:time");
+        let tokens_key = self.store.prefixed_key(&tokens);
+        let time_key = self.store.prefixed_key(&time);
+
         let (allowed, remaining, retry_after_ms): (i32, u64, u64) = script
-            .key(self.store.prefixed_key(key))
+            .key(tokens_key.as_ref())
+            .key(time_key.as_ref())
             .arg(capacity)
             .arg(refill_rate)
             .arg(cost)

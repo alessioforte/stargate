@@ -27,3 +27,4 @@ redis = ["dep:redis", "store/redis"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+ulid = { workspace = true }

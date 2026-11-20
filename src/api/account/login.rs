@@ -240,7 +240,7 @@ mod tests {
             }
             assert_eq!(
                 crate::data::store::use_store()
-                    .get_i64(&format!("login_attempts:v2:ip:{ip}"))
+                    .get_i64(&store::keys::account::login_ip(ip))
                     .await
                     .unwrap(),
                 None

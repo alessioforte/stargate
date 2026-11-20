@@ -369,7 +369,7 @@ fn delta(before: &BTreeMap<String, u64>, after: &BTreeMap<String, u64>) -> BTree
 
 /// Round trip of one application store read, like the backend table.
 async fn redis_read_latency() -> Value {
-    let key = format!("benchmark:{}", ulid::Ulid::generate());
+    let key = store::keys::scoped(&format!("benchmark:{}", ulid::Ulid::generate()), "subject");
     let subject = crate::iam::auth::subject::Subject::new(
         key.clone(),
         crate::iam::auth::subject::SubjectType::User,

@@ -14,7 +14,6 @@ use crate::err::{OAuthErrorResponse, OAuthResult};
 use serde::{Deserialize, Serialize};
 use store::Store;
 
-const KEY_PREFIX: &str = "oauth:authorize-interaction:";
 pub const INTERACTION_TTL_SECS: u64 = 600;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -57,7 +56,7 @@ pub enum ConsentDecision {
 }
 
 fn key(id: &str) -> String {
-    format!("{KEY_PREFIX}{id}")
+    store::keys::oauth::authorize_interaction(id)
 }
 
 fn valid_id(id: &str) -> bool {

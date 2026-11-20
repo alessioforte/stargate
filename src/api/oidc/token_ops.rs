@@ -239,7 +239,7 @@ fn scope_from_attrs(attrs: &JsonValue) -> Option<String> {
 async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     if let Some(sid) = claims.sid.as_deref() {
         let active = crate::data::store::use_store()
-            .exists(sid)
+            .exists(&store::keys::session::subject(sid))
             .await
             .map_err(OAuthErrorResponse::internal)?;
         if !active {
@@ -475,7 +475,7 @@ async fn revoke_api_key_token(
         .await
         .map_err(OAuthErrorResponse::internal)?;
     crate::data::store::use_store()
-        .delete(&hash)
+        .delete(&store::keys::api_key::subject(&hash))
         .await
         .map_err(OAuthErrorResponse::internal)?;
 

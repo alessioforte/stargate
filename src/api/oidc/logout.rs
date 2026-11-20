@@ -33,7 +33,6 @@ use std::time::Duration;
 use store::Store;
 use url::Url;
 
-const KEY_PREFIX: &str = "oauth:logout-request:";
 const LOGOUT_REQUEST_TTL_SECS: u64 = 600;
 pub(crate) const LOGOUT_ENDPOINT_PATH: &str = "/oauth/logout";
 
@@ -347,7 +346,7 @@ fn signed_out_page_url() -> String {
 }
 
 fn key(id: &str) -> String {
-    format!("{KEY_PREFIX}{id}")
+    store::keys::oauth::logout_request(id)
 }
 
 async fn park(pending: &PendingLogout) -> OAuthResult<String> {

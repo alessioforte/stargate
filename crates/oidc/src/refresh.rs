@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use store::Store;
 
-const FAMILY_KEY_PREFIX: &str = "oauth:refresh-family:";
 const TOKEN_PREFIX: &str = "rt_";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -24,7 +23,7 @@ pub struct RefreshTokenFamily {
 }
 
 pub fn family_key(family_id: &str) -> String {
-    format!("{FAMILY_KEY_PREFIX}{family_id}")
+    store::keys::oauth::refresh_family(family_id)
 }
 
 pub fn refresh_token(family_id: &str, secret: &str) -> String {
