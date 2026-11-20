@@ -17,6 +17,7 @@ use lim::{
     },
 };
 use std::{sync::Arc, time::Duration};
+use store::Store;
 
 #[tokio::test]
 #[ignore = "requires a Redis Cluster node that owns REDIS_CLUSTER_TAG"]
@@ -36,7 +37,7 @@ async fn all_lua_limiters_keep_their_keys_in_the_entity_slot()
         Quota::per_duration(1, Duration::from_secs(3600)),
     );
     let token = TokenBucket::new(store.clone(), clock.clone(), TokenBucketConfig::new(1, 0));
-    let quota = QuotaTracker::new(store, clock, 1, TimeWindow::Day);
+    let quota = QuotaTracker::new(store.clone(), clock, 1, TimeWindow::Day);
     for (name, limiter) in [
         ("gcra", &gcra as &dyn RateLimit),
         ("token", &token as &dyn RateLimit),
@@ -46,5 +47,11 @@ async fn all_lua_limiters_keep_their_keys_in_the_entity_slot()
         assert!(limiter.check(&key, 1).await?.allowed, "{name}");
         assert!(!limiter.check(&key, 1).await?.allowed, "{name}");
     }
+
+    // A denied request over a cost larger than the limit must not create the
+    // bucket: a key without a TTL would live forever.
+    let denied = store::keys::scoped(&tag, "quota-denied");
+    assert!(!quota.check(&denied, 2).await?.allowed);
+    assert!(!store.exists(&denied).await?);
     Ok(())
 }
