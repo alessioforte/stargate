@@ -6,14 +6,18 @@ use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
 
-/// The session cookie that carries the access token.
-pub(crate) fn session_cookie(session: &IssuedSession) -> String {
-    build_jwt_cookie(&session.access_token, session.access_ttl_secs)
+/// The session cookie that carries the access token. `secure` follows the
+/// listener that answered the request.
+pub(crate) fn session_cookie(session: &IssuedSession, secure: bool) -> String {
+    build_jwt_cookie(&session.access_token, session.access_ttl_secs, secure)
 }
 
 /// The tokens as JSON, with the session cookie.
-pub(crate) fn session_response(session: IssuedSession) -> Result<Response, ErrorResponse> {
-    let cookie = session_cookie(&session);
+pub(crate) fn session_response(
+    session: IssuedSession,
+    secure: bool,
+) -> Result<Response, ErrorResponse> {
+    let cookie = session_cookie(&session, secure);
     let body = AuthResponse {
         access_token: session.access_token,
         refresh_token: session.refresh_token,
@@ -36,8 +40,12 @@ pub(crate) async fn issue_user_session(
     auth_time: usize,
     requested_org_id: Option<&str>,
     amr: Vec<String>,
+    secure: bool,
 ) -> Result<Response, ErrorResponse> {
-    session_response(start_user_session(user, auth_time, requested_org_id, amr).await?)
+    session_response(
+        start_user_session(user, auth_time, requested_org_id, amr).await?,
+        secure,
+    )
 }
 
 /// Complete a password login and remember its server-resolved source address.
@@ -47,9 +55,10 @@ pub(crate) async fn issue_password_session(
     requested_org_id: Option<&str>,
     amr: Vec<String>,
     client_ip: &str,
+    secure: bool,
 ) -> Result<Response, ErrorResponse> {
     let user_id = user.id.clone();
-    let response = issue_user_session(user, auth_time, requested_org_id, amr).await?;
+    let response = issue_user_session(user, auth_time, requested_org_id, amr, secure).await?;
     crate::iam::auth::login_guard::record_success(&user_id, client_ip).await;
     Ok(response)
 }

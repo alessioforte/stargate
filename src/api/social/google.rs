@@ -1,5 +1,6 @@
 use super::Provider;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::web::request::RequestExt;
 use axum::extract::Request;
 use axum::response::Response;
 use db::ent::{
@@ -23,7 +24,13 @@ use idp::google::{GoogleUser, get_google_oauth_token, get_google_user};
 )]
 pub async fn get_google_start(req: Request) -> Result<Response, ErrorResponse> {
     let own_origin = super::request_origin(&req);
-    super::start(Provider::Google, req.uri().clone(), own_origin).await
+    super::start(
+        Provider::Google,
+        req.uri().clone(),
+        own_origin,
+        req.is_https(),
+    )
+    .await
 }
 
 #[utoipa::path(

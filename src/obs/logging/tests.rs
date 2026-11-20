@@ -71,17 +71,19 @@ async fn nested_request_logs_keep_request_id_without_an_otel_trace_id() {
     let app = Router::new()
         .route("/", get(handler))
         .layer(from_fn(trace_middleware));
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/")
-                .header(
-                    "traceparent",
-                    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-                )
-                .body(Body::empty())
-                .unwrap(),
+    let mut request = Request::builder()
+        .uri("/")
+        .header(
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         )
+        .body(Body::empty())
+        .unwrap();
+    request.extensions_mut().insert(crate::srv::test_connection(
+        "127.0.0.1:1234".parse().unwrap(),
+    ));
+    let response = app
+        .oneshot(request)
         .with_subscriber(subscriber)
         .await
         .unwrap();
@@ -108,6 +110,7 @@ async fn nested_request_logs_keep_request_id_without_an_otel_trace_id() {
         response.headers()["x-request-id"]
     );
     assert!(request_span.get("trace_id").is_none());
+    assert_eq!(request_span["stargate.listener"], "test");
 }
 
 async fn assert_sanitized(req: axum::extract::Request) -> StatusCode {

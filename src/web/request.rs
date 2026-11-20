@@ -1,31 +1,7 @@
 use http::Request;
 use http::header::{ACCEPT_LANGUAGE, AUTHORIZATION, COOKIE, HeaderMap, USER_AGENT};
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use tools::Locale;
-
-/// Parse a single IP token that may be a bare IP, a bracketed IPv6 address,
-/// or a socket address (`ip:port` / `[ip]:port`).
-pub(crate) fn parse_single_ip(raw: &str) -> Option<IpAddr> {
-    let token = raw.trim();
-    if token.is_empty() {
-        return None;
-    }
-
-    let unbracketed = token
-        .strip_prefix('[')
-        .and_then(|v| v.strip_suffix(']'))
-        .unwrap_or(token);
-
-    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
-        return Some(ip);
-    }
-
-    if let Ok(sock) = token.parse::<SocketAddr>() {
-        return Some(sock.ip());
-    }
-
-    None
-}
 
 pub(crate) const TOKEN_QUERY_KEYS: &[&str] = &["token", "access_token", "jwt"];
 
@@ -35,6 +11,7 @@ pub trait RequestExt {
     fn get_protocol(&self) -> &'static str;
     fn get_client_ip(&self) -> String;
     fn get_client_ip_addr(&self) -> Option<IpAddr>;
+    fn is_https(&self) -> bool;
     fn get_user_agent(&self) -> Option<String>;
     fn get_host(&self) -> Option<String>;
     fn get_query_values(&self, name: &str) -> Vec<String>;
@@ -146,60 +123,6 @@ fn from_hex(b: u8) -> Option<u8> {
     }
 }
 
-fn peer_addr<B>(req: &Request<B>) -> Option<SocketAddr> {
-    crate::srv::ConnectionInfo::peer_of(req)
-}
-
-/// Resolve the real client IP from an `X-Forwarded-For` header value,
-/// trusting only configured proxies.
-///
-/// A conforming proxy *appends* the peer it received the connection from to
-/// the right of the list, so the right-most entries are the closest, most
-/// trustworthy hops while the left-most entry is fully client-controlled. We
-/// therefore return the right-most address that is not itself a trusted
-/// proxy, which prevents a client from spoofing its address by prepending a
-/// fake left-most entry. If every entry is a trusted proxy, we fall back to
-/// the left-most parseable address (the outermost known hop).
-fn client_from_forwarded_for(value: &str) -> Option<IpAddr> {
-    select_forwarded_client(value, crate::web::trusted_proxy::is_trusted_proxy)
-}
-
-fn select_forwarded_client<F>(value: &str, is_trusted: F) -> Option<IpAddr>
-where
-    F: Fn(&IpAddr) -> bool,
-{
-    let mut leftmost = None;
-    let mut rightmost_untrusted = None;
-
-    for token in value.split(',') {
-        let Some(ip) = parse_single_ip(token) else {
-            continue;
-        };
-        if leftmost.is_none() {
-            leftmost = Some(ip);
-        }
-        if !is_trusted(&ip) {
-            rightmost_untrusted = Some(ip);
-        }
-    }
-
-    rightmost_untrusted.or(leftmost)
-}
-
-fn forwarded_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    if let Some(xff) = header_str(headers, "x-forwarded-for")
-        && let Some(ip) = client_from_forwarded_for(xff)
-    {
-        return Some(ip);
-    }
-    if let Some(real) = header_str(headers, "x-real-ip")
-        && let Some(ip) = parse_single_ip(real)
-    {
-        return Some(ip);
-    }
-    None
-}
-
 fn query_values(query: Option<&str>, name: &str) -> Vec<String> {
     let mut values = Vec::new();
     let Some(query) = query else {
@@ -285,14 +208,18 @@ impl<B> RequestExt for Request<B> {
     }
 
     fn get_client_ip_addr(&self) -> Option<IpAddr> {
-        let peer_ip = peer_addr(self).map(|s| s.ip());
-        if let Some(ref peer) = peer_ip
-            && crate::web::trusted_proxy::is_trusted_proxy(peer)
-            && let Some(ip) = forwarded_ip(self.headers())
-        {
-            return Some(ip);
+        // The server resolves this once at ingress; a request built outside a
+        // listener (tests, direct service calls) has the peer as safest answer.
+        if let Some(crate::srv::client_ip::ClientIp(ip)) = self.extensions().get() {
+            return Some(*ip);
         }
-        peer_ip
+        crate::srv::ConnectionInfo::of(self).map(|connection| connection.peer.ip())
+    }
+
+    fn is_https(&self) -> bool {
+        let listener_tls =
+            crate::srv::ConnectionInfo::of(self).is_some_and(|connection| connection.listener.tls);
+        crate::srv::tls::request_https(listener_tls)
     }
 
     fn get_user_agent(&self) -> Option<String> {

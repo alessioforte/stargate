@@ -14,8 +14,9 @@ pub async fn security_headers_middleware(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    use crate::web::request::RequestExt;
     use http::header;
-    let https = crate::srv::tls::served_over_https();
+    let https = req.is_https();
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(

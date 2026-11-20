@@ -122,8 +122,8 @@ async fn send(app: &Router, method: &str, path: &str) {
         .header("user-agent", "test-agent")
         .body(Body::empty())
         .unwrap();
-    req.extensions_mut().insert(axum::extract::ConnectInfo(
-        "203.0.113.9:4444".parse::<std::net::SocketAddr>().unwrap(),
+    req.extensions_mut().insert(crate::srv::test_connection(
+        "203.0.113.9:4444".parse().unwrap(),
     ));
     app.clone().oneshot(req).await.unwrap();
 }

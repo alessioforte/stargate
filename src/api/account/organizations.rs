@@ -89,6 +89,7 @@ pub async fn get_account_organizations(req: Request) -> Result<Response, ErrorRe
 )]
 pub async fn put_session_organization(req: Request) -> Result<Response, ErrorResponse> {
     let token = req.get_token();
+    let secure = req.is_https();
     let Json(body) = Json::<SwitchOrganizationRequest>::from_request(req, &())
         .await
         .map_err(|error| {
@@ -110,5 +111,6 @@ pub async fn put_session_organization(req: Request) -> Result<Response, ErrorRes
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
         .amr;
 
-    super::session::issue_user_session(session.user, auth_time, Some(&body.org_id), amr).await
+    super::session::issue_user_session(session.user, auth_time, Some(&body.org_id), amr, secure)
+        .await
 }

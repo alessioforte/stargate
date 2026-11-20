@@ -66,9 +66,10 @@ struct ValidatedAuthorizeRequest {
 )]
 pub async fn get_authorize(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
+    let secure = req.is_https();
     let Query(query) = Query::<AuthorizationRequest>::try_from_uri(req.uri())
         .map_err(|e| oauth_bad_request(e.body_text()))?;
-    authorize(token, query).await
+    authorize(token, query, secure).await
 }
 
 #[utoipa::path(
@@ -84,13 +85,18 @@ pub async fn get_authorize(req: Request) -> OAuthResult<Response> {
 )]
 pub async fn post_authorize(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
+    let secure = req.is_https();
     let Form(query) = Form::<AuthorizationRequest>::from_request(req, &())
         .await
         .map_err(|e| oauth_bad_request(e.body_text()))?;
-    authorize(token, query).await
+    authorize(token, query, secure).await
 }
 
-async fn authorize(token: Option<String>, query: AuthorizationRequest) -> OAuthResult<Response> {
+async fn authorize(
+    token: Option<String>,
+    query: AuthorizationRequest,
+    secure: bool,
+) -> OAuthResult<Response> {
     // A resumed request replays the parked parameters; the rest of this
     // request's query is ignored.
     let (query, parked_at, consent_stage, step_up_stage) = match query.interaction.as_deref() {
@@ -175,7 +181,7 @@ async fn authorize(token: Option<String>, query: AuthorizationRequest) -> OAuthR
                 "the signed-in user is not the one named by id_token_hint",
             );
         }
-        return login_redirect(query, hinted_subject.as_deref()).await;
+        return login_redirect(query, hinted_subject.as_deref(), secure).await;
     }
     // A parked consent stage only counts for the user it was created for.
     let stage_for_user = |user: &AuthorizedUser| {
@@ -195,7 +201,7 @@ async fn authorize(token: Option<String>, query: AuthorizationRequest) -> OAuthR
         Some(user) if parked_at.is_some_and(|at| user.auth_time.timestamp() >= at) => user,
         Some(user) if !prompt.login && !max_age_exceeded(&user, request.max_age) => user,
         _ if prompt.none => return error_redirect("login_required", "login required"),
-        _ => return login_redirect(query, hinted_subject.as_deref()).await,
+        _ => return login_redirect(query, hinted_subject.as_deref(), secure).await,
     };
 
     // The user declined on the consent page.
@@ -220,7 +226,7 @@ async fn authorize(token: Option<String>, query: AuthorizationRequest) -> OAuthR
                 }
                 StepUpRoute::EmailCode => return step_up_redirect(query, &user).await,
                 StepUpRoute::SignIn => {
-                    return login_redirect(query, hinted_subject.as_deref()).await;
+                    return login_redirect(query, hinted_subject.as_deref(), secure).await;
                 }
             }
         }
@@ -277,6 +283,7 @@ fn max_age_exceeded(user: &AuthorizedUser, max_age: Option<i64>) -> bool {
 async fn login_redirect(
     mut query: AuthorizationRequest,
     hinted_subject: Option<&str>,
+    secure: bool,
 ) -> OAuthResult<Response> {
     query.interaction = None;
     if query.login_hint.is_none()
@@ -294,7 +301,7 @@ async fn login_redirect(
         login_hint: login_hint.as_deref(),
         ..Default::default()
     }))?;
-    let cookie = interactions::interaction_cookie(&id, interactions::INTERACTION_TTL_SECS);
+    let cookie = interactions::interaction_cookie(&id, interactions::INTERACTION_TTL_SECS, secure);
     response.headers_mut().append(
         SET_COOKIE,
         cookie.parse().map_err(OAuthErrorResponse::internal)?,
