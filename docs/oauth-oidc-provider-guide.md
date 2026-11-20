@@ -653,8 +653,11 @@ session linked to an enabled OAuth client.
 After a user profile, attribute, or membership write, Stargate refreshes the
 subjects used by gateway authentication for all the user's active sessions.
 Each session keeps its active organization and uses its current membership
-role. Membership removal revokes sessions acting in that organization. Native
-and OAuth refresh preserve these subject updates. SQL commits before the store
+role. New sessions reconcile their subject with SQL after registration and
+before returning tokens. This reconciliation and the updates to existing
+subjects serialize the SQL read and store publication for each user across
+replicas. Membership removal revokes sessions acting in that organization.
+Native and OAuth refresh preserve these subject updates. SQL commits before the store
 update. Stargate logs a failed update, and an affected session may keep using
 its earlier subject until a successful update or until the session ends.
 

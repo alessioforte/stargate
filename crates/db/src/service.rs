@@ -124,6 +124,32 @@ impl Service {
         Ok(())
     }
 
+    /// Read a user's authorization state and hold its write lock through publication.
+    pub async fn with_locked_user_profile<T, Fut>(
+        &self,
+        user_id: &str,
+        publish: impl FnOnce(User, Vec<OrgMembership>) -> Fut,
+    ) -> Result<Option<T>>
+    where
+        Fut: std::future::Future<Output = T>,
+    {
+        #[cfg(feature = "postgres")]
+        let mut tx = self.pool.begin().await?;
+        // SQLite has a single writer and no row-level FOR UPDATE.
+        #[cfg(feature = "sqlite")]
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let Some(user) = self.user.get_by_id_for_update(&mut tx, user_id).await? else {
+            return Ok(None);
+        };
+        let memberships = self
+            .organization
+            .get_orgs_by_user(&mut *tx, user_id)
+            .await?;
+        let result = publish(user, memberships).await;
+        tx.commit().await?;
+        Ok(Some(result))
+    }
+
     /// Lightweight connectivity check — executes `SELECT 1`.
     pub async fn ping(&self) -> Result<()> {
         sqlx::query("SELECT 1").execute(&self.pool).await?;

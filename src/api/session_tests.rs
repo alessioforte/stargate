@@ -1,3 +1,5 @@
+mod concurrency;
+
 use crate::data::{db, store::use_store};
 use crate::iam::{
     auth::{jwt::jwt_config, subject::Subject, verification::verify_bearer},
@@ -404,6 +406,7 @@ async fn suite() {
     assert_subject([&native, &oauth], &expected, None).await;
     revise_session(&sid, |session| session.client_ids.clear()).await;
     registry::revoke_session(&sid).await.unwrap();
+    concurrency::run(&router, admin).await;
 }
 
 #[tokio::test]

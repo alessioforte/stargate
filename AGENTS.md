@@ -435,7 +435,10 @@ replay revokes the entire session.
 
 After an attribute, profile, or membership write commits, IAM rebuilds each active
 session's stored `Subject` from SQL, keeping its org and reading the current role.
-Sessions acting in a removed organization are revoked. Native refresh extends
+Registration reconciles the new subject before returning tokens. Subject reads
+from SQL and their publication share a lock: PostgreSQL locks the user row across
+replicas and SQLite holds its writer lock. Sessions acting in a removed organization
+are revoked. Native refresh extends
 the subject's TTL and OAuth refresh leaves its value and TTL alone. Post-commit
 errors are logged. A failed update can leave the subject stale until a successful
 update or the session ends.
