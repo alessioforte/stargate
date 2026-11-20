@@ -94,7 +94,13 @@ async fn three_concurrent_database_creations_emit_no_warnings_or_errors() {
 
     impl<S: Subscriber> Layer<S> for Warnings {
         fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
-            if matches!(*event.metadata().level(), Level::WARN | Level::ERROR) {
+            let metadata = event.metadata();
+            let target = metadata.target();
+
+            // SQLx can warn about slow statements even when every creator succeeds.
+            if (target == "db" || target.starts_with("db::"))
+                && matches!(*metadata.level(), Level::WARN | Level::ERROR)
+            {
                 self.0.fetch_add(1, Ordering::Relaxed);
             }
         }
