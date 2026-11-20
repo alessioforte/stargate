@@ -38,7 +38,7 @@ def main():
             return run(['docker', 'exec', cid, 'redis-cli', '--raw', *command])
 
         for index in range(6):
-            name = f'stargate-sg21-cluster-{secrets.token_hex(4)}-{index}'
+            name = f'stargate-redis-cluster-{secrets.token_hex(4)}-{index}'
             cid = run([
                 'docker', 'run', '-d', '--rm', '--name', name,
                 '-p', '127.0.0.1::6379',
