@@ -81,6 +81,7 @@ fn listener(tls: bool, max_connections: usize) -> settings::Listener {
         planes: PlaneSet::ALL,
         tls,
         max_connections,
+        trusted_proxies: Default::default(),
     }
 }
 
@@ -425,6 +426,7 @@ async fn accept_errors_back_off_instead_of_spinning() {
             name: "failing".to_string(),
             planes: PlaneSet::ALL,
             tls: false,
+            trusted_proxies: Default::default(),
         }),
         address: "127.0.0.1:1".parse().unwrap(),
         tls: None,

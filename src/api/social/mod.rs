@@ -100,15 +100,11 @@ struct StartQuery {
 }
 
 /// The origin the browser reached this server at: its `Host`, with `https`
-/// when this server or the proxy in front of it terminates TLS
-/// ([`crate::srv::tls::served_over_https`]).
+/// when this request arrived over TLS or the proxy in front of it terminates
+/// TLS ([`crate::web::request::RequestExt::is_https`]).
 fn request_origin(req: &Request) -> Option<String> {
     let host = req.headers().get(http::header::HOST)?.to_str().ok()?;
-    let scheme = if crate::srv::tls::served_over_https() {
-        "https"
-    } else {
-        "http"
-    };
+    let scheme = if req.is_https() { "https" } else { "http" };
     Some(format!("{scheme}://{host}"))
 }
 
@@ -118,6 +114,7 @@ async fn start(
     provider: Provider,
     uri: http::Uri,
     own_origin: Option<String>,
+    secure: bool,
 ) -> Result<Response, ErrorResponse> {
     let Query(query) = Query::<StartQuery>::try_from_uri(&uri).map_err(|error| {
         ErrorResponse::new(ErrorCode::RequestInvalidQuery).with_message(error.body_text())
@@ -151,7 +148,7 @@ async fn start(
     })?;
     Ok(redirect(
         &location,
-        &[state_cookie(&state, STATE_COOKIE_MAX_AGE_SECS)],
+        &[state_cookie(&state, STATE_COOKIE_MAX_AGE_SECS, secure)],
     ))
 }
 
@@ -168,6 +165,7 @@ async fn callback(req: Request, provider: Provider) -> Response {
     let audit_request = audit_request_from(req.extensions());
     let locale = crate::web::request::accept_language(req.headers());
     let bound_state = req.get_cookie_value(STATE_COOKIE);
+    let secure = req.is_https();
     let query = match Query::<CallbackQuery>::try_from_uri(req.uri()) {
         Ok(Query(query)) => query,
         Err(error) if bound_state.is_none() => {
@@ -188,11 +186,22 @@ async fn callback(req: Request, provider: Provider) -> Response {
     match record {
         Some(OAuthState {
             browser: Some(browser),
-        }) => browser_callback(provider, browser, query, bound_state, audit_request, locale).await,
+        }) => {
+            browser_callback(
+                provider,
+                browser,
+                query,
+                bound_state,
+                audit_request,
+                locale,
+                secure,
+            )
+            .await
+        }
         // The browser started a sign-in whose state expired or was used.
-        None if bound_state.is_some() => login_failure(None, LoginError::Failed),
+        None if bound_state.is_some() => login_failure(None, LoginError::Failed, secure),
         Some(OAuthState { browser: None }) => {
-            match api_callback(provider, &query, audit_request, locale).await {
+            match api_callback(provider, &query, audit_request, locale, secure).await {
                 Ok(response) => response,
                 Err(error) => error.into_response(),
             }
@@ -215,6 +224,7 @@ async fn browser_callback(
     bound_state: Option<String>,
     audit_request: TrustedAuditRequest,
     locale: Option<tools::Locale>,
+    secure: bool,
 ) -> Response {
     let return_to = browser.return_to.as_deref();
     // Only the browser that started this sign-in may finish it.
@@ -223,13 +233,13 @@ async fn browser_callback(
             provider = provider.display_name(),
             "social sign-in state does not match this browser"
         );
-        return login_failure(return_to, LoginError::Failed);
+        return login_failure(return_to, LoginError::Failed, secure);
     }
     if query.error.is_some() {
-        return login_failure(return_to, LoginError::Cancelled);
+        return login_failure(return_to, LoginError::Cancelled, secure);
     }
     let Some(code) = nonempty(query.code.as_deref()) else {
-        return login_failure(return_to, LoginError::Failed);
+        return login_failure(return_to, LoginError::Failed, secure);
     };
     match signed_in(provider, code, audit_request, locale).await {
         Ok(session) => {
@@ -238,11 +248,17 @@ async fn browser_callback(
                 .unwrap_or_default();
             // Through the organization picker, as after a password sign-in.
             let location = crate::web::links::auth_app_redirect("select-organization", &params);
-            redirect(&location, &[session_cookie(&session), state_cookie("", 0)])
+            redirect(
+                &location,
+                &[
+                    session_cookie(&session, secure),
+                    state_cookie("", 0, secure),
+                ],
+            )
         }
         Err(error) => {
             tracing::debug!(code = ?error.code, provider = provider.display_name(), "social sign-in refused");
-            login_failure(return_to, LoginError::from(&error))
+            login_failure(return_to, LoginError::from(&error), secure)
         }
     }
 }
@@ -252,10 +268,14 @@ async fn api_callback(
     query: &CallbackQuery,
     audit_request: TrustedAuditRequest,
     locale: Option<tools::Locale>,
+    secure: bool,
 ) -> Result<Response, ErrorResponse> {
     let code = nonempty(query.code.as_deref())
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SocialAuthorizationCodeMissing))?;
-    session_response(signed_in(provider, code, audit_request, locale).await?)
+    session_response(
+        signed_in(provider, code, audit_request, locale).await?,
+        secure,
+    )
 }
 
 async fn signed_in(
@@ -311,11 +331,11 @@ impl From<&ErrorResponse> for LoginError {
 
 /// Back to the auth app's login page, which shows `error` and keeps
 /// `return_to` for another attempt.
-fn login_failure(return_to: Option<&str>, error: LoginError) -> Response {
+fn login_failure(return_to: Option<&str>, error: LoginError, secure: bool) -> Response {
     let mut params = vec![("error", error.code())];
     params.extend(return_to.map(|return_to| ("return_to", return_to)));
     let location = crate::web::links::auth_app_redirect("login", &params);
-    redirect(&location, &[state_cookie("", 0)])
+    redirect(&location, &[state_cookie("", 0, secure)])
 }
 
 fn redirect(location: &str, cookies: &[String]) -> Response {
@@ -336,12 +356,8 @@ fn redirect(location: &str, cookies: &[String]) -> Response {
 
 /// `SameSite=Lax`, so it comes back with the provider's top-level redirect
 /// to the callback. An empty value with `max_age` 0 clears it.
-fn state_cookie(value: &str, max_age_secs: u64) -> String {
-    let secure = if crate::srv::tls::served_over_https() {
-        "; Secure"
-    } else {
-        ""
-    };
+fn state_cookie(value: &str, max_age_secs: u64, secure: bool) -> String {
+    let secure = if secure { "; Secure" } else { "" };
     format!(
         "{STATE_COOKIE}={value}; Path=/oauth; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}{secure}"
     )
@@ -536,11 +552,13 @@ mod tests {
 
     #[test]
     fn the_state_cookie_rides_top_level_redirects_only_under_oauth() {
-        let cookie = state_cookie("01J", 300);
+        let cookie = state_cookie("01J", 300, false);
         assert!(
             cookie
                 .starts_with("social_state=01J; Path=/oauth; HttpOnly; SameSite=Lax; Max-Age=300")
         );
-        assert!(state_cookie("", 0).contains("Max-Age=0"));
+        assert!(state_cookie("", 0, false).contains("Max-Age=0"));
+        assert!(!cookie.contains("Secure"));
+        assert!(state_cookie("01J", 300, true).ends_with("; Secure"));
     }
 }

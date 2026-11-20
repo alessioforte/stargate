@@ -90,9 +90,10 @@ struct ConfirmForm {
 )]
 pub async fn get_logout(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
+    let secure = req.is_https();
     let Query(query) = Query::<LogoutQuery>::try_from_uri(req.uri())
         .map_err(|e| oauth_bad_request(e.body_text()))?;
-    end_session_request(token, query).await
+    end_session_request(token, query, secure).await
 }
 
 #[utoipa::path(
@@ -107,6 +108,7 @@ pub async fn get_logout(req: Request) -> OAuthResult<Response> {
 )]
 pub async fn post_logout(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
+    let secure = req.is_https();
     let Form(query) = Form::<LogoutQuery>::from_request(req, &())
         .await
         .map_err(|e| oauth_bad_request(e.body_text()))?;
@@ -115,7 +117,7 @@ pub async fn post_logout(req: Request) -> OAuthResult<Response> {
         // form post arrives without it. The redirected GET carries it.
         return see_other(&get_location(&query)?);
     }
-    end_session_request(token, query).await
+    end_session_request(token, query, secure).await
 }
 
 #[utoipa::path(
@@ -129,6 +131,7 @@ pub async fn post_logout(req: Request) -> OAuthResult<Response> {
 )]
 pub async fn post_logout_confirm(req: Request) -> OAuthResult<Response> {
     let token = req.get_token();
+    let secure = req.is_https();
     let id = req.get_cookie_value(LOGOUT_COOKIE);
     let action = Form::<ConfirmForm>::from_request(req, &())
         .await
@@ -153,17 +156,21 @@ pub async fn post_logout_confirm(req: Request) -> OAuthResult<Response> {
         if let Some(session) = current_authorized_user(token).await? {
             end_browser_session(&session).await?;
         }
-        signed_out(pending.redirect)?
+        signed_out(pending.redirect, secure)?
     };
-    append_cookie(&mut response, &logout_cookie("", 0))?;
+    append_cookie(&mut response, &logout_cookie("", 0, secure))?;
     Ok(response)
 }
 
-async fn end_session_request(token: Option<String>, query: LogoutQuery) -> OAuthResult<Response> {
+async fn end_session_request(
+    token: Option<String>,
+    query: LogoutQuery,
+    secure: bool,
+) -> OAuthResult<Response> {
     let request = validate(&query).await?;
     let Some(session) = current_authorized_user(token).await? else {
         // Nobody is signed in on this browser.
-        return signed_out(request.redirect);
+        return signed_out(request.redirect, secure);
     };
 
     let hint_names_this_session = request.hinted.as_ref().is_some_and(|(sub, sid)| {
@@ -171,7 +178,7 @@ async fn end_session_request(token: Option<String>, query: LogoutQuery) -> OAuth
     });
     if hint_names_this_session {
         end_browser_session(&session).await?;
-        return signed_out(request.redirect);
+        return signed_out(request.redirect, secure);
     }
 
     let id = park(&PendingLogout {
@@ -179,7 +186,10 @@ async fn end_session_request(token: Option<String>, query: LogoutQuery) -> OAuth
     })
     .await?;
     let mut response = see_other(&logout_page_url(None))?;
-    append_cookie(&mut response, &logout_cookie(&id, LOGOUT_REQUEST_TTL_SECS))?;
+    append_cookie(
+        &mut response,
+        &logout_cookie(&id, LOGOUT_REQUEST_TTL_SECS, secure),
+    )?;
     Ok(response)
 }
 
@@ -288,10 +298,13 @@ async fn end_browser_session(session: &AuthorizedUser) -> OAuthResult<()> {
 
 /// The user is signed out: go to `redirect`, else to the signed-out page,
 /// and drop the session cookie.
-fn signed_out(redirect: Option<String>) -> OAuthResult<Response> {
+fn signed_out(redirect: Option<String>, secure: bool) -> OAuthResult<Response> {
     let location = redirect.unwrap_or_else(signed_out_page_url);
     let mut response = see_other(&location)?;
-    append_cookie(&mut response, &crate::web::cookies::build_jwt_cookie("", 0))?;
+    append_cookie(
+        &mut response,
+        &crate::web::cookies::build_jwt_cookie("", 0, secure),
+    )?;
     Ok(response)
 }
 
@@ -310,11 +323,11 @@ fn append_cookie(response: &mut Response, cookie: &str) -> OAuthResult<()> {
     Ok(())
 }
 
-fn logout_cookie(id: &str, max_age_secs: u64) -> String {
+fn logout_cookie(id: &str, max_age_secs: u64, secure: bool) -> String {
     let mut cookie = format!(
         "{LOGOUT_COOKIE}={id}; Path={LOGOUT_ENDPOINT_PATH}; HttpOnly; SameSite=Strict; Max-Age={max_age_secs}"
     );
-    if crate::srv::tls::served_over_https() {
+    if secure {
         cookie.push_str("; Secure");
     }
     cookie
@@ -398,12 +411,14 @@ mod tests {
 
     #[test]
     fn logout_cookie_is_strict_and_scoped_to_the_logout_endpoint() {
-        let cookie = logout_cookie("abc", 600);
+        let cookie = logout_cookie("abc", 600, false);
 
         assert!(cookie.starts_with("oauth_logout=abc; Path=/oauth/logout;"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("SameSite=Strict"));
         assert!(cookie.contains("Max-Age=600"));
+        assert!(!cookie.contains("Secure"));
+        assert!(logout_cookie("abc", 600, true).ends_with("; Secure"));
     }
 
     #[cfg(feature = "memory")]

@@ -1,22 +1,21 @@
 pub mod banner;
+pub mod client_ip;
 pub mod health;
 pub mod profile;
+pub mod proxy;
 pub mod settings;
 pub mod shutdown;
 pub mod tls;
 
 use crate::api::plane::PlaneSet;
-use axum::{
-    Router,
-    extract::{Request, connect_info::ConnectInfo},
-    response::Response,
-};
+use axum::{Router, extract::Request, response::Response};
 use hyper::body::Incoming;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
     server::conn::auto::Builder,
     service::TowerToHyperService,
 };
+use proxy::ProxyTrust;
 use rustls::ServerConfig;
 use std::{
     convert::Infallible,
@@ -88,11 +87,13 @@ pub struct ListenerInfo {
     pub name: String,
     pub planes: PlaneSet,
     pub tls: bool,
+    /// Forwarding-header sources this listener accepts; empty trusts nobody.
+    pub trusted_proxies: ProxyTrust,
 }
 
 /// Facts about the connection carrying a request: the peer address before any
-/// proxy header, and the listener's identity. Every request carries exactly one
-/// of these; `ConnectInfo` is only read where a test builds a request itself.
+/// proxy header, and the listener's identity. Every request carries exactly
+/// one of these; a test that builds a request itself inserts it.
 #[derive(Clone, Debug)]
 pub struct ConnectionInfo {
     pub peer: SocketAddr,
@@ -105,17 +106,33 @@ impl ConnectionInfo {
         request.extensions().get::<Self>()
     }
 
-    /// The peer address of a request: the connection the server accepted, or
-    /// the `ConnectInfo` extension where a request is built without one.
+    /// The peer address of a request: the connection the server accepted.
     pub fn peer_of<B>(request: &http::Request<B>) -> Option<SocketAddr> {
-        Self::of(request)
-            .map(|connection| connection.peer)
-            .or_else(|| {
-                request
-                    .extensions()
-                    .get::<ConnectInfo<SocketAddr>>()
-                    .map(|peer| peer.0)
-            })
+        Self::of(request).map(|connection| connection.peer)
+    }
+}
+
+/// Connection facts for a test that builds a request without a server: the
+/// listener serves every plane, terminates no TLS, and trusts no proxy.
+#[cfg(test)]
+pub(crate) fn test_connection(peer: SocketAddr) -> ConnectionInfo {
+    test_connection_with(peer, ProxyTrust::default())
+}
+
+/// Like [`test_connection`], with the forwarding sources the test needs.
+#[cfg(test)]
+pub(crate) fn test_connection_with(
+    peer: SocketAddr,
+    trusted_proxies: ProxyTrust,
+) -> ConnectionInfo {
+    ConnectionInfo {
+        peer,
+        listener: Arc::new(ListenerInfo {
+            name: "test".to_string(),
+            planes: PlaneSet::ALL,
+            tls: false,
+            trusted_proxies,
+        }),
     }
 }
 
@@ -140,6 +157,7 @@ pub async fn serve(
             address = %listener.address,
             planes = %listener.info.planes,
             tls = listener.info.tls,
+            trusted_proxies = listener.info.trusted_proxies.source_count(),
             "Serving"
         );
     }
@@ -183,6 +201,7 @@ pub(crate) async fn bind(
             name: settings.name,
             planes: settings.planes,
             tls: tls_acceptor.is_some(),
+            trusted_proxies: settings.trusted_proxies,
         });
         bound.push(Bound {
             info,
@@ -421,6 +440,7 @@ impl Service<Request<Incoming>> for Connection {
             peer: self.peer,
             listener: Arc::clone(&self.listener),
         });
+        client_ip::prepare(&mut request);
         self.router.call(request)
     }
 }

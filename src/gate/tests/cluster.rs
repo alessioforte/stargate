@@ -7,13 +7,12 @@ use crate::{
         subject::{Subject, SubjectType},
     },
 };
-use axum::{body::Body, extract::ConnectInfo, response::Response};
+use axum::{body::Body, response::Response};
 use gate::cfg::Config;
 use http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::{
-    net::SocketAddr,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -57,8 +56,8 @@ async fn send(
 ) -> Response {
     let mut request = Request::builder().uri(path).body(Body::empty()).unwrap();
     request.extensions_mut().insert(gate.clone());
-    request.extensions_mut().insert(ConnectInfo(
-        format!("{ip}:1000").parse::<SocketAddr>().unwrap(),
+    request.extensions_mut().insert(crate::srv::test_connection(
+        format!("{ip}:1000").parse().unwrap(),
     ));
     let calls = calls.clone();
     request.extensions_mut().insert(TestAuthenticator {

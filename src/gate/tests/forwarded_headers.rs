@@ -5,11 +5,11 @@ use crate::{
         RuntimeSnapshot,
         execution::{execute_plan_with_request, plan::build_execution_plan},
         request::RequestState,
-        upstream::headers::{UpstreamHeaders, strip_untrusted_forwarded_headers},
+        upstream::headers::UpstreamHeaders,
     },
     iam::auth::identity::VerifiedIdentity,
 };
-use axum::{Router, body::Body, extract::ConnectInfo, routing::any};
+use axum::{Router, body::Body, routing::any};
 use ctx::{ContextSigner, SignerConfig};
 use futures_util::{SinkExt, StreamExt};
 use http::{HeaderMap, Request, header::HOST};
@@ -53,12 +53,20 @@ fn runtime(config: serde_json::Value, internal: bool) -> Arc<RuntimeSnapshot> {
     runtime
 }
 
-fn incoming(uri: &str, internal: bool) -> Request<Body> {
+fn incoming(uri: &str, internal: bool, trusted: bool) -> Request<Body> {
     let mut req = Request::builder().uri(uri).body(Body::empty()).unwrap();
-    req.extensions_mut().insert(ConnectInfo(
-        "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
-    ));
+    let trust = if trusted {
+        crate::srv::proxy::ProxyTrust::parse("127.0.0.1/32").unwrap()
+    } else {
+        crate::srv::proxy::ProxyTrust::default()
+    };
+    req.extensions_mut()
+        .insert(crate::srv::test_connection_with(
+            "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            trust,
+        ));
     add_proxy_headers(req.headers_mut(), internal);
+    crate::srv::client_ip::prepare(&mut req);
     req
 }
 
@@ -97,7 +105,6 @@ fn request_state(
     state.path = req.uri().path().into();
     state.query = req.uri().query().unwrap_or("").into();
     state.upstream_headers = UpstreamHeaders::from_request(req, false);
-    strip_untrusted_forwarded_headers(req.headers_mut(), state.upstream_headers.peer);
     if internal {
         let signer = ContextSigner::from_rsa_pem(
             SignerConfig::new("https://gateway.test/internal", "test", 30).unwrap(),
@@ -131,14 +138,19 @@ fn request_state(
 }
 
 fn assert_headers(headers: &HeaderMap, trusted: bool, internal: bool, forward: bool, phase: &str) {
-    assert_eq!(headers.get_all("x-forwarded-for").iter().count(), 1);
+    assert_eq!(
+        headers.get_all("x-forwarded-for").iter().count(),
+        1,
+        "{phase} trusted={trusted} internal={internal}"
+    );
     assert_eq!(
         headers["x-forwarded-for"],
         if trusted {
             "1.2.3.4, 5.6.7.8, 127.0.0.1"
         } else {
             "127.0.0.1"
-        }
+        },
+        "{phase} trusted={trusted} internal={internal}"
     );
     assert_eq!(
         headers["x-forwarded-proto"],
@@ -223,6 +235,7 @@ async fn check_http(trusted: bool, internal: bool, forward: bool) {
     let mut req = incoming(
         &format!("https://{ORIGINAL_HOST}/orders?{HTTP_QUERY}"),
         internal,
+        trusted,
     );
     *req.version_mut() = http::Version::HTTP_2;
     let state = request_state(&runtime, &mut req, internal);
@@ -259,7 +272,7 @@ async fn check_http(trusted: bool, internal: bool, forward: bool) {
     }
 
     // A direct HTTP/1 dispatch takes the Host path and does not use replay.
-    let mut req = incoming(&format!("/orders?{HTTP_QUERY}"), internal);
+    let mut req = incoming(&format!("/orders?{HTTP_QUERY}"), internal, trusted);
     req.headers_mut()
         .insert(HOST, ORIGINAL_HOST.parse().unwrap());
     let state = request_state(&runtime, &mut req, internal);
@@ -311,6 +324,17 @@ async fn check_websocket(trusted: bool, internal: bool, forward: bool) {
     let app = Router::new().fallback(any(move |mut req: Request<Body>| {
         let runtime = runtime.clone();
         async move {
+            let trust = if trusted {
+                crate::srv::proxy::ProxyTrust::parse("127.0.0.1/32").unwrap()
+            } else {
+                crate::srv::proxy::ProxyTrust::default()
+            };
+            req.extensions_mut()
+                .insert(crate::srv::test_connection_with(
+                    "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+                    trust,
+                ));
+            crate::srv::client_ip::prepare(&mut req);
             let state = request_state(&runtime, &mut req, internal);
             let plan = build_execution_plan(&runtime.core.graph, "socket", "request-id").unwrap();
             execute_plan_with_request(&runtime, &plan, req, &state).await
@@ -387,9 +411,16 @@ async fn check_gateway_ingress(trusted: bool) {
             .header("x-forwarded-prefix", "/evil")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(ConnectInfo(
-            "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
-        ));
+        req.extensions_mut()
+            .insert(crate::srv::test_connection_with(
+                "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+                if trusted {
+                    crate::srv::proxy::ProxyTrust::parse("127.0.0.1/32").unwrap()
+                } else {
+                    crate::srv::proxy::ProxyTrust::default()
+                },
+            ));
+        crate::srv::client_ip::prepare(&mut req);
         req.extensions_mut().insert(gate.clone());
         let response = crate::gate::service(req).await.unwrap();
         assert_eq!(response.status(), status);
@@ -402,48 +433,19 @@ async fn check_gateway_ingress(trusted: bool) {
 
 #[test]
 fn upstreams_share_the_forwarding_trust_boundary() {
-    const CASE: &str = "STARGATE_TEST_FORWARDED_PEER";
-    if let Ok(case) = std::env::var(CASE) {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        for trusted in [true, false] {
             for internal in [false, true] {
                 for forward in [false, true] {
                     if internal && forward {
                         continue;
                     }
-                    check_http(case == "trusted", internal, forward).await;
-                    check_websocket(case == "trusted", internal, forward).await;
+                    check_http(trusted, internal, forward).await;
+                    check_websocket(trusted, internal, forward).await;
                 }
             }
             #[cfg(feature = "memory")]
-            check_gateway_ingress(case == "trusted").await;
-        });
-        return;
-    }
-    // The proxy list is process-wide and cached. Child processes exercise its
-    // production lookup without mutating the environment of concurrent tests.
-    for case in ["trusted", "untrusted"] {
-        let output = crate::conf::child_test::run(
-            "gate::tests::forwarded_headers::upstreams_share_the_forwarding_trust_boundary",
-            |command| {
-                command
-                    .env(CASE, case)
-                    .env(
-                        "TRUSTED_PROXIES",
-                        if case == "trusted" {
-                            "127.0.0.1/32"
-                        } else {
-                            ""
-                        },
-                    )
-                    .env("TLS_ENABLED", "false")
-                    .env("OAUTH_BASE_URL", "https://public.test");
-            },
-        );
-        assert!(
-            output.status.success(),
-            "{case}: {}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+            check_gateway_ingress(trusted).await;
+        }
+    });
 }

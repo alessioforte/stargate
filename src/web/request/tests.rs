@@ -90,73 +90,22 @@ fn cookie_lookup_reads_named_cookie() {
 }
 
 #[test]
-fn client_ip_uses_peer_when_no_proxy_trust() {
-    use axum::extract::ConnectInfo;
+fn client_ip_uses_the_ingress_resolution_and_falls_back_to_the_peer() {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    let mut r = req_with(&[("x-forwarded-for", "9.9.9.9")], None);
     let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 55555);
-    r.extensions_mut().insert(ConnectInfo(peer));
+
+    // A request a test builds itself has no ingress resolution: the peer is
+    // the client, and a forwarding header never changes it.
+    let mut r = req_with(&[("x-forwarded-for", "9.9.9.9")], None);
+    r.extensions_mut().insert(crate::srv::test_connection(peer));
     assert_eq!(r.get_client_ip(), "1.2.3.4");
-}
 
-#[test]
-fn parse_single_ip_handles_bare_bracketed_and_socket() {
-    use super::parse_single_ip;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    assert_eq!(
-        parse_single_ip(" 203.0.113.7 "),
-        Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
-    );
-    assert_eq!(
-        parse_single_ip("203.0.113.7:443"),
-        Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
-    );
-    assert_eq!(
-        parse_single_ip("[2001:db8::1]"),
-        Some(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))
-    );
-    assert_eq!(
-        parse_single_ip("[2001:db8::1]:8443"),
-        Some(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))
-    );
-    assert_eq!(parse_single_ip(""), None);
-    assert_eq!(parse_single_ip("not-an-ip"), None);
-}
-
-#[test]
-fn forwarded_client_ignores_spoofed_leftmost_entry() {
-    use super::select_forwarded_client;
-    use std::net::{IpAddr, Ipv4Addr};
-
-    // 10.0.0.0/8 is the trusted proxy network; the last hop appended by a
-    // conforming proxy is the real client. A client-prepended fake entry
-    // to the left must be ignored.
-    let trusted = |ip: &IpAddr| matches!(ip, IpAddr::V4(v4) if v4.octets()[0] == 10);
-
-    // Spoofed left-most value, real client appended by the proxy.
-    assert_eq!(
-        select_forwarded_client("9.9.9.9, 203.0.113.7, 10.0.0.1", trusted),
-        Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
-    );
-
-    // Single-proxy hop: client's real IP is the only forwarded entry.
-    assert_eq!(
-        select_forwarded_client("203.0.113.7", trusted),
-        Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
-    );
-
-    // Whole chain trusted: fall back to the left-most known hop.
-    assert_eq!(
-        select_forwarded_client("10.0.0.9, 10.0.0.1", trusted),
-        Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)))
-    );
-
-    // Multiple untrusted entries: the right-most untrusted one wins.
-    assert_eq!(
-        select_forwarded_client("1.1.1.1, 203.0.113.7, 10.0.0.1", trusted),
-        Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)))
-    );
+    // The server resolves the client once at ingress.
+    r.extensions_mut()
+        .insert(crate::srv::client_ip::ClientIp(IpAddr::V4(Ipv4Addr::new(
+            203, 0, 113, 7,
+        ))));
+    assert_eq!(r.get_client_ip(), "203.0.113.7");
 }
 
 #[test]

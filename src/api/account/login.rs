@@ -28,6 +28,7 @@ use db::ent::CredentialType;
 )]
 pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
     let client_ip = req.get_client_ip();
+    let secure = req.is_https();
 
     let Json(credentials) = Json::<UserCredentials>::from_request(req, &())
         .await
@@ -58,6 +59,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         credentials.org_id.as_deref(),
         vec![oidc::authentication::AMR_PASSWORD.to_string()],
         &client_ip,
+        secure,
     )
     .await
 }

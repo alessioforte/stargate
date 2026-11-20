@@ -1,5 +1,5 @@
 use crate::gate::routing::router_matches;
-use axum::{body::Body, extract::ConnectInfo};
+use axum::body::Body;
 use gate::cfg::Config;
 use http::Request;
 use serde_json::{Value, json};
@@ -48,8 +48,8 @@ pub(super) fn measure() -> Vec<Value> {
                 .header("cookie", "kind=match")
                 .body(Body::empty())
                 .unwrap();
-            request.extensions_mut().insert(ConnectInfo(
-                "127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap(),
+            request.extensions_mut().insert(crate::srv::test_connection(
+                "127.0.0.1:1234".parse().unwrap(),
             ));
             assert_eq!(
                 graph

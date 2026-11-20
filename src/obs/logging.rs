@@ -143,11 +143,7 @@ pub async fn trace_middleware(
     let original_method =
         (method != req.method().as_str()).then(|| req.method().as_str().to_owned());
     let path = req.uri().path().to_string();
-    let scheme = if crate::srv::tls::served_over_https() {
-        "https"
-    } else {
-        "http"
-    };
+    let scheme = if req.is_https() { "https" } else { "http" };
     let authority = req.uri().authority().cloned().or_else(|| {
         req.headers()
             .get(http::header::HOST)?
@@ -170,6 +166,8 @@ pub async fn trace_middleware(
     let peer_ip = crate::srv::ConnectionInfo::peer_of(&req).map(|peer| peer.ip().to_string());
     let client_ip_addr = req.get_client_ip_addr();
     let ip_address = client_ip_addr.map(|ip| ip.to_string());
+    let listener =
+        crate::srv::ConnectionInfo::of(&req).map(|connection| connection.listener.name.as_str());
 
     let span = tracing::info_span!(
         "http_request",
@@ -195,6 +193,8 @@ pub async fn trace_middleware(
         stargate.service = tracing::field::Empty,
         stargate.auth_kind = tracing::field::Empty,
         stargate.config_version = tracing::field::Empty,
+        // The listener name is a small, startup-validated set.
+        stargate.listener = listener,
     );
 
     telemetry::set_span_parent_from_headers(&span, req.headers());

@@ -46,6 +46,7 @@ struct LoginForm {
 )]
 pub async fn post_login(req: Request) -> Response {
     let client_ip = req.get_client_ip();
+    let secure = req.is_https();
     let interaction = req.get_cookie_value(INTERACTION_COOKIE);
     let form = Form::<LoginForm>::from_request(req, &())
         .await
@@ -92,19 +93,20 @@ pub async fn post_login(req: Request) -> Response {
 
     let auth_time = chrono::Utc::now().timestamp() as usize;
     let password = vec![oidc::authentication::AMR_PASSWORD.to_string()];
-    let session = match issue_password_session(user, auth_time, None, password, &client_ip).await {
-        Ok(session) => session,
-        Err(error) if error.code == ErrorCode::AuthStateUnavailable => {
-            return OAuthErrorResponse::from(error).into_response();
-        }
-        Err(error) => return back_to_login(page(), login_error_code(&error)),
-    };
+    let session =
+        match issue_password_session(user, auth_time, None, password, &client_ip, secure).await {
+            Ok(session) => session,
+            Err(error) if error.code == ErrorCode::AuthStateUnavailable => {
+                return OAuthErrorResponse::from(error).into_response();
+            }
+            Err(error) => return back_to_login(page(), login_error_code(&error)),
+        };
 
     let mut response = see_other(&interactions::resume_path(&id));
     for cookie in session.headers().get_all(SET_COOKIE) {
         response.headers_mut().append(SET_COOKIE, cookie.clone());
     }
-    if let Ok(cleared) = HeaderValue::from_str(&interactions::interaction_cookie("", 0)) {
+    if let Ok(cleared) = HeaderValue::from_str(&interactions::interaction_cookie("", 0, secure)) {
         response.headers_mut().append(SET_COOKIE, cleared);
     }
     response

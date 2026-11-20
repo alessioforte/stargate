@@ -362,8 +362,8 @@ async fn ingress_overload_and_body_drop_keep_budgets_shared_across_reload() {
     let request = || {
         let mut request = Request::new(Body::empty());
         request.extensions_mut().insert(gate.clone());
-        request.extensions_mut().insert(axum::extract::ConnectInfo(
-            "127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap(),
+        request.extensions_mut().insert(crate::srv::test_connection(
+            "127.0.0.1:1234".parse().unwrap(),
         ));
         request
     };
@@ -395,8 +395,8 @@ async fn ingress_overload_and_body_drop_keep_budgets_shared_across_reload() {
 fn ingress_request(gate: &Arc<crate::gate::Gate>) -> Request<Body> {
     let mut request = Request::new(Body::empty());
     request.extensions_mut().insert(gate.clone());
-    request.extensions_mut().insert(axum::extract::ConnectInfo(
-        "127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap(),
+    request.extensions_mut().insert(crate::srv::test_connection(
+        "127.0.0.1:1234".parse().unwrap(),
     ));
     request
 }
