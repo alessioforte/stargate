@@ -61,11 +61,15 @@ impl tower::Service<http::Uri> for DeadlineConnector {
     }
 }
 
+pub(super) enum ClientProtocol {
+    Http { http1: bool, http2: bool },
+    Grpc,
+}
+
 pub(super) fn build_hyper_client(
     timeout: Duration,
     tls: &ClientConfig,
-    http1: bool,
-    http2: bool,
+    protocol: ClientProtocol,
 ) -> Result<HyperClient, TransportPreparationError> {
     if !tls.alpn_protocols.is_empty() {
         return Err(TransportPreparationError::Alpn);
@@ -76,6 +80,10 @@ pub(super) fn build_hyper_client(
     let builder = HttpsConnectorBuilder::new()
         .with_tls_config(tls.clone())
         .https_or_http();
+    let (http1, http2) = match protocol {
+        ClientProtocol::Http { http1, http2 } => (http1, http2),
+        ClientProtocol::Grpc => (false, true),
+    };
     let https = match (http1, http2) {
         (true, true) => builder
             .enable_http1()
@@ -91,13 +99,17 @@ pub(super) fn build_hyper_client(
         .pool_idle_timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(32);
     if http2 {
-        // RFC 9113 §6.7. Detect silent peers, including on pooled or streaming
-        // connections, within the default 30-second response header deadline.
+        // RFC 9113 §6.7. For HTTP, detect a silent peer before the 30s header
+        // deadline. gRPC servers typically require 5 minutes between data-free PINGs.
+        let (interval, ack_timeout, while_idle) = match protocol {
+            ClientProtocol::Http { .. } => (20, 5, true),
+            ClientProtocol::Grpc => (300, 20, false),
+        };
         client
             .timer(TokioTimer::new())
-            .http2_keep_alive_interval(Duration::from_secs(20))
-            .http2_keep_alive_timeout(Duration::from_secs(5))
-            .http2_keep_alive_while_idle(true);
+            .http2_keep_alive_interval(Duration::from_secs(interval))
+            .http2_keep_alive_timeout(Duration::from_secs(ack_timeout))
+            .http2_keep_alive_while_idle(while_idle);
     }
     // The gateway executor owns replay eligibility and per-attempt signing.
     Ok(client

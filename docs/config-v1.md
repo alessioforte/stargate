@@ -344,10 +344,14 @@ existing prepared clients remain usable throughout.
 
 Upstream HTTP and WebSocket sockets use `TCP_NODELAY`. HTTP clients keep up to
 32 idle connections per origin to absorb short bursts while limiting open
-sockets. Idle pool entries expire after 30 seconds. HTTP/2 clients send a PING
+sockets. Idle pool entries expire after 30 seconds. The regular HTTP/2 client sends a PING
 after 20 seconds without receiving traffic, including on idle connections. A missing
 acknowledgment after 5 seconds closes the connection, ahead of the default
-30-second response header deadline.
+30-second response header deadline. gRPC uses a separate client even on HTTP/2-only
+upstreams. With a stream open, it sends a PING after 300 seconds without traffic
+and waits 20 seconds for an acknowledgment. Idle gRPC connections send no PINGs.
+The interval respects the default five-minute minimum gRPC servers enforce
+between PINGs without data.
 
 WebSockets use the pinned transport's prepared trust roots and client identity,
 with ALPN restricted to `http/1.1`. The connection's DNS destination, TLS server

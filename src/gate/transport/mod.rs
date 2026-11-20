@@ -3,7 +3,7 @@ mod tls;
 
 #[cfg(test)]
 pub(crate) use connector::DeadlineConnector;
-use connector::build_hyper_client;
+use connector::{ClientProtocol, build_hyper_client};
 pub use connector::{HyperClient, connection_timed_out};
 use gate::{
     cfg::{ProbeProtocol, RuntimeConfig, UpstreamProtocol},
@@ -162,16 +162,10 @@ pub(super) fn prepare(
             .map_or(&[][..], |value| &value.protocols);
         let http1 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http1);
         let http2 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http2);
-        let http = build_hyper_client(timeout, tls, http1, http2)?;
-        let grpc_http = if http2 {
-            Some(if http1 {
-                build_hyper_client(timeout, tls, false, true)?
-            } else {
-                http.clone()
-            })
-        } else {
-            None
-        };
+        let http = build_hyper_client(timeout, tls, ClientProtocol::Http { http1, http2 })?;
+        let grpc_http = http2
+            .then(|| build_hyper_client(timeout, tls, ClientProtocol::Grpc))
+            .transpose()?;
         let probe = upstream
             .load_balancer
             .liveness_probe

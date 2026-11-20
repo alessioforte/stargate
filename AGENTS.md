@@ -315,8 +315,11 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   WebSocket needs `http1`), `load_balancer.liveness_probe` and `circuit_breaker`
   (`fail_threshold` 3, `cooldown` 30s), optional `internal_context.audience`.
   HTTP and WebSocket connectors set `TCP_NODELAY`. HTTP pools retain up to
-  32 idle sockets per origin with a 30s idle timeout. HTTP/2 PINGs run after
-  20s of inactivity, including idle connections, with a 5s acknowledgment deadline.
+  32 idle sockets per origin with a 30s idle timeout. The regular HTTP/2 client sends PINGs
+  after 20s without traffic, including on idle connections, with a 5s ACK deadline.
+  The dedicated gRPC client sends PINGs only with active streams, after 300s
+  without traffic, with a 20s ACK deadline. This respects the default 5-minute
+  minimum interval gRPC servers enforce between PINGs without data.
   Probes support HTTP and gRPC health checks; gRPC probes require HTTP/2.
   Both use a client prepared once per upstream with its TLS trust and client
   identity. The load balancer never creates a fallback probe client.
