@@ -270,7 +270,7 @@ The plain `x-request-id` header MUST be present exactly once and equal
 | Field | Type / limit | Rule |
 | --- | --- | --- |
 | `trace_id` | 32 lowercase hexadecimal characters | Active W3C trace id used by Stargate, not raw `traceparent` bytes |
-| `client_ip` | Canonical IPv4 or IPv6 text | Resolved by Stargate using the connection peer and `TRUSTED_PROXIES` policy |
+| `client_ip` | Canonical IPv4 or IPv6 text | Resolved by Stargate once at ingress from the connection peer and the receiving listener's proxy trust |
 | `user_agent` | UTF-8 string, at most 512 bytes | Truncated by the issuer only at a valid UTF-8 boundary |
 
 Trace context is never an authorization input. If the locally extracted trace
