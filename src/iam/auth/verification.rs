@@ -135,7 +135,7 @@ async fn verify_oauth_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> {
         return None;
     }
 
-    let session = match crate::iam::sess::registry::get_active_session(&sid, user_id).await {
+    let session = match crate::iam::sess::registry::active_token_session(&claims).await {
         Ok(Some(session)) => session,
         Ok(None) => return None,
         Err(e) => {

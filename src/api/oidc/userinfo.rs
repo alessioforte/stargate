@@ -72,7 +72,7 @@ fn scope_set(scope: Option<&str>) -> Result<HashSet<String>, ErrorResponse> {
         .collect::<HashSet<_>>())
 }
 
-async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>), ErrorResponse> {
+async fn authorize_userinfo(token: &str) -> Result<(String, HashSet<String>), ErrorResponse> {
     let claims = crate::iam::auth::jwt::jwt_config()
         .validate_oauth_access_token(token, None)
         .map_err(|_| bearer_unauthorized("invalid token"))?;
@@ -87,17 +87,11 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
     {
         return Err(bearer_unauthorized("invalid token"));
     }
-    if let Some(sid) = claims.sid.as_deref() {
-        let Some(user_id) = claims.sub_id.as_deref() else {
-            return Err(bearer_unauthorized("invalid token"));
-        };
-        if !crate::iam::sess::registry::is_session_active(sid, user_id)
-            .await
-            .map_err(ErrorResponse::internal)?
-        {
-            return Err(bearer_unauthorized("invalid token"));
-        }
-    }
+    let session = crate::iam::sess::registry::active_token_session(&claims)
+        .await
+        .map_err(ErrorResponse::internal)?
+        .filter(|session| session.user_id == claims.sub)
+        .ok_or_else(|| bearer_unauthorized("invalid token"))?;
 
     let Some(client_id) = claims.azp.as_deref() else {
         return Err(bearer_unauthorized("invalid token"));
@@ -117,7 +111,7 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
         return Err(insufficient_scope());
     }
 
-    Ok((claims, scopes))
+    Ok((session.user_id, scopes))
 }
 
 fn userinfo_from_user(user: &db::ent::User, scopes: &HashSet<String>) -> UserInfoResponse {
@@ -174,19 +168,8 @@ async fn post_bearer_token(req: Request) -> Result<String, ErrorResponse> {
 }
 
 async fn handle_userinfo(token: String) -> Result<Json<UserInfoResponse>, ErrorResponse> {
-    let (claims, scopes) = active_user_claims(&token).await?;
-    let Some(user_id) = claims
-        .sub_id
-        .as_deref()
-        .filter(|user_id| !user_id.is_empty())
-    else {
-        return Err(bearer_unauthorized("invalid token"));
-    };
-    if claims.sub != user_id {
-        return Err(bearer_unauthorized("invalid token"));
-    }
-
-    let Some(user) = crate::data::db::get_user_by_id(user_id)
+    let (user_id, scopes) = authorize_userinfo(&token).await?;
+    let Some(user) = crate::data::db::get_user_by_id(&user_id)
         .await
         .map_err(ErrorResponse::internal)?
     else {

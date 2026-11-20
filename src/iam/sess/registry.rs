@@ -21,7 +21,7 @@ use crate::iam::auth::subject::{Subject, SubjectType};
 use crate::iam::oidc::backchannel_logout::{self, LogoutDelivery};
 use db::ent::OrgMembership;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use store::{Store, StoreError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,15 +181,9 @@ pub async fn rotate_refresh_token(
     Ok(rotated)
 }
 
-/// Renew session metadata after a refresh token was successfully rotated.
-/// Returns false when the session is no longer registered (e.g. revoked
-/// concurrently): it must not be brought back.
-pub async fn renew_session(
-    user_id: &str,
-    sid: &str,
-    org_id: Option<&str>,
-    ttl_secs: u64,
-) -> Result<bool, StoreError> {
+/// Renew a session after native refresh rotation. Extend the existing
+/// subject's TTL so a concurrent profile or membership write keeps its value.
+pub async fn renew_session(user_id: &str, sid: &str, ttl_secs: u64) -> Result<bool, StoreError> {
     let Some(mut record) = use_store()
         .hget::<SessionRecord>(&directory_key(), sid)
         .await?
@@ -197,8 +191,13 @@ pub async fn renew_session(
     else {
         return Ok(false);
     };
+    if !use_store()
+        .expire(&store::keys::session::subject(sid), ttl_secs)
+        .await?
+    {
+        return Ok(false);
+    }
     let now = now_unix();
-    record.org_id = org_id.map(str::to_string);
     record.last_seen_at_unix = now;
     record.expires_at_unix = now.saturating_add(ttl_secs);
     store_record(&record, ttl_secs).await?;
@@ -286,8 +285,18 @@ pub async fn get_active_session(
     Ok(Some(record))
 }
 
-pub async fn is_session_active(sid: &str, user_id: &str) -> Result<bool, StoreError> {
-    Ok(get_active_session(sid, user_id).await?.is_some())
+/// Resolve a verified user token to a live session owned by its subject.
+pub async fn active_token_session(
+    claims: &jwt::Claims,
+) -> Result<Option<SessionRecord>, StoreError> {
+    let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref()) else {
+        return Ok(None);
+    };
+    if sid.is_empty() || user_id.is_empty() || (claims.azp.is_some() && claims.auth_time.is_none())
+    {
+        return Ok(None);
+    }
+    get_active_session(sid, user_id).await
 }
 
 pub async fn get_session(sid: &str) -> Result<Option<SessionRecord>, StoreError> {
@@ -417,6 +426,102 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
     }
     backchannel_logout::notify(&records);
     Ok(revoked)
+}
+
+#[derive(PartialEq)]
+struct SubjectState {
+    attrs: serde_json::Value,
+    roles: HashMap<String, String>,
+}
+
+impl SubjectState {
+    async fn load(user_id: &str) -> anyhow::Result<Option<Self>> {
+        let Some(user) = crate::data::db::get_user_by_id(user_id).await? else {
+            return Ok(None);
+        };
+        let roles = crate::data::db::get_user_organizations(user_id)
+            .await?
+            .into_iter()
+            .map(|membership| (membership.organization.id, membership.role))
+            .collect();
+        Ok(Some(Self {
+            attrs: user.attrs,
+            roles,
+        }))
+    }
+}
+
+/// Rebuild the user's live subjects after a committed profile or membership
+/// mutation. The response waits for the update, and store failures are logged
+/// because the SQL mutation has already committed.
+pub async fn refresh_user_subjects(user_id: &str) {
+    if let Err(error) = refresh_subjects_from_db(user_id).await {
+        tracing::error!(user_id, %error, "Failed to refresh user session subjects");
+    }
+}
+
+async fn refresh_subjects_from_db(user_id: &str) -> anyhow::Result<()> {
+    let store = use_store();
+    let entries = store
+        .hgetall::<SessionIndexEntry>(&index_key(user_id))
+        .await?;
+    let now = now_unix();
+    let active: Vec<_> = entries
+        .into_iter()
+        .filter(|(_, entry)| entry.expires_at_unix > now)
+        .collect();
+    if active.is_empty() {
+        return Ok(());
+    }
+
+    let mut latest = SubjectState::load(user_id).await?;
+    while let Some(state) = latest {
+        let mut missing_orgs = HashSet::new();
+        for (sid, entry) in &active {
+            let mut subject = Subject::new(
+                user_id.to_string(),
+                SubjectType::User,
+                Some(state.attrs.clone()),
+            );
+            if let Some(org_id) = &entry.org_id {
+                let Some(role) = state.roles.get(org_id) else {
+                    missing_orgs.insert(org_id);
+                    continue;
+                };
+                subject.org_id = Some(org_id.clone());
+                subject.org_role = Some(role.clone());
+            }
+
+            if let Err(error) = store
+                .replace(&store::keys::session::subject(sid), &subject)
+                .await
+            {
+                tracing::error!(user_id, sid, %error, "Failed to refresh user session subject");
+            }
+        }
+        for org_id in missing_orgs {
+            revoke_removed_org_sessions(user_id, org_id).await;
+        }
+
+        // A concurrent SQL write and its fan-out can finish in either order.
+        // Reconcile again if the persisted state changed while publishing.
+        latest = SubjectState::load(user_id).await?;
+        if latest.as_ref() == Some(&state) {
+            break;
+        }
+    }
+    Ok(())
+}
+
+pub async fn membership_removed(user_id: &str, org_id: &str) {
+    revoke_removed_org_sessions(user_id, org_id).await;
+    refresh_user_subjects(user_id).await;
+}
+
+async fn revoke_removed_org_sessions(user_id: &str, org_id: &str) {
+    if let Err(error) = revoke_org_sessions(user_id, org_id).await {
+        tracing::error!(user_id, org_id, %error, "Failed to revoke sessions after membership removal");
+    }
 }
 
 // ── Session authentication ───────────────────────────────────────────────────
@@ -794,16 +899,16 @@ mod index_tests {
     async fn renewal_does_not_resurrect_a_revoked_session() {
         let user = unique("user");
         let sid = unique("sid");
-        seed_session(&user, &sid, None).await;
+        seed_session(&user, &sid, Some("org_a")).await;
 
-        assert!(renew_session(&user, &sid, Some("org_a"), 60).await.unwrap());
+        assert!(renew_session(&user, &sid, 60).await.unwrap());
         assert_eq!(
             get_session(&sid).await.unwrap().unwrap().org_id.as_deref(),
             Some("org_a")
         );
 
         revoke_session(&sid).await.unwrap();
-        assert!(!renew_session(&user, &sid, None, 60).await.unwrap());
+        assert!(!renew_session(&user, &sid, 60).await.unwrap());
         assert!(get_session(&sid).await.unwrap().is_none());
     }
 

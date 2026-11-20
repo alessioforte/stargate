@@ -289,15 +289,7 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
     crate::gate::invalidate_org_limits(&id).await;
 
     for member in &members {
-        if let Err(error) =
-            crate::iam::sess::registry::revoke_org_sessions(&member.user.id, &id).await
-        {
-            tracing::error!(
-                user_id = %member.user.id,
-                org_id = %id,
-                "failed to revoke org sessions after org delete: {error}"
-            );
-        }
+        crate::iam::sess::registry::membership_removed(&member.user.id, &id).await;
     }
 
     Ok((

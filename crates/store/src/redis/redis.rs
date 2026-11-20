@@ -665,6 +665,39 @@ impl Store for RedisStore {
             })
     }
 
+    async fn replace<T: SerializeValue>(&self, key: &str, value: &T) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let value = self.serialize(value)?;
+        let mut con = self.pool.get();
+
+        redis::cmd("SET")
+            .arg(physical_key.as_ref())
+            .arg(value)
+            .arg("XX")
+            .arg("KEEPTTL")
+            .query_async::<Option<String>>(&mut con)
+            .await
+            .map(|result| result.is_some())
+            .map_err(StoreError::from)
+    }
+
+    async fn expire(&self, key: &str, ttl: u64) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        if ttl == 0 {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
+        }
+        let physical_key = self.prefixed_key(key);
+        let mut con = self.pool.get();
+
+        redis::cmd("EXPIRE")
+            .arg(physical_key.as_ref())
+            .arg(ttl)
+            .query_async(&mut con)
+            .await
+            .map_err(StoreError::from)
+    }
+
     async fn delete(&self, key: &str) -> StoreResult<bool> {
         self.validate_key(key)?;
         let physical_key = self.prefixed_key(key);

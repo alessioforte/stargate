@@ -152,6 +152,8 @@ http:
                 assert result.returncode == 0, 'Redis prefix integration tests failed: ' + result.stdout + result.stderr
                 result = subprocess.run(['cargo', 'test', '--no-default-features', '--features', 'cluster', '--locked', '--offline', '--bin', 'stargate', 'credential_security::credential_flows', '--', '--ignored'], cwd=ROOT, env=env, capture_output=True, text=True)
                 assert result.returncode == 0, 'Credential security integration tests failed: ' + result.stdout + result.stderr
+                result = subprocess.run(['cargo', 'test', '--no-default-features', '--features', 'cluster', '--locked', '--offline', '--bin', 'stargate', 'session_tests::session_flows', '--', '--ignored'], cwd=ROOT, env=env, capture_output=True, text=True)
+                assert result.returncode == 0, 'Session integration tests failed: ' + result.stdout + result.stderr
                 log.flush()
                 assert 'NOPERM' not in (folder / 'server.log').read_text(), 'NOPERM in server log'
                 assert json.loads(redis_cmd('ACL', 'LOG')) == [], 'ACL permission failures recorded'
