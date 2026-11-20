@@ -39,17 +39,31 @@ ROUND_TRIP_CAPS = {
 }
 
 
-def enforce_round_trip_caps(results: dict, caps: dict[str, int] = ROUND_TRIP_CAPS) -> None:
-    """Fail when a measured path costs more Redis commands than its cap."""
-    over = [
-        f"{path['path']}: {path['redis_round_trips']} > {caps[path['path']]}"
+def enforce_round_trip_caps(
+    results: dict,
+    selected: list[str] | None = None,
+    caps: dict[str, int] = ROUND_TRIP_CAPS,
+) -> None:
+    """Fail when a selected path is missing or costs more Redis round trips.
+
+    With no `selected` list every capped path is required, so a workload that
+    stops producing a path or renames its count fails the check instead of
+    passing vacuously. Paths without a cap are ignored.
+    """
+    measured = {
+        path.get("path"): path.get("redis_round_trips")
         for path in results.get("paths", [])
-        if path.get("path") in caps
-        and path.get("redis_round_trips") is not None
-        and path["redis_round_trips"] > caps[path["path"]]
-    ]
-    if over:
-        raise SystemExit("Redis round trips exceed the caps: " + ", ".join(over))
+    }
+    required = sorted(name for name in (selected or caps) if name in caps)
+    problems = []
+    for name in required:
+        value = measured.get(name)
+        if type(value) is not int:
+            problems.append(f"{name}: no integer Redis round trip count")
+        elif value > caps[name]:
+            problems.append(f"{name}: {value} > {caps[name]}")
+    if problems:
+        raise SystemExit("Redis round trips exceed the caps: " + ", ".join(problems))
 
 
 def output(*args: str) -> str:
@@ -110,6 +124,7 @@ def main() -> None:
         help="fail when a path exceeds its Redis round-trip cap",
     )
     args = parser.parse_args()
+    selected = [name for name in args.scenarios.split(",") if name] or None
     root = Path(__file__).resolve().parents[2]
     containers: list[str] = []
     backends: dict[str, dict[str, str]] = {}
@@ -239,7 +254,7 @@ def main() -> None:
                 + "\n"
             )
             if args.check_round_trips:
-                enforce_round_trip_caps(results)
+                enforce_round_trip_caps(results, selected)
             for measured in results.get("paths", []):
                 print(
                     f"{measured['path']}: {measured['redis_round_trips']} Redis round trips"

@@ -241,8 +241,8 @@ Round trips are counted client-side by the store command accounting behind
 what each Lua script issues internally, which is why one GCRA check costs four
 commands (`EVALSHA`, `GET`, `SET`, `TIME`) but one round trip. The quota tracker
 now keeps its window and counter as hash fields of one key, so its server-side
-commands are `EVALSHA`, `TIME`, `HGET`, `HSET`, `HINCRBY` and `EXPIRE`; the
-client still issues one round trip.
+commands are `EVALSHA`, `TIME`, `HGET`, `HSET` and `EXPIRE`; the client still
+issues one round trip.
 
 The Redis CI job runs this workload in a short configuration with
 `--check-round-trips`: a path above the caps recorded above (2 anonymous and
