@@ -349,7 +349,9 @@ after 20 seconds without receiving traffic, including on idle connections. A mis
 acknowledgment after 5 seconds closes the connection, ahead of the default
 30-second response header deadline. gRPC uses a separate client even on HTTP/2-only
 upstreams. With a stream open, it sends a PING after 300 seconds without traffic
-and waits 20 seconds for an acknowledgment. Idle gRPC connections send no PINGs.
+and waits 20 seconds for an acknowledgment, including when the client has finished
+sending its request and is waiting for more response data. The pool closes idle
+connections with no open streams before the first gRPC PING.
 The interval respects the default five-minute minimum gRPC servers enforce
 between PINGs without data.
 

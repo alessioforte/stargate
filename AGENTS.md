@@ -317,9 +317,10 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   HTTP and WebSocket connectors set `TCP_NODELAY`. HTTP pools retain up to
   32 idle sockets per origin with a 30s idle timeout. The regular HTTP/2 client sends PINGs
   after 20s without traffic, including on idle connections, with a 5s ACK deadline.
-  The dedicated gRPC client sends PINGs only with active streams, after 300s
-  without traffic, with a 20s ACK deadline. This respects the default 5-minute
-  minimum interval gRPC servers enforce between PINGs without data.
+  With a stream open, the dedicated gRPC client sends a PING after 300s without
+  traffic and waits 20s for an ACK, including on receive-only streams. The pool
+  closes idle connections without open streams before the first gRPC PING.
+  The interval respects the default 5-minute minimum between data-free gRPC PINGs.
   Probes support HTTP and gRPC health checks; gRPC probes require HTTP/2.
   Both use a client prepared once per upstream with its TLS trust and client
   identity. The load balancer never creates a fallback probe client.

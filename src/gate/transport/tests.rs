@@ -307,6 +307,17 @@ async fn http2_keep_alive_discards_a_silent_idle_connection() {
 
 #[tokio::test]
 async fn grpc_keep_alive_waits_five_minutes_on_a_silent_stream() {
+    let upload =
+        futures_util::stream::pending::<Result<axum::body::Bytes, std::convert::Infallible>>();
+    assert_grpc_keep_alive_on_silent_stream(axum::body::Body::from_stream(upload)).await;
+}
+
+#[tokio::test]
+async fn grpc_keep_alive_pings_a_receive_only_stream_after_five_minutes() {
+    assert_grpc_keep_alive_on_silent_stream(axum::body::Body::empty()).await;
+}
+
+async fn assert_grpc_keep_alive_on_silent_stream(upload: axum::body::Body) {
     use axum::body::{Body, Bytes};
     use hyper::{server::conn::http2, service::service_fn};
     use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -370,9 +381,7 @@ async fn grpc_keep_alive_waits_five_minutes_on_a_silent_stream() {
         .unwrap();
     let request = http::Request::post(&url)
         .header("content-type", "application/grpc")
-        .body(Body::from_stream(futures_util::stream::pending::<
-            Result<Bytes, Infallible>,
-        >()))
+        .body(upload)
         .unwrap();
     let response = client.request(request).await.unwrap();
     assert_eq!(response.status(), 200);

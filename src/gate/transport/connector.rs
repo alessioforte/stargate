@@ -101,15 +101,16 @@ pub(super) fn build_hyper_client(
     if http2 {
         // RFC 9113 §6.7. For HTTP, detect a silent peer before the 30s header
         // deadline. gRPC servers typically require 5 minutes between data-free PINGs.
-        let (interval, ack_timeout, while_idle) = match protocol {
-            ClientProtocol::Http { .. } => (20, 5, true),
-            ClientProtocol::Grpc => (300, 20, false),
+        let (interval, ack_timeout) = match protocol {
+            ClientProtocol::Http { .. } => (20, 5),
+            ClientProtocol::Grpc => (300, 20),
         };
         client
             .timer(TokioTimer::new())
             .http2_keep_alive_interval(Duration::from_secs(interval))
             .http2_keep_alive_timeout(Duration::from_secs(ack_timeout))
-            .http2_keep_alive_while_idle(while_idle);
+            // Hyper can classify a receive-only stream as idle after pool eviction.
+            .http2_keep_alive_while_idle(true);
     }
     // The gateway executor owns replay eligibility and per-attempt signing.
     Ok(client
