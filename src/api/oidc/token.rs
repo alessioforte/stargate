@@ -260,8 +260,7 @@ async fn issue_authorization_code_token(
 ) -> OAuthResult<(TokenResponse, RedeemedGrant)> {
     if let Some(sid) = code.sid.as_deref()
         && !crate::iam::sess::registry::register_session_client(sid, &user.id, &client.client_id)
-            .await
-            .map_err(OAuthErrorResponse::internal)?
+            .await?
     {
         return Err(oauth_invalid_grant("login session is no longer active"));
     }

@@ -41,9 +41,7 @@ pub async fn post_credentials(
     // Resolved before the account lookup, so an address without an account
     // takes the same path whether or not the flow started in an app.
     let continuation =
-        crate::iam::oidc::continuation::from_interaction(body.interaction_id.as_deref())
-            .await
-            .map_err(ErrorResponse::internal)?;
+        crate::iam::oidc::continuation::from_interaction(body.interaction_id.as_deref()).await?;
 
     // Email only: a nickname or phone number would select a recipient outside
     // the per-recipient throttle's bucket.

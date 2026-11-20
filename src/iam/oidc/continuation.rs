@@ -8,6 +8,7 @@
 //! starts a normal authorization request from there.
 
 use super::{client_url, interactions};
+use crate::err::ErrorResponse;
 use serde::{Deserialize, Serialize};
 
 /// The app a flow began in, kept with the pending request so a link opened
@@ -42,7 +43,7 @@ pub struct Continuation {
 /// none: the flow simply ends on Stargate's pages.
 pub async fn from_interaction(
     interaction_id: Option<&str>,
-) -> anyhow::Result<Option<LoginContinuation>> {
+) -> Result<Option<LoginContinuation>, ErrorResponse> {
     let Some(interaction_id) = interaction_id else {
         return Ok(None);
     };
@@ -52,7 +53,10 @@ pub async fn from_interaction(
     let Some(client_id) = pending.query.client_id else {
         return Ok(None);
     };
-    let Some(client) = crate::data::db::get_oauth_client_by_client_id(&client_id).await? else {
+    let Some(client) = crate::data::db::get_oauth_client_by_client_id(&client_id)
+        .await
+        .map_err(ErrorResponse::internal)?
+    else {
         return Ok(None);
     };
     Ok(can_continue(&client).then(|| LoginContinuation::new(client_id, None)))
