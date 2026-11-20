@@ -3,14 +3,18 @@ mod tls;
 
 #[cfg(test)]
 pub(crate) use connector::DeadlineConnector;
-use connector::build_hyper_client;
+use connector::{ClientProtocol, build_hyper_client};
 pub use connector::{HyperClient, connection_timed_out};
 use gate::{
-    cfg::{RuntimeConfig, UpstreamProtocol},
+    cfg::{ProbeProtocol, RuntimeConfig, UpstreamProtocol},
     graph::ServiceNode,
 };
 use rustls::ClientConfig;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 use tls::{build_mtls, default_tls_config};
 
 #[derive(Debug, thiserror::Error)]
@@ -72,13 +76,62 @@ pub struct PreparedTransport {
     pub grpc_http: Option<HyperClient>,
     pub probe_client: Option<reqwest::Client>,
     pub websocket_tls: Arc<ClientConfig>,
-    pub connect_timeout: Duration,
-    pub http1: bool,
+    connection: Arc<ConnectionSettings>,
+    probe: Option<ProbeSettings>,
+}
+
+#[derive(PartialEq, Eq)]
+struct ConnectionSettings {
+    upstream: String,
+    targets: BTreeSet<String>,
+    mtls_fingerprint: Option<[u8; 32]>,
+    connect_timeout: Duration,
+    http1: bool,
+    http2: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ProbeSettings {
+    timeout: Duration,
+    http2_only: bool,
+}
+
+impl PreparedTransport {
+    pub fn connect_timeout(&self) -> Duration {
+        self.connection.connect_timeout
+    }
+
+    pub fn http1(&self) -> bool {
+        self.connection.http1
+    }
 }
 
 impl PreparedTransports {
     pub(super) fn get(&self, service: &str) -> Option<&PreparedTransport> {
         self.services.get(service)
+    }
+
+    pub(super) fn reuse_from(&mut self, previous: &Self) {
+        // Service aliases may change while the upstream keeps its connections.
+        let by_upstream: HashMap<_, _> = previous
+            .services
+            .values()
+            .map(|transport| (transport.connection.upstream.as_str(), transport))
+            .collect();
+        for transport in self.services.values_mut() {
+            let Some(active) = by_upstream
+                .get(transport.connection.upstream.as_str())
+                .filter(|active| transport.connection == active.connection)
+            else {
+                continue;
+            };
+            transport.http = active.http.clone();
+            transport.grpc_http = active.grpc_http.clone();
+            transport.websocket_tls = active.websocket_tls.clone();
+            if transport.probe == active.probe {
+                transport.probe_client = active.probe_client.clone();
+            }
+        }
     }
 }
 
@@ -97,62 +150,40 @@ pub(super) fn prepare(
                 .and_then(|transport| transport.connect_timeout.as_deref()),
             config.compiled.runtime.connect_timeout,
         )?;
-        let tls =
-            if upstream.targets.iter().any(|target| {
+        let upstream_mtls = mtls.as_ref().filter(|_| {
+            upstream.targets.iter().any(|target| {
                 target.url.starts_with("https://") || target.url.starts_with("wss://")
-            }) {
-                mtls.as_ref().unwrap_or(&default_tls)
-            } else {
-                &default_tls
-            };
+            })
+        });
+        let tls = upstream_mtls.map_or(&default_tls, |mtls| &mtls.config);
         let protocols = upstream
             .transport
             .as_ref()
             .map_or(&[][..], |value| &value.protocols);
         let http1 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http1);
         let http2 = protocols.is_empty() || protocols.contains(&UpstreamProtocol::Http2);
-        let http = build_hyper_client(timeout, tls, http1, http2)?;
-        let grpc_http = if http2 {
-            Some(if http1 {
-                build_hyper_client(timeout, tls, false, true)?
-            } else {
-                http.clone()
-            })
-        } else {
-            None
-        };
-        let probe_client = upstream
+        let http = build_hyper_client(timeout, tls, ClientProtocol::Http { http1, http2 })?;
+        let grpc_http = http2
+            .then(|| build_hyper_client(timeout, tls, ClientProtocol::Grpc))
+            .transpose()?;
+        let probe = upstream
             .load_balancer
             .liveness_probe
             .as_ref()
             .map(|probe| {
-                let timeout =
-                    probe
-                        .timeout()
-                        .map_err(|_| TransportPreparationError::ProbeTimeout {
-                            upstream: name.clone(),
-                        })?;
-                let mut probe_tls = tls.clone();
-                let http2_only = probe.protocol == gate::cfg::ProbeProtocol::Grpc || !http1;
-                if http2_only {
-                    probe_tls.alpn_protocols = vec![b"h2".to_vec()];
-                }
-                let client = reqwest::Client::builder()
-                    .use_preconfigured_tls(probe_tls)
-                    .connect_timeout(timeout)
-                    .timeout(timeout);
-                let client = if http2_only {
-                    client.http2_prior_knowledge()
-                } else {
-                    client
-                };
-                client
-                    .build()
-                    .map_err(|source| TransportPreparationError::ProbeClient {
+                probe
+                    .timeout()
+                    .map(|timeout| ProbeSettings {
+                        timeout,
+                        http2_only: probe.protocol == ProbeProtocol::Grpc || !http1,
+                    })
+                    .map_err(|_| TransportPreparationError::ProbeTimeout {
                         upstream: name.clone(),
-                        source,
                     })
             })
+            .transpose()?;
+        let probe_client = probe
+            .map(|probe| build_probe_client(name, tls, probe))
             .transpose()?;
         let mut websocket_tls = tls.clone();
         // RFC 6455 section 4: this proxy uses HTTP/1.1 Upgrade, never h2 CONNECT.
@@ -164,8 +195,19 @@ pub(super) fn prepare(
                 grpc_http,
                 probe_client,
                 websocket_tls: Arc::new(websocket_tls),
-                connect_timeout: timeout,
-                http1,
+                connection: Arc::new(ConnectionSettings {
+                    upstream: name.clone(),
+                    targets: upstream
+                        .targets
+                        .iter()
+                        .map(|target| target.url.clone())
+                        .collect(),
+                    mtls_fingerprint: upstream_mtls.map(|mtls| mtls.fingerprint),
+                    connect_timeout: timeout,
+                    http1,
+                    http2,
+                }),
+                probe,
             },
         );
     }
@@ -182,6 +224,30 @@ pub(super) fn prepare(
         services.insert(name.clone(), client.clone());
     }
     Ok(PreparedTransports { services })
+}
+
+fn build_probe_client(
+    upstream: &str,
+    tls: &ClientConfig,
+    settings: ProbeSettings,
+) -> Result<reqwest::Client, TransportPreparationError> {
+    let mut tls = tls.clone();
+    if settings.http2_only {
+        tls.alpn_protocols = vec![b"h2".to_vec()];
+    }
+    let mut client = reqwest::Client::builder()
+        .use_preconfigured_tls(tls)
+        .connect_timeout(settings.timeout)
+        .timeout(settings.timeout);
+    if settings.http2_only {
+        client = client.http2_prior_knowledge();
+    }
+    client
+        .build()
+        .map_err(|source| TransportPreparationError::ProbeClient {
+            upstream: upstream.to_string(),
+            source,
+        })
 }
 
 fn connect_timeout(

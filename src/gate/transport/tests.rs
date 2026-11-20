@@ -6,7 +6,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 fn valid_mtls_and_default_transports_prepare() {
     let files = TlsFiles::new();
     let tls = build_mtls(&files.mtls()).unwrap();
-    assert!(tls.alpn_protocols.is_empty());
+    assert!(tls.config.alpn_protocols.is_empty());
     let config = RuntimeConfig::from_raw(files.config("https://localhost:8443")).unwrap();
     assert!(prepare(&config).unwrap().get("secure").is_some());
     assert!(prepare(&RuntimeConfig::from_raw(gate::cfg::Config::default()).unwrap()).is_ok());
@@ -138,7 +138,14 @@ fn unexpected_alpn_is_an_error_instead_of_a_connector_panic() {
     let mut tls = default_tls_config().unwrap();
     tls.alpn_protocols = vec![b"h2".to_vec()];
     assert!(matches!(
-        build_hyper_client(Duration::from_secs(1), &tls, true, true),
+        build_hyper_client(
+            Duration::from_secs(1),
+            &tls,
+            ClientProtocol::Http {
+                http1: true,
+                http2: true
+            }
+        ),
         Err(TransportPreparationError::Alpn)
     ));
 }
@@ -193,8 +200,8 @@ async fn http_clients_enforce_configured_protocols_and_share_the_prepared_connec
         );
         let prepared = prepare(&RuntimeConfig::from_raw(config).unwrap()).unwrap();
         let transport = prepared.get("secure").unwrap();
-        assert_eq!(transport.http1, !http2);
-        assert_eq!(transport.connect_timeout, Duration::from_millis(250));
+        assert_eq!(transport.http1(), !http2);
+        assert_eq!(transport.connect_timeout(), Duration::from_millis(250));
         assert_eq!(
             transport.websocket_tls.alpn_protocols,
             vec![b"http/1.1".to_vec()]
@@ -222,6 +229,179 @@ async fn http_clients_enforce_configured_protocols_and_share_the_prepared_connec
         // request future; protocol assertions have already run on the server.
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn http2_keep_alive_discards_a_silent_idle_connection() {
+    use axum::body::Body;
+    use hyper::{server::conn::http2, service::service_fn};
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use tokio::sync::oneshot;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stop_rx) = oneshot::channel();
+    let (stopped, stopped_rx) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let builder = http2::Builder::new(TokioExecutor::new());
+        let (stream, _) = listener.accept().await.unwrap();
+        let first = builder.serve_connection(
+            TokioIo::new(stream),
+            service_fn(|_| async {
+                Ok::<_, std::convert::Infallible>(http::Response::new(Body::empty()))
+            }),
+        );
+        tokio::pin!(first);
+        tokio::select! {
+            result = &mut first => panic!("connection ended before stalling: {result:?}"),
+            result = stop_rx => result.unwrap(),
+        }
+        // Keep the socket open without processing frames or acknowledging PINGs.
+        stopped.send(()).unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+        builder
+            .serve_connection(
+                TokioIo::new(stream),
+                service_fn(|_| async {
+                    Ok::<_, std::convert::Infallible>(
+                        http::Response::builder()
+                            .status(204)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                }),
+            )
+            .await
+            .unwrap();
+    });
+
+    let client = build_hyper_client(
+        Duration::from_secs(1),
+        &default_tls_config().unwrap(),
+        ClientProtocol::Http {
+            http1: false,
+            http2: true,
+        },
+    )
+    .unwrap();
+    let request = || {
+        http::Request::builder()
+            .uri(&url)
+            .body(Body::empty())
+            .unwrap()
+    };
+    assert_eq!(client.request(request()).await.unwrap().status(), 200);
+    stop.send(()).unwrap();
+    stopped_rx.await.unwrap();
+    tokio::time::pause();
+    // Beyond the PING deadline and before the pool's idle expiration.
+    tokio::time::sleep(Duration::from_secs(26)).await;
+    tokio::time::resume();
+    let response = tokio::time::timeout(Duration::from_secs(2), client.request(request()))
+        .await
+        .expect("client reused the silent HTTP/2 connection")
+        .unwrap();
+    assert_eq!(response.status(), 204);
+    server.abort();
+}
+
+#[tokio::test]
+async fn grpc_keep_alive_waits_five_minutes_on_a_silent_stream() {
+    let upload =
+        futures_util::stream::pending::<Result<axum::body::Bytes, std::convert::Infallible>>();
+    assert_grpc_keep_alive_on_silent_stream(axum::body::Body::from_stream(upload)).await;
+}
+
+#[tokio::test]
+async fn grpc_keep_alive_pings_a_receive_only_stream_after_five_minutes() {
+    assert_grpc_keep_alive_on_silent_stream(axum::body::Body::empty()).await;
+}
+
+async fn assert_grpc_keep_alive_on_silent_stream(upload: axum::body::Body) {
+    use axum::body::{Body, Bytes};
+    use hyper::{server::conn::http2, service::service_fn};
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use std::convert::Infallible;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (ping_tx, mut pings) = tokio::sync::mpsc::unbounded_channel();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let (mut from_client, mut to_client) = socket.into_split();
+        let (relay, server) = tokio::io::duplex(8192);
+        let (mut from_server, mut to_server) = tokio::io::split(relay);
+        let inspect = async move {
+            // RFC 9113 §§3.4, 4.1, 6.7: forward the preface and each complete
+            // frame, recording only PING requests from the client.
+            let mut preface = [0; 24];
+            from_client.read_exact(&mut preface).await.unwrap();
+            to_server.write_all(&preface).await.unwrap();
+            loop {
+                let mut header = [0; 9];
+                from_client.read_exact(&mut header).await.unwrap();
+                let len = u32::from_be_bytes([0, header[0], header[1], header[2]]);
+                let mut payload = vec![0; len as usize];
+                from_client.read_exact(&mut payload).await.unwrap();
+                if header[3] == 0x6 && header[4] & 1 == 0 {
+                    ping_tx.send(()).unwrap();
+                }
+                to_server.write_all(&header).await.unwrap();
+                to_server.write_all(&payload).await.unwrap();
+            }
+        };
+        let service = service_fn(|_| async {
+            let stream = futures_util::stream::pending::<Result<Bytes, Infallible>>();
+            Ok::<_, Infallible>(
+                http::Response::builder()
+                    .header("content-type", "application/grpc")
+                    .body(Body::from_stream(stream))
+                    .unwrap(),
+            )
+        });
+        let builder = http2::Builder::new(TokioExecutor::new());
+        tokio::select! {
+            () = inspect => unreachable!(),
+            result = tokio::io::copy(&mut from_server, &mut to_client) => { result.unwrap(); }
+            result = builder.serve_connection(TokioIo::new(server), service) => result.unwrap(),
+        }
+    });
+
+    let files = TlsFiles::new();
+    let mut raw = files.config(&url);
+    raw.http.upstreams.get_mut("secure").unwrap().transport =
+        Some(serde_json::from_value(serde_json::json!({"protocols": ["http2"]})).unwrap());
+    let transports = prepare(&RuntimeConfig::from_raw(raw).unwrap()).unwrap();
+    let client = transports
+        .get("secure")
+        .unwrap()
+        .grpc_http
+        .as_ref()
+        .unwrap();
+    let request = http::Request::post(&url)
+        .header("content-type", "application/grpc")
+        .body(upload)
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    tokio::time::pause();
+    tokio::time::sleep(Duration::from_secs(240)).await;
+    tokio::time::resume();
+    assert!(pings.try_recv().is_err());
+
+    // A later PING confirms both the stream and the frame observer stayed live.
+    tokio::time::pause();
+    tokio::time::sleep(Duration::from_secs(61)).await;
+    tokio::time::resume();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), pings.recv())
+            .await
+            .unwrap(),
+        Some(())
+    );
+    drop(response);
+    server.abort();
 }
 
 #[tokio::test]

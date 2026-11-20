@@ -331,14 +331,29 @@ no fallback to another identity. A supplied `mtls` block is checked even when
 the candidate has no HTTPS upstreams. Server identity, trust, and validity are
 still verified during each TLS handshake.
 
-Clients are built before activation. Request-time lookup only clones a prepared
-client and performs no credential-file reads or TLS construction. Replacing
-credential files alone does not reload the clients. An unchanged save retains
+Clients are prepared before activation. A new generation reuses an upstream's
+connection pools when its target URLs, enabled protocols, effective connect
+timeout, and loaded TLS material match the active generation. Request-time
+lookup only clones a prepared client. Replacing credential files alone does
+not reload the clients. An unchanged save retains
 the current generation if its revision is already active; restart the replica
 to reload TLS material without changing the document. An unchanged save still
 activates a document whose revision has not reached this replica. If a
 candidate fails preparation, fix its files and save that candidate again;
 existing prepared clients remain usable throughout.
+
+Upstream HTTP and WebSocket sockets use `TCP_NODELAY`. HTTP clients keep up to
+32 idle connections per origin to absorb short bursts while limiting open
+sockets. Idle pool entries expire after 30 seconds. The regular HTTP/2 client sends a PING
+after 20 seconds without receiving traffic, including on idle connections. A missing
+acknowledgment after 5 seconds closes the connection, ahead of the default
+30-second response header deadline. gRPC uses a separate client even on HTTP/2-only
+upstreams. With a stream open, it sends a PING after 300 seconds without traffic
+and waits 20 seconds for an acknowledgment, including when the client has finished
+sending its request and is waiting for more response data. The pool closes idle
+connections with no open streams before the first gRPC PING.
+The interval respects the default five-minute minimum gRPC servers enforce
+between PINGs without data.
 
 WebSockets use the pinned transport's prepared trust roots and client identity,
 with ALPN restricted to `http/1.1`. The connection's DNS destination, TLS server
