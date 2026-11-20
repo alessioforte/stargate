@@ -1,3 +1,4 @@
+use crate::data::store::{delete_confirmed, set_confirmed};
 use chrono::Utc;
 use store::{Store, StoreError};
 
@@ -19,20 +20,19 @@ pub async fn is_revoked(claims: &jwt::Claims) -> Result<bool, StoreError> {
 }
 
 pub async fn revoke_claims(claims: &jwt::Claims) -> Result<(), StoreError> {
-    let store = crate::data::store::use_store();
     let mut jti_revoked = false;
 
     if let Some(jti) = claims.jti.as_deref()
         && let Some(ttl) = ttl_until_exp(claims.exp)
     {
-        store.set(&key(jti), &true, Some(ttl)).await?;
+        set_confirmed(&key(jti), &true, ttl).await?;
         jti_revoked = true;
     }
 
     if (claims.typ.as_deref() == Some("refresh") || !jti_revoked)
         && let Some(sid) = claims.sid.as_deref()
     {
-        store.delete(&store::keys::session::subject(sid)).await?;
+        delete_confirmed(&store::keys::session::subject(sid)).await?;
     }
 
     Ok(())

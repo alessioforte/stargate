@@ -10,7 +10,7 @@
 //! `api::oidc::interactions`.
 
 use super::request::AuthorizationRequest;
-use crate::err::{OAuthErrorResponse, OAuthResult};
+use crate::err::OAuthResult;
 use serde::{Deserialize, Serialize};
 use store::Store;
 
@@ -105,7 +105,7 @@ async fn save(id: &str, pending: &PendingAuthorization) -> OAuthResult<()> {
     crate::data::store::use_store()
         .set(&key(id), pending, Some(INTERACTION_TTL_SECS))
         .await
-        .map_err(OAuthErrorResponse::internal)
+        .map_err(Into::into)
 }
 
 /// Record the user's decision on a request parked for consent; resuming it
@@ -138,7 +138,7 @@ pub async fn get(id: &str) -> OAuthResult<Option<PendingAuthorization>> {
     crate::data::store::use_store()
         .get(&key(id))
         .await
-        .map_err(OAuthErrorResponse::internal)
+        .map_err(Into::into)
 }
 
 /// Load and delete a parked request so it resumes at most once.
@@ -146,10 +146,7 @@ pub async fn take(id: &str) -> OAuthResult<Option<PendingAuthorization>> {
     let Some(pending) = get(id).await? else {
         return Ok(None);
     };
-    let deleted = crate::data::store::use_store()
-        .delete(&key(id))
-        .await
-        .map_err(OAuthErrorResponse::internal)?;
+    let deleted = crate::data::store::use_store().delete(&key(id)).await?;
     if !deleted {
         return Ok(None);
     }

@@ -105,8 +105,7 @@ pub async fn put_session_organization(req: Request) -> Result<Response, ErrorRes
         .auth_time
         .unwrap_or_else(|| chrono::Utc::now().timestamp() as usize);
     let amr = crate::iam::sess::registry::get_active_session(&session.sid, &session.user.id)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
         .amr;
 

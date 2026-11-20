@@ -39,6 +39,19 @@ pub enum StoreError {
     TypeMismatch(String),
 }
 
+impl StoreError {
+    pub fn is_unavailable(&self) -> bool {
+        matches!(
+            self,
+            Self::ConnectionFailed(_)
+                | Self::BackendUnavailable(_)
+                | Self::Timeout(_)
+                | Self::IoError(_)
+                | Self::RedisFailed(_)
+        )
+    }
+}
+
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -1,8 +1,7 @@
-use crate::OAuthError;
 use crate::authentication::Authentication;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use store::Store;
+use store::{Store, StoreResult};
 
 /// How long a redeemed code is remembered, so a replay can still be detected
 /// and the tokens it issued revoked (RFC 6749 §4.1.2). Matches the code TTL.
@@ -60,7 +59,7 @@ pub async fn store<S: Store>(
     code_hash: &str,
     record: AuthorizationCodeRecord,
     ttl_secs: u64,
-) -> Result<(), OAuthError> {
+) -> StoreResult<()> {
     store
         .set(
             &code_key(code_hash),
@@ -71,7 +70,7 @@ pub async fn store<S: Store>(
     Ok(())
 }
 
-pub async fn get<S: Store>(store: &S, code_hash: &str) -> Result<CodeLookup, OAuthError> {
+pub async fn get<S: Store>(store: &S, code_hash: &str) -> StoreResult<CodeLookup> {
     let key = code_key(code_hash);
     Ok(match store.get::<StoredAuthorizationCode>(&key).await? {
         None => CodeLookup::Missing,
@@ -85,7 +84,7 @@ pub async fn consume<S: Store>(
     store: &S,
     code_hash: &str,
     record: &AuthorizationCodeRecord,
-) -> Result<bool, OAuthError> {
+) -> StoreResult<bool> {
     let key = code_key(code_hash);
     let expected = StoredAuthorizationCode::Pending(Box::new(record.clone()));
     let consumed = StoredAuthorizationCode::Consumed;
@@ -101,7 +100,7 @@ pub async fn record_redemption<S: Store>(
     store: &S,
     code_hash: &str,
     grant: RedeemedGrant,
-) -> Result<(), OAuthError> {
+) -> StoreResult<()> {
     store
         .set(
             &code_key(code_hash),

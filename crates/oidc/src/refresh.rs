@@ -1,8 +1,7 @@
-use crate::OAuthError;
 use crate::authentication::Authentication;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use store::Store;
+use store::{Store, StoreResult};
 
 const TOKEN_PREFIX: &str = "rt_";
 
@@ -63,7 +62,7 @@ pub async fn issue<S: Store>(
     nonce: Option<String>,
     authentication: Authentication,
     ttl_secs: u64,
-) -> Result<String, OAuthError> {
+) -> StoreResult<String> {
     let ttl_secs = ttl_secs.max(1);
     let family_id = ulid::Ulid::generate().to_string();
     let secret = new_secret();
@@ -94,7 +93,7 @@ async fn revoke_family<S: Store>(
     store: &S,
     family_id: &str,
     current: &RefreshTokenFamily,
-) -> Result<(), OAuthError> {
+) -> StoreResult<()> {
     if current.revoked_at.is_some() {
         return Ok(());
     }
@@ -112,7 +111,7 @@ pub async fn rotate<S: Store>(
     store: &S,
     token: &str,
     client_id: &str,
-) -> Result<Option<(String, RefreshTokenFamily)>, OAuthError> {
+) -> StoreResult<Option<(String, RefreshTokenFamily)>> {
     let Some((family_id, secret)) = parse_refresh_token(token.trim()) else {
         return Ok(None);
     };

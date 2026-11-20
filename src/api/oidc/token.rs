@@ -340,7 +340,7 @@ async fn issue_authorization_code_grant(
         CodeLookup::Pending(record) => *record,
         CodeLookup::Missing => return Err(oauth_invalid_grant("invalid authorization code")),
         CodeLookup::Redeemed(grant) => {
-            revoke_replayed_code_grant(grant).await;
+            revoke_replayed_code_grant(grant).await?;
             return Err(oauth_invalid_grant("invalid authorization code"));
         }
     };
@@ -376,28 +376,29 @@ async fn issue_authorization_code_grant(
 }
 
 /// A redeemed code presented again may have been intercepted, so revoke the
-/// tokens issued for it (RFC 6749 §4.1.2). Best-effort: failures only log.
-async fn revoke_replayed_code_grant(grant: Option<RedeemedGrant>) {
+/// tokens issued for it (RFC 6749 §4.1.2).
+async fn revoke_replayed_code_grant(grant: Option<RedeemedGrant>) -> OAuthResult<()> {
     let Some(grant) = grant else {
-        return;
+        return Ok(());
     };
 
-    if let (Some(jti), Some(exp)) = (grant.access_jti, grant.access_exp) {
-        let claims = jwt::Claims {
-            jti: Some(jti),
-            exp,
-            ..Default::default()
-        };
-        if let Err(error) = crate::iam::auth::revocation::revoke_claims(&claims).await {
-            tracing::warn!(error = %error, "failed to revoke access token of replayed code");
+    let access_revocation = match (grant.access_jti, grant.access_exp) {
+        (Some(jti), Some(exp)) => {
+            let claims = jwt::Claims {
+                jti: Some(jti),
+                exp,
+                ..Default::default()
+            };
+            crate::iam::auth::revocation::revoke_claims(&claims).await
         }
-    }
+        _ => Ok(()),
+    };
 
-    if let Some(family_id) = grant.refresh_family_id.as_deref()
-        && let Err(error) = refresh::revoke_family(family_id).await
-    {
-        tracing::warn!(error = %error, "failed to revoke refresh tokens of replayed code");
+    if let Some(family_id) = grant.refresh_family_id.as_deref() {
+        refresh::revoke_family(family_id).await?;
     }
+    access_revocation?;
+    Ok(())
 }
 
 async fn consent_still_covers(

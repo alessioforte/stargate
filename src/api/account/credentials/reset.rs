@@ -93,9 +93,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
             ErrorResponse::new(ErrorCode::PasswordUpdateFailed)
         })?;
 
-    crate::iam::sess::registry::revoke_all_sessions(&user.id)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    crate::iam::sess::registry::revoke_all_sessions(&user.id).await?;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();

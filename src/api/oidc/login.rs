@@ -7,7 +7,8 @@
 //! `/oauth/authorize?interaction={id}`. Without JavaScript its form posts
 //! here. This endpoint runs the password checks of `POST /account/login`
 //! (login guard throttling, constant-time unknown users, rehash) and
-//! answers only with redirects: back to `/oauth/authorize` on success, or to
+//! answers with redirects on healthy dependencies: back to `/oauth/authorize`
+//! on success, or to
 //! the login page with an `error` code it displays.
 //!
 //! Accounts that need MFA or a password change are sent back with
@@ -22,7 +23,7 @@ use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use http::HeaderValue;
 use http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use serde::Deserialize;
@@ -40,6 +41,7 @@ struct LoginForm {
     request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "username and password, posted by the hosted login page when JavaScript is unavailable; the parked authorization request comes from the oauth_interaction cookie"),
     responses(
         (status = 303, description = "Signed in: resumes the authorization request. Otherwise back to the login page with an error code."),
+        (status = 503, description = "Authentication state unavailable"),
     )
 )]
 pub async fn post_login(req: Request) -> Response {
@@ -57,6 +59,9 @@ pub async fn post_login(req: Request) -> Response {
     let pending = match interactions::get(&id).await {
         Ok(Some(pending)) => pending,
         Ok(None) => return expired(),
+        Err(error) if error.status == StatusCode::SERVICE_UNAVAILABLE => {
+            return error.into_response();
+        }
         Err(_) => return back_to_login(LoginPage::default(), "server_error"),
     };
     let page = || LoginPage {
@@ -73,6 +78,9 @@ pub async fn post_login(req: Request) -> Response {
     let password = form.password.as_deref().unwrap_or_default();
     let user = match verify_login_password(&client_ip, username, password).await {
         Ok((user, _)) => user,
+        Err(error) if error.status == StatusCode::SERVICE_UNAVAILABLE => {
+            return error.into_response();
+        }
         Err(error) => return back_to_login(page(), login_error_code(&error)),
     };
 
@@ -86,6 +94,9 @@ pub async fn post_login(req: Request) -> Response {
     let password = vec![oidc::authentication::AMR_PASSWORD.to_string()];
     let session = match issue_user_session(user, auth_time, None, password).await {
         Ok(session) => session,
+        Err(error) if error.status == StatusCode::SERVICE_UNAVAILABLE => {
+            return crate::err::OAuthErrorResponse::from(error).into_response();
+        }
         Err(_) => return back_to_login(page(), "server_error"),
     };
 

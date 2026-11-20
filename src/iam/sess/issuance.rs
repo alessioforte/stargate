@@ -63,8 +63,7 @@ pub async fn start_user_session(
 
     store
         .set(&store::keys::session::subject(&sid), &subject, Some(sttl))
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
     if let Err(error) = registry::register_session(
         registry::NewSession {
             user_id: &user.id,
@@ -79,7 +78,7 @@ pub async fn start_user_session(
     .await
     {
         let _ = store.delete(&store::keys::session::subject(&sid)).await;
-        return Err(ErrorResponse::internal(error));
+        return Err(error.into());
     }
 
     Ok(IssuedSession {

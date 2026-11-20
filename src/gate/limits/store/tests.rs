@@ -117,6 +117,38 @@ async fn traffic_checks_apply_allow_and_deny_to_backend_errors_and_deadlines_at_
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn ingress_rate_and_quota_share_one_budget() {
+    let state = Arc::new(AtomicU8::new(2));
+    let runtime = runtime(&state);
+    for ingress in [LimitPoint::GatewayIngress, LimitPoint::IamIngress] {
+        let started = Instant::now();
+        with_traffic_budget(runtime.ingress.timeout, async {
+            assert!(
+                check_traffic_limit(&runtime, ingress, OnStoreError::Allow, check(ingress))
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            // A healthy backend must not be called after the request spent
+            // its entire allowance on ingress.
+            state.store(0, Ordering::Relaxed);
+            for point in [
+                LimitPoint::RateLimit,
+                LimitPoint::Quota,
+                LimitPoint::AdminPrincipal,
+            ] {
+                let result =
+                    check_traffic_limit(&runtime, point, OnStoreError::Deny, check(point)).await;
+                assert_eq!(result.unwrap_err().code, point.unavailable());
+            }
+        })
+        .await;
+        assert_eq!(started.elapsed(), runtime.ingress.timeout);
+        state.store(2, Ordering::Relaxed);
+    }
+}
+
 #[tokio::test]
 async fn configuration_and_internal_errors_are_distinct_and_never_fail_open_or_degrade_the_store() {
     for state in [0, 3, 4, 6] {

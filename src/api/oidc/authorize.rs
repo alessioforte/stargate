@@ -308,9 +308,7 @@ async fn step_up_route(
     user: &AuthorizedUser,
     signed_in_for_request: bool,
 ) -> OAuthResult<StepUpRoute> {
-    let available = crate::iam::otp::service::email_mfa_available(&user.user)
-        .await
-        .map_err(|error| OAuthErrorResponse::internal(error.message))?;
+    let available = crate::iam::otp::service::email_mfa_available(&user.user).await?;
     Ok(if !available {
         StepUpRoute::Unavailable
     } else if oidc::authentication::otp_adds_factor(&user.amr) {
@@ -551,10 +549,7 @@ pub(super) async fn current_authorized_user(
         _ => return Ok(None),
     };
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
-    {
+    if crate::iam::auth::revocation::is_revoked(&claims).await? {
         return Ok(None);
     }
 
@@ -563,8 +558,7 @@ pub(super) async fn current_authorized_user(
     };
     let Some(subject) = crate::data::store::use_store()
         .get::<crate::iam::auth::subject::Subject>(&store::keys::session::subject(sid))
-        .await
-        .map_err(OAuthErrorResponse::internal)?
+        .await?
     else {
         return Ok(None);
     };
@@ -584,10 +578,7 @@ pub(super) async fn current_authorized_user(
     let Some(auth_time) = claims.auth_time else {
         return Ok(None);
     };
-    let Some(session) = crate::iam::sess::registry::get_active_session(sid, &user.id)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
-    else {
+    let Some(session) = crate::iam::sess::registry::get_active_session(sid, &user.id).await? else {
         return Ok(None);
     };
     let auth_time = Utc

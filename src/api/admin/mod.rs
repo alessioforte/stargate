@@ -85,39 +85,26 @@ pub struct AdminAuthenticationState {
     pub authenticated: bool,
 }
 
-async fn super_admin_step_up_satisfied(sid: &str, user_id: &str) -> bool {
+async fn grant_super_admin_if_allowed(user_id: &str, sid: &str) -> Result<bool, ErrorResponse> {
+    if !crate::data::db::is_super_admin_user_id(user_id)
+        .await
+        .map_err(ErrorResponse::internal)?
+    {
+        return Ok(false);
+    }
     if !crate::iam::otp::admin_step_up_required() {
-        return true;
+        return Ok(true);
     }
-
     if sid.is_empty() {
-        return false;
+        return Ok(false);
     }
 
-    match crate::iam::otp::has_valid_mfa_verification(
+    crate::iam::otp::has_valid_mfa_verification(
         sid,
         user_id,
         crate::iam::otp::ADMIN_STEP_UP_PURPOSE,
     )
     .await
-    {
-        Ok(satisfied) => satisfied,
-        Err(err) => {
-            tracing::error!("Failed to check admin MFA step-up state: {}", err);
-            false
-        }
-    }
-}
-
-async fn grant_super_admin_if_allowed(user_id: &str, sid: Option<&str>) -> bool {
-    match crate::data::db::is_super_admin_user_id(user_id).await {
-        Ok(true) => super_admin_step_up_satisfied(sid.unwrap_or_default(), user_id).await,
-        Ok(false) => false,
-        Err(err) => {
-            tracing::error!("Failed to resolve super admin grants: {}", err);
-            false
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -132,28 +119,10 @@ struct AuthorizationResolution {
     authorization: Option<AdminAuthorization>,
 }
 
-/// The live native session behind a user-delegated OAuth access token.
-///
-/// Control-plane access requires it: a token without a `sid`, or one whose
-/// session ended, has no session whose state an administrator could act on.
-async fn oauth_session_sid(claims: &jwt::Claims) -> Option<String> {
-    let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref()) else {
-        return None;
-    };
-    match crate::iam::sess::registry::get_active_session(sid, user_id).await {
-        Ok(Some(_)) => Some(sid.to_string()),
-        Ok(None) => None,
-        Err(err) => {
-            tracing::error!("Failed to resolve backing OAuth session: {}", err);
-            None
-        }
-    }
-}
-
 async fn resolve_authorization(
     token: Option<String>,
     raw_key: Option<String>,
-) -> AuthorizationResolution {
+) -> Result<AuthorizationResolution, ErrorResponse> {
     let credential_present = token.is_some() || raw_key.is_some();
     let mut authenticated = false;
     let mut actor = None;
@@ -162,62 +131,41 @@ async fn resolve_authorization(
     if let Some(token) = token {
         let jwt = jwt_config();
         if let Ok(claims) = jwt.validate_session_access_token(&token) {
-            match crate::iam::auth::revocation::is_revoked(&claims).await {
-                Ok(false) => {
-                    let sid = claims.sid.clone().unwrap_or_default();
-                    let store = crate::data::store::use_store();
-                    let session = store
-                        .get::<Subject>(&store::keys::session::subject(&sid))
-                        .await
-                        .unwrap_or(None);
-                    if let Some(subject) = session.as_ref()
-                        && subject.sub_type == crate::iam::auth::subject::SubjectType::User
-                        && claims.sub_id.as_deref() == Some(subject.id.as_str())
-                    {
-                        authenticated = true;
-                    }
-                    if authenticated
-                        && let Some(user_id) = claims.sub_id.as_deref()
-                        && grant_super_admin_if_allowed(user_id, Some(&sid)).await
-                    {
-                        let user_id = user_id.to_string();
-                        actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
-                        authorization = Some(AdminAuthorization::super_admin_user(
-                            user_id,
-                            AdminAuthenticationKind::Session,
-                            Box::new(claims),
-                        ));
-                    }
-                }
-                Ok(true) => {}
-                Err(err) => {
-                    tracing::error!("Failed to check token revocation state: {}", err);
+            if let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref())
+                && !crate::iam::auth::revocation::is_revoked(&claims).await?
+            {
+                let session = crate::data::store::use_store()
+                    .get::<Subject>(&store::keys::session::subject(sid))
+                    .await?;
+                authenticated = session.is_some_and(|subject| {
+                    subject.sub_type == crate::iam::auth::subject::SubjectType::User
+                        && subject.id == user_id
+                });
+                if authenticated && grant_super_admin_if_allowed(user_id, sid).await? {
+                    actor = Some(db::ent::TrustedAdminActor::admin(user_id));
+                    authorization = Some(AdminAuthorization::super_admin_user(
+                        user_id.to_owned(),
+                        AdminAuthenticationKind::Session,
+                        Box::new(claims),
+                    ));
                 }
             }
-        } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None) {
-            match crate::iam::auth::revocation::is_revoked(&claims).await {
-                Ok(false) => {
-                    if let Some(sid) = oauth_session_sid(&claims).await {
-                        authenticated = true;
-                        let client_id = claims.azp.as_deref().unwrap_or_default();
-                        if crate::iam::oidc::client_is_trusted_first_party(client_id).await
-                            && let Some(user_id) = claims.sub_id.as_deref()
-                            && grant_super_admin_if_allowed(user_id, Some(&sid)).await
-                        {
-                            let user_id = user_id.to_string();
-                            actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
-                            authorization = Some(AdminAuthorization::super_admin_user(
-                                user_id,
-                                AdminAuthenticationKind::OAuth,
-                                Box::new(claims),
-                            ));
-                        }
-                    }
-                }
-                Ok(true) => {}
-                Err(err) => {
-                    tracing::error!("Failed to check token revocation state: {}", err);
-                }
+        } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None)
+            && let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref())
+            && !crate::iam::auth::revocation::is_revoked(&claims).await?
+            && crate::iam::sess::registry::is_session_active(sid, user_id).await?
+        {
+            authenticated = true;
+            let client_id = claims.azp.as_deref().unwrap_or_default();
+            if crate::iam::oidc::client_is_trusted_first_party(client_id).await
+                && grant_super_admin_if_allowed(user_id, sid).await?
+            {
+                actor = Some(db::ent::TrustedAdminActor::admin(user_id));
+                authorization = Some(AdminAuthorization::super_admin_user(
+                    user_id.to_owned(),
+                    AdminAuthenticationKind::OAuth,
+                    Box::new(claims),
+                ));
             }
         }
     }
@@ -241,14 +189,14 @@ async fn resolve_authorization(
         }
     }
 
-    AuthorizationResolution {
+    Ok(AuthorizationResolution {
         authentication: AdminAuthenticationState {
             credential_present,
             authenticated,
         },
         actor,
         authorization,
-    }
+    })
 }
 
 fn install_audit_context(
@@ -285,7 +233,13 @@ async fn extract_authorization_for(
 ) -> Response {
     let token = req.get_token();
     let raw_key = req.get_api_key();
-    let resolution = resolve_authorization(token, raw_key).await;
+    let resolution = match resolve_authorization(token, raw_key).await {
+        Ok(resolution) => resolution,
+        Err(error) if matches!(boundary, AuditRouteBoundary::Application) => {
+            return crate::err::OAuthErrorResponse::from(error).into_response();
+        }
+        Err(error) => return error.into_response(),
+    };
     // Authenticated control-plane principals are limited by identity, not by
     // client address: an admin key's automation never drains a console user's
     // budget behind the same IP. Unauthenticated requests are bounded by the

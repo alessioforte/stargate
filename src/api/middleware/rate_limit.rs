@@ -10,7 +10,9 @@ use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::{Gate, RuntimeSnapshot, retain_runtime};
 use crate::web::request::RequestExt;
 use crate::{
-    gate::limits::{LimitPoint, TrafficLimit, check_traffic_limit, ingress_key},
+    gate::limits::{
+        LimitPoint, TrafficLimit, check_traffic_limit, ingress_key, with_traffic_budget,
+    },
     web::limits::{insert_limit_headers, limited_response},
 };
 use axum::extract::Request;
@@ -32,13 +34,17 @@ pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response 
 
     let runtime = gate.snapshot();
     req.extensions_mut().insert(runtime.clone());
-    let client_ip = req.get_client_ip();
-    if let Err(error) = check_ingress(&runtime, &client_ip).await {
-        return error.into_response();
-    }
-    next.run(req)
-        .await
-        .map(|body| retain_runtime(body, runtime))
+    with_traffic_budget(runtime.ingress.timeout, async move {
+        let client_ip = req.get_client_ip();
+        let ingress_started = tokio::time::Instant::now();
+        if let Err(error) = check_ingress(&runtime, &client_ip).await {
+            return error.into_response();
+        }
+        crate::data::store::with_security_budget(ingress_started.elapsed(), next.run(req))
+            .await
+            .map(|body| retain_runtime(body, runtime))
+    })
+    .await
 }
 
 async fn check_ingress(runtime: &RuntimeSnapshot, client_ip: &str) -> Result<(), ErrorResponse> {

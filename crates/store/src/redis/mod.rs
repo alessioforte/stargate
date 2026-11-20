@@ -1,11 +1,12 @@
+mod pool;
 #[allow(clippy::module_inception)]
 mod redis;
+mod replication;
 mod scripts;
 mod streams;
 
+pub use replication::RedisReplicationConfig;
 pub use streams::{StreamGroupState, StreamId};
 
-pub use redis::{
-    Compression, CompressionConfig, RedisConnection, RedisPoolConfig, RedisScript, RedisStore,
-    StreamEntry,
-};
+pub use pool::{RedisConnection, RedisPoolConfig, with_request_budget};
+pub use redis::{Compression, CompressionConfig, RedisScript, RedisStore, StreamEntry};

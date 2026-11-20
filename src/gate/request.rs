@@ -108,19 +108,22 @@ pub(super) async fn handle_hyper(mut req: Request<Body>) -> Result<Response, Err
         execution
             .run_with_deadline_updates(
                 updates,
-                handle_request(
-                    req,
-                    runtime.clone(),
-                    policies,
-                    &execution,
-                    RequestDeadlines {
-                        started: request_started,
-                        grpc_deadline,
-                        updates: deadlines,
-                    },
-                    admission,
-                    &mut labels,
-                    &mut usage,
+                crate::gate::limits::with_traffic_budget(
+                    runtime.ingress.timeout,
+                    Box::pin(handle_request(
+                        req,
+                        runtime.clone(),
+                        policies,
+                        &execution,
+                        RequestDeadlines {
+                            started: request_started,
+                            grpc_deadline,
+                            updates: deadlines,
+                        },
+                        admission,
+                        &mut labels,
+                        &mut usage,
+                    )),
                 ),
             )
             .await?
@@ -185,14 +188,18 @@ async fn handle_request(
         crate::srv::ConnectionInfo::of(&req).is_some_and(|connection| connection.listener.tls);
     let upstream_headers = UpstreamHeaders::from_request(&req, listener_tls);
     strip_untrusted_forwarded_headers(req.headers_mut(), upstream_headers.peer);
+    let ingress_started = tokio::time::Instant::now();
     ingress::apply_ingress_limit(&runtime, &client_ip, execution, usage)
         .instrument(tracing::debug_span!("gateway.ingress"))
         .await?;
-    let (identity, commands) = store::observe::count_commands(
-        authentication::authenticate(authentication::auth_request(&req))
-            .instrument(tracing::debug_span!("gateway.authenticate")),
-    )
-    .await;
+    let (identity, commands) =
+        store::observe::count_commands(crate::data::store::with_security_budget(
+            ingress_started.elapsed(),
+            authentication::authenticate(authentication::auth_request(&req))
+                .instrument(tracing::debug_span!("gateway.authenticate")),
+        ))
+        .await;
+    let identity = identity?;
     let auth_kind = identity.auth_kind();
     usage.record_auth(auth_kind, commands);
     let sub = identity.subject();
