@@ -77,8 +77,9 @@ pub(super) async fn connect_upstream(
     // Connect bounds DNS, TCP, and TLS together. The Upgrade response has its
     // own header deadline, with both phases capped by the execution deadline.
     let stream = execution
-        .run("connect", Some(transport.connect_timeout), async {
+        .run("connect", Some(transport.connect_timeout()), async {
             let socket = tokio::net::TcpStream::connect((host.as_str(), port)).await?;
+            socket.set_nodelay(true)?;
             match tls {
                 Some(server_name) => {
                     // RFC 6455 section 4.1: TLS identity comes from the target URI,

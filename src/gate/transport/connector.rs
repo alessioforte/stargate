@@ -2,7 +2,7 @@ use super::TransportPreparationError;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
-    rt::TokioExecutor,
+    rt::{TokioExecutor, TokioTimer},
 };
 use rustls::ClientConfig;
 use std::time::Duration;
@@ -72,6 +72,7 @@ pub(super) fn build_hyper_client(
     }
     let mut connector = HttpConnector::new();
     connector.enforce_http(false);
+    connector.set_nodelay(true);
     let builder = HttpsConnectorBuilder::new()
         .with_tls_config(tls.clone())
         .https_or_http();
@@ -83,8 +84,23 @@ pub(super) fn build_hyper_client(
         (true, false) => builder.enable_http1().wrap_connector(connector),
         (false, _) => builder.enable_http2().wrap_connector(connector),
     };
+    let mut client = Client::builder(TokioExecutor::new());
+    // Keep connections warm between bursts while bounding idle sockets per origin.
+    client
+        .pool_timer(TokioTimer::new())
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(32);
+    if http2 {
+        // RFC 9113 §6.7. Detect silent peers, including on pooled or streaming
+        // connections, within the default 30-second response header deadline.
+        client
+            .timer(TokioTimer::new())
+            .http2_keep_alive_interval(Duration::from_secs(20))
+            .http2_keep_alive_timeout(Duration::from_secs(5))
+            .http2_keep_alive_while_idle(true);
+    }
     // The gateway executor owns replay eligibility and per-attempt signing.
-    Ok(Client::builder(TokioExecutor::new())
+    Ok(client
         .http2_only(!http1)
         .retry_canceled_requests(false)
         .build(DeadlineConnector::new(https, timeout)))

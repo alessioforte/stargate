@@ -106,6 +106,7 @@ pub async fn handler(
     strip_hop_by_hop_headers(&mut upstream_headers);
     strip_internal_context_response(&mut upstream_headers);
 
+    // Hyper writes the response for the downstream connection (RFC 9110 §6.2).
     let mut proxied = Response::new(guarded_body(
         Body::new(body),
         execution.response(),
@@ -115,7 +116,6 @@ pub async fn handler(
         Termination::Error,
     ));
     *proxied.status_mut() = parts.status;
-    *proxied.version_mut() = parts.version;
     *proxied.extensions_mut() = parts.extensions;
     *proxied.headers_mut() = upstream_headers;
 

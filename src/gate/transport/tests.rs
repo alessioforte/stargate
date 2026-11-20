@@ -6,7 +6,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 fn valid_mtls_and_default_transports_prepare() {
     let files = TlsFiles::new();
     let tls = build_mtls(&files.mtls()).unwrap();
-    assert!(tls.alpn_protocols.is_empty());
+    assert!(tls.config.alpn_protocols.is_empty());
     let config = RuntimeConfig::from_raw(files.config("https://localhost:8443")).unwrap();
     assert!(prepare(&config).unwrap().get("secure").is_some());
     assert!(prepare(&RuntimeConfig::from_raw(gate::cfg::Config::default()).unwrap()).is_ok());
@@ -193,8 +193,8 @@ async fn http_clients_enforce_configured_protocols_and_share_the_prepared_connec
         );
         let prepared = prepare(&RuntimeConfig::from_raw(config).unwrap()).unwrap();
         let transport = prepared.get("secure").unwrap();
-        assert_eq!(transport.http1, !http2);
-        assert_eq!(transport.connect_timeout, Duration::from_millis(250));
+        assert_eq!(transport.http1(), !http2);
+        assert_eq!(transport.connect_timeout(), Duration::from_millis(250));
         assert_eq!(
             transport.websocket_tls.alpn_protocols,
             vec![b"http/1.1".to_vec()]
@@ -222,6 +222,78 @@ async fn http_clients_enforce_configured_protocols_and_share_the_prepared_connec
         // request future; protocol assertions have already run on the server.
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn http2_keep_alive_discards_a_silent_idle_connection() {
+    use axum::body::Body;
+    use hyper::{server::conn::http2, service::service_fn};
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use tokio::sync::oneshot;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stop_rx) = oneshot::channel();
+    let (stopped, stopped_rx) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let builder = http2::Builder::new(TokioExecutor::new());
+        let (stream, _) = listener.accept().await.unwrap();
+        let first = builder.serve_connection(
+            TokioIo::new(stream),
+            service_fn(|_| async {
+                Ok::<_, std::convert::Infallible>(http::Response::new(Body::empty()))
+            }),
+        );
+        tokio::pin!(first);
+        tokio::select! {
+            result = &mut first => panic!("connection ended before stalling: {result:?}"),
+            result = stop_rx => result.unwrap(),
+        }
+        // Keep the socket open without processing frames or acknowledging PINGs.
+        stopped.send(()).unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+        builder
+            .serve_connection(
+                TokioIo::new(stream),
+                service_fn(|_| async {
+                    Ok::<_, std::convert::Infallible>(
+                        http::Response::builder()
+                            .status(204)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                }),
+            )
+            .await
+            .unwrap();
+    });
+
+    let client = build_hyper_client(
+        Duration::from_secs(1),
+        &default_tls_config().unwrap(),
+        false,
+        true,
+    )
+    .unwrap();
+    let request = || {
+        http::Request::builder()
+            .uri(&url)
+            .body(Body::empty())
+            .unwrap()
+    };
+    assert_eq!(client.request(request()).await.unwrap().status(), 200);
+    stop.send(()).unwrap();
+    stopped_rx.await.unwrap();
+    tokio::time::pause();
+    // Beyond the PING deadline and before the pool's idle expiration.
+    tokio::time::sleep(Duration::from_secs(26)).await;
+    tokio::time::resume();
+    let response = tokio::time::timeout(Duration::from_secs(2), client.request(request()))
+        .await
+        .expect("client reused the silent HTTP/2 connection")
+        .unwrap();
+    assert_eq!(response.status(), 204);
+    server.abort();
 }
 
 #[tokio::test]

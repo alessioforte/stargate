@@ -25,7 +25,7 @@ pub async fn handler(
     execution: &Execution,
 ) -> Result<Response, ErrorResponse> {
     validate_upgrade(&req)?;
-    if !transport.http1 {
+    if !transport.http1() {
         return Err(
             ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed)
                 .with_param("reason", "websocket_requires_http1"),

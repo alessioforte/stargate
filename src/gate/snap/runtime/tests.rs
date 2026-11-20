@@ -11,6 +11,7 @@ use hyper_util::rt::TokioIo;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::{
     convert::Infallible,
+    net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -262,6 +263,144 @@ async fn wait_for_path(upstream: &MtlsUpstream, expected: &str) {
     })
     .await
     .expect("upstream never received the expected request");
+}
+
+#[tokio::test]
+async fn publishing_reuses_the_pool_for_an_unchanged_upstream() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server =
+        tokio::spawn(async move {
+            let app = axum::Router::new().fallback(
+            |axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>| async move {
+                (StatusCode::NO_CONTENT, [("x-upstream-port", peer.port().to_string())])
+            },
+        );
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+    let files = TlsFiles::new();
+    let mut config = files.config(&url);
+    let gate = Arc::new(crate::gate::test_support::gate(config.clone()));
+    let connection = async || {
+        let response = crate::gate::service(request(&gate)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        response.headers()["x-upstream-port"].clone()
+    };
+    let first = connection().await;
+
+    let service = config.http.services.shift_remove("secure").unwrap();
+    config.http.services.insert("alias".to_owned(), service);
+    config.http.routers["secure"].service = "alias".to_owned();
+    assert_eq!(
+        apply_gateway_config(&gate, &config.to_yaml_string().unwrap()).unwrap(),
+        1
+    );
+    assert_eq!(connection().await, first);
+
+    config.http.upstreams["secure"].transport =
+        Some(serde_json::from_value(serde_json::json!({"protocols": ["http1"]})).unwrap());
+    assert_eq!(
+        apply_gateway_config(&gate, &config.to_yaml_string().unwrap()).unwrap(),
+        2
+    );
+    assert_ne!(connection().await, first);
+    server.abort();
+}
+
+#[tokio::test]
+async fn publishing_rotated_mtls_material_uses_a_fresh_transport() {
+    let files = TlsFiles::new();
+    let mut config = files.config("https://localhost:8443");
+    let gate = crate::gate::test_support::gate(config.clone());
+    let original = gate
+        .snapshot()
+        .transport("secure")
+        .unwrap()
+        .websocket_tls
+        .clone();
+
+    config.http.routers["secure"].priority = Some(1);
+    apply_gateway_config(&gate, &config.to_yaml_string().unwrap()).unwrap();
+    assert!(Arc::ptr_eq(
+        &original,
+        &gate.snapshot().transport("secure").unwrap().websocket_tls
+    ));
+
+    files.write("ca.pem", &[CA, SERVER_CERT].concat());
+    config.http.routers["secure"].priority = Some(2);
+    apply_gateway_config(&gate, &config.to_yaml_string().unwrap()).unwrap();
+    assert!(!Arc::ptr_eq(
+        &original,
+        &gate.snapshot().transport("secure").unwrap().websocket_tls
+    ));
+}
+
+#[tokio::test]
+async fn http10_upstream_preserves_http11_downstream_keep_alive() {
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", upstream.local_addr().unwrap());
+    let upstream_task = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (stream, _) = upstream.accept().await.unwrap();
+            http1::Builder::new()
+                .serve_connection(
+                    TokioIo::new(stream),
+                    service_fn(|_| async {
+                        Ok::<_, Infallible>(
+                            Response::builder()
+                                .version(http::Version::HTTP_10)
+                                .header(http::header::CONNECTION, "close")
+                                .body(Body::from("upstream"))
+                                .unwrap(),
+                        )
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+    });
+    let files = TlsFiles::new();
+    let gate = Arc::new(crate::gate::test_support::gate(files.config(&url)));
+    let downstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let downstream_address = downstream.local_addr().unwrap();
+    let gateway_task = tokio::spawn(async move {
+        let app = axum::Router::new()
+            .fallback(crate::gate::service)
+            .layer(axum::Extension(gate));
+        axum::serve(downstream, app).await.unwrap();
+    });
+    let stream = tokio::net::TcpStream::connect(downstream_address)
+        .await
+        .unwrap();
+    let (mut client, connection) =
+        hyper::client::conn::http1::handshake::<_, Body>(TokioIo::new(stream))
+            .await
+            .unwrap();
+    let client_task = tokio::spawn(connection);
+
+    for _ in 0..2 {
+        client.ready().await.unwrap();
+        let request = Request::builder()
+            .uri("/")
+            .header(http::header::HOST, downstream_address.to_string())
+            .body(Body::empty())
+            .unwrap();
+        let response = client.send_request(request).await.unwrap();
+        assert_eq!(response.version(), http::Version::HTTP_11);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            "upstream"
+        );
+    }
+    upstream_task.await.unwrap();
+    client_task.abort();
+    gateway_task.abort();
 }
 
 #[tokio::test]

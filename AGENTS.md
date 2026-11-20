@@ -314,6 +314,9 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
 - Upstreams: `transport.connect_timeout`, `transport.protocols` (`http1`/`http2`;
   WebSocket needs `http1`), `load_balancer.liveness_probe` and `circuit_breaker`
   (`fail_threshold` 3, `cooldown` 30s), optional `internal_context.audience`.
+  HTTP and WebSocket connectors set `TCP_NODELAY`. HTTP pools retain up to
+  32 idle sockets per origin with a 30s idle timeout. HTTP/2 PINGs run after
+  20s of inactivity, including idle connections, with a 5s acknowledgment deadline.
   Probes support HTTP and gRPC health checks; gRPC probes require HTTP/2.
   Both use a client prepared once per upstream with its TLS trust and client
   identity. The load balancer never creates a fallback probe client.
@@ -462,6 +465,8 @@ with its safe audit event in one transaction. Conflicts return
 replica. Capacity changes are saved with `activation: restart_required` and retain the
 current runtime until restart. Pinned requests, bodies, mirrors, and WebSockets keep
 their generation. Replacing TLS files alone does not reload prepared transports.
+Publication retains the active pools for upstreams with the same target URLs,
+protocols, effective connect timeout, and loaded TLS material.
 The Console preserves gateway and ACE drafts on conflicts, fetches the latest
 document separately, and offers explicit Reload or Overwrite actions with its
 version, update time and actor. ACE reads and writes expose the same metadata.

@@ -114,7 +114,6 @@ impl Gate {
             return Err(GatewayPreparationError::BudgetChange);
         }
         let core = self.builder.prepare(&prepared.config)?;
-        configure_probes(&core, &prepared.transports);
         Ok(PreparedActivation { core, prepared })
     }
 
@@ -122,15 +121,17 @@ impl Gate {
         &self,
         activation: PreparedActivation,
     ) -> Result<u64, GatewayPreparationError> {
-        let PreparedActivation { core, prepared } = activation;
+        let PreparedActivation { core, mut prepared } = activation;
         // Preparation finishes before touching the active generation or its probes.
         let _activation = self.activation.lock().expect("Activation lock poisoned");
-        let version = self
-            .runtime
-            .load()
+        let active = self.runtime.load();
+        let version = active
             .version
             .checked_add(1)
             .ok_or(GatewayPreparationError::VersionExhausted)?;
+        // A different generation may have been published since preparation.
+        prepared.transports.reuse_from(&active.transports);
+        configure_probes(&core, &prepared.transports);
         let runtime = Arc::new(RuntimeSnapshot {
             core,
             ingress: prepared.config.compiled.ingress.clone(),
