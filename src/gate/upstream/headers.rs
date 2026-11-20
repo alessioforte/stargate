@@ -3,7 +3,7 @@ use crate::web::cookies::SESSION_COOKIE;
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::graph::HeaderValueNode;
 use http::header::{AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION};
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
 /// Ingress facts survive URI/header rewrites and every replayed dispatch.
 #[derive(Debug, Clone, Default)]
@@ -18,10 +18,7 @@ impl UpstreamHeaders {
     pub(in crate::gate) fn from_request<B>(req: &http::Request<B>, listener_tls: bool) -> Self {
         Self {
             preserve_host: false,
-            peer: req
-                .extensions()
-                .get::<axum::extract::ConnectInfo<SocketAddr>>()
-                .map(|peer| peer.0.ip()),
+            peer: crate::srv::ConnectionInfo::peer_of(req).map(|peer| peer.ip()),
             original_host: req.headers().get(http::header::HOST).cloned().or_else(|| {
                 req.uri()
                     .authority()

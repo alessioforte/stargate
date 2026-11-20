@@ -79,9 +79,8 @@ fn required_path(env_key: &str) -> io::Result<String> {
 }
 
 pub fn rustls_server_config() -> io::Result<std::sync::Arc<rustls::ServerConfig>> {
-    use rustls::ServerConfig;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject};
-    use std::{fs::File, io::BufReader, sync::Arc};
+    use std::{fs::File, io::BufReader};
 
     let key_path = required_path("TLS_KEY")?;
     let cert_path = required_path("TLS_CERT")?;
@@ -102,12 +101,27 @@ pub fn rustls_server_config() -> io::Result<std::sync::Arc<rustls::ServerConfig>
             Err(error) => return Err(io::Error::other(error)),
         };
 
-    let config = ServerConfig::builder()
+    server_config(cert_chain, private_key)
+}
+
+/// Builds the TLS configuration every TLS listener shares. ALPN offers HTTP/2
+/// and HTTP/1.1: without it a client can only negotiate HTTP/1.1, and gRPC
+/// clients fail. The certificate does not change per listener.
+pub(crate) fn server_config(
+    cert_chain: Vec<rustls::pki_types::CertificateDer<'static>>,
+    private_key: rustls::pki_types::PrivateKeyDer<'static>,
+) -> io::Result<std::sync::Arc<rustls::ServerConfig>> {
+    const ALPN_PROTOCOLS: [&[u8]; 2] = [b"h2", b"http/1.1"];
+
+    let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(cert_chain, private_key)
         .map_err(io::Error::other)?;
-
-    Ok(Arc::new(config))
+    config.alpn_protocols = ALPN_PROTOCOLS
+        .iter()
+        .map(|protocol| protocol.to_vec())
+        .collect();
+    Ok(std::sync::Arc::new(config))
 }
 
 #[cfg(test)]

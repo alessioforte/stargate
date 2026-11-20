@@ -16,14 +16,13 @@ use crate::{
     data::store,
     iam::auth::jwt,
     obs::logging,
-    srv::{banner, profile, shutdown, tls},
+    srv::{banner, profile, settings, shutdown, tls},
     web::headers,
 };
 
 use axum::Extension;
 use axum::middleware::from_fn;
 use dotenvy::dotenv;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
 
@@ -65,16 +64,15 @@ pub async fn run() -> std::io::Result<()> {
     iam::pwd::hash::init();
 
     let version = env!("CARGO_PKG_VERSION");
-    let port = std::env::var("PORT").unwrap_or_else(|_| "5050".to_string());
-    let addr: SocketAddr = format!("0.0.0.0:{}", port)
-        .parse()
-        .expect("Invalid listen address");
-    let tls_enabled = tls::enabled()?;
+    let listeners = settings::from_env().map_err(|error| {
+        tracing::error!("Invalid listener settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
+    tls::enabled()?;
     let runtime_profile = profile::validate_runtime_profile()?;
     let shutdown_timeout_secs = shutdown::server_shutdown_timeout_secs();
 
     info!("Version: {}", version);
-    info!("Starting server on port {}", port);
     info!(
         "Runtime profile: {} (db={}, state={})",
         runtime_profile,
@@ -122,10 +120,25 @@ pub async fn run() -> std::io::Result<()> {
     gate::spawn_config_sync(gate.clone())?;
     let lifecycle = srv::health::Lifecycle::default();
 
-    let app = api::server_router(lifecycle.clone(), conf::iam_hosts().clone())
-        .layer(Extension(Arc::clone(&gate)))
-        .layer(from_fn(headers::security_headers_middleware))
-        .layer(from_fn(logging::trace_middleware));
+    // One router per listener: each serves only the planes it declares, with the
+    // server-wide layers on top. The gateway extension and the layers are
+    // applied once here, never per connection.
+    let hosts = conf::iam_hosts().clone();
+    let listeners = listeners
+        .into_iter()
+        .map(|settings| {
+            let router = api::listener_router(settings.planes, lifecycle.clone(), hosts.clone())
+                .layer(Extension(Arc::clone(&gate)))
+                .layer(from_fn(headers::security_headers_middleware))
+                .layer(from_fn(logging::trace_middleware));
+            srv::Listener { settings, router }
+        })
+        .collect::<Vec<_>>();
+    let tls_config = listeners
+        .iter()
+        .any(|listener| listener.settings.tls)
+        .then(tls::rustls_server_config)
+        .transpose()?;
 
     let signal = shutdown::shutdown_signal()?;
 
@@ -142,13 +155,13 @@ pub async fn run() -> std::io::Result<()> {
             .begin_shutdown_with_timeout(std::time::Duration::from_secs(shutdown_timeout_secs));
     };
 
-    info!("Server listening on {}", addr);
-
-    let result = if tls_enabled {
-        srv::tls(app, addr, shutdown, shutdown_timeout_secs).await
-    } else {
-        srv::plain(app, addr, shutdown, shutdown_timeout_secs).await
-    };
+    let result = srv::serve(
+        listeners,
+        tls_config,
+        shutdown,
+        std::time::Duration::from_secs(shutdown_timeout_secs),
+    )
+    .await;
 
     info!("Server stopped, running shutdown hooks...");
     gate.resources.begin_shutdown();
