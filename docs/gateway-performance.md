@@ -239,7 +239,15 @@ gateway, PostgreSQL and Redis share the machine.
 Round trips are counted client-side by the store command accounting behind
 `stargate.store.redis.commands_per_request`. Server-side commands also include
 what each Lua script issues internally, which is why one GCRA check costs four
-commands (`EVALSHA`, `GET`, `SET`, `TIME`) but one round trip.
+commands (`EVALSHA`, `GET`, `SET`, `TIME`) but one round trip. The quota tracker
+now keeps its window and counter as hash fields of one key, so its server-side
+commands are `EVALSHA`, `TIME`, `HGET`, `HSET`, `HINCRBY` and `EXPIRE`; the
+client still issues one round trip.
+
+The Redis CI job runs this workload in a short configuration with
+`--check-round-trips`: a path above the caps recorded above (2 anonymous and
+rate limit, 3 API key and quota, 4 session, 6 OAuth) fails the job. Only the
+round-trip counts are gated; latency in CI is not.
 
 The paths compose: every request pays the ingress admission check and the
 subject rate check (two round trips, both GCRA scripts), and then:
