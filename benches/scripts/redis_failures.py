@@ -681,8 +681,9 @@ def scenario_empty(ctx):
         ctx, "empty", ["--save", "", "--appendonly", "no"]
     )
     sid = json.loads(_b64decode(token.split(".")[1]))["sid"]
+    session_key = f"stargate:v1:{{s:{sid}}}:subject"
     require(
-        redis_command(redis, "EXISTS", sid).stdout.strip() == "1",
+        redis_command(redis, "EXISTS", session_key).stdout.strip() == "1",
         "session is not in the store before the restart",
     )
     load = Load(server.base, token)
@@ -707,7 +708,7 @@ def scenario_empty(ctx):
     fault_end = time.monotonic()
     wait_redis(redis)
     require(
-        redis_command(redis, "EXISTS", sid).stdout.strip() == "0",
+        redis_command(redis, "EXISTS", session_key).stdout.strip() == "0",
         "the restarted Redis still holds the session",
     )
     status, _, body, _ = request(server.url("/account/profile"), token=token)

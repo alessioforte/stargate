@@ -167,11 +167,8 @@ async fn assertion_client(
     let accepted = oidc::client_assertion::accept(claims, &client.client_id, &audiences, now)
         .map_err(oauth_invalid_client)?;
 
-    let replay_key = format!(
-        "oauth:client-assertion:{}:{}",
-        client.client_id,
-        pw::hash_api_key(&accepted.jti)
-    );
+    let replay_key =
+        store::keys::oauth::client_assertion(&client.client_id, &pw::hash_api_key(&accepted.jti));
     let ttl = (accepted.exp - now + REPLAY_LEEWAY_SECS).max(1) as u64;
     if !crate::data::store::use_store()
         .set_if_absent(&replay_key, &true, Some(ttl))

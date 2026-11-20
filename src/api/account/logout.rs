@@ -41,7 +41,7 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         }
         None => {
             use_store()
-                .delete(&sid)
+                .delete(&store::keys::session::subject(&sid))
                 .await
                 .map_err(ErrorResponse::internal)?;
         }

@@ -53,10 +53,10 @@ fn org_policies(on_missing: OnMissingOrg) -> SelectedLimitPolicies {
 
 async fn assert_buckets_uncharged(runtime: &RuntimeSnapshot) {
     for (name, key, cost) in [
-        ("default", format!("lim:{SUBJECT}"), 1),
-        ("org", format!("lim:org:{ORG}"), 1),
-        ("daily", format!("quota:{SUBJECT}"), 3),
-        ("org-daily", format!("quota:org:{ORG}"), 4),
+        ("default", store::keys::limits::subject_rate(SUBJECT), 1),
+        ("org", store::keys::limits::org_rate(ORG), 1),
+        ("daily", store::keys::limits::subject_quota(SUBJECT), 3),
+        ("org-daily", store::keys::limits::org_quota(ORG), 4),
     ] {
         let decision = runtime
             .core
@@ -151,7 +151,7 @@ async fn route_precedence_ignores_unselected_subject_overrides_and_known_limits_
         runtime
             .core
             .limiter
-            .check("default", "lim:subject", None)
+            .check("default", &store::keys::limits::subject_rate(SUBJECT), None)
             .await
             .unwrap()
             .is_allowed()
@@ -160,7 +160,7 @@ async fn route_precedence_ignores_unselected_subject_overrides_and_known_limits_
         runtime
             .core
             .limiter
-            .check("premium", "lim:subject", None)
+            .check("premium", &store::keys::limits::subject_rate(SUBJECT), None)
             .await
             .unwrap()
             .is_allowed()
@@ -169,7 +169,7 @@ async fn route_precedence_ignores_unselected_subject_overrides_and_known_limits_
         !runtime
             .core
             .limiter
-            .check("premium", "lim:subject", None)
+            .check("premium", &store::keys::limits::subject_rate(SUBJECT), None)
             .await
             .unwrap()
             .is_allowed()
@@ -200,15 +200,15 @@ async fn absent_quotas_and_explicit_org_skip_do_not_select_or_consume_a_bucket()
     assert_eq!(headers["x-ratelimit-limit"], "1");
     assert!(!headers.contains_key("x-quota-limit"));
     for (name, key, cost) in [
-        ("org", "lim:org:organization", 1),
-        ("daily", "quota:subject", 3),
-        ("org-daily", "quota:org:organization", 4),
+        ("org", store::keys::limits::org_rate(ORG), 1),
+        ("daily", store::keys::limits::subject_quota(SUBJECT), 3),
+        ("org-daily", store::keys::limits::org_quota(ORG), 4),
     ] {
         assert!(
             runtime
                 .core
                 .limiter
-                .check(name, key, Some(cost))
+                .check(name, &key, Some(cost))
                 .await
                 .unwrap()
                 .is_allowed()
@@ -241,7 +241,7 @@ async fn org_ip_fallback_uses_the_policy_names_and_original_namespaces() {
         !runtime
             .core
             .limiter
-            .check("org", &format!("lim:orgip:{IP}"), None)
+            .check("org", &store::keys::limits::org_ip_rate(IP), None)
             .await
             .unwrap()
             .is_allowed()
@@ -250,7 +250,7 @@ async fn org_ip_fallback_uses_the_policy_names_and_original_namespaces() {
         runtime
             .core
             .limiter
-            .check("org-daily", &format!("quota:orgip:{IP}"), Some(3))
+            .check("org-daily", &store::keys::limits::org_ip_quota(IP), Some(3),)
             .await
             .unwrap()
             .remaining,
@@ -260,7 +260,7 @@ async fn org_ip_fallback_uses_the_policy_names_and_original_namespaces() {
         runtime
             .core
             .limiter
-            .check("org", "lim:org:organization", None)
+            .check("org", &store::keys::limits::org_rate(ORG), None)
             .await
             .unwrap()
             .is_allowed()
@@ -290,7 +290,7 @@ async fn malformed_selected_attributes_are_errors_and_diagnostics_are_bounded() 
                 runtime
                     .core
                     .limiter
-                    .check("default", "lim:subject", None)
+                    .check("default", &store::keys::limits::subject_rate(SUBJECT), None)
                     .await
                     .unwrap()
                     .is_allowed()
@@ -368,7 +368,7 @@ async fn removing_an_attribute_referenced_limit_fails_new_requests_but_preserves
         gate.snapshot()
             .core
             .limiter
-            .check("default", "lim:subject", None)
+            .check("default", &store::keys::limits::subject_rate(SUBJECT), None)
             .await
             .unwrap()
             .is_allowed()

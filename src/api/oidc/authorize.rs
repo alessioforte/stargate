@@ -562,7 +562,7 @@ pub(super) async fn current_authorized_user(
         return Ok(None);
     };
     let Some(subject) = crate::data::store::use_store()
-        .get::<crate::iam::auth::subject::Subject>(sid)
+        .get::<crate::iam::auth::subject::Subject>(&store::keys::session::subject(sid))
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {

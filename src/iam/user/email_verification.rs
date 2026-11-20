@@ -4,7 +4,6 @@ use store::Store;
 
 use super::signup::{PendingSignupProfile, SignupOrigin};
 
-const KEY_PREFIX: &str = "email_verification_requests";
 const REQUEST_TTL_SECS: u64 = 60 * 60; // 60 minutes
 
 pub async fn create_email_verification_request(
@@ -13,8 +12,8 @@ pub async fn create_email_verification_request(
     let store = use_store();
     let sid = ulid::Ulid::generate().to_string();
 
-    let key1 = format!("{}:{}", KEY_PREFIX, sid);
-    let key2 = format!("{}:{}", KEY_PREFIX, profile.email);
+    let key1 = store::keys::account::email_verification(&sid);
+    let key2 = store::keys::account::email_verification_lookup(&profile.email);
     store
         .set(key1.as_str(), profile, Some(REQUEST_TTL_SECS))
         .await?;
@@ -40,7 +39,7 @@ pub async fn set_continuation(
         return Ok(());
     }
     profile.continuation = Some(continuation);
-    let key = format!("{}:{}", KEY_PREFIX, sid);
+    let key = store::keys::account::email_verification(sid);
     use_store()
         .set(key.as_str(), &profile, Some(REQUEST_TTL_SECS))
         .await
@@ -50,7 +49,7 @@ pub async fn check_email_verification_request(
     email: &str,
 ) -> Result<Option<String>, store::StoreError> {
     let store = use_store();
-    let key = format!("{}:{}", KEY_PREFIX, email);
+    let key = store::keys::account::email_verification_lookup(email);
     store.get::<String>(key.as_str()).await
 }
 
@@ -58,15 +57,15 @@ pub async fn get_email_verification_request(
     sid: &str,
 ) -> Result<Option<PendingSignupProfile>, store::StoreError> {
     let store = use_store();
-    let key = format!("{}:{}", KEY_PREFIX, sid);
+    let key = store::keys::account::email_verification(sid);
     store.get::<PendingSignupProfile>(key.as_str()).await
 }
 
 pub async fn delete_email_verification_request(sid: &str) -> Result<(), store::StoreError> {
     let store = use_store();
     if let Some(profile) = get_email_verification_request(sid).await? {
-        let key1 = format!("{}:{}", KEY_PREFIX, sid);
-        let key2 = format!("{}:{}", KEY_PREFIX, profile.email);
+        let key1 = store::keys::account::email_verification(sid);
+        let key2 = store::keys::account::email_verification_lookup(&profile.email);
         store.delete(key1.as_str()).await?;
         store.delete(key2.as_str()).await?;
     }

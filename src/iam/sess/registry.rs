@@ -24,10 +24,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use store::{Store, StoreError};
 
-const SESSION_INDEX_PREFIX: &str = "account:sessions";
-const SESSION_DIRECTORY_KEY: &str = "account:sessions:directory";
-const REFRESH_ROTATION_PREFIX: &str = "account:session-refresh";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionIndexEntry {
@@ -64,11 +60,15 @@ struct RefreshRotation {
 }
 
 fn index_key(user_id: &str) -> String {
-    format!("{SESSION_INDEX_PREFIX}:{user_id}")
+    store::keys::session::index(user_id)
 }
 
 fn refresh_rotation_key(sid: &str) -> String {
-    format!("{REFRESH_ROTATION_PREFIX}:{sid}")
+    store::keys::session::refresh(sid)
+}
+
+fn directory_key() -> String {
+    store::keys::session::directory()
 }
 
 fn now_unix() -> u64 {
@@ -94,7 +94,7 @@ async fn store_record(record: &SessionRecord, ttl_secs: u64) -> Result<(), Store
         .hset(&user_key, &record.id, &index_entry(record), Some(ttl_secs))
         .await?;
     if let Err(error) = store
-        .hset(SESSION_DIRECTORY_KEY, &record.id, record, Some(ttl_secs))
+        .hset(&directory_key(), &record.id, record, Some(ttl_secs))
         .await
     {
         let _ = store.hdel(&user_key, &record.id).await;
@@ -191,7 +191,7 @@ pub async fn renew_session(
     ttl_secs: u64,
 ) -> Result<bool, StoreError> {
     let Some(mut record) = use_store()
-        .hget::<SessionRecord>(SESSION_DIRECTORY_KEY, sid)
+        .hget::<SessionRecord>(&directory_key(), sid)
         .await?
         .filter(|record| record.user_id == user_id)
     else {
@@ -212,16 +212,15 @@ pub async fn register_session_client(
     client_id: &str,
 ) -> Result<bool, StoreError> {
     let store = use_store();
-    let Some(mut record) = store
-        .hget::<SessionRecord>(SESSION_DIRECTORY_KEY, sid)
-        .await?
-    else {
+    let Some(mut record) = store.hget::<SessionRecord>(&directory_key(), sid).await? else {
         return Ok(false);
     };
     if record.user_id != user_id {
         return Ok(false);
     }
-    if record.expires_at_unix <= now_unix() || !store.exists(sid).await? {
+    if record.expires_at_unix <= now_unix()
+        || !store.exists(&store::keys::session::subject(sid)).await?
+    {
         return Ok(false);
     }
     if !record.client_ids.iter().any(|value| value == client_id) {
@@ -233,7 +232,7 @@ pub async fn register_session_client(
         return Ok(false);
     };
     store
-        .hset(SESSION_DIRECTORY_KEY, sid, &record, Some(ttl_secs))
+        .hset(&directory_key(), sid, &record, Some(ttl_secs))
         .await?;
     Ok(true)
 }
@@ -263,7 +262,7 @@ pub async fn touch_session(sid: &str, user_id: &str) -> Result<bool, StoreError>
         return Ok(false);
     };
     store
-        .hset(SESSION_DIRECTORY_KEY, sid, &record, Some(ttl_secs))
+        .hset(&directory_key(), sid, &record, Some(ttl_secs))
         .await?;
     Ok(true)
 }
@@ -275,16 +274,13 @@ pub async fn get_active_session(
     user_id: &str,
 ) -> Result<Option<SessionRecord>, StoreError> {
     let store = use_store();
-    let Some(record) = store
-        .hget::<SessionRecord>(SESSION_DIRECTORY_KEY, sid)
-        .await?
-    else {
+    let Some(record) = store.hget::<SessionRecord>(&directory_key(), sid).await? else {
         return Ok(None);
     };
     if record.user_id != user_id || record.expires_at_unix <= now_unix() {
         return Ok(None);
     }
-    if !store.exists(sid).await? {
+    if !store.exists(&store::keys::session::subject(sid)).await? {
         return Ok(None);
     }
     Ok(Some(record))
@@ -295,20 +291,24 @@ pub async fn is_session_active(sid: &str, user_id: &str) -> Result<bool, StoreEr
 }
 
 pub async fn get_session(sid: &str) -> Result<Option<SessionRecord>, StoreError> {
-    use_store().hget(SESSION_DIRECTORY_KEY, sid).await
+    use_store().hget(&directory_key(), sid).await
 }
 
 pub async fn list_sessions() -> Result<Vec<SessionRecord>, StoreError> {
     let store = use_store();
-    let sessions = store.hvals::<SessionRecord>(SESSION_DIRECTORY_KEY).await?;
+    let sessions = store.hvals::<SessionRecord>(&directory_key()).await?;
     let now = now_unix();
     let mut active = Vec::with_capacity(sessions.len());
     for session in sessions {
-        if session.expires_at_unix > now && store.exists(&session.id).await? {
+        if session.expires_at_unix > now
+            && store
+                .exists(&store::keys::session::subject(&session.id))
+                .await?
+        {
             active.push(session);
         } else {
             let _ = store.hdel(&index_key(&session.user_id), &session.id).await;
-            let _ = store.hdel(SESSION_DIRECTORY_KEY, &session.id).await;
+            let _ = store.hdel(&directory_key(), &session.id).await;
         }
     }
     active.sort_by(|left, right| {
@@ -339,10 +339,12 @@ pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreErr
     let Some(record) = get_session(sid).await? else {
         return Ok(None);
     };
-    store.delete(&record.id).await?;
+    store
+        .delete(&store::keys::session::subject(&record.id))
+        .await?;
     store.delete(&refresh_rotation_key(&record.id)).await?;
     store.hdel(&index_key(&record.user_id), sid).await?;
-    store.hdel(SESSION_DIRECTORY_KEY, sid).await?;
+    store.hdel(&directory_key(), sid).await?;
     backchannel_logout::notify(std::slice::from_ref(&record));
     Ok(Some(record))
 }
@@ -355,10 +357,10 @@ pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, Sto
     let record = get_session(sid)
         .await?
         .filter(|record| record.user_id == user_id);
-    store.delete(sid).await?;
+    store.delete(&store::keys::session::subject(sid)).await?;
     store.delete(&refresh_rotation_key(sid)).await?;
     store.hdel(&index_key(user_id), sid).await?;
-    store.hdel(SESSION_DIRECTORY_KEY, sid).await?;
+    store.hdel(&directory_key(), sid).await?;
     Ok(backchannel_logout::notify(record.as_slice()))
 }
 
@@ -366,17 +368,15 @@ pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, Sto
 /// authoritative) and the user's session index.
 pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
     let store = use_store();
-    let records = store
-        .hgetall::<SessionRecord>(SESSION_DIRECTORY_KEY)
-        .await?;
+    let records = store.hgetall::<SessionRecord>(&directory_key()).await?;
     let mut revoked = Vec::new();
     for (sid, record) in records {
         if record.user_id != user_id {
             continue;
         }
-        store.delete(&sid).await?;
+        store.delete(&store::keys::session::subject(&sid)).await?;
         store.delete(&refresh_rotation_key(&sid)).await?;
-        store.hdel(SESSION_DIRECTORY_KEY, &sid).await?;
+        store.hdel(&directory_key(), &sid).await?;
         revoked.push(record);
     }
     store.delete(&index_key(user_id)).await?;
@@ -399,12 +399,14 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
         let matches = entry.org_id.as_deref() == Some(org_id);
         if matches && !expired {
             if let Some(record) = get_session(&sid).await? {
-                store.delete(&record.id).await?;
+                store
+                    .delete(&store::keys::session::subject(&record.id))
+                    .await?;
                 store.delete(&refresh_rotation_key(&record.id)).await?;
-                store.hdel(SESSION_DIRECTORY_KEY, &sid).await?;
+                store.hdel(&directory_key(), &sid).await?;
                 revoked += 1;
                 records.push(record);
-            } else if store.delete(&sid).await? {
+            } else if store.delete(&store::keys::session::subject(&sid)).await? {
                 store.delete(&refresh_rotation_key(&sid)).await?;
                 revoked += 1;
             }
@@ -448,7 +450,7 @@ pub async fn authenticated_session(
 
     let sid = claims.sid.clone().ok_or_else(invalid)?;
     let subject = use_store()
-        .get::<Subject>(&sid)
+        .get::<Subject>(&store::keys::session::subject(&sid))
         .await
         .map_err(|_| invalid())?
         .ok_or_else(invalid)?;
@@ -556,7 +558,11 @@ mod index_tests {
 
     async fn seed_session(user_id: &str, sid: &str, org: Option<&str>) {
         use_store()
-            .set(sid, &json!({ "id": user_id }), Some(60))
+            .set(
+                &store::keys::session::subject(sid),
+                &json!({ "id": user_id }),
+                Some(60),
+            )
             .await
             .unwrap();
         register_session(
@@ -589,8 +595,18 @@ mod index_tests {
         let revoked = revoke_all_sessions(&user).await.unwrap();
 
         assert_eq!(revoked, 2);
-        assert!(!use_store().exists(&sid_a).await.unwrap());
-        assert!(!use_store().exists(&sid_b).await.unwrap());
+        assert!(
+            !use_store()
+                .exists(&store::keys::session::subject(&sid_a))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !use_store()
+                .exists(&store::keys::session::subject(&sid_b))
+                .await
+                .unwrap()
+        );
         // Idempotent: nothing left to revoke.
         assert_eq!(revoke_all_sessions(&user).await.unwrap(), 0);
     }
@@ -608,9 +624,24 @@ mod index_tests {
         let revoked = revoke_org_sessions(&user, "org_a").await.unwrap();
 
         assert_eq!(revoked, 1);
-        assert!(!use_store().exists(&sid_target).await.unwrap());
-        assert!(use_store().exists(&sid_other_org).await.unwrap());
-        assert!(use_store().exists(&sid_orgless).await.unwrap());
+        assert!(
+            !use_store()
+                .exists(&store::keys::session::subject(&sid_target))
+                .await
+                .unwrap()
+        );
+        assert!(
+            use_store()
+                .exists(&store::keys::session::subject(&sid_other_org))
+                .await
+                .unwrap()
+        );
+        assert!(
+            use_store()
+                .exists(&store::keys::session::subject(&sid_orgless))
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -641,7 +672,12 @@ mod index_tests {
 
         end_session(&user, &sid).await.unwrap();
 
-        assert!(!use_store().exists(&sid).await.unwrap());
+        assert!(
+            !use_store()
+                .exists(&store::keys::session::subject(&sid))
+                .await
+                .unwrap()
+        );
         assert!(get_session(&sid).await.unwrap().is_none());
         assert!(
             !rotate_refresh_token(&sid, "refresh-jti", "next", 60)
@@ -661,7 +697,12 @@ mod index_tests {
         // A mismatched user still removes the sid but notifies nobody.
         end_session("someone-else", &sid).await.unwrap();
 
-        assert!(!use_store().exists(&sid).await.unwrap());
+        assert!(
+            !use_store()
+                .exists(&store::keys::session::subject(&sid))
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -669,7 +710,11 @@ mod index_tests {
         let user = unique("user");
         let sid = unique("sid");
         use_store()
-            .set(&sid, &json!({ "id": &user }), Some(60))
+            .set(
+                &store::keys::session::subject(&sid),
+                &json!({ "id": &user }),
+                Some(60),
+            )
             .await
             .unwrap();
         register_session(
@@ -698,7 +743,12 @@ mod index_tests {
         );
 
         assert!(get_session(&sid).await.unwrap().is_none());
-        assert!(!use_store().exists(&sid).await.unwrap());
+        assert!(
+            !use_store()
+                .exists(&store::keys::session::subject(&sid))
+                .await
+                .unwrap()
+        );
         assert!(
             !rotate_refresh_token(&sid, "jti-2", "jti-4", 60)
                 .await

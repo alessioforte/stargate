@@ -325,7 +325,7 @@ impl lim::RateLimit for AdmissionBackend {
     }
 
     async fn check(&self, key: &str, cost: u64) -> lim::Result<lim::RateLimitDecision> {
-        assert_eq!(key, "ingress:ingress:ip:203.0.113.8");
+        assert_eq!(key, "stargate:v1:{ip:203.0.113.8}:ingress:ingress");
         assert_eq!(cost, 1);
         let _pending = PendingCheck(self.dropped.clone());
         self.entered.store(true, Ordering::SeqCst);
@@ -582,7 +582,11 @@ async fn probes_are_exempt_and_iam_shares_the_client_ingress_allowance() {
         .snapshot()
         .core
         .limiter
-        .check("default", "lim:203.0.113.9", None)
+        .check(
+            "default",
+            &store::keys::limits::subject_rate("203.0.113.9"),
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(resource.remaining, 98);

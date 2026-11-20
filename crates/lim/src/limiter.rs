@@ -41,33 +41,33 @@ mod tests {
             Box::new(gcra(&state, &clock, 100, Duration::from_secs(1))),
         );
 
-        let key = "lim:org:01ORG";
+        let key = store::keys::limits::org_rate("01ORG");
 
         // Exhaust the strict limit.
         assert!(
             limiter
-                .check("strict", key, None)
+                .check("strict", &key, None)
                 .await
                 .unwrap()
                 .is_allowed()
         );
         assert!(
             limiter
-                .check("strict", key, None)
+                .check("strict", &key, None)
                 .await
                 .unwrap()
                 .is_allowed()
         );
         assert!(
             !limiter
-                .check("strict", key, None)
+                .check("strict", &key, None)
                 .await
                 .unwrap()
                 .is_allowed()
         );
 
         // The permissive limit for the same key starts fresh.
-        let decision = limiter.check("permissive", key, None).await.unwrap();
+        let decision = limiter.check("permissive", &key, None).await.unwrap();
         assert!(
             decision.is_allowed(),
             "permissive limit must not inherit the strict limit's state"
@@ -140,8 +140,10 @@ impl Limiter {
         // checking the same key (e.g. a subject or org whose attrs
         // switch them to a different named limit) must not share
         // replenish state — a strict limit's TAT would keep throttling
-        // long after the switch to a permissive one.
-        let state_key = format!("{limiter_name}:{key}");
+        // long after the switch to a permissive one. The name is appended
+        // after the schema key, so the versioned root and the entity hash
+        // tag stay at the front and in the same slot.
+        let state_key = format!("{key}:{limiter_name}");
         limiter.check(&state_key, cost).await
     }
 }

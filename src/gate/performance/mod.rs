@@ -38,7 +38,11 @@ async fn gateway_release_workloads() {
         None,
     );
     use_store()
-        .set(&session, &subject, Some(600))
+        .set(
+            &store::keys::session::subject(&session),
+            &subject,
+            Some(600),
+        )
         .await
         .unwrap();
     let token = session_jwt::jwt_config()
@@ -194,7 +198,10 @@ async fn gateway_release_workloads() {
         results.push(result);
         fixture.stop().await;
     }
-    use_store().delete(&session).await.unwrap();
+    use_store()
+        .delete(&store::keys::session::subject(&session))
+        .await
+        .unwrap();
     assert!(!results.is_empty(), "no matching benchmark scenarios");
     let route_results = if std::env::var("STARGATE_BENCH_SCENARIOS").is_ok() {
         Vec::new()

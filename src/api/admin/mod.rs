@@ -69,8 +69,12 @@ impl AdminPrincipal {
     /// one user share it; distinct users and admin keys never do.
     fn rate_limit_key(&self) -> String {
         match self {
-            Self::User { user_id, .. } => format!("lim:admin:user:{user_id}"),
-            Self::AdminKey { key_id } => format!("lim:admin:key:{key_id}"),
+            Self::User { user_id, .. } => {
+                store::keys::limits::admin_principal(&format!("user:{user_id}"))
+            }
+            Self::AdminKey { key_id } => {
+                store::keys::limits::admin_principal(&format!("key:{key_id}"))
+            }
         }
     }
 }
@@ -162,7 +166,10 @@ async fn resolve_authorization(
                 Ok(false) => {
                     let sid = claims.sid.clone().unwrap_or_default();
                     let store = crate::data::store::use_store();
-                    let session = store.get::<Subject>(&sid).await.unwrap_or(None);
+                    let session = store
+                        .get::<Subject>(&store::keys::session::subject(&sid))
+                        .await
+                        .unwrap_or(None);
                     if let Some(subject) = session.as_ref()
                         && subject.sub_type == crate::iam::auth::subject::SubjectType::User
                         && claims.sub_id.as_deref() == Some(subject.id.as_str())
@@ -710,11 +717,11 @@ mod tests {
         );
         assert_eq!(
             user(AdminAuthenticationKind::Session).rate_limit_key(),
-            "lim:admin:user:01JZ000000000000000000000A"
+            "stargate:v1:{admin:user:01JZ000000000000000000000A}:requests"
         );
         assert_eq!(
             key.rate_limit_key(),
-            "lim:admin:key:01JZ000000000000000000000A"
+            "stargate:v1:{admin:key:01JZ000000000000000000000A}:requests"
         );
     }
 

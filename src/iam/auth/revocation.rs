@@ -1,10 +1,8 @@
 use chrono::Utc;
 use store::{Store, StoreError};
 
-const KEY_PREFIX: &str = "oauth_revoked_jti";
-
 fn key(jti: &str) -> String {
-    format!("{KEY_PREFIX}:{jti}")
+    store::keys::session::revoked_jti(jti)
 }
 
 fn ttl_until_exp(exp: usize) -> Option<u64> {
@@ -34,7 +32,7 @@ pub async fn revoke_claims(claims: &jwt::Claims) -> Result<(), StoreError> {
     if (claims.typ.as_deref() == Some("refresh") || !jti_revoked)
         && let Some(sid) = claims.sid.as_deref()
     {
-        store.delete(sid).await?;
+        store.delete(&store::keys::session::subject(sid)).await?;
     }
 
     Ok(())

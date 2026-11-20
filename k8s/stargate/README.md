@@ -147,13 +147,19 @@ processes use the same CA path without weakening certificate verification.
 
 ## Redis state namespace
 
-Set `runtimeConfig.data.REDIS_KEY_PREFIX: "stargate:"` to isolate state keys
-with ACL patterns `~stargate:* ~audit.raw`. The default is empty for compatibility.
-The prefix is literal: include the trailing colon. It covers session/auth/OAuth
-state, hash keys (not fields), batch and atomic operations, and all limiter Lua
-keys. `AUDIT_REDIS_STREAM` remains a separate, explicit name (`audit.raw` by default).
-Changing the prefix hides existing sessions, revocations and limiter counters;
-coordinate migration or draining across every replica before changing it.
+Every state key already starts with the built-in schema root `stargate:v1:` and
+carries an entity hash tag; restrict the Redis user with
+`ACL SETUSER ... ~stargate:v1:* ~audit.raw`. `REDIS_KEY_PREFIX` (default empty)
+adds a literal prefix before that root, for sharing one Redis instance between
+deployments; include its trailing colon and use `~<prefix>stargate:v1:*` in the
+ACL. Braces are rejected in the prefix (they would become the Cluster hash tag
+and collapse every key into one slot). `AUDIT_REDIS_STREAM` remains a separate, explicit name (`audit.raw` by
+default) outside the schema. The first rollout of the `stargate:v1:` schema
+starts with empty state: every session signs in again and limiter counters
+restart, with no migration. Later changes to the schema version or the prefix
+hide existing sessions, revocations and counters in the same way; coordinate
+draining across every replica. The full key table and cluster-slot rules are in
+`docs/redis-keys.md`.
 
 The local ACL smoke test builds a fresh synthetic database and verifies login,
 refresh rotation, session revocation, gateway admission/rate limiting, all three
@@ -168,9 +174,12 @@ python3 benches/scripts/test_redis_prefix.py \
 
 Use Redis >= 7.4 (hash-field expiry). The disposable services bind only to
 localhost and are removed on exit. The test creates the exact ACL
-`~stargate:* ~audit.raw +@all -@admin -@dangerous`, verifies an empty ACL failure
-log and checks that every state key has the prefix while `audit.raw` does not.
-Its observer uses the fixture's admin connection for diagnostics only.
+`~tenant:stargate:v1:* ~audit.raw +@all -@admin -@dangerous` (the server runs
+with `REDIS_KEY_PREFIX=tenant:`), verifies an empty ACL failure log and checks
+that every state key has the operator prefix and schema root while `audit.raw`
+does not. `benches/scripts/test_redis_cluster.py` runs the store and limiter
+suites on a disposable 3+3 cluster under the same prefix. Its observer uses the
+fixture's admin connection for diagnostics only.
 
 Observed application commands: `AUTH`, `HELLO`, `CLIENT SETINFO`, `PING`, `GET`,
 `SET`, `SETEX`, `DEL`, `EXISTS`, `MGET`, `HSET`, `HGET`, `HDEL`, `HEXISTS`,

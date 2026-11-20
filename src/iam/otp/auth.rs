@@ -26,7 +26,7 @@ pub(crate) async fn authenticated_user(
         .clone()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
     let subject = crate::data::store::use_store()
-        .get::<Subject>(&sid)
+        .get::<Subject>(&store::keys::session::subject(&sid))
         .await
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;

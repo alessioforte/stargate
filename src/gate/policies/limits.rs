@@ -130,19 +130,25 @@ fn org_check(
     let Some(policy) = policy else {
         return Ok(None);
     };
-    let (prefix, policy_kind) = match kind {
-        LimitKind::Rate => ("lim", "rate_limit"),
-        LimitKind::Quota => ("quota", "quota"),
+    let policy_kind = match kind {
+        LimitKind::Rate => "rate_limit",
+        LimitKind::Quota => "quota",
     };
     let (name, key, scope) = match org_target(org_id, policy.on_missing, policy_kind)? {
         Some(OrgTarget::Org(id)) => (
             override_name.unwrap_or(&policy.limit),
-            format!("{prefix}:org:{id}"),
+            match kind {
+                LimitKind::Rate => store::keys::limits::org_rate(id),
+                LimitKind::Quota => store::keys::limits::org_quota(id),
+            },
             "org",
         ),
         Some(OrgTarget::Ip) => (
             policy.limit.as_str(),
-            format!("{prefix}:orgip:{client_ip}"),
+            match kind {
+                LimitKind::Rate => store::keys::limits::org_ip_rate(client_ip),
+                LimitKind::Quota => store::keys::limits::org_ip_quota(client_ip),
+            },
             "ip",
         ),
         None => return Ok(None),
@@ -191,7 +197,7 @@ async fn apply_selected_limits(
     }
     checks.push(LimitCheck {
         name: selected.rate_limit_name,
-        key: format!("lim:{}", selected.subject_key),
+        key: store::keys::limits::subject_rate(&selected.subject_key),
         kind: LimitKind::Rate,
         scope: "subject",
         on_store_error: policies
@@ -211,7 +217,7 @@ async fn apply_selected_limits(
     if let Some(name) = selected.quota_name {
         checks.push(LimitCheck {
             name,
-            key: format!("quota:{}", selected.subject_key),
+            key: store::keys::limits::subject_quota(&selected.subject_key),
             kind: LimitKind::Quota,
             scope: "subject",
             on_store_error: policies

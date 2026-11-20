@@ -41,9 +41,12 @@ profile, and Redis >= 7.4 (hash-field expiry). `--scenarios` selects a subset,
 only and are removed on exit. The script exits non-zero at the first scenario
 whose behavior does not match.
 
-The project's other Redis suite is `benches/scripts/test_redis_prefix.py`; it
-verifies the key prefix, the production ACL and the session/limiter/relay smoke
-test. Run it with the same images.
+The project's other Redis suites are `benches/scripts/test_redis_prefix.py`,
+which verifies the key schema prefix, the production ACL and the
+session/limiter/relay smoke test on one instance, and
+`benches/scripts/test_redis_cluster.py`, which runs the store and limiter tests
+on a disposable 3+3 cluster. Run both with the same image; the key schema is in
+`docs/redis-keys.md`.
 
 ## CI
 
@@ -57,8 +60,11 @@ bench scripts and their fixture or this guide, and on manual dispatch:
 gh workflow run redis-failures.yml --ref main
 ```
 
-The job builds the cluster profile, runs the prefix/ACL smoke test, then this
-bench with `redis:7.4-alpine` and `postgres:17-alpine`.
+The job builds the cluster profile, runs the prefix/ACL smoke test and the 3+3
+cluster store/limiter suites, then this bench with `redis:7.4-alpine` and
+`postgres:17-alpine`. It ends with a short
+`benches/scripts/benchmark_request_paths.py` run that fails when a gateway path
+exceeds its Redis round-trip cap (`docs/gateway-performance.md`).
 
 ## Recorded results
 

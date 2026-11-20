@@ -12,7 +12,7 @@ use lim::{LimitKind, Limiter, RateLimitError};
 /// intersects subject/org rate or quota buckets, even when they reference the
 /// same named limit.
 pub fn ingress_key(client_ip: &str) -> String {
-    format!("ingress:ip:{client_ip}")
+    ::store::keys::limits::ingress(client_ip)
 }
 
 pub fn attribute_name<'a>(

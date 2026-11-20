@@ -323,7 +323,7 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .map_err(ErrorResponse::internal)?;
 
     crate::data::store::use_store()
-        .delete(&api_key.key_hash)
+        .delete(&store::keys::api_key::subject(&api_key.key_hash))
         .await
         .map_err(ErrorResponse::internal)?;
 
@@ -368,7 +368,7 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .map_err(ErrorResponse::internal)?;
 
     crate::data::store::use_store()
-        .delete(&api_key.key_hash)
+        .delete(&store::keys::api_key::subject(&api_key.key_hash))
         .await
         .map_err(ErrorResponse::internal)?;
 

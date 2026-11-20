@@ -10,11 +10,6 @@ mod time;
 pub mod types;
 pub mod util;
 
-pub(crate) const PASSWORDLESS_EMAIL_KEY_PREFIX: &str = "account:login:otp:email";
-pub(crate) const MFA_PENDING_LOGIN_KEY_PREFIX: &str = "account:mfa:pending-login";
-pub(crate) const MFA_CHALLENGE_KEY_PREFIX: &str = "account:mfa:challenge";
-pub(crate) const MFA_VERIFIED_KEY_PREFIX: &str = "account:mfa:verified";
-pub(crate) const OTP_REQUEST_KEY_PREFIX: &str = "account:otp:request";
 pub(crate) const DEFAULT_EMAIL_OTP_LENGTH: usize = 6;
 pub(crate) const DEFAULT_EMAIL_OTP_TTL_SECS: u64 = 300;
 pub(crate) const DEFAULT_EMAIL_OTP_MAX_ATTEMPTS: u8 = 5;
