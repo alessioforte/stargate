@@ -22,7 +22,10 @@ schema:
 
 `REDIS_KEY_PREFIX` (default empty) is the operator's literal prefix, applied
 before the schema root. Use it to share one Redis instance between
-deployments; changing it hides all state of the previous namespace.
+deployments; changing it hides all state of the previous namespace. It must not
+contain `{` or `}`: Redis hashes the first brace pair of the physical key, so a
+prefix such as `{stargate}:` would put every key in one Cluster slot. Startup
+rejects such a prefix.
 
 The tag is built from generated identifiers (ULIDs, digests) or an IP address.
 Free-form values are hashed with SHA-256: emails, login identifiers and OTP

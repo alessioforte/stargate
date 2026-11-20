@@ -152,7 +152,8 @@ carries an entity hash tag; restrict the Redis user with
 `ACL SETUSER ... ~stargate:v1:* ~audit.raw`. `REDIS_KEY_PREFIX` (default empty)
 adds a literal prefix before that root, for sharing one Redis instance between
 deployments; include its trailing colon and use `~<prefix>stargate:v1:*` in the
-ACL. `AUDIT_REDIS_STREAM` remains a separate, explicit name (`audit.raw` by
+ACL. Braces are rejected in the prefix (they would become the Cluster hash tag
+and collapse every key into one slot). `AUDIT_REDIS_STREAM` remains a separate, explicit name (`audit.raw` by
 default) outside the schema. The first rollout of the `stargate:v1:` schema
 starts with empty state: every session signs in again and limiter counters
 restart, with no migration. Later changes to the schema version or the prefix
