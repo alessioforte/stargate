@@ -71,9 +71,8 @@ pub async fn set_continuation(
         .await
 }
 
-pub async fn delete_change_password_request(email: &str) -> Result<(), store::StoreError> {
+pub async fn delete_change_password_request(email: &str) -> Result<bool, store::StoreError> {
     let store = use_store();
     let key = format!("{}:{}", KEY_PREFIX, email);
-    store.delete(key.as_str()).await?;
-    Ok(())
+    store.delete(key.as_str()).await
 }

@@ -94,7 +94,7 @@ fn send_reset_email(user: &User, sid: String, locale: tools::Locale) -> anyhow::
         .sub_id(user.id.clone())
         .email(user.email.clone())
         .sid(sid);
-    let token = jwt_config().generate_token(&claim)?;
+    let token = jwt_config().generate_password_reset_token(claim)?;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();

@@ -24,9 +24,11 @@ pub async fn get_signup(
     Query(query): Query<SignupVerificationParams>,
 ) -> Result<Json<EmailVerificationResponse>, ErrorResponse> {
     let jwt_cfg = jwt_config();
-    let claim = jwt_cfg.validate_token(&query.token).map_err(|error| {
-        ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
-    })?;
+    let claim = jwt_cfg
+        .validate_signup_verification_token(&query.token)
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
+        })?;
 
     if claim.sub != "signup_request" {
         return Err(ErrorResponse::new(ErrorCode::SignupTokenInvalid));
@@ -65,7 +67,7 @@ pub async fn get_signup(
         .email(request.email.clone());
 
     let token = jwt_cfg
-        .generate_token(&new_claim)
+        .generate_signup_token(new_claim)
         .map_err(ErrorResponse::internal)?;
 
     Ok(Json(EmailVerificationResponse {

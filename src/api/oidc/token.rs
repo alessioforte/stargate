@@ -449,13 +449,6 @@ async fn issue_refresh_token_grant(
         }
         return Err(oauth_invalid_grant("consent was revoked"));
     }
-    if let Some(sid) = family.sid.as_deref()
-        && !crate::iam::sess::registry::touch_session(sid, &family.user_id)
-            .await
-            .map_err(OAuthErrorResponse::internal)?
-    {
-        return Err(oauth_invalid_grant("login session is no longer active"));
-    }
     issue_user_token_response(
         client,
         &user,

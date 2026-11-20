@@ -38,9 +38,11 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, E
         })?;
 
     let jwt_cfg = jwt_config();
-    let claim = jwt_cfg.validate_token(&body.token).map_err(|error| {
-        ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
-    })?;
+    let claim = jwt_cfg
+        .validate_signup_token(&body.token)
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
+        })?;
 
     if claim.sub != "signup" {
         return Err(ErrorResponse::new(ErrorCode::SignupTokenInvalid));
@@ -131,23 +133,33 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, E
         audit_context,
     )
     .await
-    .map_err(ErrorResponse::internal)?;
+    .map_err(|error| {
+        if db::is_unique_violation(&error) {
+            ErrorResponse::new(ErrorCode::SignupUserAlreadyExists)
+        } else {
+            ErrorResponse::internal(error)
+        }
+    })?;
 
     let _ = signup::delete_signup_request(&sid).await;
     let _ = email_verification::delete_email_verification_request(&sid).await;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
-    if let Err(e) = Smtp::new()
-        .template(smtp::Template::SignupCompleted)
-        .locale(locale)
-        .to(user.email)
-        .name(Some(format_name(&given_name, &family_name)))
-        .build()
-        .and_then(|smtp| smtp.send())
-    {
-        error!("Could not send email: {:?}", e);
-    }
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = Smtp::new()
+            .template(smtp::Template::SignupCompleted)
+            .locale(locale)
+            .to(user.email)
+            .name(Some(format_name(&given_name, &family_name)))
+            .build()
+            .and_then(|smtp| smtp.send())
+        {
+            error!("Could not send email: {:?}", e);
+        }
+    })
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     Ok(Json(match continuation {
         Some(continuation) => MessageWithContinuation::new(MessageCode::SignupCompleted)
@@ -232,8 +244,17 @@ mod tests {
     async fn complete_signup(sid: &str) -> MessageWithContinuation {
         let claim = jwt::Claims::default()
             .subject("signup".to_string())
-            .sub_id(sid.to_string());
-        let token = jwt_config().generate_token(&claim).expect("signup token");
+            .sub_id(sid.to_string())
+            .email(
+                signup::get_signup_request(sid)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .email,
+            );
+        let token = jwt_config()
+            .generate_signup_token(claim)
+            .expect("signup token");
         let body = serde_json::json!({
             "token": token,
             "givenName": "Ada",

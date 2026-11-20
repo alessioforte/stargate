@@ -35,7 +35,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
 
     let token = body.token.clone();
     let claims = jwt_config()
-        .validate_token(&token)
+        .validate_password_reset_token(&token)
         .map_err(|_| ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid))?;
 
     let email = claims
@@ -58,6 +58,10 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))?;
 
+    if claims.sub_id.as_deref() != Some(user.id.as_str()) {
+        return Err(ErrorResponse::new(ErrorCode::PasswordResetTokenInvalid));
+    }
+
     pwd::policy::validate_for_user(&user, &body.password).await?;
 
     // The app the reset began in still has to be enabled and keep its endpoint
@@ -68,6 +72,15 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
             .map_err(ErrorResponse::internal)?;
 
     let password = pwd::hash::hash_password(body.password.clone()).await?;
+
+    // Consume the request before writing: failed or concurrent consumption must
+    // never leave a successful password change with a reusable reset link.
+    if !pwd::reset::delete_change_password_request(&email)
+        .await
+        .map_err(ErrorResponse::internal)?
+    {
+        return Err(ErrorResponse::new(ErrorCode::PasswordResetRequestInvalid));
+    }
 
     let audit_context = db::ent::TrustedAuditContext::application(
         db::ent::TrustedAuditActor::user(&user.id),
@@ -80,21 +93,27 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
             ErrorResponse::new(ErrorCode::PasswordUpdateFailed)
         })?;
 
-    let _ = pwd::reset::delete_change_password_request(&email).await;
+    crate::iam::sess::registry::revoke_all_sessions(&user.id)
+        .await
+        .map_err(ErrorResponse::internal)?;
 
     let given_name = user.given_name.clone().unwrap_or_default();
     let family_name = user.family_name.clone().unwrap_or_default();
     let locale = user_locale(&user).unwrap_or_else(smtp::default_locale);
-    if let Err(e) = Smtp::new()
-        .template(Template::PasswordChangedNotification)
-        .locale(locale)
-        .to(user.email.clone())
-        .name(Some(format_name(&given_name, &family_name)))
-        .build()
-        .and_then(|smtp| smtp.send())
-    {
-        error!("Could not send email: {:?}", e);
-    }
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = Smtp::new()
+            .template(Template::PasswordChangedNotification)
+            .locale(locale)
+            .to(user.email.clone())
+            .name(Some(format_name(&given_name, &family_name)))
+            .build()
+            .and_then(|smtp| smtp.send())
+        {
+            error!("Could not send email: {:?}", e);
+        }
+    })
+    .await
+    .map_err(ErrorResponse::internal)?;
 
     Ok(Json(match continuation {
         Some(continuation) => MessageWithContinuation::new(MessageCode::PasswordChanged)
@@ -179,7 +198,9 @@ mod tests {
             .sub_id(user_id.to_string())
             .email(email.to_string())
             .sid(sid.to_string());
-        let token = jwt_config().generate_token(&claim).expect("reset token");
+        let token = jwt_config()
+            .generate_password_reset_token(claim)
+            .expect("reset token");
         let body = serde_json::json!({ "token": token, "password": PASSWORD });
         let request = Request::builder()
             .method(Method::PUT)

@@ -35,9 +35,22 @@ pub async fn rotate(
     token: &str,
     client_id: &str,
 ) -> OAuthResult<Option<(String, RefreshTokenFamily)>> {
-    oidc::refresh::rotate(crate::data::store::use_store(), token, client_id)
-        .await
-        .map_err(Into::into)
+    let Some((next, family)) =
+        oidc::refresh::rotate(crate::data::store::use_store(), token, client_id).await?
+    else {
+        return Ok(None);
+    };
+    if let Some(sid) = family.sid.as_deref()
+        && !crate::iam::sess::registry::touch_session(sid, &family.user_id)
+            .await
+            .map_err(OAuthErrorResponse::internal)?
+    {
+        if let Some((family_id, _)) = oidc::refresh::parse_refresh_token(token) {
+            revoke_family(family_id).await?;
+        }
+        return Ok(None);
+    }
+    Ok(Some((next, family)))
 }
 
 /// Drop a refresh-token family so none of its tokens rotate again.
@@ -57,10 +70,29 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_token_rotates_once_and_replay_revokes_family() {
+        let sid = ulid::Ulid::generate().to_string();
+        use store::Store;
+        crate::data::store::use_store()
+            .set(&sid, &true, Some(60))
+            .await
+            .unwrap();
+        crate::iam::sess::registry::register_session(
+            crate::iam::sess::registry::NewSession {
+                user_id: "user-1",
+                sid: &sid,
+                org_id: None,
+                authenticated_at_unix: Utc::now().timestamp() as u64,
+                amr: vec!["pwd".to_string()],
+            },
+            "jti",
+            60,
+        )
+        .await
+        .unwrap();
         let token = issue(
             "client-1".to_string(),
             "user-1".to_string(),
-            Some("session-1".to_string()),
+            Some(sid.clone()),
             "openid offline_access".to_string(),
             Some("gateway".to_string()),
             Utc::now(),
@@ -86,5 +118,8 @@ mod tests {
         let (next_token, _) = rotated.unwrap();
         let after_replay = rotate(&next_token, "client-1").await.unwrap();
         assert!(after_replay.is_none());
+        crate::iam::sess::registry::revoke_session(&sid)
+            .await
+            .unwrap();
     }
 }

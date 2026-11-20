@@ -10,3 +10,6 @@ pub struct ChangePasswordRequestBody {
     pub token: String,
     pub password: String,
 }
+
+#[cfg(test)]
+mod credential_security;

@@ -10,6 +10,9 @@ use std::{error::Error, fmt};
 
 const TOKEN_TYPE_BEARER: &str = "bearer";
 const TOKEN_TYPE_REFRESH: &str = "refresh";
+const TOKEN_TYPE_PASSWORD_RESET: &str = "pwd_reset";
+const TOKEN_TYPE_SIGNUP: &str = "signup";
+const TOKEN_TYPE_SIGNUP_VERIFICATION: &str = "signup_verification";
 const TOKEN_TYPE_ID_TOKEN: &str = "id_token";
 /// JOSE `typ` of Back-Channel Logout tokens (OIDC Back-Channel Logout 1.0 §2.4).
 const LOGOUT_TOKEN_HEADER_TYPE: &str = "logout+jwt";
@@ -229,6 +232,31 @@ impl JwtConfig {
         self.generate_token(&claims)
     }
 
+    // RFC 8725 §3.12: mutually exclusive validation rules separate JWT purposes.
+    pub fn generate_password_reset_token(
+        &self,
+        claims: Claims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        let claims = self.timed_claims(claims, TOKEN_TYPE_PASSWORD_RESET, Duration::hours(1));
+        self.generate_token(&claims)
+    }
+
+    pub fn generate_signup_verification_token(
+        &self,
+        claims: Claims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        let claims = self.timed_claims(claims, TOKEN_TYPE_SIGNUP_VERIFICATION, Duration::hours(1));
+        self.generate_token(&claims)
+    }
+
+    pub fn generate_signup_token(
+        &self,
+        claims: Claims,
+    ) -> Result<String, jsonwebtoken::errors::Error> {
+        let claims = self.timed_claims(claims, TOKEN_TYPE_SIGNUP, Duration::hours(1));
+        self.generate_token(&claims)
+    }
+
     pub fn generate_oauth_access_token(
         &self,
         claims: Claims,
@@ -314,6 +342,34 @@ impl JwtConfig {
         if claims.azp.is_some() {
             return Err(JwtValidationError::UnexpectedClaim("azp"));
         }
+        Ok(claims)
+    }
+
+    pub fn validate_password_reset_token(&self, token: &str) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_without_audience(token)?;
+        Self::require_type(&claims, TOKEN_TYPE_PASSWORD_RESET)?;
+        Self::require_non_empty_claim(claims.sid.as_deref(), "sid")?;
+        Self::require_non_empty_claim(claims.email.as_deref(), "email")?;
+        Self::require_non_empty_claim(claims.sub_id.as_deref(), "sub_id")?;
+        Ok(claims)
+    }
+
+    pub fn validate_signup_verification_token(
+        &self,
+        token: &str,
+    ) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_without_audience(token)?;
+        Self::require_type(&claims, TOKEN_TYPE_SIGNUP_VERIFICATION)?;
+        Self::require_non_empty_claim(claims.sid.as_deref(), "sid")?;
+        Self::require_non_empty_claim(claims.email.as_deref(), "email")?;
+        Ok(claims)
+    }
+
+    pub fn validate_signup_token(&self, token: &str) -> Result<Claims, JwtValidationError> {
+        let claims = self.decode_without_audience(token)?;
+        Self::require_type(&claims, TOKEN_TYPE_SIGNUP)?;
+        Self::require_non_empty_claim(claims.sub_id.as_deref(), "sub_id")?;
+        Self::require_non_empty_claim(claims.email.as_deref(), "email")?;
         Ok(claims)
     }
 
@@ -438,6 +494,89 @@ mod tests {
             Duration::minutes(5),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn credential_tokens_require_their_exact_purpose_and_reject_untyped_tokens() {
+        let config = hmac_config("credential-test");
+        let claims = Claims::default()
+            .sub_id("user-or-request".to_string())
+            .sid("pending-request".to_string())
+            .email("alice@example.com".to_string());
+        let tokens = [
+            config
+                .generate_password_reset_token(claims.clone())
+                .unwrap(),
+            config
+                .generate_signup_verification_token(claims.clone())
+                .unwrap(),
+            config.generate_signup_token(claims.clone()).unwrap(),
+            config.generate_token(&claims).unwrap(),
+            config
+                .generate_session_access_token(claims.clone())
+                .unwrap(),
+            config.generate_session_refresh_token(claims).unwrap(),
+        ];
+        for (index, token) in tokens.iter().enumerate() {
+            assert_eq!(
+                config.validate_password_reset_token(token).is_ok(),
+                index == 0
+            );
+            assert_eq!(
+                config.validate_signup_verification_token(token).is_ok(),
+                index == 1
+            );
+            assert_eq!(config.validate_signup_token(token).is_ok(), index == 2);
+            if index < 3 {
+                assert!(config.validate_session_access_token(token).is_err());
+                assert!(config.validate_session_refresh_token(token).is_err());
+                let claims = config.validate_token(token).unwrap();
+                assert!(claims.jti.is_some());
+                assert_eq!(claims.exp - claims.iat, 3600);
+            }
+        }
+    }
+
+    #[test]
+    fn credential_validators_require_binding_claims_and_check_expiry() {
+        let config = hmac_config("credential-test");
+        let complete = Claims::default()
+            .sub_id("user-or-request".to_string())
+            .sid("request".to_string())
+            .email("alice@example.com".to_string());
+        for field in ["sid", "email", "sub_id"] {
+            let mut claims = complete.clone();
+            match field {
+                "sid" => claims.sid = Some(" ".to_string()),
+                "email" => claims.email = None,
+                _ => claims.sub_id = None,
+            }
+            let reset = config
+                .generate_password_reset_token(claims.clone())
+                .unwrap();
+            assert!(config.validate_password_reset_token(&reset).is_err());
+            if field != "sub_id" {
+                let token = config
+                    .generate_signup_verification_token(claims.clone())
+                    .unwrap();
+                assert!(config.validate_signup_verification_token(&token).is_err());
+            }
+            if field != "sid" {
+                let token = config.generate_signup_token(claims).unwrap();
+                assert!(config.validate_signup_token(&token).is_err());
+            }
+        }
+        for typ in [
+            TOKEN_TYPE_PASSWORD_RESET,
+            TOKEN_TYPE_SIGNUP_VERIFICATION,
+            TOKEN_TYPE_SIGNUP,
+        ] {
+            let expired = config.timed_claims(complete.clone(), typ, Duration::minutes(-5));
+            let token = config.generate_token(&expired).unwrap();
+            assert!(config.validate_password_reset_token(&token).is_err());
+            assert!(config.validate_signup_verification_token(&token).is_err());
+            assert!(config.validate_signup_token(&token).is_err());
+        }
     }
 
     #[test]
