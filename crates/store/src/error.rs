@@ -23,6 +23,9 @@ pub enum StoreError {
     /// Invalid input provided (e.g., empty key, invalid TTL)
     InvalidInput(String),
 
+    /// An atomic write lost against a concurrent change; the caller may retry
+    Conflict(String),
+
     /// Storage backend is unavailable or unreachable
     BackendUnavailable(String),
 
@@ -44,6 +47,7 @@ impl fmt::Display for StoreError {
             StoreError::DeserializationFailed(msg) => write!(f, "Deserialization failed: {}", msg),
             StoreError::RedisFailed(msg) => write!(f, "Redis operation failed: {}", msg),
             StoreError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
+            StoreError::Conflict(msg) => write!(f, "Conflict: {}", msg),
             StoreError::BackendUnavailable(msg) => write!(f, "Backend unavailable: {}", msg),
             StoreError::Timeout(msg) => write!(f, "Operation timed out: {}", msg),
             StoreError::IoError(msg) => write!(f, "I/O error: {}", msg),
