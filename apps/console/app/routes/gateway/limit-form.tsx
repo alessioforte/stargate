@@ -10,6 +10,7 @@ import {
   type GatewayNamedFormProps,
 } from "./gateway-form-utils";
 import {
+  isCalendarPeriod,
   isLimitPeriod,
   isLimitStrategy,
   limitPeriodOptions,
@@ -27,6 +28,8 @@ interface FormValues {
   refillRate: number | string;
   limit: number | string;
   period: LimitPeriod;
+  timezone: string;
+  anchorDay: number | string;
 }
 
 const defaultValues: FormValues = {
@@ -38,6 +41,8 @@ const defaultValues: FormValues = {
   refillRate: 10,
   limit: 1000,
   period: "day",
+  timezone: "UTC",
+  anchorDay: "",
 };
 
 function limitToFormValues(
@@ -76,6 +81,14 @@ function limitToFormValues(
     limit:
       typeof params.limit === "number" ? params.limit : defaultValues.limit,
     period: isLimitPeriod(params.period) ? params.period : defaultValues.period,
+    timezone:
+      typeof params.timezone === "string"
+        ? params.timezone
+        : defaultValues.timezone,
+    anchorDay:
+      typeof params.anchor_day === "number"
+        ? params.anchor_day
+        : defaultValues.anchorDay,
   };
 }
 
@@ -110,12 +123,24 @@ function formValuesToLimit(values: FormValues): JsonValue | null {
       const limit = positiveInteger(values.limit);
       if (!limit) return null;
 
+      const params: Record<string, JsonValue> = {
+        limit,
+        period: values.period,
+      };
+      if (isCalendarPeriod(values.period)) {
+        const timezone = values.timezone.trim();
+        if (!timezone) return null;
+        params.timezone = timezone;
+        if (values.period === "month" && values.anchorDay !== "") {
+          const anchorDay = positiveInteger(values.anchorDay);
+          if (!anchorDay || anchorDay > 28) return null;
+          params.anchor_day = anchorDay;
+        }
+      }
+
       return {
         strategy: "quota_tracker",
-        params: {
-          limit,
-          period: values.period,
-        },
+        params,
       };
     }
   }
@@ -242,28 +267,54 @@ const LimitForm: React.FC<GatewayNamedFormProps> = ({
         )}
 
         {values.strategy === "quota_tracker" && (
-          <Group grow align="flex-start">
-            <NumberInput
-              min={1}
-              step={1}
-              allowDecimal={false}
-              variant="filled"
-              label={t("limit")}
-              value={values.limit}
-              onChange={(value) => setField("limit", value)}
-            />
-            <Select
-              withAlignedLabels
-              allowDeselect={false}
-              variant="filled"
-              label={t("period")}
-              data={limitPeriodOptions}
-              value={values.period}
-              onChange={(value) =>
-                setField("period", (value ?? values.period) as LimitPeriod)
-              }
-            />
-          </Group>
+          <Stack gap="xs">
+            <Group grow align="flex-start">
+              <NumberInput
+                min={1}
+                step={1}
+                allowDecimal={false}
+                variant="filled"
+                label={t("limit")}
+                value={values.limit}
+                onChange={(value) => setField("limit", value)}
+              />
+              <Select
+                withAlignedLabels
+                allowDeselect={false}
+                variant="filled"
+                label={t("period")}
+                data={limitPeriodOptions}
+                value={values.period}
+                onChange={(value) =>
+                  setField("period", (value ?? values.period) as LimitPeriod)
+                }
+              />
+            </Group>
+            {isCalendarPeriod(values.period) && (
+              <Group grow align="flex-start">
+                <TextInput
+                  variant="filled"
+                  label={t("timezone")}
+                  value={values.timezone}
+                  onChange={(event) =>
+                    setField("timezone", event.currentTarget.value)
+                  }
+                />
+                {values.period === "month" && (
+                  <NumberInput
+                    min={1}
+                    max={28}
+                    step={1}
+                    allowDecimal={false}
+                    variant="filled"
+                    label={t("anchorDay")}
+                    value={values.anchorDay}
+                    onChange={(value) => setField("anchorDay", value)}
+                  />
+                )}
+              </Group>
+            )}
+          </Stack>
         )}
       </Stack>
     </GatewayEntityForm>
