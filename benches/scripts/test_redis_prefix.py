@@ -28,6 +28,12 @@ def run(args, **kwargs):
     return subprocess.run(args, check=True, capture_output=True, text=True, **kwargs).stdout.strip()
 
 
+def run_cluster_test(test, env):
+    result = subprocess.run(['cargo', 'test', '--no-default-features', '--features', 'cluster', '--locked', '--offline', '--bin', 'stargate', test, '--', '--ignored'], cwd=ROOT, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, f'{test} failed: ' + result.stdout + result.stderr
+    assert 'test result: ok. 1 passed;' in result.stdout, f'{test} did not run exactly one test: ' + result.stdout + result.stderr
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--redis-image', required=True)
@@ -154,9 +160,10 @@ http:
                     'credential_security::credential_flows',
                     'concurrent_password_attempts_respect_login_limits',
                     'concurrent_callbacks_consume_social_state_once',
+                    'known_addresses_bypass_only_account_backoff',
+                    'completed_password_logins_remember_server_addresses',
                 ):
-                    result = subprocess.run(['cargo', 'test', '--no-default-features', '--features', 'cluster', '--locked', '--offline', '--bin', 'stargate', test, '--', '--ignored'], cwd=ROOT, env=env, capture_output=True, text=True)
-                    assert result.returncode == 0, f'{test} failed: ' + result.stdout + result.stderr
+                    run_cluster_test(test, env)
                 log.flush()
                 assert 'NOPERM' not in (folder / 'server.log').read_text(), 'NOPERM in server log'
                 assert json.loads(redis_cmd('ACL', 'LOG')) == [], 'ACL permission failures recorded'
