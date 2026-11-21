@@ -63,6 +63,17 @@ pub async fn run() -> std::io::Result<()> {
     let guard = logging::init(log_settings);
     iam::pwd::hash::init();
 
+    // Every `?` below passes through the guard shutdown, so startup errors
+    // reach the file sink and the OTLP log exporter instead of staying in a
+    // batch that the process exit discards.
+    let result = serve().await;
+    guard.shutdown();
+    result
+}
+
+/// The server after logging is initialized. The caller shuts the log guard
+/// down on every outcome, normal shutdown and startup error alike.
+async fn serve() -> std::io::Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let listeners = settings::from_env().map_err(|error| {
         tracing::error!("Invalid listener settings: {error}");
@@ -191,7 +202,6 @@ pub async fn run() -> std::io::Result<()> {
     aud::shutdown().await;
     store::save().await;
     info!("Shutdown complete");
-    guard.shutdown();
 
     result
 }
