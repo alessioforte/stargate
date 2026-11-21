@@ -139,9 +139,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   uses the same credentials/TLS through the `postgres` maintenance database;
   concurrent-create errors are benign only for `42P04`, or `23505` on
   `pg_database_datname_index`, after a fresh existence query confirms the target.
-  `data/store/`: selected profile interface; `memory.rs` persistence, `redis.rs`
-  init/readiness and Redis TLS/credential settings (`settings.rs`). Redis uses
-  verified TLS for `rediss://`, public roots by default or `REDIS_CA_FILE`, and
+  `data/store/`: selected profile interface; `memory.rs` persistence (backup at
+  `CONFIG_PATH/memory.bin`, `STORE_MAX_MEMORY_MB` validated at startup),
+  `redis.rs` init/readiness and Redis TLS/credential settings (`settings.rs`).
+  Redis uses verified TLS for `rediss://`, public roots by default or `REDIS_CA_FILE`, and
   separate credentials without URL encoding. The store, limiter, and audit relay
   share the same pool; URL credentials cannot be combined with separate fields.
   `crates/store/src/keys.rs` owns every state-key name:
@@ -187,7 +188,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `https://` public base URL (a proxy terminates TLS); it decides the `Secure` cookie
   attribute, HSTS, and the request's own origin scheme.
 - `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
-  trusted-origin middleware), security and retry headers, the session cookie
+  trusted-origin middleware, `cors.rs`; both read and validated once at startup),
+  security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
   (`limits.rs`), message envelopes.
   `cookies::SESSION_COOKIE` is the shared session-cookie name for reading,
@@ -957,7 +959,7 @@ the same logical columns on PostgreSQL and SQLite.
 
 | Var                                                                                    | Default                                | Purpose                                                                                                                             |
 | -------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `CONFIG_PATH`                                                                          | `.stargate`                            | Directory for gateway/policy seed files; also holds other runtime assets                                                            |
+| `CONFIG_PATH`                                                                          | `.stargate`                            | Runtime directory: gateway/policy seed files and the in-memory store backup (`memory.bin`)                                          |
 | `CONFIG_FILENAME`                                                                      | `config.yaml`                          | Gateway seed filename, used only when its database document is absent                                                               |
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
 | `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |
@@ -973,7 +975,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `OAUTH_BASE_URL`                                                                       | issuer                                 | Public base URL (`conf::public_base_url`): provider endpoints, email links, OpenAPI `servers`                                       |
 | `IAM_HOSTS`                                                                            | all hosts                              | Comma-separated IAM hostnames, case-insensitive, without schemes, ports, paths, or wildcards; must include the public base URL host |
 | `JWKS_CACHE_MAX_AGE_SECS`                                                              | 300                                    | JWKS cache max-age                                                                                                                  |
-| `OAUTH_CLIENT_CA_FILE`                                                                 | -                                      | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`)                               |
+| `OAUTH_CLIENT_CA_FILE`                                                                 | -                                      | PEM roots trusted (with the system ones) for OAuth client endpoints (back-channel logout, `jwks_uri`); read and validated at startup |
 | `INTERNAL_CONTEXT_*`                                                                   | see `.env.example`                     | Internal-context issuer, kid, key/JWKS paths, TTL, skew, signing workers/queue                                                      |
 | `POSTGRES_ENDPOINT`                                                                    | localhost:5432                         | Cluster DB endpoint: host, host:port, [ipv6], or [ipv6]:port; invalid endpoints stop startup                                        |
 | `POSTGRES_USERNAME` / `_PASSWORD` / `_DATABASE`                                        | root / root / stargate                 | PostgreSQL fields passed directly to sqlx; no URL encoding                                                                          |
@@ -987,6 +989,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `REDIS_POOL_SIZE` | 4 | Positive connections per Redis pool; invalid values stop startup |
 | `REDIS_USERNAME` / `REDIS_PASSWORD`                                                    | -                                      | Optional ACL credentials, passed without URL encoding; cannot be combined with URL credentials                                      |
 | `REDIS_CA_FILE`                                                                        | -                                      | Private CA PEM roots for `rediss://`; replace public roots                                                                          |
+| `STORE_MAX_MEMORY_MB`                                                                  | 100                                    | In-memory store limit in MiB (`edge`); positive integer, invalid values stop startup                                                |
 | `RUST_LOG`                                                                             | -                                      | Tracing/log filter directives                                                                                                       |
 | `LOG_FORMAT`                                                                           | pretty (debug), json (release)         | Console format: json, compact, or pretty; invalid values stop logging initialization                                                |
 | `LOG_CONSOLE_ENABLED`                                                                  | true                                   | Log to stdout; stays enabled if both sinks are disabled                                                                             |
@@ -1004,8 +1007,8 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_OUTBOX_RETENTION` | 30d | Cluster published-row retention (duration or `none`); never prunes pending rows |
 | `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | TLS of the implicit listener (`TLS_ENABLED` stops startup with `LISTENERS`); the certificate is shared. With listener TLS off, an `https://` public base URL still marks the deployment HTTPS |
 | `TRUSTED_PROXIES`                                                                      | -                                      | Proxy IP/CIDRs allowed to set client IP headers                                                                                     |
-| `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins                                                                                                                |
-| `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints                                                                                 |
+| `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins (or `*` alone); invalid entries stop startup                                                                   |
+| `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints (no wildcard); invalid entries stop startup                                     |
 | `GEOIP_DB_PATH`                                                                        | -                                      | MaxMind GeoLite2                                                                                                                    |
 | `SERVER_DRAIN_DELAY_SECS`                                                              | 5                                      | Readiness-off delay before listeners close                                                                                          |
 | `SERVER_SHUTDOWN_TIMEOUT_SECS`                                                         | 25                                     | Connection drain deadline                                                                                                           |

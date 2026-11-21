@@ -89,6 +89,23 @@ pub async fn run() -> std::io::Result<()> {
         tracing::error!("Invalid IAM host settings: {error}");
         std::io::Error::other(error)
     })?;
+    web::cors::init().map_err(|error| {
+        tracing::error!("Invalid CORS settings: {error}");
+        std::io::Error::other(error)
+    })?;
+    web::origin::init().map_err(|error| {
+        tracing::error!("Invalid trusted origin settings: {error}");
+        std::io::Error::other(error)
+    })?;
+    iam::oidc::http_client::init().map_err(|error| {
+        tracing::error!("Invalid OAuth client endpoint settings: {error}");
+        std::io::Error::other(error)
+    })?;
+    #[cfg(feature = "memory")]
+    store::init_settings().map_err(|error| {
+        tracing::error!("Invalid memory store settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
     iam::otp::settings::init().map_err(|error| {
         tracing::error!("Invalid MFA settings: {error}");
         std::io::Error::other(error.to_string())

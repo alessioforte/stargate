@@ -6,6 +6,6 @@ mod redis;
 mod settings;
 
 #[cfg(feature = "memory")]
-pub use memory::{init, save, use_store};
+pub use memory::{init, init_settings, save, use_store};
 #[cfg(feature = "redis")]
 pub use redis::{init, ping, save, use_store};

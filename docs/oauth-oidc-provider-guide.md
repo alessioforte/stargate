@@ -353,7 +353,9 @@ Keys at `jwks_uri` are fetched with a 5-second timeout (no redirects, at most
 assertion, Stargate refetches the document, at most once every 10 seconds per
 URL, so a client rotates by publishing the new key before signing with it.
 Clients behind a private CA can be trusted with `OAUTH_CLIENT_CA_FILE` (PEM
-bundle, added to the system roots), which also covers back-channel logout.
+bundle, added to the system roots), which also covers back-channel logout. The
+file is read and validated at startup: an unreadable or invalid bundle stops
+the server instead of silently falling back to the system roots.
 
 ## Client Credentials
 
@@ -783,8 +785,8 @@ retries (after 1 and 3 seconds) on network errors and `5xx`, none on `4xx`,
 redirects not followed. RP-Initiated Logout waits up to 3 seconds for delivery
 before redirecting the browser. Nothing is persisted, so notifications in
 flight during a restart are lost. Relying parties behind a private CA can be
-trusted with `OAUTH_CLIENT_CA_FILE` (PEM bundle, added to the system
-roots).
+trusted with `OAUTH_CLIENT_CA_FILE` (PEM bundle, added to the system roots and
+validated at startup).
 
 The Console logs out this way: it sends its ID token to `/oauth/logout` and
 returns to its root, its registered `post_logout_redirect_uri` (`admin
