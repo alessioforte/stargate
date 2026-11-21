@@ -16,26 +16,38 @@ pub struct ChangePasswordRequest {
     pub continuation: Option<LoginContinuation>,
 }
 
-pub async fn create_change_password_request(
+impl ChangePasswordRequest {
+    fn new() -> Self {
+        Self {
+            sid: ulid::Ulid::generate().to_string(),
+            continuation: None,
+        }
+    }
+}
+
+/// The pending reset of an address: created, or renewed so the link just
+/// issued lives exactly as long as the request behind it. The app of the
+/// newest link replaces the previous one.
+pub async fn issue_change_password_request(
     email: &str,
     continuation: Option<LoginContinuation>,
 ) -> Result<String, store::StoreError> {
-    let store = use_store();
-    let sid = ulid::Ulid::generate().to_string();
-
-    let key = store::keys::account::password_reset(email);
-    let request = ChangePasswordRequest {
-        sid: sid.clone(),
-        continuation,
+    let mut request = match get_change_password_request(email).await? {
+        Some(request) => request,
+        None => ChangePasswordRequest::new(),
     };
-    store
+    if let Some(continuation) = continuation {
+        request.continuation = Some(continuation);
+    }
+    let key = store::keys::account::password_reset(email);
+    use_store()
         .set(
             key.as_str(),
             &request,
             Some(CHANGE_PASSWORD_REQUEST_TTL_SECS),
         )
         .await?;
-    Ok(sid)
+    Ok(request.sid)
 }
 
 pub async fn get_change_password_request(
@@ -44,29 +56,6 @@ pub async fn get_change_password_request(
     let store = use_store();
     let key = store::keys::account::password_reset(email);
     store.get::<ChangePasswordRequest>(key.as_str()).await
-}
-
-/// Keep the pending request but point it at the app the newest link was
-/// requested from.
-pub async fn set_continuation(
-    email: &str,
-    continuation: LoginContinuation,
-) -> Result<(), store::StoreError> {
-    let Some(mut request) = get_change_password_request(email).await? else {
-        return Ok(());
-    };
-    if request.continuation.as_ref() == Some(&continuation) {
-        return Ok(());
-    }
-    request.continuation = Some(continuation);
-    let key = store::keys::account::password_reset(email);
-    use_store()
-        .set(
-            key.as_str(),
-            &request,
-            Some(CHANGE_PASSWORD_REQUEST_TTL_SECS),
-        )
-        .await
 }
 
 pub async fn delete_change_password_request(email: &str) -> Result<bool, store::StoreError> {

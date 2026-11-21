@@ -197,7 +197,7 @@ async fn reset_revokes_every_session(expired: bool) {
             .unwrap()
             .to_string()
     } else {
-        let sid = pwd::reset::create_change_password_request(&user.email, None)
+        let sid = pwd::reset::issue_change_password_request(&user.email, None)
             .await
             .unwrap();
         jwt_config()
@@ -315,7 +315,7 @@ async fn refresh_replay_ends_the_session() {
 
 async fn a_reset_request_is_consumed_once() {
     let user = create_user().await;
-    let sid = pwd::reset::create_change_password_request(&user.email, None)
+    let sid = pwd::reset::issue_change_password_request(&user.email, None)
         .await
         .unwrap();
     let token = jwt_config()
@@ -351,7 +351,7 @@ async fn a_reset_request_is_consumed_once() {
 
 async fn tokens_are_bound_to_their_flow() {
     let user = create_user().await;
-    let sid = pwd::reset::create_change_password_request(&user.email, None)
+    let sid = pwd::reset::issue_change_password_request(&user.email, None)
         .await
         .unwrap();
     let claims = jwt::Claims::default()

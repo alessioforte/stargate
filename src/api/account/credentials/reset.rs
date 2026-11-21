@@ -232,7 +232,7 @@ mod tests {
                 .await
                 .expect("take interaction")
                 .expect("parked request");
-            let sid = pwd::reset::create_change_password_request(email, continuation)
+            let sid = pwd::reset::issue_change_password_request(email, continuation)
                 .await
                 .expect("pending reset");
 
@@ -261,7 +261,7 @@ mod tests {
         with_test_database(async {
             let email = "grace@example.com";
             let user_id = user(email, "grace").await;
-            let sid = pwd::reset::create_change_password_request(email, None)
+            let sid = pwd::reset::issue_change_password_request(email, None)
                 .await
                 .expect("pending reset");
 
@@ -279,7 +279,7 @@ mod tests {
             app_client("orders", true, Some("https://orders.example/login")).await;
             let email = "edsger@example.com";
             let user_id = user(email, "edsger").await;
-            let sid = pwd::reset::create_change_password_request(
+            let sid = pwd::reset::issue_change_password_request(
                 email,
                 Some(LoginContinuation::new("orders", None)),
             )

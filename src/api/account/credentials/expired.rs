@@ -50,13 +50,11 @@ pub(crate) async fn maybe_password_expired_response(
     }
 
     // Reuse a pending change-password request when one exists (e.g. from the
-    // forgot flow) so the emailed link stays valid; otherwise create one.
-    let sid = match pwd::reset::get_change_password_request(&user.email).await {
-        Ok(Some(request)) => request.sid,
-        _ => pwd::reset::create_change_password_request(&user.email, None)
-            .await
-            .map_err(ErrorResponse::internal)?,
-    };
+    // forgot flow) so the emailed link stays valid; issuing the token renews
+    // it, so `expires_in_secs` holds for the request too.
+    let sid = pwd::reset::issue_change_password_request(&user.email, None)
+        .await
+        .map_err(ErrorResponse::internal)?;
 
     let claim = jwt::Claims::default()
         .sub_id(user.id.clone())
