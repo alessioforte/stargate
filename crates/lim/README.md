@@ -4,13 +4,13 @@ Async rate-limiting and quota crate. Pluggable strategies (GCRA, token bucket, f
 
 ## Features
 
-- **Three strategies** — `Gcra`, `TokenBucket`, `QuotaTracker` (fixed-window counter).
+- **Strategies** — `Gcra`, `TokenBucket`, `QuotaTracker` (short fixed window) and `DurableQuotaTracker` (calendar window with a SQL-backed balance).
 - **Compile-time backend** — `memory` (DashMap) or `redis` (atomic Lua scripts), exactly one per build.
 - **Identical semantics across backends** — same return values, same units (millisecond-resolution `retry_after`).
 - **Named registry** — `Limiter` holds many limits, dispatch by string name.
 - **Cost-aware** — every `check` accepts a `cost` (defaults to 1 via `Limiter::check`).
 - **Cached clock** — `CachedClock` updates every 10ms in a background thread; avoids per-call `SystemTime::now()`.
-- **Quota windows** — second / minute / hour / day / week / month / year / custom.
+- **Quota windows** — short windows (second / minute / hour) in the state store and calendar windows (day / week / month / year) with a SQL-backed durable balance.
 - **Rich decision** — limit, remaining, retry_after, reset, plus helpers for HTTP `Retry-After` headers.
 - **Strict named references** — `Limiter::check` returns `RateLimitError::UnknownLimit` for an unregistered name. Skipping a check is an explicit caller decision.
 - **Typed strategies** — every strategy exposes `LimitKind::Rate` or `LimitKind::Quota`; `Limiter::validate_limit` rejects unknown or incompatible references without consuming state.
@@ -79,17 +79,38 @@ Memory impl scales tokens by 1000 internally to preserve fractional refill acros
 
 ### Quota Tracker — `strategies::quota_tracker::QuotaTracker`
 
-Fixed-window counter. Aligned to wall-clock boundaries (e.g. minute starts at second 0).
+Fixed-window counter for short quotas, up to one hour. Aligned to wall-clock
+boundaries (e.g. minute starts at second 0).
 
 ```rust
-use lim::strategies::quota_tracker::{QuotaTracker, TimeWindow};
+use lim::strategies::quota_tracker::{QuotaTracker, ShortWindow};
 
-QuotaTracker::new(store, clock, 1_000, TimeWindow::Hour);   // 1k req/hour
+QuotaTracker::new(store, clock, 1_000, ShortWindow::Hour);   // 1k req/hour
 ```
 
-`TimeWindow`: `Second`, `Minute`, `Hour`, `Day`, `Week`, `Month` (avg), `Year` (avg), `Custom(Duration)`. Parses from `&str` (`"minute"`, `"hours"`, etc.); unknown strings fall back to `Custom(300s)`.
+`ShortWindow`: `Second`, `Minute`, `Hour`.
 
 State is one key: the window marker and the counter are hash fields (`w:<window_secs>`, `c:<window_secs>`). The Redis script reads `TIME`, rotates the counter when the window advances and sets a TTL of window + 1s. The in-memory backend keeps one entry per window internally.
+
+### Durable Quota — `strategies::quota_tracker::DurableQuotaTracker`
+
+Calendar-window quota (day, week, month, year) whose balance lives in SQL. The
+application supplies a `QuotaLedger` implementation; each replica reserves a
+batch with one atomic statement and consumes it in memory, so the request path
+has no store round trip. Batches shrink near the limit and a crash strands at
+most the unused part of one batch. `is_durable()` is true, which makes the
+gateway apply a closed failure policy.
+
+```rust
+use lim::strategies::quota_tracker::{CalendarPeriod, CalendarWindow, DurableQuotaTracker};
+
+let window = CalendarWindow::parse(CalendarPeriod::Month, "Europe/Rome", Some(15))?;
+DurableQuotaTracker::new(ledger, clock, 500_000, window)?;
+```
+
+`CalendarWindow::bounds(now_secs)` resolves local-midnight boundaries, including
+daylight-saving transitions; a `week` starts on Monday and `anchor_day` (1..=28)
+moves the start of a billing month.
 
 ## Limiter Registry
 
