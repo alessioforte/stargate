@@ -229,3 +229,94 @@ mod prefix_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod security_settings_tests {
+    use super::{replication_config, security_timeout};
+
+    #[test]
+    fn startup_validates_security_budget_and_replication_settings() {
+        const TEST_VAR: &str = "STARGATE_TEST_REDIS_SETTING";
+        const EXPECTED: &str = "STARGATE_TEST_REDIS_SETTING_EXPECTED";
+        const SECURITY: &str = "REDIS_SECURITY_TIMEOUT_MS";
+        const REPLICAS: &str = "REDIS_WAIT_REPLICAS";
+        const TIMEOUT: &str = "REDIS_WAIT_TIMEOUT_MS";
+        const FAIL: &str = "REDIS_WAIT_FAIL_ON_TIMEOUT";
+
+        if let Ok(name) = std::env::var(TEST_VAR) {
+            let expected = std::env::var(EXPECTED).unwrap();
+            let actual = if name == SECURITY {
+                security_timeout().map(|timeout| timeout.as_millis().to_string())
+            } else {
+                replication_config().map(|config| match config {
+                    None => "disabled".to_string(),
+                    Some(config) => format!(
+                        "{}/{}/{}",
+                        config.replicas, config.timeout_ms, config.fail_on_timeout,
+                    ),
+                })
+            };
+            match actual {
+                Ok(actual) => assert_eq!(actual, expected),
+                Err(error) => {
+                    assert_eq!(expected, "error");
+                    assert!(error.to_string().contains(&name));
+                }
+            }
+            return;
+        }
+
+        for (name, value, expected) in [
+            (SECURITY, None, "1000"),
+            (SECURITY, Some("500"), "500"),
+            (SECURITY, Some("0"), "error"),
+            (SECURITY, Some("-1"), "error"),
+            (SECURITY, Some(""), "error"),
+            (SECURITY, Some("invalid"), "error"),
+            (REPLICAS, None, "disabled"),
+            (REPLICAS, Some("0"), "disabled"),
+            (REPLICAS, Some("2"), "2/250/true"),
+            (REPLICAS, Some("-1"), "error"),
+            (REPLICAS, Some("invalid"), "error"),
+            (TIMEOUT, None, "2/250/true"),
+            (TIMEOUT, Some("750"), "2/750/true"),
+            (TIMEOUT, Some("0"), "error"),
+            (TIMEOUT, Some("-1"), "error"),
+            (TIMEOUT, Some(""), "error"),
+            (TIMEOUT, Some("invalid"), "error"),
+            (FAIL, Some("true"), "2/250/true"),
+            (FAIL, Some("false"), "2/250/false"),
+            (FAIL, Some("invalid"), "error"),
+        ] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    concat!(
+                        module_path!(),
+                        "::startup_validates_security_budget_and_replication_settings"
+                    ),
+                    "--nocapture",
+                ])
+                .env(TEST_VAR, name)
+                .env(EXPECTED, expected);
+            for setting in [SECURITY, REPLICAS, TIMEOUT, FAIL] {
+                child.env_remove(setting);
+            }
+            if matches!(name, TIMEOUT | FAIL) {
+                child.env(REPLICAS, "2");
+            }
+            if let Some(value) = value {
+                child.env(name, value);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).contains("running 1 test"),
+                "{name}={value:?}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
+    }
+}
