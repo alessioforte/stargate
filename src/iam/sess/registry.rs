@@ -213,17 +213,9 @@ pub async fn register_session_client(
     client_id: &str,
 ) -> Result<bool, StoreError> {
     let store = use_store();
-    let Some(mut record) = store.hget::<SessionRecord>(&directory_key(), sid).await? else {
+    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
-    if record.user_id != user_id {
-        return Ok(false);
-    }
-    if record.expires_at_unix <= now_unix()
-        || !store.exists(&store::keys::session::subject(sid)).await?
-    {
-        return Ok(false);
-    }
     if !record.client_ids.iter().any(|value| value == client_id) {
         record.client_ids.push(client_id.to_string());
         record.client_ids.sort_unstable();
@@ -242,7 +234,7 @@ pub async fn register_session_client(
 /// `otp`, and `mfa` when the session already had another factor. Returns
 /// false when the session is gone.
 pub async fn add_otp_factor(sid: &str, user_id: &str) -> Result<bool, StoreError> {
-    let Some(mut record) = get_active_session(sid, user_id).await? else {
+    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
     record.amr = oidc::authentication::with_otp(&record.amr);
@@ -255,7 +247,7 @@ pub async fn add_otp_factor(sid: &str, user_id: &str) -> Result<bool, StoreError
 
 pub async fn touch_session(sid: &str, user_id: &str) -> Result<bool, StoreError> {
     let store = use_store();
-    let Some(mut record) = get_active_session(sid, user_id).await? else {
+    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
     record.last_seen_at_unix = now_unix();
@@ -268,33 +260,45 @@ pub async fn touch_session(sid: &str, user_id: &str) -> Result<bool, StoreError>
     Ok(true)
 }
 
-/// A user OAuth token remains active only while its backing login session and
-/// stable native session record still exists.
+/// A live login has a current user subject and a matching directory record.
+pub async fn load_active_session(
+    sid: &str,
+) -> Result<Option<(SessionRecord, Subject)>, StoreError> {
+    let Some(record) = get_session(sid).await? else {
+        return Ok(None);
+    };
+    let Some(subject) = subjects::read(sid).await? else {
+        return Ok(None);
+    };
+    if record.id != sid
+        || record.expires_at_unix <= now_unix()
+        || subject.sub_type != SubjectType::User
+        || subject.id != record.user_id
+    {
+        return Ok(None);
+    }
+    Ok(Some((record, subject)))
+}
+
 pub async fn get_active_session(
     sid: &str,
     user_id: &str,
-) -> Result<Option<SessionRecord>, StoreError> {
-    let store = use_store();
-    let Some(record) = store.hget::<SessionRecord>(&directory_key(), sid).await? else {
-        return Ok(None);
-    };
-    if record.user_id != user_id || record.expires_at_unix <= now_unix() {
-        return Ok(None);
-    }
-    if !store.exists(&store::keys::session::subject(sid)).await? {
-        return Ok(None);
-    }
-    Ok(Some(record))
+) -> Result<Option<(SessionRecord, Subject)>, StoreError> {
+    Ok(load_active_session(sid)
+        .await?
+        .filter(|(record, _)| record.user_id == user_id))
 }
 
 /// Resolve a verified user token to a live session owned by its subject.
 pub async fn active_token_session(
     claims: &jwt::Claims,
-) -> Result<Option<SessionRecord>, StoreError> {
+) -> Result<Option<(SessionRecord, Subject)>, StoreError> {
     let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref()) else {
         return Ok(None);
     };
-    if sid.is_empty() || user_id.is_empty() || (claims.azp.is_some() && claims.auth_time.is_none())
+    if sid.is_empty()
+        || user_id.is_empty()
+        || (claims.azp.is_some() && (claims.auth_time.is_none() || claims.sub != user_id))
     {
         return Ok(None);
     }
@@ -362,7 +366,7 @@ pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreErr
     confirmations.finish(Some(record))
 }
 
-/// End the user's own session `sid` (logout): delete its subject, refresh
+/// End a specific login session for this user: delete its subject, refresh
 /// rotation, and registry entries, whether or not the registry still knows
 /// it, and notify its relying parties.
 pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, StoreError> {
@@ -492,31 +496,29 @@ async fn refresh_subjects_from_db(db: &db::service::Service, user_id: &str) -> a
         .await?;
     #[cfg(test)]
     super::test_support::pause_at(super::test_support::Stage::IndexRead).await;
-    let mut missing_orgs = HashSet::new();
     for (sid, entry) in entries {
         match subjects::publish(use_store(), db, user_id, &sid, entry.org_id.as_deref()).await {
-            Ok(Publication::MembershipRemoved) => missing_orgs.extend(entry.org_id),
+            Ok(Publication::MembershipRemoved) => {
+                #[cfg(test)]
+                super::test_support::pause_at(super::test_support::Stage::MissingMembership).await;
+                if let Err(error) = end_session(user_id, &sid).await {
+                    tracing::error!(user_id, sid, %error, "Failed to revoke session after membership removal");
+                }
+            }
             Ok(Publication::Updated | Publication::Gone) => {}
             Err(error) => {
                 tracing::error!(user_id, sid, %error, "Failed to refresh user session subject")
             }
         }
     }
-    for org_id in missing_orgs {
-        revoke_removed_org_sessions(user_id, &org_id).await;
-    }
     Ok(())
 }
 
 pub async fn membership_removed(user_id: &str, org_id: &str) {
-    revoke_removed_org_sessions(user_id, org_id).await;
-    refresh_user_subjects(user_id).await;
-}
-
-async fn revoke_removed_org_sessions(user_id: &str, org_id: &str) {
     if let Err(error) = revoke_org_sessions(user_id, org_id).await {
         tracing::error!(user_id, org_id, %error, "Failed to revoke sessions after membership removal");
     }
+    refresh_user_subjects(user_id).await;
 }
 
 // ── Session authentication ───────────────────────────────────────────────────
@@ -654,7 +656,11 @@ mod index_tests {
         use_store()
             .set(
                 &store::keys::session::subject(sid),
-                &json!({ "id": user_id }),
+                &subjects::PublishedSubject::from(Subject::new(
+                    user_id.into(),
+                    SubjectType::User,
+                    None,
+                )),
                 Some(60),
             )
             .await
@@ -861,7 +867,7 @@ mod index_tests {
                 .await
                 .unwrap()
         );
-        let record = get_active_session(&sid, &user).await.unwrap().unwrap();
+        let (record, _) = get_active_session(&sid, &user).await.unwrap().unwrap();
         assert_eq!(record.client_ids, ["beehive"]);
 
         revoke_session(&sid).await.unwrap();

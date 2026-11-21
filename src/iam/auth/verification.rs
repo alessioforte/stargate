@@ -132,19 +132,14 @@ async fn verify_oauth_claims(
         return Ok(None);
     }
 
-    let Some(session) = crate::iam::sess::registry::active_token_session(&claims).await? else {
+    let Some((session, subject)) = crate::iam::sess::registry::active_token_session(&claims).await? else {
         return Ok(None);
     };
     if !session.client_ids.iter().any(|linked| linked == client_id) {
         return Ok(None);
     }
-    let subject = crate::iam::sess::subjects::read(sid)
-        .await?;
-    Ok(subject
-        .filter(|subject| subject.id == user_id)
-        .and_then(|subject| {
-            VerifiedIdentity::oauth(subject, sid.to_owned(), auth_time, claims.aud)
-        }))
+
+    Ok(VerifiedIdentity::oauth(subject, sid.to_owned(), auth_time, claims.aud))
 }
 
 /// Verify a native session JWT or a user-delegated OAuth access token and bind

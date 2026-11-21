@@ -554,27 +554,24 @@ pub(super) async fn current_authorized_user(
     let Some(sid) = claims.sid.as_deref().filter(|sid| !sid.is_empty()) else {
         return Ok(None);
     };
-    let Some(subject) = crate::iam::sess::subjects::read(sid)
-        .await?
+    let Some((session, _)) = crate::iam::sess::registry::load_active_session(sid).await?
     else {
         return Ok(None);
     };
-
-    if subject.sub_type != crate::iam::auth::subject::SubjectType::User {
+    if claims
+        .sub_id
+        .as_deref()
+        .is_some_and(|id| id != session.user_id)
+    {
         return Ok(None);
     }
-
-    let user_id = claims.sub_id.as_deref().unwrap_or(subject.id.as_str());
-    let Some(user) = crate::data::db::get_user_by_id(user_id)
-        .await?
+    let Some(user) = crate::data::db::get_user_by_id(&session.user_id)
+        .await
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(None);
     };
-
     let Some(auth_time) = claims.auth_time else {
-        return Ok(None);
-    };
-    let Some(session) = crate::iam::sess::registry::get_active_session(sid, &user.id).await? else {
         return Ok(None);
     };
     let auth_time = Utc

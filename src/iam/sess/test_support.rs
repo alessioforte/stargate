@@ -8,6 +8,7 @@ pub(crate) enum Stage {
     IndexRead,
     ProfileRead,
     SubjectWrite,
+    MissingMembership,
 }
 
 tokio::task_local! {

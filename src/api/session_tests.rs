@@ -1,6 +1,7 @@
 mod concurrency;
 #[cfg(feature = "redis")]
 mod delayed_publication;
+mod delegated;
 
 use crate::data::{db, store::use_store};
 use crate::iam::{
@@ -81,16 +82,19 @@ async fn json_request(
 }
 
 async fn oauth_form(router: &Router, path: &str, fields: &[(&str, &str)]) -> Value {
+    send(router, oauth_request(path, fields), StatusCode::OK).await
+}
+
+fn oauth_request(path: &str, fields: &[(&str, &str)]) -> Request<Body> {
     let body = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("client_id", CLIENT_ID)
         .append_pair("client_secret", CLIENT_SECRET)
         .extend_pairs(fields.iter().copied())
         .finish();
-    let req = Request::post(path)
+    Request::post(path)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .body(Body::from(body))
-        .unwrap();
-    send(router, req, StatusCode::OK).await
+        .unwrap()
 }
 
 async fn userinfo(router: &Router, token: &str, status: StatusCode) {
@@ -216,6 +220,25 @@ async fn verify_delegated_session_checks(router: &Router, user: &User, sid: &str
     );
 }
 
+async fn refresh_family(user: &User, sid: &str) -> String {
+    refresh::issue(
+        CLIENT_ID.into(),
+        user.id.clone(),
+        Some(sid.to_owned()),
+        "openid offline_access".into(),
+        Some(AUDIENCE.into()),
+        chrono::Utc::now(),
+        None,
+        oidc::authentication::Authentication {
+            amr: vec!["pwd".into()],
+            acr: oidc::authentication::ACR_SINGLE_FACTOR.into(),
+        },
+        3600,
+    )
+    .await
+    .unwrap()
+}
+
 async fn suite() {
     db::create_oauth_client(
         OAuthClient::new(
@@ -337,22 +360,7 @@ async fn suite() {
     )
     .await;
 
-    let refresh_token = refresh::issue(
-        CLIENT_ID.into(),
-        user.id.clone(),
-        Some(sid.clone()),
-        "openid offline_access".into(),
-        Some(AUDIENCE.into()),
-        chrono::Utc::now(),
-        None,
-        oidc::authentication::Authentication {
-            amr: vec!["pwd".into()],
-            acr: oidc::authentication::ACR_SINGLE_FACTOR.into(),
-        },
-        3600,
-    )
-    .await
-    .unwrap();
+    let refresh_token = refresh_family(&user, &sid).await;
 
     // Represent a subject publication after a refresh has taken its SQL
     // snapshot. Any refresh that writes its own snapshot will erase this value.
@@ -418,6 +426,7 @@ async fn suite() {
     assert_subject([&native, &oauth], &expected, None).await;
     revise_session(&sid, |session| session.client_ids.clear()).await;
     registry::revoke_session(&sid).await.unwrap();
+    delegated::verify_subjects(&router).await;
     concurrency::run(&router, admin).await;
 }
 

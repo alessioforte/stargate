@@ -148,7 +148,7 @@ async fn resolve_authorization(
             }
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None)
             && !crate::iam::auth::revocation::is_revoked(&claims).await?
-            && let Some(session) = crate::iam::sess::registry::active_token_session(&claims).await?
+            && let Some((session, _)) = crate::iam::sess::registry::active_token_session(&claims).await?
         {
             authenticated = true;
             let client_id = claims.azp.as_deref().unwrap_or_default();

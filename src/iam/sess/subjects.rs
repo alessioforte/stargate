@@ -20,10 +20,16 @@ impl From<Subject> for PublishedSubject {
 }
 
 pub(crate) async fn read(sid: &str) -> Result<Option<Subject>, StoreError> {
-    Ok(use_store()
+    match use_store()
         .get::<PublishedSubject>(&store::keys::session::subject(sid))
-        .await?
-        .map(|published| published.subject))
+        .await
+    {
+        Ok(value) => Ok(value.map(|published| published.subject)),
+        // An unreadable subject cannot authorize a session. Transport failures
+        // still reach callers as store errors.
+        Err(StoreError::DeserializationFailed(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[derive(Debug)]

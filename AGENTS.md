@@ -438,6 +438,8 @@ native refresh rotation stores the current `jti` under `{s:<sid>}:refresh`
 `{g}:sessions` directory hash (sid, org, times, linked OAuth client ids).
 User-delegated OAuth access tokens need a `sid` for a live session owned by the
 token's `sub_id` on the admin API, profile, UserInfo, introspection, and gateway.
+The directory record must be unexpired and the versioned subject under the same
+`sid` must decode as a user with the record owner's ID.
 Client-credentials tokens are sessionless. OAuth refresh requires the family's
 live session. Admin endpoints list and revoke sessions, and a native refresh-token
 replay revokes the entire session.
@@ -449,7 +451,8 @@ reads the session subject revision, then reads attributes and the selected membe
 in one SQL query. The store atomically replaces the observed value, increments its
 revision and retains its expiration. A conflict retries both reads. A delayed write
 cannot overwrite a later publication, and the SQL connection is free while Redis
-is pending. Sessions acting in a removed organization are revoked. Native refresh extends
+is pending. If publication observes a missing membership, it revokes only the
+session it read. Sessions opened after readmission keep their current role. Native refresh extends
 the subject's TTL and OAuth refresh leaves its value and TTL alone. Post-commit
 errors are logged. A failed update can leave the subject stale until a successful
 update or the session ends.
