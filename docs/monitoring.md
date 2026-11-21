@@ -108,9 +108,10 @@ the operation name or route attribute. Router names remain bounded by configurat
 | `http.request.method_original` | Original method only when normalized; span only |
 | `http.route` | Matched low-cardinality template/exact path, when known |
 | `url.path` | Actual path; span only |
-| `url.scheme` | `http` or `https` from listener/public HTTPS settings |
+| `url.scheme` | `http` or `https` from the receiving listener's TLS or the public base URL |
 | `server.address`, `server.port` | Original request authority/Host, before gateway middleware; scheme's default port if omitted |
-| `client.address` | Client IP resolved through configured trusted proxies |
+| `client.address` | Client IP resolved once at ingress through the receiving listener's proxy trust |
+| `stargate.listener` | Name of the listener that received the request (`default` for the implicit listener); bounded by `LISTENERS` |
 | `network.peer.address` | Immediate connection peer IP, without port |
 | `user_agent.original` | User-Agent when present |
 | `http.response.status_code` | Response status number |
