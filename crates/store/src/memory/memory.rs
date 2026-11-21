@@ -321,6 +321,18 @@ impl MemoryStore {
         self.data.len()
     }
 
+    /// When `key` expires, for diagnostics and tests. `None` for a missing key
+    /// or one stored without a deadline.
+    pub fn expiry(&self, key: &str) -> Option<DateTime<Utc>> {
+        let now = self.get_cached_now();
+        let expiration = match self.data.get(key)?.value() {
+            StoreValue::Simple(_, expiration)
+            | StoreValue::Hash(_, expiration)
+            | StoreValue::AtomicI64(_, expiration) => *expiration,
+        };
+        expiration.filter(|expiration| *expiration > now)
+    }
+
     pub fn get_cache_hit_ratio(&self) -> f64 {
         let hits = self.stats.cache_hits.load(Ordering::Relaxed);
         let misses = self.stats.cache_misses.load(Ordering::Relaxed);

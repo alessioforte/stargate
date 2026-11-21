@@ -56,7 +56,7 @@ pub async fn get_signup(
         .map_err(ErrorResponse::internal)?
         .is_none()
     {
-        signup::create_signup_request(&sid, &request)
+        signup::store_signup_request(&sid, &request)
             .await
             .map_err(ErrorResponse::internal)?;
     }

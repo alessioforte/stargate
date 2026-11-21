@@ -887,8 +887,10 @@ register `initiate_login_uri`, else `400 signup.invitation_client_invalid`) and 
 optional `targetLinkUri` (absolute HTTPS, only with `clientId`). `POST /signup` and
 `POST /account/credentials` accept `interactionId`, the parked authorization request
 the app derived from its `return_to`; the pending signup or reset keeps the client, so
-the emailed link works in another tab and after the interaction expires. Missing or
-expired interactions mean no continuation, never an error.
+the emailed link works in another tab and after the interaction expires. A
+self-service signup or reset follows the app of its newest link and renews the
+pending request with it; an invitation keeps the app the administrator chose.
+Missing or expired interactions mean no continuation, never an error.
 
 SMTP sender and recipient addresses reject non-ASCII whitespace and control
 characters. Signup reports these addresses as `400 request.invalid`.

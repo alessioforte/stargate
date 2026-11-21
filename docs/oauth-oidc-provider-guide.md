@@ -270,6 +270,9 @@ Where a flow ends:
   client must exist, be enabled, and register `initiate_login_uri`, else `400`
   `signup.invitation_client_invalid`) and an optional `targetLinkUri` (absolute
   HTTPS URL, only with `clientId`). Both are stored with the pending signup.
+  The Console's invitation form offers the same choice: it lists the enabled
+  clients that register an endpoint, and asks for the target link once one is
+  selected. Without a selected app the invitation is the one it always sent.
 - **Registration and reset started by an app.** `POST /signup` and
   `POST /account/credentials` accept `interactionId`, the parked authorization
   request the app derived from its `return_to`. When that request is gone or
@@ -293,7 +296,10 @@ What the app must do with the request it receives:
 
 The continuation outlives the parked request: the pending signup or reset
 keeps the client, so the emailed link works in another tab and after the
-interaction expires.
+interaction expires. A self-service signup or reset for the same address
+follows the app of its newest link, and the pending request, its address
+lookup and the verification copy live for the same hour; an invitation always
+keeps the app the administrator chose.
 
 ## Rotate Client Secret
 

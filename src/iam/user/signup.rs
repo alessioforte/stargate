@@ -6,6 +6,11 @@ use serde_json::Value;
 use store::Store;
 use tools::Locale;
 
+/// Lifetime of a pending signup: the verification request, its address
+/// lookup, and the copy created once the address is verified share it, so the
+/// link just sent lives exactly as long as the request behind it.
+pub const PENDING_SIGNUP_TTL_SECS: u64 = 60 * 60;
+
 /// How a pending signup started, which decides whether `SIGNUP_MODE` still
 /// lets it complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,14 +60,14 @@ impl PendingSignupProfile {
     }
 }
 
-pub async fn create_signup_request(
+pub async fn store_signup_request(
     sid: &str,
     profile: &PendingSignupProfile,
 ) -> Result<(), store::StoreError> {
     let store = use_store();
 
     let key = store::keys::account::signup(sid);
-    let ttl = Some(60 * 60); // 60 minutes
+    let ttl = Some(PENDING_SIGNUP_TTL_SECS);
     store.set(key.as_str(), profile, ttl).await
 }
 

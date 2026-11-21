@@ -53,23 +53,11 @@ pub async fn post_credentials(
 
     if let Some(user) = user {
         // Reuse the pending request so a lost or failed email can be resent;
-        // the per-recipient throttle bounds the repeats.
-        let sid = match pwd::reset::get_change_password_request(&user.email)
+        // the per-recipient throttle bounds the repeats. Issuing the link
+        // renews the request, so the two deadlines coincide.
+        let sid = pwd::reset::issue_change_password_request(&user.email, continuation)
             .await
-            .map_err(ErrorResponse::internal)?
-        {
-            Some(request) => {
-                if let Some(continuation) = continuation {
-                    pwd::reset::set_continuation(&user.email, continuation)
-                        .await
-                        .map_err(ErrorResponse::internal)?;
-                }
-                request.sid
-            }
-            None => pwd::reset::create_change_password_request(&user.email, continuation)
-                .await
-                .map_err(ErrorResponse::internal)?,
-        };
+            .map_err(ErrorResponse::internal)?;
         let locale = user_locale(&user).unwrap_or_else(smtp::default_locale);
         spawn_reset_email(user, sid, locale);
     }
@@ -144,6 +132,48 @@ mod tests {
         serde_json::to_value(response.0).expect("response json")
     }
 
+    fn admin_context() -> TrustedAuditContext {
+        TrustedAuditContext::admin_control_plane(
+            db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
+            db::ent::TrustedAuditRequest::from_http(
+                ulid::Ulid::generate().to_string(),
+                None,
+                None,
+                None,
+            ),
+        )
+    }
+
+    async fn app_client(client_id: &str, initiate_login_uri: &str) {
+        let mut client = db::ent::OAuthClient::new(
+            client_id.to_string(),
+            None,
+            "Orders".to_string(),
+            None,
+            "none".to_string(),
+            vec!["authorization_code".to_string()],
+            vec!["code".to_string()],
+            vec!["https://orders.example/callback".to_string()],
+            vec!["openid".to_string()],
+            Vec::new(),
+            serde_json::json!({}),
+        );
+        client.initiate_login_uri = Some(initiate_login_uri.to_string());
+        crate::data::db::create_oauth_client(client, admin_context())
+            .await
+            .expect("create client");
+    }
+
+    async fn interaction(client_id: &str) -> String {
+        let query = crate::iam::oidc::request::AuthorizationRequest {
+            client_id: Some(client_id.to_string()),
+            ..Default::default()
+        };
+        crate::iam::oidc::interactions::park(query)
+            .await
+            .expect("parked request")
+    }
+
     #[tokio::test]
     async fn the_reset_request_response_is_the_same_for_known_and_unknown_addresses() {
         with_test_database(async {
@@ -156,6 +186,50 @@ mod tests {
             assert_eq!(known, unknown);
             assert_eq!(known, with_interaction);
             assert_eq!(known["code"], "password.reset_requested");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_new_link_renews_the_pending_request_it_was_sent_for() {
+        with_test_database(async {
+            let email = "known@example.com";
+            user(email, "known").await;
+            app_client("orders", "https://orders.example/login").await;
+            request(email, None).await;
+
+            let store = crate::data::store::use_store();
+            let key = store::keys::account::password_reset(email);
+            let first_deadline = store.expiry(&key).expect("pending request");
+            let first_sid = crate::iam::pwd::reset::get_change_password_request(email)
+                .await
+                .unwrap()
+                .unwrap()
+                .sid;
+
+            tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+            // The link is requested again, this time from an app.
+            let interaction = interaction("orders").await;
+            request(email, Some(&interaction)).await;
+
+            let renewed_deadline = store.expiry(&key).expect("pending request");
+            assert!(
+                renewed_deadline > first_deadline + chrono::Duration::seconds(1),
+                "{first_deadline} and {renewed_deadline}"
+            );
+            // The same pending request, so the link already in the mailbox
+            // stays valid, now pointing at the newest app.
+            let request = crate::iam::pwd::reset::get_change_password_request(email)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(request.sid, first_sid);
+            assert_eq!(
+                request.continuation,
+                Some(crate::iam::oidc::continuation::LoginContinuation::new(
+                    "orders", None
+                ))
+            );
         })
         .await;
     }
