@@ -5,6 +5,8 @@ use crate::{
 };
 use gate::cfg::OnStoreError;
 use lim::{LimitKind, RateLimitDecision, RateLimitError};
+use std::{cell::Cell, time::Duration};
+use tokio::time::Instant;
 mod health;
 pub(crate) use health::LimitStoreHealth;
 
@@ -58,6 +60,32 @@ pub(crate) struct TrafficLimit<'a> {
     pub cost: Option<u64>,
 }
 
+tokio::task_local! {
+    static TRAFFIC_BUDGET: Cell<Duration>;
+}
+
+pub(crate) async fn with_traffic_budget<T>(budget: Duration, future: impl Future<Output = T>) -> T {
+    TRAFFIC_BUDGET.scope(Cell::new(budget), future).await
+}
+
+async fn within_traffic_budget<T>(timeout: Duration, check: impl Future<Output = T>) -> Option<T> {
+    let remaining = TRAFFIC_BUDGET.try_with(Cell::get).unwrap_or(timeout);
+    if remaining.is_zero() {
+        return None;
+    }
+    let started = Instant::now();
+    let check = tokio::time::timeout(remaining, check);
+    #[cfg(feature = "redis")]
+    let check = store::with_request_budget(None, check);
+    let result = check.await;
+    let _ = TRAFFIC_BUDGET.try_with(|budget| {
+        budget.set(result.as_ref().map_or(Duration::ZERO, |_| {
+            remaining.saturating_sub(started.elapsed())
+        }));
+    });
+    result.ok()
+}
+
 /// `None` means the store check failed open: no allowance was obtained, so
 /// callers must not fabricate a decision or emit headers for this check.
 pub(crate) async fn check_traffic_limit(
@@ -68,19 +96,17 @@ pub(crate) async fn check_traffic_limit(
 ) -> Result<Option<RateLimitDecision>, ErrorResponse> {
     let limiter = &runtime.core.limiter;
     super::validate_limit(limiter, check.name, point.kind(), check.scope)?;
-    // Redis bounds command responses, but awaits reconnection before sending.
-    // Bound the entire check (including that wait) for every traffic point.
-    let reason = match tokio::time::timeout(
+    let reason = match within_traffic_budget(
         runtime.ingress.timeout,
         limiter.check(check.name, check.key, check.cost),
     )
     .await
     {
-        Ok(Ok(decision)) => {
+        Some(Ok(decision)) => {
             runtime.limit_store_health.success(point);
             return Ok(Some(decision));
         }
-        Ok(Err(error)) => match error {
+        Some(Err(error)) => match error {
             RateLimitError::UnknownLimit(_)
             | RateLimitError::IncompatibleLimit { .. }
             | RateLimitError::InvalidConfig(_) => {
@@ -109,7 +135,7 @@ pub(crate) async fn check_traffic_limit(
                 "backend"
             }
         },
-        Err(_) => "timeout",
+        None => "timeout",
     };
     runtime.limit_store_health.failure(point, policy, reason);
     match policy {

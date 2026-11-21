@@ -1,6 +1,8 @@
+use std::{num::NonZeroU32, sync::OnceLock, time::Duration};
 use store::{Compression, CompressionConfig, RedisPoolConfig, RedisStore};
 use tokio::sync::OnceCell;
 
+static SECURITY_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 static STORE: OnceCell<RedisStore> = OnceCell::const_new();
 
 pub async fn init() -> anyhow::Result<&'static RedisStore> {
@@ -11,16 +13,23 @@ pub async fn init() -> anyhow::Result<&'static RedisStore> {
             let pool_size = pool_size()?;
 
             let key_prefix = key_prefix()?;
-            let config = RedisPoolConfig::new(pool_size);
+            let timeout = security_timeout()?;
+            let replication = replication_config()?;
+            let mut config = RedisPoolConfig::new(pool_size)
+                .with_connection_timeout(Some(Duration::from_millis(250)));
+            config.on_incompatible_server = telemetry::incompatible_server;
             #[cfg(feature = "redis-compression")]
             let com = Compression::Lz4;
             #[cfg(not(feature = "redis-compression"))]
             let com = Compression::None;
             let com_config = CompressionConfig::new(com);
-            let store = RedisStore::with_client(client, config)
-                .await?
+            let mut store = RedisStore::with_client(client, config)?
                 .with_compression(com_config)
                 .with_key_prefix(key_prefix);
+            if let Some(replication) = replication {
+                store = store.with_replication(replication);
+            }
+            let _ = SECURITY_TIMEOUT.set(timeout);
             tracing::info!(
                 "Redis store initialized with pool of {} connection(s)",
                 store.pool_size()
@@ -40,13 +49,75 @@ pub async fn ping() -> anyhow::Result<()> {
     let store = STORE
         .get()
         .ok_or_else(|| anyhow::anyhow!("Redis store not initialized"))?;
-    store::Store::ping(store).await?;
+    // The diagnostics have their own budget and still report Redis failures
+    // after a fail-open ingress check consumed the request's budget.
+    store::with_request_budget(Some(Duration::from_secs(1)), store::Store::ping(store)).await?;
     Ok(())
 }
 
 pub async fn save() {
     // Redis is persistent; nothing to do on shutdown
     tracing::info!("Redis store: no shutdown save needed");
+}
+
+fn security_timeout() -> Result<Duration, crate::conf::env::EnvError> {
+    crate::conf::env::parse_or("REDIS_SECURITY_TIMEOUT_MS", NonZeroU32::new(1000).unwrap())
+        .map(|ms| Duration::from_millis(ms.get().into()))
+}
+
+fn replication_config() -> Result<Option<store::RedisReplicationConfig>, crate::conf::env::EnvError>
+{
+    use crate::conf::env::parse_or;
+
+    let replicas = parse_or("REDIS_WAIT_REPLICAS", 0u32)?;
+    let timeout_ms = parse_or("REDIS_WAIT_TIMEOUT_MS", NonZeroU32::new(250).unwrap())?;
+    let fail_on_timeout = parse_or("REDIS_WAIT_FAIL_ON_TIMEOUT", true)?;
+    Ok(
+        NonZeroU32::new(replicas).map(|replicas| store::RedisReplicationConfig {
+            replicas,
+            timeout_ms,
+            fail_on_timeout,
+            on_timeout: telemetry::replication_timeout,
+        }),
+    )
+}
+
+pub(crate) async fn with_security_budget<T>(
+    elapsed: Duration,
+    future: impl Future<Output = T>,
+) -> T {
+    let budget = SECURITY_TIMEOUT
+        .get()
+        .copied()
+        .unwrap_or(Duration::from_secs(1));
+    store::with_request_budget(Some(budget.saturating_sub(elapsed)), future).await
+}
+
+mod telemetry {
+    use opentelemetry::{KeyValue, metrics::Counter};
+    use std::sync::LazyLock;
+
+    static INCOMPATIBLE: LazyLock<Counter<u64>> = LazyLock::new(|| {
+        crate::obs::telemetry::meter()
+            .u64_counter("stargate.store.redis.incompatible_connections")
+            .with_description("Redis connections rejected for lacking HEXPIRE capability")
+            .build()
+    });
+    static REPLICATION_TIMEOUT: LazyLock<Counter<u64>> = LazyLock::new(|| {
+        crate::obs::telemetry::meter()
+            .u64_counter("stargate.store.redis.replication_timeouts")
+            .with_description("Confirmed Redis writes whose WAIT did not reach the replica target")
+            .build()
+    });
+
+    pub(super) fn incompatible_server() {
+        INCOMPATIBLE.add(1, &[]);
+    }
+
+    pub(super) fn replication_timeout(fail: bool) {
+        let outcome = if fail { "error" } else { "warn" };
+        REPLICATION_TIMEOUT.add(1, &[KeyValue::new("stargate.outcome", outcome)]);
+    }
 }
 
 /// The operator prefix sits before the `stargate:v1:` schema root. Braces are
@@ -154,6 +225,94 @@ mod prefix_tests {
                 "{value:?}: {} {}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod security_settings_tests {
+    use super::{replication_config, security_timeout};
+
+    #[test]
+    fn startup_validates_security_budget_and_replication_settings() {
+        const TEST_VAR: &str = "STARGATE_TEST_REDIS_SETTING";
+        const EXPECTED: &str = "STARGATE_TEST_REDIS_SETTING_EXPECTED";
+        const SECURITY: &str = "REDIS_SECURITY_TIMEOUT_MS";
+        const REPLICAS: &str = "REDIS_WAIT_REPLICAS";
+        const TIMEOUT: &str = "REDIS_WAIT_TIMEOUT_MS";
+        const FAIL: &str = "REDIS_WAIT_FAIL_ON_TIMEOUT";
+
+        if let Ok(name) = std::env::var(TEST_VAR) {
+            let expected = std::env::var(EXPECTED).unwrap();
+            let actual = if name == SECURITY {
+                security_timeout().map(|timeout| timeout.as_millis().to_string())
+            } else {
+                replication_config().map(|config| match config {
+                    None => "disabled".to_string(),
+                    Some(config) => format!(
+                        "{}/{}/{}",
+                        config.replicas, config.timeout_ms, config.fail_on_timeout,
+                    ),
+                })
+            };
+            match actual {
+                Ok(actual) => assert_eq!(actual, expected),
+                Err(error) => {
+                    assert_eq!(expected, "error");
+                    assert!(error.to_string().contains(&name));
+                }
+            }
+            return;
+        }
+
+        for (name, value, expected) in [
+            (SECURITY, None, "1000"),
+            (SECURITY, Some("500"), "500"),
+            (SECURITY, Some("0"), "error"),
+            (SECURITY, Some("-1"), "error"),
+            (SECURITY, Some(""), "error"),
+            (SECURITY, Some("invalid"), "error"),
+            (REPLICAS, None, "disabled"),
+            (REPLICAS, Some("0"), "disabled"),
+            (REPLICAS, Some("2"), "2/250/true"),
+            (REPLICAS, Some("-1"), "error"),
+            (REPLICAS, Some("invalid"), "error"),
+            (TIMEOUT, None, "2/250/true"),
+            (TIMEOUT, Some("750"), "2/750/true"),
+            (TIMEOUT, Some("0"), "error"),
+            (TIMEOUT, Some("-1"), "error"),
+            (TIMEOUT, Some(""), "error"),
+            (TIMEOUT, Some("invalid"), "error"),
+            (FAIL, Some("true"), "2/250/true"),
+            (FAIL, Some("false"), "2/250/false"),
+            (FAIL, Some("invalid"), "error"),
+        ] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child
+                .args([
+                    "--exact",
+                    "data::store::redis::security_settings_tests::startup_validates_security_budget_and_replication_settings",
+                    "--nocapture",
+                ])
+                .env(TEST_VAR, name)
+                .env(EXPECTED, expected);
+            for setting in [SECURITY, REPLICAS, TIMEOUT, FAIL] {
+                child.env_remove(setting);
+            }
+            if matches!(name, TIMEOUT | FAIL) {
+                child.env(REPLICAS, "2");
+            }
+            if let Some(value) = value {
+                child.env(name, value);
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).contains("running 1 test"),
+                "{name}={value:?}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
             );
         }
     }

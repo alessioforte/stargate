@@ -7,7 +7,8 @@
 //! `/oauth/authorize?interaction={id}`. Without JavaScript its form posts
 //! here. This endpoint runs the password checks of `POST /account/login`
 //! (login guard throttling, constant-time unknown users, rehash) and
-//! answers only with redirects: back to `/oauth/authorize` on success, or to
+//! answers with redirects on healthy dependencies: back to `/oauth/authorize`
+//! on success, or to
 //! the login page with an `error` code it displays.
 //!
 //! Accounts that need MFA or a password change are sent back with
@@ -16,13 +17,13 @@
 use super::interactions::{self, INTERACTION_COOKIE, LoginPage};
 use crate::api::account::login::verify_login_password;
 use crate::api::account::session::issue_user_session;
-use crate::err::ErrorResponse;
+use crate::err::{ErrorCode, ErrorResponse, OAuthErrorResponse};
 use crate::iam::otp::service::login_mfa_required;
 use crate::web::request::RequestExt;
 use axum::body::Body;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use http::HeaderValue;
 use http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use serde::Deserialize;
@@ -40,6 +41,7 @@ struct LoginForm {
     request_body(content = String, content_type = "application/x-www-form-urlencoded", description = "username and password, posted by the hosted login page when JavaScript is unavailable; the parked authorization request comes from the oauth_interaction cookie"),
     responses(
         (status = 303, description = "Signed in: resumes the authorization request. Otherwise back to the login page with an error code."),
+        (status = 503, description = "Authentication state unavailable"),
     )
 )]
 pub async fn post_login(req: Request) -> Response {
@@ -54,10 +56,13 @@ pub async fn post_login(req: Request) -> Response {
     let Some(id) = interaction else {
         return expired();
     };
-    let pending = match interactions::get(&id).await {
+    let pending = match interactions::get(&id).await.map_err(ErrorResponse::from) {
         Ok(Some(pending)) => pending,
         Ok(None) => return expired(),
-        Err(_) => return back_to_login(LoginPage::default(), "server_error"),
+        Err(error) if error.code == ErrorCode::AuthStateUnavailable => {
+            return OAuthErrorResponse::from(error).into_response();
+        }
+        Err(error) => return back_to_login(LoginPage::default(), login_error_code(&error)),
     };
     let page = || LoginPage {
         interaction: Some(&id),
@@ -73,6 +78,9 @@ pub async fn post_login(req: Request) -> Response {
     let password = form.password.as_deref().unwrap_or_default();
     let user = match verify_login_password(&client_ip, username, password).await {
         Ok((user, _)) => user,
+        Err(error) if error.code == ErrorCode::AuthStateUnavailable => {
+            return error.into_response();
+        }
         Err(error) => return back_to_login(page(), login_error_code(&error)),
     };
 
@@ -86,7 +94,10 @@ pub async fn post_login(req: Request) -> Response {
     let password = vec![oidc::authentication::AMR_PASSWORD.to_string()];
     let session = match issue_user_session(user, auth_time, None, password).await {
         Ok(session) => session,
-        Err(_) => return back_to_login(page(), "server_error"),
+        Err(error) if error.code == ErrorCode::AuthStateUnavailable => {
+            return OAuthErrorResponse::from(error).into_response();
+        }
+        Err(error) => return back_to_login(page(), login_error_code(&error)),
     };
 
     let mut response = see_other(&interactions::resume_path(&id));

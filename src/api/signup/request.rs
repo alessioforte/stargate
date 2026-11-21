@@ -50,9 +50,7 @@ pub async fn post_signup(
     // Resolved before the account lookup, so an existing address takes the
     // same path whether or not the flow started in an app.
     let continuation =
-        crate::iam::oidc::continuation::from_interaction(body.interaction_id.as_deref())
-            .await
-            .map_err(ErrorResponse::internal)?;
+        crate::iam::oidc::continuation::from_interaction(body.interaction_id.as_deref()).await?;
 
     let requested = crate::web::request::accept_language(&headers);
     let default = smtp::default_locale();

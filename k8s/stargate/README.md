@@ -172,7 +172,7 @@ python3 benches/scripts/test_redis_prefix.py \
   --postgres-image <local-postgres-image-digest>
 ```
 
-Use Redis >= 7.4 (hash-field expiry). The disposable services bind only to
+Use Redis 7.4+ or Valkey 9.0+ for hash field expiry. The disposable services bind only to
 localhost and are removed on exit. The test creates the exact ACL
 `~tenant:stargate:v1:* ~audit.raw +@all -@admin -@dangerous` (the server runs
 with `REDIS_KEY_PREFIX=tenant:`), verifies an empty ACL failure log and checks
@@ -181,7 +181,7 @@ does not. `benches/scripts/test_redis_cluster.py` runs the store and limiter
 suites on a disposable 3+3 cluster under the same prefix. Its observer uses the
 fixture's admin connection for diagnostics only.
 
-Observed application commands: `AUTH`, `HELLO`, `CLIENT SETINFO`, `PING`, `GET`,
+Observed application commands: `AUTH`, `HELLO`, `CLIENT SETINFO`, `COMMAND INFO`, `PING`, `GET`,
 `SET`, `SETEX`, `DEL`, `EXISTS`, `MGET`, `HSET`, `HGET`, `HDEL`, `HEXISTS`,
 `HGETALL`, `HKEYS`, `HVALS`, `HLEN`, `HEXPIRE`, `INCRBY`, `DECRBY`, `EXPIRE`,
 `TTL`, `SCRIPT LOAD`, `EVALSHA`, `TIME`, `XADD`, `XLEN`, `XINFO GROUPS`,
@@ -203,12 +203,24 @@ Secret, without URL encoding. Alternatively, put them in the URL; using both
 sources stops startup. The same connection settings apply to the state store,
 rate limiters, and audit relay.
 
+Stargate starts with a lazy pool. Each connection checks `COMMAND INFO HEXPIRE`
+before it can serve state, limits or audit commands. Use Redis 7.4+ or Valkey
+9.0+ and allow `COMMAND INFO` in the ACL. When Redis cannot be reached, SQL still
+controls readiness. See [Health and readiness probes](../../docs/health-probes.md).
+
 Use one stable endpoint for the Redis primary, such as a managed service or an
-operator-managed Service in the cluster. Sentinel and Redis Cluster discovery
-are not supported. During failover, requests that need Redis can return `503`
-for several seconds while connections recover. See
-[Health and readiness probes](../../docs/health-probes.md) for readiness and
-ingress behavior during an outage.
+operator-managed Service. Stargate does not perform Sentinel or Redis Cluster
+discovery. Set `REDIS_WAIT_REPLICAS` (default `0`) to require acknowledgment
+from that many replicas for logout, revocations, and invalidation of a revoked
+API key's cached subject. Grant `WAIT` and `EVAL` when this is enabled.
+`REDIS_WAIT_TIMEOUT_MS` defaults to `250` and must be positive.
+`REDIS_WAIT_FAIL_ON_TIMEOUT` defaults to `true` and returns an error on a
+shortfall. With `false`, Stargate logs a warning and reports success. Both
+outcomes increment `stargate.store.redis.replication_timeouts`. A write can
+already have reached the primary when the request returns an error.
+Acknowledgment confirms receipt by replicas, with durability depending on
+the Redis persistence and promotion configuration.
+[Redis WAIT reference](https://redis.io/docs/latest/commands/wait/).
 
 ## Multiple public hosts
 

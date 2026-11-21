@@ -196,10 +196,11 @@ referencing an existing named `gcra` or `token_bucket` rate limit. There is no
 implicit binding or disable switch. Quota trackers, missing/blank references,
 zero token-bucket capacity/refill rate, overflowing bucket lifetimes, and invalid durations reject startup,
 reload, and admin saves. `ingress.timeout` defaults to `250ms` and must be a
-positive, representable duration. It bounds each traffic store check, including
-IAM/admin admission and route rate/quota checks, from start through any Redis
-reconnection wait. Redis also has 5s command-response and connection timeouts;
-these do not replace the complete-check deadline. Generated configs and the Helm defaults use
+positive, representable duration. Every request gets one shared traffic store
+budget. Ingress, admin-principal, rate and quota checks spend from that budget
+through connection acquisition and Redis responses. An exhausted check follows
+its own `on_store_error` policy immediately. Time spent on other request work
+does not consume the budget. Generated configs and the Helm defaults use
 burst 100 with one request replenished every `100ms` (10/s); tune these values
 for the gateway and IAM traffic sharing each client IP (NAT, VPN, office egress).
 

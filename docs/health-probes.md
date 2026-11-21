@@ -57,18 +57,28 @@ and at `CONFIG_SYNC_INTERVAL_SECS` (default 30 seconds) to recover missed notifi
 Edge uses the same interval without a listener, including for CLI imports from another
 process sharing the SQLite database file.
 
-With Redis unavailable after startup, replicas remain ready while SQL is healthy.
-Traffic limits default to fail-open: public gateway routes, direct responses,
-static auth/Console pages, discovery/JWKS and API/admin keys verified through SQL
-remain usable. The affected checks emit no allowance headers. Each check is
-bounded by `ingress.timeout` (default 250ms), including rate/quota policies and
-admin principal admission. Set `on_store_error: deny` on ingress or a route's
-rate/quota policy to retain `503` with `Retry-After: 10` for that check.
-Configuration errors stay `500`; login guard, OTP/email throttles, sessions,
-JWT revocation and OAuth state remain fail-closed. User login and the Console's
-user session therefore remain unavailable. Redis recovery restores checks
-without a restart. A Traefik rate limit provides a safety net while the shared
-per-IP allowance is unavailable.
+Stargate starts without waiting for Redis, and replicas remain ready while SQL
+is healthy. Each Redis connection checks for hash field expiry using
+`COMMAND INFO HEXPIRE`. Use [Redis 7.4 or newer](https://redis.io/docs/latest/commands/hexpire/)
+or [Valkey 9.0 or newer](https://valkey.io/commands/hexpire/) and allow the
+capability command in the Redis ACL.
+
+Traffic limits default to fail-open. Public gateway routes, static auth/Console
+pages, discovery/JWKS and SQL-backed admin keys remain usable. Failed-open
+checks emit no allowance headers. A request's traffic checks share
+`ingress.timeout` (default 250ms), including rate/quota and admin-principal
+admission. A check with no budget left applies its failure policy immediately.
+Set `on_store_error: deny` on ingress or a route's rate/quota policy to return
+`503` with `Retry-After: 10` when that check fails. Configuration errors stay
+`500`.
+
+Session, token revocation, cached gateway API key and OAuth state checks
+fail closed on store outages. They return `503` with `Retry-After: 10`, with a
+Redis time budget of one second by default. Set the positive integer
+`REDIS_SECURITY_TIMEOUT_MS` at startup to change it. The preceding ingress
+check counts against this budget. Once Redis becomes reachable, Stargate
+reconnects without a restart. A Traefik rate limit can preserve an IP allowance
+during a shared store failure.
 
 Initialization includes database migrations, state-store setup, signing
 configuration, and the compiled gateway configuration. The listener opens
@@ -90,8 +100,9 @@ return request-level `503` responses; they do not change probe readiness.
 `benches/scripts/redis_failures.py` reproduces these failures against a
 disposable cluster-profile deployment and asserts the behavior above. It
 injects a Redis restart, an empty restart, a network partition, memory
-exhaustion with `noeviction`, and a missing instance at startup, and reports
-the unexpected responses, the disturbance duration and the recovery time. See
+exhaustion with `noeviction`, an unavailable or incompatible instance at startup,
+and promotion of a replica after confirmed logout. It reports unexpected
+responses, disturbance duration and recovery by endpoint. See
 [the Redis failure bench](redis-failure-bench.md) for the scenarios, the
 commands and the recorded results.
 

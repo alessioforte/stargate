@@ -1,6 +1,7 @@
 #![cfg(feature = "redis")]
 
-use store::{AtomicStore, RedisStore, Store, StreamEntry, keys};
+use std::time::Duration;
+use store::{AtomicStore, RedisStore, Store, StoreError, StreamEntry, keys, with_request_budget};
 
 const PREFIX: &str = "tenant:";
 
@@ -135,5 +136,33 @@ async fn prefixed_state_and_explicit_stream() -> Result<(), Box<dyn std::error::
             .is_some()
     );
     assert_eq!(store.trim_stream_before("audit.raw", zero).await?, 0);
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires isolated REDIS_PREFIX_TEST_URL with the restricted Stargate ACL"]
+async fn nested_scope_suspends_and_restores_the_request_budget()
+-> Result<(), Box<dyn std::error::Error>> {
+    let url = std::env::var("REDIS_PREFIX_TEST_URL")?;
+    let store = RedisStore::new(&url).await?.with_key_prefix(PREFIX);
+    let value = key(&test_tag(), "budget");
+    store.set(&value, &42, Some(60)).await?;
+
+    with_request_budget(Some(Duration::ZERO), async {
+        assert!(matches!(
+            store.get::<i32>(&value).await,
+            Err(StoreError::Timeout(_))
+        ));
+        assert_eq!(
+            with_request_budget(None, store.get::<i32>(&value)).await?,
+            Some(42)
+        );
+        assert!(matches!(
+            store.get::<i32>(&value).await,
+            Err(StoreError::Timeout(_))
+        ));
+        Ok::<(), StoreError>(())
+    })
+    .await?;
     Ok(())
 }

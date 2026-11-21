@@ -1,30 +1,30 @@
 # Redis failure bench
 
 `benches/scripts/redis_failures.py` runs a disposable cluster-profile Stargate
-(PostgreSQL and Redis containers on localhost) under a light mixed load and
-injects one Redis failure per scenario. Every scenario asserts the documented
-behavior from [health probes](health-probes.md) and the API overview; it does
-more than check that the process stays alive. The report lists the responses
-that did not match, the duration of the disturbance and the time to recover.
-
-The load sends three requests in a loop: a gateway route whose rate limit fails
-open (`/bench/public`), the same route with `on_store_error: deny`
-(`/bench/deny`), and `GET /account/profile`, a store read on every request.
-`x-ratelimit-limit` identifies a limit check that actually reached the store, so
-a fail-open response is a `200` without allowance headers.
+with local PostgreSQL and Redis containers. It checks HTTP behavior, shared
+traffic budgets and recovery. The partition holds the Redis connection open
+while withholding all replies. The public gateway route has ingress, rate
+and quota checks. The protected route accepts a native session, a gateway API
+key or a user-delegated OAuth access token.
 
 ## Scenarios
 
-| Scenario            | Injection                                                                                                                                                     | Documented behavior asserted                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `restart`           | Stop and start the Redis container (AOF on, state survives).                                                                                                  | Limits fail open: `/bench/public` returns `200` without allowance headers, `/bench/deny` returns `503 gateway.limiter_unavailable`, `/account/profile` fails closed with `5xx`, `/readyz` stays `200`, `/admin/health` reports Redis `unhealthy` and `limits.storeDegraded`. After the restart the same session works, limits are enforced again, `storeDegraded` clears and Stargate never restarts. |
-| `empty`             | Stop and start Redis with persistence off.                                                                                                                    | The session key is gone: the old access token gets `401 auth.token_invalid` from `/account/profile`, the old refresh token gets `401`, and a fresh sign-in works. Limits and health recover; there is no permanent error.                                                                                                                                                                         |
-| `partition`         | A localhost TCP relay forwards to Redis; `SIGSTOP` on the relay blackholes every packet while its sockets stay open. Held past the 5s store response timeout. | Same fail-open and fail-closed split as `restart`, with `/admin/health` also reporting overall `unhealthy` and `limits.storeDegraded`; readiness does not follow Redis. `SIGCONT` restores every check without restarting Stargate.                                                                                                                                                               |
-| `memory-full`       | Redis starts with `maxmemory 2mb` and `noeviction`; filler keys are written, then `maxmemory` is pinned below the stored data so every write is rejected.     | Reads keep working (`/account/profile` returns `200`), limit checks fail open or closed as configured, sign-in fails closed (`5xx`) because the session write is rejected, `PING` keeps the Redis component `healthy` while `limits.storeDegraded` is true and the overall status is `degraded`. Freeing the filler keys and restoring `maxmemory` restores writes without a restart.             |
-| `absent-at-startup` | Redis listens on the chosen port, then the container is removed before Stargate starts.                                                                       | Store initialization runs before the listener opens, so the process exits non-zero and names Redis; it never answers HTTP. The expectation is `STARTUP_WITHOUT_REDIS_FAILS` at the top of the script: when startup without Redis is supported, invert it and assert readiness with the Redis component reported unhealthy.                                                                        |
+| Scenario | Behavior asserted |
+| --- | --- |
+| `restart` | With AOF enabled, the existing session works once Redis returns. Failed-open requests get `200` without allowance headers. Failed-closed requests get `503` with `Retry-After`. Readiness stays healthy and Redis diagnostics report the outage. |
+| `empty` | With persistence disabled, existing access and refresh tokens get `401` once Redis recovers. A fresh sign-in works. |
+| `partition` | Gateway and IAM traffic follow their failure policies within one shared 250ms budget. Stateful auth requests return `503` with `Retry-After` using the one-second Redis budget. A request already dispatched to its upstream completes, readiness stays healthy and the first recovered request charges its quota once. |
+| `memory-full` | Redis rejects writes under `noeviction`. Session reads and PING work, login fails closed, and the limit store is reported degraded. Writes recover when memory is freed. |
+| `absent-at-startup` | Stargate starts and serves readiness while Redis is down. Admin diagnostics show Redis unhealthy and session access fails closed. The existing process recovers when Redis starts. |
+| `incompatible` | An older Redis without `HEXPIRE` is rejected with a capability diagnostic while Stargate serves readiness. |
+| `replicated-logout` | With replica confirmation enabled, missing acknowledgments produce either an error or a warning according to settings. A successful logout stays revoked after promotion, including for the old refresh token. A subsequent logout everywhere revokes all three sessions on the promoted primary and reports the missing replica acknowledgment with `503`. |
 
-Cluster and Sentinel topologies are out of scope; only a single Redis is
-exercised.
+The report records recovery per endpoint when the workload can probe it
+continuously. The first successful traffic check must finish within one second
+of Redis accepting writes, and every sampled endpoint must recover within five
+seconds. The local relay resumes traffic at a known time for the partition test.
+Outage latency checks allow 40ms for HTTP processing and scheduler jitter. The
+Rust test checks the exact traffic budget against Tokio's clock.
 
 ## Run locally
 
@@ -36,8 +36,9 @@ python3 benches/scripts/redis_failures.py \
 ```
 
 Requirements: Docker, a `target/debug/stargate` built with the `cluster`
-profile, and Redis >= 7.4 (hash-field expiry). `--scenarios` selects a subset,
-`--output` writes the JSON report. Containers are disposable, bind to localhost
+profile, and Redis 7.4+ (or Valkey 9.0+) with hash field expiry.
+`--scenarios` selects a subset, `--unsupported-redis-image` changes the fixture
+used for the capability rejection test, and `--output` writes the JSON report. Containers are disposable, bind to localhost
 only and are removed on exit. The script exits non-zero at the first scenario
 whose behavior does not match.
 
@@ -66,36 +67,43 @@ cluster store/limiter suites, then this bench with `redis:7.4-alpine` and
 `benches/scripts/benchmark_request_paths.py` run that fails when a gateway path
 exceeds its Redis round-trip cap (`docs/gateway-performance.md`).
 
+## Report
+
+`disturbance_seconds` measures the time the induced failure was active.
+`recovery_by_endpoint_ms` measures the first successful response per endpoint
+after Redis accepts writes. `unexpected` is zero in a passing run. `errors`
+counts failed responses and transport failures during the fault, including
+expected `503` responses. The assertions include requests started far enough
+inside the fault to complete within their budget.
+
 ## Recorded results
 
-Recorded 2026-11-17 on Apple M1 Pro (10 CPUs), macOS 27.2.1, Docker 29.9.3,
-`target/debug/stargate` from `test/redis-failure-bench`, running the command
-above. Durations are indicative: `disturbance_seconds` runs from the injection
-to the end of the fault, and `recovery_seconds` from there to the documented
-healthy state (limits enforced, sessions usable, `/admin/health` healthy).
+Recorded on 2026-11-21 on an Apple M1 Pro with macOS 27.2.1 and Docker 29.9.3.
+The run used the Redis and PostgreSQL images in [Run locally](#run-locally)
+and wrote the report with `--output`.
 
-| Scenario            | Requests | Unexpected | Errors | public | deny | profile | Disturbance (s) | Recovery (s) | Final state             |
-| ------------------- | -------- | ---------- | ------ | ------ | ---- | ------- | --------------- | ------------ | ----------------------- |
-| `restart`           | 200      | 0          | 38     | 0      | 38   | 0       | 11.99           | 1.76         | healthy                 |
-| `empty`             | 188      | 0          | 34     | 0      | 32   | 2       | 10.57           | 1.33         | signed-out then healthy |
-| `partition`         | 159      | 0          | 26     | 0      | 26   | 0       | 8.78            | 0.08         | healthy                 |
-| `memory-full`       | 214      | 0          | 10     | 0      | 10   | 0       | 1.04            | 0.18         | healthy                 |
-| `absent-at-startup` | 0        | 0          | 0      | 0      | 0    | 0       | 9.50            | —            | failed at startup       |
+| Scenario | Requests | Unexpected | Errors | Disturbance (s) | Recovery (s) | Final state |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `restart` | 207 | 0 | 40 | 1.77 | 0.09 | healthy |
+| `empty` | 212 | 0 | 42 | 1.72 | 0.22 | signed-out then healthy |
+| `partition` | 304 | 0 | 36 | 3.55 | 0.10 | healthy |
+| `memory-full` | 221 | 0 | 10 | 1.10 | 0.21 | healthy |
+| `absent-at-startup` | 0 | 0 | 0 | 0.33 | 0.09 | healthy |
+| `incompatible` | 0 | 0 | 0 | 0.00 | 0.00 | ready, Redis rejected |
+| `replicated-logout` | 0 | 0 | 0 | 0.00 | 0.00 | logout survived promotion |
 
-`unexpected` counts the samples that contradicted the expectation of their
-phase; a single one fails the run, so it is always zero in a passing report.
-`errors` counts the responses with no status or `>= 400` among the requests
-started while the fault was active, split by endpoint (`public`/`deny`/`profile`):
-that is the observable cost of the disturbance, and the fail-closed route's
-`503` makes it non-zero even in a passing run. A request that outlives the fault
-is excluded from the `during` assertions (a session read can still succeed after
-Redis returns) but still counted in `errors` when it fails.
+Partition recovery times in `recovery_by_endpoint_ms` are measured from the
+moment the relay resumed traffic.
 
-The `restart` and `empty` disturbances include the deliberate `/account/profile`
-probe. The store pool waits for reconnection before sending a command, so the
-probe observes the documented `5xx` only after its retries are exhausted (about
-ten seconds), while a request that outlives the fault can complete once Redis
-returns; the one-second hold keeps the sampled windows non-empty. The
-`partition` disturbance is held past the store timeout for the same reason, and
-`absent-at-startup` measures the connection retry time before the process
-exits, not a timeout of the bench.
+| Endpoint | Recovery (ms) |
+| --- | ---: |
+| `public` | 34 |
+| `deny` | 102 |
+| `profile` | 116 |
+| `jwt` | 114 |
+| `api_key` | 113 |
+| `oauth` | 119 |
+| `userinfo` | 118 |
+| `iam_ingress_deny` | 106 |
+| `gateway_ingress_deny` | 109 |
+| `oauth_refresh` | 121 |

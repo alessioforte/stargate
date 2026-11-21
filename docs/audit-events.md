@@ -101,7 +101,8 @@ This example is the control-plane fixture exercised by
 
 ## Configure protected delivery
 
-Use Redis/Valkey **6.2 or newer**. Before starting Stargate, create every
+Use **Redis 7.4+ or Valkey 9.0+**, as required by the state store. Before starting
+Stargate, create every
 configured consumer group at the beginning of the stream:
 
 ```sh

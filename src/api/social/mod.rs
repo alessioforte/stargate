@@ -144,10 +144,7 @@ async fn start(
             return_to,
         }),
     };
-    let state = create_oauth_state(&record).await.map_err(|error| {
-        tracing::error!(%error, "failed to create OAuth state");
-        ErrorResponse::new(ErrorCode::SocialStateGenerationFailed)
-    })?;
+    let state = create_oauth_state(&record).await?;
     let location = provider.authorize_url(&state).map_err(|error| {
         tracing::error!(%error, provider = provider.display_name(), "cannot build the authorization URL");
         ErrorResponse::new(ErrorCode::SystemInternal)
@@ -181,10 +178,10 @@ async fn callback(req: Request, provider: Provider) -> Response {
         Err(_) => CallbackQuery::default(),
     };
     let record = match nonempty(query.state.as_deref()) {
-        Some(state) => take_oauth_state(state).await.unwrap_or_else(|error| {
-            tracing::error!(%error, "failed to read OAuth state");
-            None
-        }),
+        Some(state) => match take_oauth_state(state).await {
+            Ok(record) => record,
+            Err(error) => return ErrorResponse::from(error).into_response(),
+        },
         None => None,
     };
 

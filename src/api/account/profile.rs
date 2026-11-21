@@ -65,10 +65,7 @@ async fn session_user(token: String) -> Result<db::ent::User, ErrorResponse> {
         claims
     };
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if crate::iam::auth::revocation::is_revoked(&claims).await? {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
@@ -85,8 +82,7 @@ async fn session_user(token: String) -> Result<db::ent::User, ErrorResponse> {
         .filter(|user_id| !user_id.is_empty())
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
     if crate::iam::sess::registry::get_active_session(sid, user_id)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .is_none()
     {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));

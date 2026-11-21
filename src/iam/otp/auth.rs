@@ -14,10 +14,7 @@ pub(crate) async fn authenticated_user(
         .validate_session_access_token(&token)
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if crate::iam::auth::revocation::is_revoked(&claims).await? {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
@@ -27,8 +24,7 @@ pub(crate) async fn authenticated_user(
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
     let subject = crate::data::store::use_store()
         .get::<Subject>(&store::keys::session::subject(&sid))
-        .await
-        .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
+        .await?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     if subject.sub_type != SubjectType::User {

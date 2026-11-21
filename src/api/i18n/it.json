@@ -17,6 +17,7 @@
     "auth.untrusted_origin": "L'origine della richiesta non è attendibile",
     "auth.openid_scope_required": "Lo scope openid è obbligatorio",
     "auth.login_rate_limited": "Troppi tentativi di accesso non riusciti",
+    "auth.state_unavailable": "Lo stato di autenticazione è temporaneamente indisponibile",
     "auth.login_unavailable": "L'accesso non è temporaneamente disponibile",
     "session.organization_membership_required": "L'utente non appartiene all'organizzazione richiesta",
     "session.not_found": "Sessione non trovata",

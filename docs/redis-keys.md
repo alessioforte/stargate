@@ -101,7 +101,9 @@ ACL SETUSER stargate reset on nopass ~stargate:v1:* ~audit.raw +@all -@admin -@d
 
 With `REDIS_KEY_PREFIX=tenant:` the pattern becomes `~tenant:stargate:v1:*`.
 Redis glob patterns match the whole physical key; `{` and `}` are ordinary
-characters there.
+characters there. Each connection needs `COMMAND INFO` to verify `HEXPIRE`
+support. When replica confirmation is enabled, the ACL must also allow
+`WAIT` and `EVAL`.
 
 ## Verification
 
