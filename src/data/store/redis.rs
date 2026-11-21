@@ -292,10 +292,7 @@ mod security_settings_tests {
             child
                 .args([
                     "--exact",
-                    concat!(
-                        module_path!(),
-                        "::startup_validates_security_budget_and_replication_settings"
-                    ),
+                    "data::store::redis::security_settings_tests::startup_validates_security_budget_and_replication_settings",
                     "--nocapture",
                 ])
                 .env(TEST_VAR, name)
