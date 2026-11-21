@@ -211,8 +211,11 @@ fn escape_html(value: &str) -> String {
 }
 
 /// Whether `value` parses as a deliverable recipient address.
+///
+/// RFC 5321 §4.5.3.1.3 limits a forward-path to 256 octets including the
+/// angle brackets, so an address is at most 254.
 pub fn is_valid_address(value: &str) -> bool {
-    value.parse::<lettre::Address>().is_ok()
+    value.len() <= 254 && value.parse::<lettre::Address>().is_ok()
 }
 
 pub struct Smtp {
@@ -429,6 +432,19 @@ mod tests {
                 "{email:?}"
             );
         }
+    }
+
+    #[test]
+    fn addresses_are_limited_to_254_octets() {
+        let local = "a".repeat(64);
+        let domain = format!("{}.{}.{}", "b".repeat(63), "c".repeat(63), "d".repeat(61));
+        let accepted = format!("{local}@{domain}");
+        assert_eq!(accepted.len(), 254);
+        assert!(is_valid_address(&accepted), "{accepted}");
+
+        let too_long = format!("{accepted}d");
+        assert_eq!(too_long.len(), 255);
+        assert!(!is_valid_address(&too_long), "{too_long}");
     }
 
     #[test]

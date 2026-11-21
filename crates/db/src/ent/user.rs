@@ -2,10 +2,21 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Longest address the schema stores (`VARCHAR(254)`). RFC 5321 §4.5.3.1.3
+/// limits a forward-path to 256 octets including the angle brackets, leaving
+/// 254 for the address itself.
+pub const MAX_EMAIL_LEN: usize = 254;
+
 /// The stored and compared form of an email address. One mailbox is one
 /// account, whatever casing is used at signup, login, or recovery.
 pub fn canonical_email(raw: &str) -> String {
     raw.trim().to_lowercase()
+}
+
+/// Whether the canonical address fits the column. SQLite ignores `VARCHAR`
+/// lengths, so every backend checks this before writing.
+pub fn email_fits_column(raw: &str) -> bool {
+    canonical_email(raw).len() <= MAX_EMAIL_LEN
 }
 
 /// The stored and compared form of a nickname: handles match
@@ -24,7 +35,22 @@ pub fn nickname_is_valid(nickname: &str, email: &str) -> bool {
 
 #[cfg(test)]
 mod identity_tests {
-    use super::{canonical_nickname, nickname_is_valid};
+    use super::{MAX_EMAIL_LEN, canonical_nickname, email_fits_column, nickname_is_valid};
+
+    #[test]
+    fn an_address_fits_the_column_up_to_254_octets() {
+        assert!(email_fits_column("ada@example.com"));
+        assert!(email_fits_column(&format!(
+            "{}@{}",
+            "a".repeat(64),
+            "b".repeat(MAX_EMAIL_LEN - 64 - 1)
+        )));
+        assert!(!email_fits_column(&format!(
+            "{}@{}",
+            "a".repeat(64),
+            "b".repeat(MAX_EMAIL_LEN - 64)
+        )));
+    }
 
     #[test]
     fn nicknames_are_case_insensitive_and_cannot_claim_another_address() {

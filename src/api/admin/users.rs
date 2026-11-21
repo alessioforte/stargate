@@ -424,6 +424,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: CreateUserRequest = extract_json(req).await?;
+    crate::iam::user::emails::ensure_email_fits_column(&payload.email)?;
     super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
     let membership = normalize_initial_membership(payload.membership)?;
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
@@ -494,6 +495,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
 
     let runtime = super::limit_attrs::runtime(&req)?;
     let payload: CreateUserInvitationRequest = extract_json(req).await?;
+    crate::iam::user::emails::ensure_email_fits_column(&payload.email)?;
     super::limit_attrs::validate(&runtime.core.limiter, &payload.attrs, false)?;
     let membership = normalize_initial_membership(payload.membership)?;
     authorization.require_all(membership.as_ref().map(|_| Permission::MembershipsCreate))?;
@@ -568,6 +570,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     let id: String = extract_path(&mut req).await?;
     authorization::get(&req)?.require_user_mutation(&id).await?;
     let payload: UpdateUserRequest = extract_json(req).await?;
+    crate::iam::user::emails::ensure_email_fits_column(&payload.email)?;
 
     let existing = crate::data::db::get_user_by_id(&id)
         .await
@@ -636,6 +639,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", id.clone()))?;
 
     if let Some(email) = &payload.email {
+        crate::iam::user::emails::ensure_email_fits_column(email)?;
         existing.email = email.clone();
     }
     if payload.given_name.is_some() {

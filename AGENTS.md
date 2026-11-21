@@ -927,7 +927,10 @@ every insert/update):
 
 - `email` and `nickname` are stored canonical (trimmed, lowercased:
   `canonical_email` / `canonical_nickname`) and looked up the same way, so one
-  mailbox or handle is one account whatever the casing.
+  mailbox or handle is one account whatever the casing. An address is at most
+  254 octets (`MAX_EMAIL_LEN`, RFC 5321 §4.5.3.1.3); the column is
+  `VARCHAR(254)` on both backends and every write checks the length because
+  SQLite ignores `VARCHAR` lengths.
 - `nickname_is_valid`: a nickname is non-empty and may contain `@` only when it
   equals the account's own email (the default nickname), so no account can take
   another person's address as its handle. A nickname that mirrored the email

@@ -3396,6 +3396,30 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
+    async fn email_column_accepts_254_characters_and_rejects_more() {
+        let svc = test_service().await;
+        let accepted = format!(
+            "{}@{}.{}.{}",
+            "a".repeat(64),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(61)
+        );
+        assert_eq!(accepted.len(), 254);
+        let user = create_identity(&svc, &accepted, "email-254")
+            .await
+            .expect("254-octet email");
+        assert_eq!(user.email, accepted);
+
+        let rejected = format!("{accepted}d");
+        assert_eq!(rejected.len(), 255);
+        let error = create_identity(&svc, &rejected, "email-255")
+            .await
+            .expect_err("255-octet email");
+        assert!(error.to_string().contains("254"), "{error}");
+    }
+
+    #[tokio::test]
     async fn nicknames_cannot_claim_another_accounts_address() {
         let svc = test_service().await;
         assert!(
@@ -4779,6 +4803,42 @@ mod tests {
 
     fn unique_nick() -> String {
         ulid::Ulid::generate().to_string()
+    }
+
+    async fn create_identity(svc: &Service, email: &str, nickname: &str) -> Result<User> {
+        svc.create_user(
+            Profile::new(email.to_string(), nickname.to_string()),
+            CredentialType::Password,
+            "test-password-hash",
+            None,
+            admin_context(ulid::Ulid::generate().to_string()),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
+    async fn email_column_accepts_254_characters_and_rejects_more() {
+        let svc = test_service().await;
+        let accepted = format!(
+            "{}@{}.{}.{}",
+            "a".repeat(64),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(61)
+        );
+        assert_eq!(accepted.len(), 254);
+        let user = create_identity(&svc, &accepted, &unique_nick())
+            .await
+            .expect("254-octet email");
+        assert_eq!(user.email, accepted);
+
+        let rejected = format!("{accepted}d");
+        assert_eq!(rejected.len(), 255);
+        let error = create_identity(&svc, &rejected, &unique_nick())
+            .await
+            .expect_err("255-octet email");
+        assert!(error.to_string().contains("254"), "{error}");
     }
 
     #[tokio::test]

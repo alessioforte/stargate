@@ -1,4 +1,6 @@
-use crate::ent::{User, canonical_email, canonical_nickname, nickname_is_valid};
+use crate::ent::{
+    MAX_EMAIL_LEN, User, canonical_email, canonical_nickname, email_fits_column, nickname_is_valid,
+};
 use anyhow::{Result, ensure};
 use chrono::Utc;
 
@@ -21,6 +23,7 @@ impl Default for UserRepository {
 
 impl UserRepository {
     pub async fn create(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
+        ensure_email_fits_column(&user)?;
         ensure_nickname_is_valid(&user)?;
         let row = sqlx::query_as::<_, User>(
             sqlx::AssertSqlSafe(format!(
@@ -103,6 +106,7 @@ impl UserRepository {
     }
 
     pub async fn update(&self, tx: &mut crate::backend::Tx<'_>, user: User) -> Result<User> {
+        ensure_email_fits_column(&user)?;
         ensure_nickname_is_valid(&user)?;
         let updated_at = Utc::now();
         let row = sqlx::query_as::<_, User>(
@@ -274,8 +278,16 @@ impl UserRepository {
     }
 }
 
-/// Every write path goes through the repository, so this is the invariant's
+/// Every write path goes through the repository, so these are the invariants'
 /// last line: callers validate first to answer with a precise error.
+fn ensure_email_fits_column(user: &User) -> Result<()> {
+    ensure!(
+        email_fits_column(&user.email),
+        "email must not exceed {MAX_EMAIL_LEN} octets"
+    );
+    Ok(())
+}
+
 fn ensure_nickname_is_valid(user: &User) -> Result<()> {
     ensure!(
         nickname_is_valid(&user.nickname, &user.email),
