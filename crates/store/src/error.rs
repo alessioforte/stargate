@@ -29,6 +29,9 @@ pub enum StoreError {
     /// Storage backend is unavailable or unreachable
     BackendUnavailable(String),
 
+    /// The primary accepted the write, but too few replicas acknowledged it.
+    ReplicationShortfall { acknowledged: u32, required: u32 },
+
     /// Operation timed out
     Timeout(String),
 
@@ -45,6 +48,7 @@ impl StoreError {
             self,
             Self::ConnectionFailed(_)
                 | Self::BackendUnavailable(_)
+                | Self::ReplicationShortfall { .. }
                 | Self::Timeout(_)
                 | Self::IoError(_)
                 | Self::RedisFailed(_)
@@ -62,6 +66,13 @@ impl fmt::Display for StoreError {
             StoreError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
             StoreError::Conflict(msg) => write!(f, "Conflict: {}", msg),
             StoreError::BackendUnavailable(msg) => write!(f, "Backend unavailable: {}", msg),
+            StoreError::ReplicationShortfall {
+                acknowledged,
+                required,
+            } => write!(
+                f,
+                "Redis write acknowledged by {acknowledged} of {required} required replicas"
+            ),
             StoreError::Timeout(msg) => write!(f, "Operation timed out: {}", msg),
             StoreError::IoError(msg) => write!(f, "I/O error: {}", msg),
             StoreError::TypeMismatch(msg) => write!(f, "Type mismatch error: {}", msg),

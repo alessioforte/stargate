@@ -1,6 +1,7 @@
 use crate::data::store::delete_confirmed;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
+use crate::iam::auth::revocation::{RevocationConfirmations, revoke_claims};
 use crate::web::messages::{MessageCode, MessageResponse};
 use crate::web::request::RequestExt;
 use axum::Json;
@@ -28,18 +29,19 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
     let sid = claims.sid.clone().unwrap_or_default();
-    let revoked = crate::iam::auth::revocation::revoke_claims(&claims).await;
+    let mut confirmations = RevocationConfirmations::default();
+    confirmations.record(revoke_claims(&claims).await)?;
 
     match claims.sub_id.as_deref() {
         Some(user_id) => {
-            crate::iam::sess::registry::end_session(user_id, &sid).await?;
+            confirmations.record(crate::iam::sess::registry::end_session(user_id, &sid).await)?;
         }
         None => {
-            delete_confirmed(&store::keys::session::subject(&sid)).await?;
+            confirmations.record(delete_confirmed(&store::keys::session::subject(&sid)).await)?;
         }
     }
 
-    revoked?;
+    confirmations.finish(())?;
     Ok(Json(MessageResponse::new(MessageCode::LogoutCompleted)))
 }
 
