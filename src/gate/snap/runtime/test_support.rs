@@ -26,6 +26,7 @@ pub(crate) fn gate(config: Config) -> super::Gate {
         std::sync::Arc::new(lim::State::new()),
         super::super::prepare_config(config).unwrap(),
         gate::PolicySnapshot::default(),
+        None,
     )
     .unwrap()
 }

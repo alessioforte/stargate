@@ -68,6 +68,13 @@ pub(crate) async fn check_traffic_limit(
 ) -> Result<Option<RateLimitDecision>, ErrorResponse> {
     let limiter = &runtime.core.limiter;
     super::validate_limit(limiter, check.name, point.kind(), check.scope)?;
+    // A durable quota must never exceed its limit, so its failure mode is
+    // always closed even when the policy says `allow`.
+    let policy = if limiter.is_durable(check.name) {
+        OnStoreError::Deny
+    } else {
+        policy
+    };
     // Redis bounds command responses, but awaits reconnection before sending.
     // Bound the entire check (including that wait) for every traffic point.
     let reason = match tokio::time::timeout(

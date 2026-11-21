@@ -1,5 +1,7 @@
 #[cfg(feature = "redis")]
 mod cluster;
+#[cfg(all(feature = "memory", feature = "sqlite"))]
+mod durable_quota;
 mod forwarded_headers;
 #[cfg(feature = "memory")]
 mod grpc;

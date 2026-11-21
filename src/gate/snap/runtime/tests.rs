@@ -155,6 +155,7 @@ async fn failed_tls_reload_keeps_routes_and_prepared_clients_then_recovers() {
         Arc::new(lim::State::new()),
         prepared,
         PolicySnapshot::default(),
+        None,
     )
     .unwrap();
     let runtime = gate.snapshot();

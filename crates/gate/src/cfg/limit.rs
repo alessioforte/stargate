@@ -30,11 +30,12 @@ impl Limit {
         self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
+        ledger: Option<Arc<dyn lim::QuotaLedger>>,
     ) -> Result<Box<dyn lim::RateLimit>, super::graph::CompileError> {
         self.spec.validate().map_err(|message| {
             super::graph::CompileError::new(format!("limits.{}", self.name), message)
         })?;
-        self.spec.factory(state, clock).map_err(|message| {
+        self.spec.factory(state, clock, ledger).map_err(|message| {
             super::graph::CompileError::new(format!("limits.{}", self.name), message)
         })
     }
@@ -134,6 +135,41 @@ impl LimitSpec {
                 return Err("GCRA duration and burst exceed the supported timestamp range");
             }
         }
+        if let Strategy::QuotaTracker {
+            limit,
+            period,
+            timezone,
+            anchor_day,
+        } = &self.params
+        {
+            if *limit == 0 {
+                return Err("quota limit must be greater than zero");
+            }
+            if *limit > u64::try_from(i64::MAX).expect("i64::MAX fits in u64") {
+                return Err("quota limit must not exceed i64::MAX");
+            }
+            if period.is_short() {
+                if timezone.is_some() {
+                    return Err(
+                        "timezone is only valid for calendar periods (day, week, month, year)",
+                    );
+                }
+                if anchor_day.is_some() {
+                    return Err(
+                        "anchor_day is only valid for calendar periods (day, week, month, year)",
+                    );
+                }
+            } else {
+                let timezone = timezone
+                    .as_deref()
+                    .ok_or("calendar periods require an explicit timezone")?;
+                lim::strategies::quota_tracker::CalendarWindow::parse(
+                    period.calendar_period(),
+                    timezone,
+                    *anchor_day,
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -141,8 +177,9 @@ impl LimitSpec {
         &self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-    ) -> Result<Box<dyn lim::RateLimit>, &'static str> {
-        self.params.factory(state, clock)
+        ledger: Option<Arc<dyn lim::QuotaLedger>>,
+    ) -> Result<Box<dyn lim::RateLimit>, String> {
+        self.params.factory(state, clock, ledger)
     }
 }
 
@@ -159,22 +196,30 @@ enum Period {
 }
 
 impl Period {
-    pub fn to_time_window(&self) -> lim::strategies::quota_tracker::TimeWindow {
+    fn is_short(&self) -> bool {
+        matches!(self, Period::Second | Period::Minute | Period::Hour)
+    }
+
+    pub fn to_short_window(&self) -> Option<lim::strategies::quota_tracker::ShortWindow> {
         match self {
-            Period::Second => lim::strategies::quota_tracker::TimeWindow::Second,
-            Period::Minute => lim::strategies::quota_tracker::TimeWindow::Minute,
-            Period::Hour => lim::strategies::quota_tracker::TimeWindow::Hour,
-            Period::Day => lim::strategies::quota_tracker::TimeWindow::Day,
-            Period::Week => lim::strategies::quota_tracker::TimeWindow::Week,
-            Period::Month => lim::strategies::quota_tracker::TimeWindow::Month,
-            Period::Year => lim::strategies::quota_tracker::TimeWindow::Year,
+            Period::Second => Some(lim::strategies::quota_tracker::ShortWindow::Second),
+            Period::Minute => Some(lim::strategies::quota_tracker::ShortWindow::Minute),
+            Period::Hour => Some(lim::strategies::quota_tracker::ShortWindow::Hour),
+            Period::Day | Period::Week | Period::Month | Period::Year => None,
         }
     }
-}
 
-impl From<Period> for lim::strategies::quota_tracker::TimeWindow {
-    fn from(period: Period) -> Self {
-        period.to_time_window()
+    pub fn calendar_period(&self) -> lim::strategies::quota_tracker::CalendarPeriod {
+        use lim::strategies::quota_tracker::CalendarPeriod;
+        match self {
+            Period::Second | Period::Minute | Period::Hour => {
+                unreachable!("short periods are not calendar periods")
+            }
+            Period::Day => CalendarPeriod::Day,
+            Period::Week => CalendarPeriod::Week,
+            Period::Month => CalendarPeriod::Month,
+            Period::Year => CalendarPeriod::Year,
+        }
     }
 }
 
@@ -192,6 +237,11 @@ enum Strategy {
     QuotaTracker {
         limit: u64,
         period: Period,
+        /// IANA time zone of a calendar window; required for day, week,
+        /// month and year, rejected for shorter windows.
+        timezone: Option<String>,
+        /// Day of the month a billing window starts on (1..=28), month only.
+        anchor_day: Option<u8>,
     },
 }
 
@@ -200,16 +250,17 @@ impl Strategy {
         &self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-    ) -> Result<Box<dyn lim::RateLimit>, &'static str> {
+        ledger: Option<Arc<dyn lim::QuotaLedger>>,
+    ) -> Result<Box<dyn lim::RateLimit>, String> {
         match self {
             Strategy::Gcra {
                 max_burst,
                 replenish_1_per,
             } => {
                 let replenish_1_per = tools::parse_duration(replenish_1_per)
-                    .map_err(|_| "invalid GCRA replenish_1_per")?
+                    .map_err(|_| "invalid GCRA replenish_1_per".to_string())?
                     .to_std()
-                    .map_err(|_| "invalid GCRA replenish_1_per")?;
+                    .map_err(|_| "invalid GCRA replenish_1_per".to_string())?;
 
                 let quota = lim::gcra::Quota {
                     max_burst: NonZeroU32::new(*max_burst)
@@ -227,15 +278,33 @@ impl Strategy {
                     state, clock, config,
                 )))
             }
-            Strategy::QuotaTracker { limit, period } => {
-                let time_window = period.to_time_window();
-                Ok(Box::new(lim::strategies::quota_tracker::QuotaTracker::new(
-                    state,
-                    clock,
-                    *limit,
-                    time_window,
-                )))
-            }
+            Strategy::QuotaTracker {
+                limit,
+                period,
+                timezone,
+                anchor_day,
+            } => match period.to_short_window() {
+                Some(window) => Ok(Box::new(lim::strategies::quota_tracker::QuotaTracker::new(
+                    state, clock, *limit, window,
+                ))),
+                None => {
+                    let ledger =
+                        ledger.ok_or("calendar quota requires a database-backed quota ledger")?;
+                    let window = lim::strategies::quota_tracker::CalendarWindow::parse(
+                        period.calendar_period(),
+                        timezone
+                            .as_deref()
+                            .ok_or("calendar periods require an explicit timezone")?,
+                        *anchor_day,
+                    )
+                    .map_err(str::to_string)?;
+                    lim::strategies::quota_tracker::DurableQuotaTracker::new(
+                        ledger, clock, *limit, window,
+                    )
+                    .map(|tracker| Box::new(tracker) as Box<dyn lim::RateLimit>)
+                    .map_err(|error| error.to_string())
+                }
+            },
         }
     }
 }
@@ -270,4 +339,83 @@ pub(super) fn default_on_store_error() -> String {
 
 pub(super) fn is_default_on_store_error(value: &str) -> bool {
     value == "allow"
+}
+
+#[cfg(all(test, feature = "memory"))]
+mod tests {
+    use super::*;
+
+    struct NoopLedger;
+
+    #[async_trait::async_trait]
+    impl lim::QuotaLedger for NoopLedger {
+        async fn reserve(
+            &self,
+            _bucket: &str,
+            _definition: &str,
+            _window_start: i64,
+            _window_end: i64,
+            _limit: u64,
+            units: u64,
+        ) -> lim::Result<Option<u64>> {
+            Ok(Some(units))
+        }
+    }
+
+    fn state() -> Arc<lim::State> {
+        Arc::new(lim::State::new())
+    }
+
+    fn limit(value: serde_json::Value) -> Limit {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn calendar_quotas_need_a_sql_ledger_and_short_windows_do_not() {
+        let calendar = limit(serde_json::json!({
+            "name": "monthly",
+            "strategy": "quota_tracker",
+            "params": {"limit": 100, "period": "month", "timezone": "Europe/Rome"}
+        }));
+        let clock = lim::CachedClock::new();
+        let error = calendar
+            .clone()
+            .build(state(), clock.clone(), None)
+            .err()
+            .expect("calendar quota without a ledger must fail");
+        assert!(error.to_string().contains("limits.monthly"));
+        assert!(
+            calendar
+                .build(state(), clock.clone(), Some(Arc::new(NoopLedger)))
+                .is_ok()
+        );
+
+        let short = limit(serde_json::json!({
+            "name": "hourly",
+            "strategy": "quota_tracker",
+            "params": {"limit": 100, "period": "hour"}
+        }));
+        assert!(short.build(state(), clock, None).is_ok());
+    }
+
+    #[test]
+    fn durable_limits_report_their_failure_mode() {
+        let calendar = limit(serde_json::json!({
+            "name": "monthly",
+            "strategy": "quota_tracker",
+            "params": {"limit": 100, "period": "month", "timezone": "UTC"}
+        }));
+        let clock = lim::CachedClock::new();
+        let durable = calendar
+            .build(state(), clock.clone(), Some(Arc::new(NoopLedger)))
+            .unwrap();
+        assert!(durable.is_durable());
+
+        let short = limit(serde_json::json!({
+            "name": "hourly",
+            "strategy": "quota_tracker",
+            "params": {"limit": 100, "period": "hour"}
+        }));
+        assert!(!short.build(state(), clock, None).unwrap().is_durable());
+    }
 }
