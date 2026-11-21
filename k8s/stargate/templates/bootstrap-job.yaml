@@ -61,6 +61,10 @@ spec:
           env:
             - name: STARGATE_RUNTIME_PROFILE
               value: {{ .Values.deployment.mode | quote }}
+            {{- if eq .Values.deployment.mode "edge" }}
+            - name: DATA_PATH
+              value: {{ .Values.persistence.mountPath | quote }}
+            {{- end }}
             {{- if .Values.migrations.job.enabled }}
             - name: DB_MIGRATE_ON_START
               value: "false"
