@@ -1,14 +1,10 @@
 use super::{AuthResponse, RefreshTokenRequestBody};
 use crate::err::{ErrorCode, ErrorResponse};
-use crate::iam::{
-    auth::{jwt::jwt_config, subject::Subject},
-    sess::registry,
-};
+use crate::iam::{auth::jwt::jwt_config, sess::registry};
 use crate::web::cookies::build_jwt_cookie;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
-use store::Store;
 
 #[utoipa::path(
     put,
@@ -48,8 +44,7 @@ pub async fn put_refresh_token(
         .sub_id
         .as_deref()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-    let subject = crate::data::store::use_store()
-        .get::<Subject>(&store::keys::session::subject(sid))
+    let subject = crate::iam::sess::subjects::read(sid)
         .await
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
         .filter(|subject| subject.id == user_id)

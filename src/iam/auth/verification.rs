@@ -96,8 +96,7 @@ async fn verify_session_claims(
         return Ok(None);
     }
 
-    let subject = crate::data::store::use_store()
-        .get::<Subject>(&store::keys::session::subject(sid))
+    let subject = crate::iam::sess::subjects::read(sid)
         .await?;
     Ok(
         subject
@@ -139,8 +138,7 @@ async fn verify_oauth_claims(
     if !session.client_ids.iter().any(|linked| linked == client_id) {
         return Ok(None);
     }
-    let subject = crate::data::store::use_store()
-        .get::<Subject>(&store::keys::session::subject(sid))
+    let subject = crate::iam::sess::subjects::read(sid)
         .await?;
     Ok(subject
         .filter(|subject| subject.id == user_id)

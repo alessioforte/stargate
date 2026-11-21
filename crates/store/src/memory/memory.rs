@@ -468,23 +468,30 @@ impl Store for MemoryStore {
         Ok(true)
     }
 
-    async fn replace<T: SerializeValue>(&self, key: &str, value: &T) -> StoreResult<bool> {
+    async fn replace_if_equal<T: SerializeValue>(
+        &self,
+        key: &str,
+        expected: &T,
+        value: &T,
+    ) -> StoreResult<bool> {
         if key.trim().is_empty() {
             return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
         }
-        let data: Data = self.serialize(value)?.into();
+        let expected = self.serialize(expected)?;
+        let data = self.serialize(value)?.into();
         let Some(mut entry) = self.data.get_mut(key) else {
             return Ok(false);
         };
         if self.store_value_is_expired_at(entry.value(), self.get_cached_now()) {
             return Ok(false);
         }
-        let expiration = match entry.value() {
-            StoreValue::Simple(_, expiration)
-            | StoreValue::Hash(_, expiration)
-            | StoreValue::AtomicI64(_, expiration) => *expiration,
+        let StoreValue::Simple(current, _) = entry.value_mut() else {
+            return Err(self.wrong_type_error());
         };
-        *entry.value_mut() = StoreValue::Simple(data, expiration);
+        if current.as_ref() != expected.as_slice() {
+            return Ok(false);
+        }
+        *current = data;
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
         Ok(true)
     }

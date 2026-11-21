@@ -16,7 +16,6 @@ use oidc::scopes::{
     contains as scope_contains, parse_space_delimited, resolve_audience,
 };
 use std::collections::HashSet;
-use store::Store;
 use url::Url;
 
 /// The browser's signed-in user, from the session cookie.
@@ -486,8 +485,7 @@ async fn authorization_client(query: &AuthorizationRequest) -> OAuthResult<db::e
     }
 
     let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
+        .await?
     else {
         return Err(oauth_bad_request("unknown client_id"));
     };
@@ -556,8 +554,7 @@ pub(super) async fn current_authorized_user(
     let Some(sid) = claims.sid.as_deref().filter(|sid| !sid.is_empty()) else {
         return Ok(None);
     };
-    let Some(subject) = crate::data::store::use_store()
-        .get::<crate::iam::auth::subject::Subject>(&store::keys::session::subject(sid))
+    let Some(subject) = crate::iam::sess::subjects::read(sid)
         .await?
     else {
         return Ok(None);
@@ -569,8 +566,7 @@ pub(super) async fn current_authorized_user(
 
     let user_id = claims.sub_id.as_deref().unwrap_or(subject.id.as_str());
     let Some(user) = crate::data::db::get_user_by_id(user_id)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
+        .await?
     else {
         return Ok(None);
     };
@@ -721,8 +717,7 @@ async fn consent_satisfied(
     }
 
     let Some(consent) = crate::data::db::get_active_oauth_consent(&user.id, &client.client_id)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
+        .await?
     else {
         return Ok(false);
     };

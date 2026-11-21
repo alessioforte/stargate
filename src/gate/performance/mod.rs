@@ -40,7 +40,7 @@ async fn gateway_release_workloads() {
     use_store()
         .set(
             &store::keys::session::subject(&session),
-            &subject,
+            &crate::iam::sess::subjects::PublishedSubject::from(subject),
             Some(600),
         )
         .await

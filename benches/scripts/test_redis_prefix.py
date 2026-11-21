@@ -164,7 +164,7 @@ http:
                     'completed_password_logins_remember_server_addresses',
                 ):
                     run_cluster_test(test, env)
-                run_cluster_test('session_tests::session_flows', env)
+                run_cluster_test('session_tests::session_flows', {**env, 'DB_POOL_MAX': '1'})
                 log.flush()
                 assert 'NOPERM' not in (folder / 'server.log').read_text(), 'NOPERM in server log'
                 assert json.loads(redis_cmd('ACL', 'LOG')) == [], 'ACL permission failures recorded'

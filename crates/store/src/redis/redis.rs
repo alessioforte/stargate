@@ -361,6 +361,34 @@ impl RedisStore {
         Ok(())
     }
 
+    async fn swap_serialized<T: SerializeValue>(
+        &self,
+        key: &str,
+        expected: &T,
+        new: &T,
+        expiry: &str,
+    ) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
+
+        let mut con = self.pool.get();
+
+        let expected_serialized = self.serialize(expected)?;
+        let new_serialized = self.serialize(new)?;
+
+        let result: i32 = CAS_SCRIPT
+            .key(key)
+            .arg(expected_serialized)
+            .arg(new_serialized)
+            .arg(expiry)
+            .invoke_async(&mut con)
+            .await
+            .map_err(StoreError::from)?;
+
+        Ok(result == 1)
+    }
+
     fn serialize<T: SerializeValue>(&self, value: &T) -> StoreResult<Vec<u8>> {
         let raw = rmp_serde::to_vec(value).map_err(|e| {
             StoreError::SerializationFailed(format!("Failed to serialize value: {}", e))
@@ -479,10 +507,6 @@ impl Store for RedisStore {
         value: &T,
         ttl: Option<u64>,
     ) -> StoreResult<()> {
-        self.validate_key(key)?;
-        let physical_key = self.prefixed_key(key);
-        let key = physical_key.as_ref();
-
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -534,21 +558,13 @@ impl Store for RedisStore {
             .map_err(StoreError::from)
     }
 
-    async fn replace<T: SerializeValue>(&self, key: &str, value: &T) -> StoreResult<bool> {
-        self.validate_key(key)?;
-        let physical_key = self.prefixed_key(key);
-        let value = self.serialize(value)?;
-        let mut con = self.pool.get();
-
-        redis::cmd("SET")
-            .arg(physical_key.as_ref())
-            .arg(value)
-            .arg("XX")
-            .arg("KEEPTTL")
-            .query_async::<Option<String>>(&mut con)
-            .await
-            .map(|result| result.is_some())
-            .map_err(StoreError::from)
+    async fn replace_if_equal<T: SerializeValue>(
+        &self,
+        key: &str,
+        expected: &T,
+        value: &T,
+    ) -> StoreResult<bool> {
+        self.swap_serialized(key, expected, value, "keep").await
     }
 
     async fn expire(&self, key: &str, ttl: u64) -> StoreResult<bool> {
@@ -759,31 +775,12 @@ impl Store for RedisStore {
         new: &T,
         ttl: Option<u64>,
     ) -> StoreResult<bool> {
-        self.validate_key(key)?;
-        let physical_key = self.prefixed_key(key);
-        let key = physical_key.as_ref();
-
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
-        let mut con = self.pool.get();
-
-        let expected_serialized = self.serialize(expected)?;
-        let new_serialized = self.serialize(new)?;
-
-        let ttl_str = ttl.map_or("nil".to_string(), |t| t.to_string());
-
-        let result: i32 = CAS_SCRIPT
-            .key(key)
-            .arg(expected_serialized)
-            .arg(new_serialized)
-            .arg(ttl_str)
-            .invoke_async(&mut con)
-            .await
-            .map_err(StoreError::from)?;
-
-        Ok(result == 1)
+        let expiry = ttl.map_or_else(|| "nil".to_owned(), |secs| secs.to_string());
+        self.swap_serialized(key, expected, new, &expiry).await
     }
 }
 
@@ -990,10 +987,6 @@ impl AtomicStore for RedisStore {
     }
 
     async fn set_i64(&self, key: &str, value: i64, ttl: Option<u64>) -> StoreResult<()> {
-        self.validate_key(key)?;
-        let physical_key = self.prefixed_key(key);
-        let key = physical_key.as_ref();
-
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -1013,10 +1006,6 @@ impl AtomicStore for RedisStore {
     }
 
     async fn incr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
-        self.validate_key(key)?;
-        let physical_key = self.prefixed_key(key);
-        let key = physical_key.as_ref();
-
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -1044,10 +1033,6 @@ impl AtomicStore for RedisStore {
     }
 
     async fn decr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
-        self.validate_key(key)?;
-        let physical_key = self.prefixed_key(key);
-        let key = physical_key.as_ref();
-
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -1081,10 +1066,6 @@ impl AtomicStore for RedisStore {
         new: i64,
         ttl: Option<u64>,
     ) -> StoreResult<bool> {
-        self.validate_key(key)?;
-        let physical_key = self.prefixed_key(key);
-        let key = physical_key.as_ref();
-
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
