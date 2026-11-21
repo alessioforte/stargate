@@ -54,7 +54,7 @@ fn config() -> Config {
     let mut value = serde_json::to_value(Config::default()).unwrap();
     value["ingress"]["timeout"] = serde_json::json!("10ms");
     value["limits"]["daily"] =
-        serde_json::json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"day"}});
+        serde_json::json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"hour"}});
     serde_json::from_value(value).unwrap()
 }
 

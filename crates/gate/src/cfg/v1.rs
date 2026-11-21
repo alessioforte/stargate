@@ -1579,6 +1579,7 @@ limits:
     params:
       limit: 1000
       period: day
+      timezone: UTC
 http:
   upstreams:
     reports-v1:
@@ -1711,6 +1712,7 @@ limits:
     params:
       limit: 1000
       period: day
+      timezone: UTC
 http:
   services:
     ok:
@@ -2294,7 +2296,9 @@ mod limit_validation_tests {
         let valid = serde_json::to_value(Config::default()).unwrap();
         for spec in [
             None,
-            Some(json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}})),
+            Some(
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}}),
+            ),
             Some(json!({"strategy":"token_bucket","params":{"capacity":0,"refill_rate":1}})),
         ] {
             let mut value = valid.clone();
@@ -2318,8 +2322,7 @@ mod limit_validation_tests {
             ("quota", "default"),
         ] {
             let mut value = serde_json::to_value(Config::default()).unwrap();
-            value["limits"]["daily"] =
-                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}});
+            value["limits"]["daily"] = json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}});
             value["http"]["policies"] = json!({"selected":{"kind":kind,"limit":name}});
             let config: Config = serde_json::from_value(value).unwrap();
             assert_eq!(
@@ -2328,8 +2331,7 @@ mod limit_validation_tests {
             );
         }
         let mut value = serde_json::to_value(Config::default()).unwrap();
-        value["limits"]["daily"] =
-            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}});
+        value["limits"]["daily"] = json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}});
         value["http"]["policies"] = json!({
             "rate":{"kind":"rate_limit","limit":"default"},
             "quota":{"kind":"quota","limit":"daily"},
@@ -2341,5 +2343,66 @@ mod limit_validation_tests {
                 .compile()
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn calendar_quota_windows_require_a_timezone_and_a_valid_anchor() {
+        for (spec, message) in [
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month"}}),
+                "timezone",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month","timezone":"Mars/Olympus"}}),
+                "timezone",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC","anchor_day":5}}),
+                "anchor_day",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month","timezone":"UTC","anchor_day":29}}),
+                "anchor_day",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":0,"period":"hour"}}),
+                "greater than zero",
+            ),
+        ] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] = spec;
+            let config: Config = serde_json::from_value(value).unwrap();
+            let error = config.compile().unwrap_err();
+            assert_eq!(error.path, "limits.daily");
+            assert!(
+                error.to_string().contains(message),
+                "unexpected error: {error}"
+            );
+        }
+
+        for spec in [
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}}),
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month","timezone":"Europe/Rome","anchor_day":15}}),
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"hour"}}),
+        ] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] = spec;
+            let config: Config = serde_json::from_value(value).unwrap();
+            config.compile().unwrap();
+        }
+    }
+
+    #[test]
+    fn short_quota_windows_reject_calendar_settings() {
+        for spec in [
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"hour","timezone":"UTC"}}),
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"minute","anchor_day":1}}),
+        ] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] = spec;
+            let config: Config = serde_json::from_value(value).unwrap();
+            let error = config.compile().unwrap_err();
+            assert_eq!(error.path, "limits.daily");
+        }
     }
 }

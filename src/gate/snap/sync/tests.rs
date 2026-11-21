@@ -150,6 +150,7 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
             store.clone(),
             prepare_gateway_config(&initial.content).unwrap(),
             PolicySnapshot::default(),
+            None,
         )
         .unwrap(),
     );
@@ -158,6 +159,7 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
             store,
             prepare_gateway_config(&initial.content).unwrap(),
             PolicySnapshot::default(),
+            None,
         )
         .unwrap(),
     );

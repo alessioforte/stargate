@@ -53,6 +53,9 @@ pub async fn init() -> anyhow::Result<Arc<Gate>> {
         Arc::new(use_store().clone()),
         prepared,
         policies,
+        Some(Arc::new(limits::SqlQuotaLedger::new(
+            crate::data::db::service(),
+        ))),
     )?);
     metrics::register(&gate);
     Ok(gate)

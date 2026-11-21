@@ -1,5 +1,7 @@
 mod store;
 pub(crate) use store::{LimitPoint, LimitStoreHealth, TrafficLimit, check_traffic_limit};
+mod ledger;
+pub(crate) use ledger::SqlQuotaLedger;
 
 use crate::{
     err::{ErrorCode, ErrorResponse},

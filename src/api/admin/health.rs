@@ -204,6 +204,7 @@ mod tests {
             Arc::new(store),
             crate::gate::prepare_config(gate::cfg::Config::default()).unwrap(),
             gate::PolicySnapshot::default(),
+            None,
         )
         .unwrap();
         let response = health_response(
@@ -311,7 +312,7 @@ mod fail_open_tests {
         use gate::cfg::OnStoreError;
         let mut cfg = serde_json::to_value(gate::cfg::Config::default()).unwrap();
         cfg["limits"]["daily"] =
-            serde_json::json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"day"}});
+            serde_json::json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"hour"}});
         let mut limiter = lim::Limiter::new();
         limiter.add_limit("daily".into(), Box::new(Unavailable(lim::LimitKind::Quota)));
         let gate = test_support::gate_with_limiter(serde_json::from_value(cfg).unwrap(), limiter);

@@ -67,8 +67,9 @@ impl Gate {
         store: Arc<lim::State>,
         prepared: PreparedConfig,
         policies: PolicySnapshot,
+        quota_ledger: Option<Arc<dyn lim::QuotaLedger>>,
     ) -> Result<Self, GatewayPreparationError> {
-        let builder = RuntimeBuilder::new(store);
+        let builder = RuntimeBuilder::new(store).with_quota_ledger(quota_ledger);
         let core = builder.prepare(&prepared.config)?;
         configure_probes(&core, &prepared.transports);
         let settings = prepared.config.compiled.runtime.clone();
