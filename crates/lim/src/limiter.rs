@@ -108,6 +108,12 @@ impl Limiter {
         self.limits.contains_key(name)
     }
 
+    /// Whether a named limit has a durable balance. Unknown limits are not
+    /// durable; callers validate the name first.
+    pub fn is_durable(&self, name: &str) -> bool {
+        self.get_limit(name).is_some_and(RateLimit::is_durable)
+    }
+
     pub fn validate_limit(&self, name: &str, expected: LimitKind) -> Result<()> {
         let limit = self
             .get_limit(name)

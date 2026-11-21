@@ -25,6 +25,12 @@ impl std::fmt::Display for LimitKind {
 #[async_trait]
 pub trait RateLimit: Send + Sync {
     fn kind(&self) -> LimitKind;
+    /// Whether the balance is durable (SQL) rather than store-backed. Durable
+    /// quotas fail closed: a store failure must never admit traffic above the
+    /// limit.
+    fn is_durable(&self) -> bool {
+        false
+    }
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision>;
 }
 
