@@ -56,9 +56,9 @@ pub enum SettingsError {
     )]
     SingleListenerSetting(&'static str),
     #[error(
-        "`LISTENERS` needs an explicit public URL: set `JWT_ISSUER` or `OAUTH_BASE_URL`, because the default issuer uses `PORT`, which a declared listener does not use"
+        "`LISTENERS` needs `JWT_ISSUER`: the default issuer uses `PORT`, which a declared listener does not use, and `OAUTH_BASE_URL` does not set the issuer"
     )]
-    MissingPublicUrl,
+    MissingIssuer,
     #[error("`LISTENERS` uses the listener name `{0}` more than once")]
     DuplicateName(String),
     #[error(
@@ -156,8 +156,8 @@ fn declared(
             return Err(SettingsError::SingleListenerSetting(setting));
         }
     }
-    if var("JWT_ISSUER").is_none() && var("OAUTH_BASE_URL").is_none() {
-        return Err(SettingsError::MissingPublicUrl);
+    if var("JWT_ISSUER").is_none() {
+        return Err(SettingsError::MissingIssuer);
     }
 
     let mut names = Vec::new();
@@ -330,13 +330,11 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect::<Vec<_>>();
-        // A declared listener needs an explicit public URL (see
-        // `declared_listeners_need_an_explicit_public_url`); tests that do not
+        // A declared listener needs `JWT_ISSUER` (see
+        // `declared_listeners_need_an_explicit_issuer`); tests that do not
         // exercise that rule get one here.
         if vars.iter().any(|(key, _)| key == "LISTENERS")
-            && !vars
-                .iter()
-                .any(|(key, _)| key == "JWT_ISSUER" || key == "OAUTH_BASE_URL")
+            && !vars.iter().any(|(key, _)| key == "JWT_ISSUER")
         {
             vars.push((
                 "JWT_ISSUER".to_string(),
@@ -664,8 +662,8 @@ mod tests {
     }
 
     #[test]
-    fn declared_listeners_need_an_explicit_public_url() {
-        let mut vars = [
+    fn declared_listeners_need_an_explicit_issuer() {
+        let base = [
             ("LISTENERS", "public"),
             ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
             ("LISTENER_PUBLIC_PLANES", "identity"),
@@ -673,13 +671,22 @@ mod tests {
         .into_iter()
         .map(|(key, value)| (key.to_string(), value.to_string()))
         .collect::<Vec<_>>();
-        let error = from_vars(&vars).unwrap_err();
-        assert!(matches!(error, SettingsError::MissingPublicUrl), "{error}");
+        let error = from_vars(&base).unwrap_err();
+        assert!(matches!(error, SettingsError::MissingIssuer), "{error}");
 
-        // Either public setting is enough: the other one supplies the issuer.
+        // `OAUTH_BASE_URL` does not set the issuer: `issuer_from_env` reads
+        // `JWT_ISSUER` only, so the localhost default would remain.
+        let mut vars = base.clone();
         vars.push((
             "OAUTH_BASE_URL".to_string(),
-            "http://localhost:5050".to_string(),
+            "https://identity.example.com".to_string(),
+        ));
+        let error = from_vars(&vars).unwrap_err();
+        assert!(matches!(error, SettingsError::MissingIssuer), "{error}");
+
+        vars.push((
+            "JWT_ISSUER".to_string(),
+            "https://identity.example.com".to_string(),
         ));
         assert!(from_vars(&vars).is_ok());
     }
