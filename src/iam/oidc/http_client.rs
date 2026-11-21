@@ -51,7 +51,13 @@ fn build_client_with(ca_file: Option<&OsStr>) -> Result<reqwest::Client, String>
             builder = builder.add_root_certificate(certificate);
         }
     }
-    builder.build().map_err(|error| error.to_string())
+    builder.build().map_err(|error| {
+        let cause = error_chain(&error);
+        match ca_file {
+            Some(path) => format!("{CA_FILE_ENV} {}: {cause}", path.to_string_lossy()),
+            None => format!("failed to build the OAuth client endpoint HTTP client: {cause}"),
+        }
+    })
 }
 
 /// reqwest's message omits the cause (TLS, DNS, connect); include it.
@@ -98,5 +104,16 @@ mod tests {
             assert!(error.contains(CA_FILE_ENV), "{error}");
             std::fs::remove_file(path).ok();
         }
+    }
+
+    #[test]
+    fn a_pem_with_invalid_der_names_the_variable_and_the_cause() {
+        let path = temporary_pem(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n");
+        let error = build_client_with(Some(path.as_os_str())).unwrap_err();
+        let path = path.to_string_lossy().to_string();
+        assert!(error.contains(CA_FILE_ENV), "{error}");
+        assert!(error.contains(&path), "{error}");
+        assert!(error.contains("BadEncoding"), "{error}");
+        std::fs::remove_file(path).ok();
     }
 }
