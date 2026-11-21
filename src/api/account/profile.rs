@@ -72,7 +72,7 @@ async fn session_user(token: String) -> Result<db::ent::User, ErrorResponse> {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
-    let session = crate::iam::sess::registry::active_token_session(&claims)
+    let (session, _) = crate::iam::sess::registry::active_token_session(&claims)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;

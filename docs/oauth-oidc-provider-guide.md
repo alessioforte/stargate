@@ -660,7 +660,10 @@ with identical attributes advances the revision. Competing updates reread the
 revision and the SQL state. The publication keeps the session's current expiry
 and releases the SQL connection before writing to the store. Deployments moving
 from unversioned session subjects must drain those sessions or require a new login.
-Membership removal revokes sessions acting in that organization.
+Delegated access and OAuth refresh require a readable versioned user subject whose
+owner matches the live directory record and the token or refresh family.
+Membership removal revokes sessions acting in that organization. A pending subject
+update that observed the removal can revoke only the session it examined.
 Native and OAuth refresh preserve these subject updates. SQL commits before the store
 update. Stargate logs a failed update, and an affected session may keep using
 its earlier subject until a successful update or until the session ends.

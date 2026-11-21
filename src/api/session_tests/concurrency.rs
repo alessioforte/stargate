@@ -87,6 +87,53 @@ async fn registration_races(router: &Router, admin: (&str, &str)) {
     );
 }
 
+async fn readmission_during_revocation(router: &Router, admin: (&str, &str)) {
+    let user = create_user().await;
+    let org = db::create_organization("Readmission", None, None, context())
+        .await
+        .unwrap();
+    add_admin_membership(&user, &org.id).await;
+    let (old_sid, _, _, old_oauth) = start_session(&user, Some(&org.id)).await;
+    revise_session(&old_sid, |record| record.client_ids.clear()).await;
+
+    // The SQL deletion has committed. Pause a publisher before the removal
+    // handler finishes its session cleanup.
+    db::remove_user_from_organization(&user.id, &org.id, context())
+        .await
+        .unwrap();
+    let pause = Pause::new(Stage::MissingMembership);
+    let publication = pause.scope(registry::refresh_user_subjects(&user.id));
+    let readmit = async {
+        pause.wait().await;
+        registry::membership_removed(&user.id, &org.id).await;
+        let path = format!("/admin/users/{}/organizations/{}", user.id, org.id);
+        json_request(router, "PUT", &path, admin, json!({"role":"member"})).await;
+        let session = start_session(&user, Some(&org.id)).await;
+        pause.resume();
+        session
+    };
+    let ((), (sid, native, _, oauth)) = tokio::join!(publication, readmit);
+    assert_ne!(old_sid, sid);
+    assert!(registry::get_session(&old_sid).await.unwrap().is_none());
+    userinfo(router, &old_oauth, StatusCode::UNAUTHORIZED).await;
+    assert_subject([&native, &oauth], &user.attrs, Some((&org.id, "member"))).await;
+
+    // The publisher must also revoke the observed sid when it is the first
+    // to see the missing membership.
+    revise_session(&sid, |record| record.client_ids.clear()).await;
+    db::remove_user_from_organization(&user.id, &org.id, context())
+        .await
+        .unwrap();
+    registry::refresh_user_subjects(&user.id).await;
+    assert!(registry::get_session(&sid).await.unwrap().is_none());
+    assert!(
+        !use_store()
+            .exists(&store::keys::session::subject(&sid))
+            .await
+            .unwrap()
+    );
+}
+
 async fn publication_races(router: &Router, admin: (&str, &str)) {
     let user = create_user().await;
     let (sid, native, _, oauth) = start_session(&user, None).await;
@@ -172,6 +219,7 @@ async fn renewed_during_publication(router: &Router, admin: (&str, &str)) {
 pub(super) async fn run(router: &Router, admin: (&str, &str)) {
     tokio::time::timeout(Duration::from_secs(20), async {
         registration_races(router, admin).await;
+        readmission_during_revocation(router, admin).await;
         publication_races(router, admin).await;
         renewed_during_publication(router, admin).await;
         #[cfg(feature = "redis")]

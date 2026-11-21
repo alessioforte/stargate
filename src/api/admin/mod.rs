@@ -174,7 +174,7 @@ async fn resolve_authorization(
             match crate::iam::auth::revocation::is_revoked(&claims).await {
                 Ok(false) => {
                     match crate::iam::sess::registry::active_token_session(&claims).await {
-                        Ok(Some(session)) => {
+                        Ok(Some((session, _))) => {
                             authenticated = true;
                             let client_id = claims.azp.as_deref().unwrap_or_default();
                             if crate::iam::oidc::client_is_trusted_first_party(client_id).await

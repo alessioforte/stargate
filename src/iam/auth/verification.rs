@@ -131,7 +131,7 @@ async fn verify_oauth_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> {
         return None;
     }
 
-    let session = match crate::iam::sess::registry::active_token_session(&claims).await {
+    let (session, subject) = match crate::iam::sess::registry::active_token_session(&claims).await {
         Ok(Some(session)) => session,
         Ok(None) => return None,
         Err(e) => {
@@ -142,15 +142,6 @@ async fn verify_oauth_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> {
     if !session.client_ids.iter().any(|linked| linked == client_id) {
         return None;
     }
-
-    let subject = match crate::iam::sess::subjects::read(&sid).await {
-        Ok(Some(subject)) if subject.id == user_id => subject,
-        Ok(_) => return None,
-        Err(e) => {
-            error!("Failed to get OAuth subject from the session store: {}", e);
-            return None;
-        }
-    };
 
     VerifiedIdentity::oauth(subject, sid, auth_time, claims.aud)
 }
