@@ -29,6 +29,7 @@ fn assert_startup_fails(variable: &str, value: &str) {
         .env_remove("OAUTH_CLIENT_CA_FILE")
         .env_remove("STORE_MAX_MEMORY_MB")
         .env_remove("CONFIG_PATH")
+        .env_remove("DATA_PATH")
         .env(variable, value)
         .output()
         .expect("run the server binary");
@@ -59,5 +60,6 @@ fn invalid_security_settings_stop_startup() {
     );
     if cfg!(feature = "edge") {
         assert_startup_fails("STORE_MAX_MEMORY_MB", "0");
+        assert_startup_fails("DATA_PATH", "");
     }
 }

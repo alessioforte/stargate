@@ -776,6 +776,19 @@ pub async fn init(conn: &str) -> Result<Service> {
     init_with_options(conn.parse()?).await
 }
 
+/// Connect to a SQLite database file without running migrations.
+#[cfg(feature = "sqlite")]
+pub async fn init_sqlite_file(path: impl AsRef<std::path::Path>) -> Result<Service> {
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(pool_max_connections()?)
+        .connect_with(options)
+        .await?;
+    Ok(Service::new(pool))
+}
+
 #[cfg(feature = "sqlite")]
 pub async fn init(conn: &str) -> Result<Service> {
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
