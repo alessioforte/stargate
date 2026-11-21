@@ -79,6 +79,7 @@ pub async fn complete(
         return Ok(None);
     };
     let url = initiate_login_url(
+        &continuation.client_id,
         uri,
         &jwt::issuer_from_env(),
         email,
@@ -103,6 +104,7 @@ fn can_continue(client: &db::ent::OAuthClient) -> bool {
 /// import or direct SQL, and the page uses the result as an `href`. The value
 /// is never logged: a rejected scheme is exactly what must not be followed.
 pub fn initiate_login_url(
+    client_id: &str,
     base: &str,
     issuer: &str,
     email: &str,
@@ -110,6 +112,7 @@ pub fn initiate_login_url(
 ) -> Option<String> {
     if !client_url::is_client_endpoint_url(base) {
         tracing::warn!(
+            client_id,
             "OAuth client initiate_login_uri is not a client endpoint URL; no continuation"
         );
         return None;
@@ -134,6 +137,7 @@ mod tests {
     fn initiate_login_url_carries_the_issuer_and_the_hinted_email() {
         assert_eq!(
             initiate_login_url(
+                "app",
                 "https://app.example/login",
                 "https://id.example",
                 "ada@example.com",
@@ -148,6 +152,7 @@ mod tests {
     fn initiate_login_url_keeps_existing_parameters_and_adds_the_target() {
         assert_eq!(
             initiate_login_url(
+                "app",
                 "https://app.example/login?tenant=acme",
                 "https://id.example",
                 "ada@example.com",
@@ -161,7 +166,7 @@ mod tests {
     #[test]
     fn an_unparsable_endpoint_has_no_continuation() {
         assert_eq!(
-            initiate_login_url("not a url", "https://id.example", "a@b.c", None),
+            initiate_login_url("app", "not a url", "https://id.example", "a@b.c", None),
             None
         );
     }
@@ -175,13 +180,14 @@ mod tests {
             "https://app.example/login#fragment",
         ] {
             assert_eq!(
-                initiate_login_url(base, "https://id.example", "a@b.c", None),
+                initiate_login_url("app", base, "https://id.example", "a@b.c", None),
                 None,
                 "{base}"
             );
         }
         assert!(
             initiate_login_url(
+                "app",
                 "http://localhost:3000/login",
                 "https://id.example",
                 "a@b.c",
