@@ -235,6 +235,8 @@ In the container image the binary is `/bin/server`, for example
 The CLI initializes the database before executing the command, so it uses the
 same compiled backend profile and runtime database configuration as the server.
 
-- In `edge` mode, ensure the process can create or access `.stargate/sqlite.db`.
+- In `edge` mode, ensure the process can create or access `DATA_PATH/sqlite.db`
+  (default `.stargate/sqlite.db`). The server and the CLI resolve it from the
+  same setting.
 - In `cluster` mode, set the required Postgres environment variables before running the command.
 - If `STARGATE_RUNTIME_PROFILE` is set, it must match the compiled profile.

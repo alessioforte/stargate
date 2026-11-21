@@ -259,6 +259,9 @@ persistence:
     - ReadWriteOnce
   size: 1Gi
   annotations: {}
+  # Writable data directory (DATA_PATH) for SQLite and the in-memory store
+  # snapshot. A distinct path is also mounted at /app/.stargate for the bundled
+  # applications, email templates, and signing keys.
   mountPath: /app/.stargate
   seed:
     enabled: true

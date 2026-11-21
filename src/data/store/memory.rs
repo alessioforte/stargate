@@ -1,17 +1,12 @@
 use crate::conf::env::{EnvError, parse_or};
 use once_cell::sync::Lazy;
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use store::{MemoryStore, memory::MemoryStoreConfig};
 
 const MAX_MEMORY_ENV: &str = "STORE_MAX_MEMORY_MB";
-/// The writable edge data directory, next to `sqlite.db` and `jwks/`. It is
-/// distinct from `CONFIG_PATH`, which holds the read-only seed files in the
-/// chart.
-const DATA_DIR: &str = ".stargate";
-const MEMORY_BACKUP_FILE: &str = "memory.bin";
 const DEFAULT_MEMORY_BACKUP_INTERVAL_SECS: u64 = 30;
 const DEFAULT_MEMORY_BACKUP_WRITE_THRESHOLD: u64 = 100;
 const MEMORY_BACKUP_CHECK_INTERVAL_SECS: u64 = 1;
@@ -52,11 +47,11 @@ fn max_memory_mb() -> usize {
         .get()
 }
 
-/// The snapshot lives in the writable edge data directory, next to
-/// `sqlite.db`, not in `CONFIG_PATH` (which the chart mounts read-only for the
-/// seed files).
+/// The snapshot lives in the writable edge data directory (`DATA_PATH`,
+/// default `.stargate`), next to `sqlite.db`, not in `CONFIG_PATH` (which the
+/// chart mounts read-only for the seed files).
 fn backup_path() -> PathBuf {
-    Path::new(DATA_DIR).join(MEMORY_BACKUP_FILE)
+    crate::conf::data::memory_snapshot()
 }
 
 pub async fn init() -> &'static MemoryStore {
@@ -81,8 +76,9 @@ pub fn use_store() -> &'static MemoryStore {
 ///
 /// # What it does
 ///
-/// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`] (`.stargate/memory.bin`,
-///    on the same volume as the edge SQLite database).
+/// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`]
+///    (`DATA_PATH/memory.bin`, default `.stargate/memory.bin`, on the same
+///    volume as the edge SQLite database).
 /// 2. Replaces the contents of the already-initialised global [`STORE`] (empty at this
 ///    point since the `Lazy` constructor does not populate any data) via
 ///    `MemoryStore::absorb`, which also resets operational stats to zero so metrics
@@ -237,7 +233,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_backup_lives_next_to_the_edge_database() {
-        assert_eq!(backup_path(), Path::new(".stargate/memory.bin"));
+    fn the_backup_lives_in_the_data_directory() {
+        assert_eq!(backup_path(), crate::conf::data::dir().join("memory.bin"));
     }
 }

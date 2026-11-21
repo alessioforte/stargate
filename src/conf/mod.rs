@@ -1,4 +1,6 @@
 pub mod apps;
+#[cfg(any(feature = "memory", feature = "sqlite"))]
+pub mod data;
 pub mod env;
 pub mod features;
 pub mod hosts;

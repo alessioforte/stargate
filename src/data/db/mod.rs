@@ -115,14 +115,16 @@ mod sqlite {
     static DB: OnceCell<service::Service> = OnceCell::new();
 
     async fn connect() -> anyhow::Result<service::Service> {
-        if !std::path::Path::new(".stargate/sqlite.db").exists() {
-            info!("SQLite database file not found, creating directory and file...");
-            std::fs::create_dir_all(".stargate")?;
-            std::fs::File::create(".stargate/sqlite.db")?;
-            info!("SQLite database file created successfully");
+        crate::conf::data::init()?;
+        let path = crate::conf::data::sqlite_file();
+        if let Some(directory) = path.parent() {
+            std::fs::create_dir_all(directory)?;
+        }
+        if !path.exists() {
+            info!(path = %path.display(), "SQLite database file not found, creating it...");
         }
 
-        service::init("sqlite://.stargate/sqlite.db").await
+        service::init_sqlite_file(&path).await
     }
 
     pub async fn migrate() -> anyhow::Result<()> {
