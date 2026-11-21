@@ -20,13 +20,11 @@ mod protection_tests;
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
-use crate::iam::auth::subject::Subject;
 use crate::{api::middleware::rate_limit, web::request::RequestExt};
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use store::Store;
 
 use authorization::{AdminAuthorization, parse_stored_permissions};
 
@@ -132,24 +130,6 @@ struct AuthorizationResolution {
     authorization: Option<AdminAuthorization>,
 }
 
-/// The live native session behind a user-delegated OAuth access token.
-///
-/// Control-plane access requires it: a token without a `sid`, or one whose
-/// session ended, has no session whose state an administrator could act on.
-async fn oauth_session_sid(claims: &jwt::Claims) -> Option<String> {
-    let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref()) else {
-        return None;
-    };
-    match crate::iam::sess::registry::get_active_session(sid, user_id).await {
-        Ok(Some(_)) => Some(sid.to_string()),
-        Ok(None) => None,
-        Err(err) => {
-            tracing::error!("Failed to resolve backing OAuth session: {}", err);
-            None
-        }
-    }
-}
-
 async fn resolve_authorization(
     token: Option<String>,
     raw_key: Option<String>,
@@ -165,11 +145,7 @@ async fn resolve_authorization(
             match crate::iam::auth::revocation::is_revoked(&claims).await {
                 Ok(false) => {
                     let sid = claims.sid.clone().unwrap_or_default();
-                    let store = crate::data::store::use_store();
-                    let session = store
-                        .get::<Subject>(&store::keys::session::subject(&sid))
-                        .await
-                        .unwrap_or(None);
+                    let session = crate::iam::sess::subjects::read(&sid).await.unwrap_or(None);
                     if let Some(subject) = session.as_ref()
                         && subject.sub_type == crate::iam::auth::subject::SubjectType::User
                         && claims.sub_id.as_deref() == Some(subject.id.as_str())
@@ -197,20 +173,26 @@ async fn resolve_authorization(
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None) {
             match crate::iam::auth::revocation::is_revoked(&claims).await {
                 Ok(false) => {
-                    if let Some(sid) = oauth_session_sid(&claims).await {
-                        authenticated = true;
-                        let client_id = claims.azp.as_deref().unwrap_or_default();
-                        if crate::iam::oidc::client_is_trusted_first_party(client_id).await
-                            && let Some(user_id) = claims.sub_id.as_deref()
-                            && grant_super_admin_if_allowed(user_id, Some(&sid)).await
-                        {
-                            let user_id = user_id.to_string();
-                            actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
-                            authorization = Some(AdminAuthorization::super_admin_user(
-                                user_id,
-                                AdminAuthenticationKind::OAuth,
-                                Box::new(claims),
-                            ));
+                    match crate::iam::sess::registry::active_token_session(&claims).await {
+                        Ok(Some((session, _))) => {
+                            authenticated = true;
+                            let client_id = claims.azp.as_deref().unwrap_or_default();
+                            if crate::iam::oidc::client_is_trusted_first_party(client_id).await
+                                && grant_super_admin_if_allowed(&session.user_id, Some(&session.id))
+                                    .await
+                            {
+                                let user_id = session.user_id;
+                                actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
+                                authorization = Some(AdminAuthorization::super_admin_user(
+                                    user_id,
+                                    AdminAuthenticationKind::OAuth,
+                                    Box::new(claims),
+                                ));
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            tracing::error!("Failed to resolve backing OAuth session: {}", err)
                         }
                     }
                 }

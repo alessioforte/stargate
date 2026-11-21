@@ -61,15 +61,18 @@ pub async fn start_user_session(
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
+    #[cfg(test)]
+    super::test_support::pause_at(super::test_support::Stage::Registration).await;
+    let published = super::subjects::PublishedSubject::from(subject);
     store
-        .set(&store::keys::session::subject(&sid), &subject, Some(sttl))
+        .set(&store::keys::session::subject(&sid), &published, Some(sttl))
         .await
         .map_err(ErrorResponse::internal)?;
     if let Err(error) = registry::register_session(
         registry::NewSession {
             user_id: &user.id,
             sid: &sid,
-            org_id: subject.org_id.as_deref(),
+            org_id: published.subject.org_id.as_deref(),
             authenticated_at_unix: auth_time as u64,
             amr,
         },
@@ -82,10 +85,19 @@ pub async fn start_user_session(
         return Err(ErrorResponse::internal(error));
     }
 
+    if let Err(error) =
+        registry::reconcile_new_session(&user.id, &sid, published.subject.org_id.as_deref()).await
+    {
+        if let Err(revoke_error) = registry::revoke_session(&sid).await {
+            tracing::error!(sid, %revoke_error, "Failed to revoke an unconfirmed session");
+        }
+        return Err(error);
+    }
+
     Ok(IssuedSession {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
-        org_id: subject.org_id,
+        org_id: published.subject.org_id,
         access_ttl_secs: cttl,
     })
 }

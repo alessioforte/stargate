@@ -17,6 +17,7 @@ use db::{
 use http::StatusCode;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use store::Store;
 use tower::ServiceExt;
 
 fn context(actor: &str) -> TrustedAuditContext {
@@ -167,7 +168,9 @@ impl Fixture {
         crate::data::store::use_store()
             .set(
                 &store::keys::session::subject(&sid),
-                &crate::iam::auth::subject::Subject::from(target.clone()),
+                &crate::iam::sess::subjects::PublishedSubject::from(
+                    crate::iam::auth::subject::Subject::from(target.clone()),
+                ),
                 Some(3600),
             )
             .await

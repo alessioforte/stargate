@@ -9,6 +9,8 @@ pub mod internal_context;
 pub mod middleware;
 pub mod oidc;
 pub mod plane;
+#[cfg(test)]
+mod session_tests;
 pub mod signup;
 pub mod social;
 

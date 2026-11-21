@@ -41,16 +41,16 @@ pub async fn rotate(
         return Ok(None);
     };
     if let Some(sid) = family.sid.as_deref()
-        && !crate::iam::sess::registry::touch_session(sid, &family.user_id)
+        && crate::iam::sess::registry::touch_session(sid, &family.user_id)
             .await
             .map_err(OAuthErrorResponse::internal)?
     {
-        if let Some((family_id, _)) = oidc::refresh::parse_refresh_token(token) {
-            revoke_family(family_id).await?;
-        }
-        return Ok(None);
+        return Ok(Some((next, family)));
     }
-    Ok(Some((next, family)))
+    if let Some((family_id, _)) = oidc::refresh::parse_refresh_token(token) {
+        revoke_family(family_id).await?;
+    }
+    Ok(None)
 }
 
 /// Drop a refresh-token family so none of its tokens rotate again.
@@ -71,9 +71,13 @@ mod tests {
     #[tokio::test]
     async fn refresh_token_rotates_once_and_replay_revokes_family() {
         let sid = ulid::Ulid::generate().to_string();
+        use crate::iam::auth::subject::{Subject, SubjectType};
+        use crate::iam::sess::subjects::PublishedSubject;
         use store::Store;
+        let subject =
+            PublishedSubject::from(Subject::new("user-1".into(), SubjectType::User, None));
         crate::data::store::use_store()
-            .set(&store::keys::session::subject(&sid), &true, Some(60))
+            .set(&store::keys::session::subject(&sid), &subject, Some(60))
             .await
             .unwrap();
         crate::iam::sess::registry::register_session(

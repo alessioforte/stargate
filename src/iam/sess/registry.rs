@@ -14,6 +14,7 @@
 //! Every function that ends sessions here also notifies the relying parties
 //! linked to them (OIDC Back-Channel Logout, see `backchannel_logout`).
 
+use super::subjects::{self, Publication};
 use crate::data::store::use_store;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
@@ -181,15 +182,9 @@ pub async fn rotate_refresh_token(
     Ok(rotated)
 }
 
-/// Renew session metadata after a refresh token was successfully rotated.
-/// Returns false when the session is no longer registered (e.g. revoked
-/// concurrently): it must not be brought back.
-pub async fn renew_session(
-    user_id: &str,
-    sid: &str,
-    org_id: Option<&str>,
-    ttl_secs: u64,
-) -> Result<bool, StoreError> {
+/// Renew a session after native refresh rotation. Extend the existing
+/// subject's TTL so a concurrent profile or membership write keeps its value.
+pub async fn renew_session(user_id: &str, sid: &str, ttl_secs: u64) -> Result<bool, StoreError> {
     let Some(mut record) = use_store()
         .hget::<SessionRecord>(&directory_key(), sid)
         .await?
@@ -197,8 +192,13 @@ pub async fn renew_session(
     else {
         return Ok(false);
     };
+    if !use_store()
+        .expire(&store::keys::session::subject(sid), ttl_secs)
+        .await?
+    {
+        return Ok(false);
+    }
     let now = now_unix();
-    record.org_id = org_id.map(str::to_string);
     record.last_seen_at_unix = now;
     record.expires_at_unix = now.saturating_add(ttl_secs);
     store_record(&record, ttl_secs).await?;
@@ -212,17 +212,9 @@ pub async fn register_session_client(
     client_id: &str,
 ) -> Result<bool, StoreError> {
     let store = use_store();
-    let Some(mut record) = store.hget::<SessionRecord>(&directory_key(), sid).await? else {
+    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
-    if record.user_id != user_id {
-        return Ok(false);
-    }
-    if record.expires_at_unix <= now_unix()
-        || !store.exists(&store::keys::session::subject(sid)).await?
-    {
-        return Ok(false);
-    }
     if !record.client_ids.iter().any(|value| value == client_id) {
         record.client_ids.push(client_id.to_string());
         record.client_ids.sort_unstable();
@@ -241,7 +233,7 @@ pub async fn register_session_client(
 /// `otp`, and `mfa` when the session already had another factor. Returns
 /// false when the session is gone.
 pub async fn add_otp_factor(sid: &str, user_id: &str) -> Result<bool, StoreError> {
-    let Some(mut record) = get_active_session(sid, user_id).await? else {
+    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
     record.amr = oidc::authentication::with_otp(&record.amr);
@@ -254,7 +246,7 @@ pub async fn add_otp_factor(sid: &str, user_id: &str) -> Result<bool, StoreError
 
 pub async fn touch_session(sid: &str, user_id: &str) -> Result<bool, StoreError> {
     let store = use_store();
-    let Some(mut record) = get_active_session(sid, user_id).await? else {
+    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
     record.last_seen_at_unix = now_unix();
@@ -267,27 +259,49 @@ pub async fn touch_session(sid: &str, user_id: &str) -> Result<bool, StoreError>
     Ok(true)
 }
 
-/// A user OAuth token remains active only while its backing login session and
-/// stable native session record still exists.
+/// A live login has a current user subject and a matching directory record.
+pub async fn load_active_session(
+    sid: &str,
+) -> Result<Option<(SessionRecord, Subject)>, StoreError> {
+    let Some(record) = get_session(sid).await? else {
+        return Ok(None);
+    };
+    let Some(subject) = subjects::read(sid).await? else {
+        return Ok(None);
+    };
+    if record.id != sid
+        || record.expires_at_unix <= now_unix()
+        || subject.sub_type != SubjectType::User
+        || subject.id != record.user_id
+    {
+        return Ok(None);
+    }
+    Ok(Some((record, subject)))
+}
+
 pub async fn get_active_session(
     sid: &str,
     user_id: &str,
-) -> Result<Option<SessionRecord>, StoreError> {
-    let store = use_store();
-    let Some(record) = store.hget::<SessionRecord>(&directory_key(), sid).await? else {
-        return Ok(None);
-    };
-    if record.user_id != user_id || record.expires_at_unix <= now_unix() {
-        return Ok(None);
-    }
-    if !store.exists(&store::keys::session::subject(sid)).await? {
-        return Ok(None);
-    }
-    Ok(Some(record))
+) -> Result<Option<(SessionRecord, Subject)>, StoreError> {
+    Ok(load_active_session(sid)
+        .await?
+        .filter(|(record, _)| record.user_id == user_id))
 }
 
-pub async fn is_session_active(sid: &str, user_id: &str) -> Result<bool, StoreError> {
-    Ok(get_active_session(sid, user_id).await?.is_some())
+/// Resolve a verified user token to a live session owned by its subject.
+pub async fn active_token_session(
+    claims: &jwt::Claims,
+) -> Result<Option<(SessionRecord, Subject)>, StoreError> {
+    let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref()) else {
+        return Ok(None);
+    };
+    if sid.is_empty()
+        || user_id.is_empty()
+        || (claims.azp.is_some() && (claims.auth_time.is_none() || claims.sub != user_id))
+    {
+        return Ok(None);
+    }
+    get_active_session(sid, user_id).await
 }
 
 pub async fn get_session(sid: &str) -> Result<Option<SessionRecord>, StoreError> {
@@ -349,7 +363,7 @@ pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreErr
     Ok(Some(record))
 }
 
-/// End the user's own session `sid` (logout): delete its subject, refresh
+/// End a specific login session for this user: delete its subject, refresh
 /// rotation, and registry entries, whether or not the registry still knows
 /// it, and notify its relying parties.
 pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, StoreError> {
@@ -419,6 +433,78 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
     Ok(revoked)
 }
 
+/// Reconcile a session after registration and before returning its tokens.
+pub(super) async fn reconcile_new_session(
+    user_id: &str,
+    sid: &str,
+    org_id: Option<&str>,
+) -> Result<(), ErrorResponse> {
+    match subjects::publish(
+        use_store(),
+        &crate::data::db::service(),
+        user_id,
+        sid,
+        org_id,
+    )
+    .await
+    .map_err(ErrorResponse::internal)?
+    {
+        Publication::Updated => Ok(()),
+        Publication::Gone => Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid)),
+        Publication::MembershipRemoved => Err(ErrorResponse::new(
+            ErrorCode::SessionOrganizationMembershipRequired,
+        )),
+    }
+}
+
+/// Finish updating the user's live sessions even if the HTTP caller disconnects
+/// after its SQL mutation committed.
+pub async fn refresh_user_subjects(user_id: &str) {
+    let db = crate::data::db::service();
+    let id = user_id.to_owned();
+    let work = async move {
+        if let Err(error) = refresh_subjects_from_db(&db, &id).await {
+            tracing::error!(user_id = id, %error, "Failed to refresh user session subjects");
+        }
+    };
+    #[cfg(test)]
+    let work = super::test_support::inherit_pause(work);
+    if let Err(error) = tokio::spawn(work).await {
+        tracing::error!(user_id, %error, "Session publication worker failed");
+    }
+}
+
+async fn refresh_subjects_from_db(db: &db::service::Service, user_id: &str) -> anyhow::Result<()> {
+    let entries = use_store()
+        .hgetall::<SessionIndexEntry>(&index_key(user_id))
+        .await?;
+    #[cfg(test)]
+    super::test_support::pause_at(super::test_support::Stage::IndexRead).await;
+    for (sid, entry) in entries {
+        match subjects::publish(use_store(), db, user_id, &sid, entry.org_id.as_deref()).await {
+            Ok(Publication::MembershipRemoved) => {
+                #[cfg(test)]
+                super::test_support::pause_at(super::test_support::Stage::MissingMembership).await;
+                if let Err(error) = end_session(user_id, &sid).await {
+                    tracing::error!(user_id, sid, %error, "Failed to revoke session after membership removal");
+                }
+            }
+            Ok(Publication::Updated | Publication::Gone) => {}
+            Err(error) => {
+                tracing::error!(user_id, sid, %error, "Failed to refresh user session subject")
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn membership_removed(user_id: &str, org_id: &str) {
+    if let Err(error) = revoke_org_sessions(user_id, org_id).await {
+        tracing::error!(user_id, org_id, %error, "Failed to revoke sessions after membership removal");
+    }
+    refresh_user_subjects(user_id).await;
+}
+
 // ── Session authentication ───────────────────────────────────────────────────
 
 /// A fully validated user session: access token verified, not revoked, and
@@ -449,8 +535,7 @@ pub async fn authenticated_session(
     }
 
     let sid = claims.sid.clone().ok_or_else(invalid)?;
-    let subject = use_store()
-        .get::<Subject>(&store::keys::session::subject(&sid))
+    let subject = crate::iam::sess::subjects::read(&sid)
         .await
         .map_err(|_| invalid())?
         .ok_or_else(invalid)?;
@@ -560,7 +645,11 @@ mod index_tests {
         use_store()
             .set(
                 &store::keys::session::subject(sid),
-                &json!({ "id": user_id }),
+                &subjects::PublishedSubject::from(Subject::new(
+                    user_id.into(),
+                    SubjectType::User,
+                    None,
+                )),
                 Some(60),
             )
             .await
@@ -767,7 +856,7 @@ mod index_tests {
                 .await
                 .unwrap()
         );
-        let record = get_active_session(&sid, &user).await.unwrap().unwrap();
+        let (record, _) = get_active_session(&sid, &user).await.unwrap().unwrap();
         assert_eq!(record.client_ids, ["beehive"]);
 
         revoke_session(&sid).await.unwrap();
@@ -794,16 +883,16 @@ mod index_tests {
     async fn renewal_does_not_resurrect_a_revoked_session() {
         let user = unique("user");
         let sid = unique("sid");
-        seed_session(&user, &sid, None).await;
+        seed_session(&user, &sid, Some("org_a")).await;
 
-        assert!(renew_session(&user, &sid, Some("org_a"), 60).await.unwrap());
+        assert!(renew_session(&user, &sid, 60).await.unwrap());
         assert_eq!(
             get_session(&sid).await.unwrap().unwrap().org_id.as_deref(),
             Some("org_a")
         );
 
         revoke_session(&sid).await.unwrap();
-        assert!(!renew_session(&user, &sid, None, 60).await.unwrap());
+        assert!(!renew_session(&user, &sid, 60).await.unwrap());
         assert!(get_session(&sid).await.unwrap().is_none());
     }
 

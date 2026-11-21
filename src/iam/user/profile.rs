@@ -1,6 +1,12 @@
-use db::ent::User;
+use db::ent::{TrustedAuditContext, User};
 use serde_json::Value;
 use tools::Locale;
+
+pub async fn update_user(user: User, audit: TrustedAuditContext) -> anyhow::Result<User> {
+    let user = crate::data::db::update_user(user, audit).await?;
+    crate::iam::sess::registry::refresh_user_subjects(&user.id).await;
+    Ok(user)
+}
 
 pub fn format_name(given_name: &str, family_name: &str) -> String {
     if given_name.is_empty() && family_name.is_empty() {

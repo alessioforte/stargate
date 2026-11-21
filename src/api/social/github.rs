@@ -96,13 +96,13 @@ pub(super) async fn sign_in(
     if user.picture.is_none()
         && let Some(avatar_url) = github_user.avatar_url.clone()
     {
-        let updated = user.clone().picture(Some(avatar_url));
-        crate::data::db::update_user(updated, audit_context)
+        let updated = user.picture(Some(avatar_url));
+        return crate::iam::user::profile::update_user(updated, audit_context)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to update GitHub OAuth user picture: {}", e);
                 ErrorResponse::new(ErrorCode::SystemInternal)
-            })?;
+            });
     }
     Ok(user)
 }

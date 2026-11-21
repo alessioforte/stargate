@@ -616,7 +616,9 @@ Claims depend on granted scopes:
 - `email`: `email`, `email_verified`
 - `profile`: `name`, `given_name`, `family_name`, `nickname`, `preferred_username`, `picture`, `locale`, `updated_at`
 
-Client credentials tokens are rejected by UserInfo.
+UserInfo requires a user-delegated access token whose `sid` identifies a live
+session owned by the token's `sub_id`. Missing, expired, and mismatched sessions
+return `401`. Client credentials tokens are rejected by UserInfo.
 
 ## JWKS Validation
 
@@ -647,6 +649,24 @@ client must list `gateway` in `audiences`, and the authorization request must
 request `audience=gateway`. The gateway accepts Authorization Code user access
 tokens only: the token's `sid`, `sub_id`, and `azp` must resolve to an active
 session linked to an enabled OAuth client.
+
+After a user profile, attribute, or membership write, Stargate refreshes the
+subjects used by gateway authentication for all the user's active sessions.
+Each session keeps its active organization and uses its current membership
+role. New sessions reconcile their subject with SQL after registration and
+before returning tokens. Every publication reads the stored revision before querying SQL,
+then replaces the live subject only if its revision still matches. Even an update
+with identical attributes advances the revision. Competing updates reread the
+revision and the SQL state. The publication keeps the session's current expiry
+and releases the SQL connection before writing to the store. Deployments moving
+from unversioned session subjects must drain those sessions or require a new login.
+Delegated access and OAuth refresh require a readable versioned user subject whose
+owner matches the live directory record and the token or refresh family.
+Membership removal revokes sessions acting in that organization. A pending subject
+update that observed the removal can revoke only the session it examined.
+Native and OAuth refresh preserve these subject updates. SQL commits before the store
+update. Stargate logs a failed update, and an affected session may keep using
+its earlier subject until a successful update or until the session ends.
 
 JWT access-token claims include:
 
@@ -690,7 +710,9 @@ Broader introspection requires:
 - `oauth:introspect` scope or `attrs.can_introspect = true`
 - token audience present in the client's registered audiences
 
-Invalid, inactive, or invisible tokens return:
+For user-delegated OAuth access tokens, introspection also checks that `sid`
+identifies a live session owned by `sub_id`. Client credentials tokens can be
+active without a session. Invalid, inactive, or invisible tokens return:
 
 ```json
 {

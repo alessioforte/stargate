@@ -237,18 +237,22 @@ fn scope_from_attrs(attrs: &JsonValue) -> Option<String> {
 }
 
 async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
-    if let Some(sid) = claims.sid.as_deref() {
-        let active = crate::data::store::use_store()
-            .exists(&store::keys::session::subject(sid))
+    // Client-credentials tokens have an authorized party and no user session claims.
+    let needs_session = claims.azp.is_none()
+        || claims.auth_time.is_some()
+        || claims.sub_id.is_some()
+        || claims.sid.is_some();
+    if needs_session
+        && crate::iam::sess::registry::active_token_session(claims)
             .await
-            .map_err(OAuthErrorResponse::internal)?;
-        if !active {
-            return Ok(false);
-        }
+            .map_err(OAuthErrorResponse::internal)?
+            .is_none()
+    {
+        return Ok(false);
     }
 
     let Some(client_id) = claims.azp.as_deref() else {
-        return Ok(claims.sid.is_some());
+        return Ok(true);
     };
     let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
         .await
