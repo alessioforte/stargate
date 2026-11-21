@@ -79,7 +79,6 @@ async fn serve() -> std::io::Result<()> {
         tracing::error!("Invalid listener settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
-    tls::enabled()?;
     let runtime_profile = profile::validate_runtime_profile()?;
     let shutdown_timeout_secs = shutdown::server_shutdown_timeout_secs();
 

@@ -31,6 +31,7 @@ pub async fn put_login_mfa_challenge(
     req: Request,
 ) -> Result<Response, ErrorResponse> {
     let client_ip = req.get_client_ip();
+    let secure = req.is_https();
     let Json(body) = Json::<MfaChallengeVerifyRequestBody>::from_request(req, &())
         .await
         .map_err(|error| {
@@ -56,6 +57,7 @@ pub async fn put_login_mfa_challenge(
         requested_org_id.as_deref(),
         password_and_code,
         &client_ip,
+        secure,
     )
     .await
 }

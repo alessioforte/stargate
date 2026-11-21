@@ -1,10 +1,10 @@
 //! The same credential flows run against SQLite/memory in the normal suite and
 //! PostgreSQL/Redis in the disposable Redis CI fixture.
 use super::{expired::maybe_password_expired_response, reset::put_credentials};
-use crate::api::account::{RefreshTokenRequestBody, refresh_token::put_refresh_token};
+use crate::api::account::refresh_token::put_refresh_token;
 use crate::err::ErrorCode;
 use crate::iam::{auth::jwt::jwt_config, oidc::refresh, pwd, sess::registry};
-use axum::{Json, body::Body};
+use axum::body::Body;
 use db::ent::{
     CredentialType, OrganizationMembershipMutation, Profile, TrustedAuditActor,
     TrustedAuditContext, TrustedAuditRequest, User,
@@ -82,10 +82,14 @@ async fn oauth_family(user: &User, sid: &str) -> String {
 }
 
 async fn refresh_native(token: &str) -> Result<Value, crate::err::ErrorResponse> {
-    let response = put_refresh_token(Json(RefreshTokenRequestBody {
-        refresh_token: token.to_string(),
-    }))
-    .await?;
+    let request = axum::http::Request::builder()
+        .method("PUT")
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({ "refresh_token": token }).to_string(),
+        ))
+        .unwrap();
+    let response = put_refresh_token(request).await?;
     let bytes = axum::body::to_bytes(response.into_body(), 32 * 1024)
         .await
         .unwrap();
@@ -621,7 +625,7 @@ fn login_request(ip: &str, uri: &str, body: Value) -> Request<Body> {
     let mut request = request(uri, body);
     request
         .extensions_mut()
-        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(
+        .insert(crate::srv::test_connection(std::net::SocketAddr::new(
             ip.parse().unwrap(),
             12345,
         )));
@@ -629,6 +633,7 @@ fn login_request(ip: &str, uri: &str, body: Value) -> Request<Body> {
     request
         .headers_mut()
         .insert("x-forwarded-for", "192.0.2.99".parse().unwrap());
+    crate::srv::client_ip::prepare(&mut request);
     request
 }
 

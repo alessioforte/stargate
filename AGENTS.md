@@ -183,12 +183,19 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `0.0.0.0:$PORT` (see "Listeners"). All listeners bind before any serves, every
   connection gets hyper timeouts, HTTP/2 limits, `TCP_NODELAY`, and a slot from its
   listener's cap, and a failed accept backs off. Each request carries
-  `srv::ConnectionInfo` (peer and the listener's name, planes, TLS): read connection
-  facts from it instead of a process-wide setting.
-  `tls::served_over_https()`: the implicit listener's TLS (`TLS_ENABLED`) or an
-  `https://` public base URL (a proxy terminates TLS); it decides the `Secure` cookie
-  attribute, HSTS, and the request's own origin scheme.
-- `web/`: request extraction (`request.rs`), trusted proxies, origins/CORS (`origin.rs`
+  `srv::ConnectionInfo` (peer and the listener's name, planes, TLS, proxy trust): read
+  connection facts from it instead of a process-wide setting.
+  `srv::client_ip` resolves the client address once at ingress from the peer and that
+  listener's `ProxyTrust` (`srv::proxy`), removes `Forwarded`, `X-Real-IP`, and every
+  `X-Forwarded-*` field from an untrusted peer on every plane, and stores
+  `srv::client_ip::ClientIp` in the request extensions. Logging and spans, ingress and
+  admin limits, login guards, OTP, source-IP matchers, audit, and internal-context
+  signing all read it from there.
+  `web::request::RequestExt::is_https` decides HTTPS per request through
+  `tls::request_https(listener_tls)`: the receiving listener's TLS or the public base
+  URL scheme (read once). It drives the `Secure` cookie attribute, HSTS, the request's
+  own origin scheme, and the span scheme; `tls::over_https` is the pure test helper.
+- `web/`: request extraction (`request.rs`), origins/CORS (`origin.rs`
   trusted-origin middleware, `cors.rs`; both read and validated once at startup),
   security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
@@ -211,14 +218,23 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 ### Listeners
 
 `srv::settings` reads and validates `LISTENERS` and, for each declared name,
-`LISTENER_<NAME>_ADDRESS`, `_PLANES`, `_TLS`, and `_MAX_CONNECTIONS` once at
-startup. Invalid or duplicate names, shared addresses, incomplete addresses,
-unknown planes, a management plane sharing its listener, TLS on a management
-listener, `PORT`/`TLS_ENABLED`/`MAX_CONNECTIONS` alongside `LISTENERS`, and an
-unknown `LISTENER_*` variable all stop it. Without `LISTENERS` the implicit
-listener is `0.0.0.0:$PORT` with every plane, `TLS_ENABLED`, and
-`MAX_CONNECTIONS`. Names are 1–32 ASCII letters or digits starting with a letter;
-addresses are literal IPs with a port, IPv6 included.
+`LISTENER_<NAME>_ADDRESS`, `_PLANES`, `_TLS`, `_MAX_CONNECTIONS`, and
+`_TRUSTED_PROXIES` once at startup. Invalid or duplicate names, shared addresses,
+incomplete addresses, unknown planes, a management plane sharing its listener, TLS
+on a management listener, `PORT`/`TLS_ENABLED`/`MAX_CONNECTIONS`/`TRUSTED_PROXIES`
+alongside `LISTENERS`, an invalid proxy entry, an unknown `LISTENER_*` variable, and
+a declared configuration without `JWT_ISSUER` all stop it.
+Without `LISTENERS` the implicit listener is `0.0.0.0:$PORT` with every plane,
+`TLS_ENABLED`, `MAX_CONNECTIONS`, and its own `TRUSTED_PROXIES`. Names are 1–32
+ASCII letters or digits starting with a letter; addresses are literal IPs with a
+port, IPv6 included.
+
+Proxy trust is per listener and empty by default: only a peer in
+`LISTENER_<NAME>_TRUSTED_PROXIES` (the implicit listener: `TRUSTED_PROXIES`) may set
+forwarding headers. Trust is a list of sources (`srv::proxy::ProxyTrust`; today only
+addresses and CIDR blocks, so a proxy certificate can join later). The same plane on
+two listeners keeps two trust boundaries: an internal listener ignores forged
+`X-Forwarded-For` while the ingress listener accepts it.
 
 `main.rs` builds one router per listener with `api::listener_router` and applies
 the gateway extension, security headers, and tracing once, never per connection;
@@ -232,10 +248,11 @@ streams, a 32 KiB HTTP/2 header list, a 30 s keep-alive PING with a 10 s timeout
 failed accept backs off 100 ms. Upgraded WebSockets leave the cap and are bounded
 by gateway admission, and a proxy that reuses connections needs an idle timeout
 below 10 s (Traefik: `serversTransport.forwardingTimeouts.idleConnTimeout`).
-Every request carries only `srv::ConnectionInfo` (peer, listener name, planes,
-TLS); handlers must not extract `ConnectInfo`, which remains only as a
-`ConnectionInfo::peer_of` fallback for tests that build requests themselves.
-Guide: `docs/listeners.md`.
+Every request carries `srv::ConnectionInfo` (peer, listener name, planes, TLS,
+proxy trust) and the resolved `ClientIp`; handlers read the client address from
+`RequestExt` and never extract `ConnectInfo`. Tests that build a request
+themselves insert `ConnectionInfo` (and run `srv::client_ip::prepare` when they
+exercise forwarding headers). Guide: `docs/listeners.md`.
 
 ### Gateway Runtime (`src/gate/`)
 
@@ -245,13 +262,13 @@ Guide: `docs/listeners.md`.
 1. Pin the active `RuntimeSnapshot` (graph, balancers, limiter, prepared clients,
    version) and the independent `PolicySnapshot` (ACE engine + revision); acquire
    process admission (`503 gateway.overloaded` when exhausted).
-2. Resolve the client IP (trusted proxies only) and charge the mandatory
-   `ingress.limit` IP bucket, bounded by `ingress.timeout` (default 250ms):
+2. Charge the mandatory `ingress.limit` IP bucket with the client address the
+   server resolved once at ingress, bounded by `ingress.timeout` (default 250ms):
    `429` on denial; store errors/timeouts pass by default (`on_store_error: allow`),
    or return `503` with `deny`, before any credential check or route match.
-   Capture the original peer and host and strip `Forwarded`, `X-Real-IP`, and
-   every `X-Forwarded-*` field from untrusted or missing peers before routing
-   and middleware. Operator middleware may then supply forwarding metadata.
+   The listener already removed `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*`
+   field from an untrusted peer before routing. Capture the original peer and host;
+   operator middleware may then supply forwarding metadata.
 3. Verify API key / JWT / OAuth token and capture the subject.
 4. Match compiled v1 routers (descending `priority`, declaration order for ties).
 5. Apply route middlewares (path rewrite, preserve host, header transforms).
@@ -971,7 +988,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
 | `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |
 | `MAX_CONNECTIONS`                                                                      | 1024                                   | Concurrent connections of the implicit listener; stops startup with `LISTENERS`                                                     |
-| `LISTENERS` / `LISTENER_<NAME>_*`                                                      | -                                      | Named listeners: `_ADDRESS` and `_PLANES` required, `_TLS` on except management, `_MAX_CONNECTIONS` 1024 (see "Listeners")           |
+| `LISTENERS` / `LISTENER_<NAME>_*`                                                      | -                                      | Named listeners: `_ADDRESS` and `_PLANES` required, `_TLS` on except management, `_MAX_CONNECTIONS` 1024, `_TRUSTED_PROXIES` none; needs `JWT_ISSUER` (see "Listeners") |
 | `STARGATE_RUNTIME_PROFILE`                                                             | -                                      | `edge` or `cluster` (validated against the build)                                                                                   |
 | `JWT_ALGORITHM`                                                                        | active key / `RS256`                   | Must match the active key when set; picks the first generated key                                                                   |
 | `JWT_SECRET`                                                                           | -                                      | HMAC key for HS* algorithms                                                                                                         |
@@ -1013,7 +1030,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_STREAM_CONSUMER_GROUPS` | empty | Distinct comma-separated consumer groups; protect unacknowledged stream entries |
 | `AUDIT_OUTBOX_RETENTION` | 30d | Cluster published-row retention (duration or `none`); never prunes pending rows |
 | `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | TLS of the implicit listener (`TLS_ENABLED` stops startup with `LISTENERS`); the certificate is shared. With listener TLS off, an `https://` public base URL still marks the deployment HTTPS |
-| `TRUSTED_PROXIES`                                                                      | -                                      | Proxy IP/CIDRs allowed to set client IP headers                                                                                     |
+| `TRUSTED_PROXIES`                                                                      | -                                      | Implicit listener's proxy sources; refused with `LISTENERS` (use `LISTENER_<NAME>_TRUSTED_PROXIES`)                                  |
 | `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins (or `*` alone); invalid entries stop startup                                                                   |
 | `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints (no wildcard); invalid entries stop startup                                     |
 | `GEOIP_DB_PATH`                                                                        | -                                      | MaxMind GeoLite2                                                                                                                    |

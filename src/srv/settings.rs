@@ -9,6 +9,7 @@
 use crate::{
     api::plane::{Plane, PlaneSet},
     conf::env::{EnvError, parse_bool},
+    srv::proxy::ProxyTrust,
 };
 use std::{net::SocketAddr, str::FromStr};
 
@@ -24,7 +25,13 @@ const IMPLICIT_NAME: &str = "default";
 const MAX_NAME_LENGTH: usize = 32;
 
 /// Fields a declared listener accepts after its name.
-const LISTENER_FIELDS: [&str; 4] = ["ADDRESS", "PLANES", "TLS", "MAX_CONNECTIONS"];
+const LISTENER_FIELDS: [&str; 5] = [
+    "ADDRESS",
+    "PLANES",
+    "TLS",
+    "MAX_CONNECTIONS",
+    "TRUSTED_PROXIES",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Listener {
@@ -36,6 +43,8 @@ pub struct Listener {
     /// clear text, so a management listener cannot enable TLS.
     pub tls: bool,
     pub max_connections: usize,
+    /// Forwarding-header sources this listener accepts; empty trusts nobody.
+    pub trusted_proxies: ProxyTrust,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +55,10 @@ pub enum SettingsError {
         "`{0}` configures the implicit listener and cannot be used with `LISTENERS`: set it per listener instead"
     )]
     SingleListenerSetting(&'static str),
+    #[error(
+        "`LISTENERS` needs `JWT_ISSUER`: the default issuer uses `PORT`, which a declared listener does not use, and `OAUTH_BASE_URL` does not set the issuer"
+    )]
+    MissingIssuer,
     #[error("`LISTENERS` uses the listener name `{0}` more than once")]
     DuplicateName(String),
     #[error(
@@ -67,7 +80,7 @@ pub enum SettingsError {
         address: SocketAddr,
     },
     #[error(
-        "`{key}` is not a listener setting: declare the listener in `LISTENERS` and use ADDRESS, PLANES, TLS, or MAX_CONNECTIONS"
+        "`{key}` is not a listener setting: declare the listener in `LISTENERS` and use ADDRESS, PLANES, TLS, MAX_CONNECTIONS, or TRUSTED_PROXIES"
     )]
     UnknownSetting { key: String },
 }
@@ -122,12 +135,14 @@ fn implicit(var: &impl Fn(&str) -> Option<String>) -> Result<Listener, SettingsE
         None => DEFAULT_MAX_CONNECTIONS,
         Some(value) => parse_connections("MAX_CONNECTIONS", &value)?,
     };
+    let trusted_proxies = parse_trust("TRUSTED_PROXIES", var("TRUSTED_PROXIES"))?;
     Ok(Listener {
         name: IMPLICIT_NAME.to_string(),
         address,
         planes: PlaneSet::ALL,
         tls,
         max_connections,
+        trusted_proxies,
     })
 }
 
@@ -136,10 +151,13 @@ fn declared(
     vars: &[(String, String)],
     var: &impl Fn(&str) -> Option<String>,
 ) -> Result<Vec<Listener>, SettingsError> {
-    for setting in ["PORT", "TLS_ENABLED", "MAX_CONNECTIONS"] {
+    for setting in ["PORT", "TLS_ENABLED", "MAX_CONNECTIONS", "TRUSTED_PROXIES"] {
         if var(setting).is_some() {
             return Err(SettingsError::SingleListenerSetting(setting));
         }
+    }
+    if var("JWT_ISSUER").is_none() {
+        return Err(SettingsError::MissingIssuer);
     }
 
     let mut names = Vec::new();
@@ -207,6 +225,10 @@ fn declared(
             None => DEFAULT_MAX_CONNECTIONS,
             Some(value) => parse_connections(&format!("{prefix}MAX_CONNECTIONS"), &value)?,
         };
+        let trusted_proxies = parse_trust(
+            &format!("{prefix}TRUSTED_PROXIES"),
+            var(&format!("{prefix}TRUSTED_PROXIES")),
+        )?;
 
         listeners.push(Listener {
             name: name.clone(),
@@ -214,6 +236,7 @@ fn declared(
             planes,
             tls,
             max_connections,
+            trusted_proxies,
         });
     }
     Ok(listeners)
@@ -281,6 +304,13 @@ fn parse_connections(name: &str, value: &str) -> Result<usize, SettingsError> {
     }
 }
 
+fn parse_trust(name: &str, value: Option<String>) -> Result<ProxyTrust, SettingsError> {
+    let Some(value) = value else {
+        return Ok(ProxyTrust::default());
+    };
+    ProxyTrust::parse(&value).map_err(|message| invalid(name, &value, &message).into())
+}
+
 fn invalid(name: &str, value: &str, message: &str) -> EnvError {
     EnvError::Parse {
         name: name.to_string(),
@@ -296,10 +326,21 @@ mod tests {
     use std::{net::SocketAddr, str::FromStr};
 
     fn listeners(vars: &[(&str, &str)]) -> Result<Vec<Listener>, SettingsError> {
-        let vars = vars
+        let mut vars = vars
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect::<Vec<_>>();
+        // A declared listener needs `JWT_ISSUER` (see
+        // `declared_listeners_need_an_explicit_issuer`); tests that do not
+        // exercise that rule get one here.
+        if vars.iter().any(|(key, _)| key == "LISTENERS")
+            && !vars.iter().any(|(key, _)| key == "JWT_ISSUER")
+        {
+            vars.push((
+                "JWT_ISSUER".to_string(),
+                "https://identity.test".to_string(),
+            ));
+        }
         from_vars(&vars)
     }
 
@@ -377,6 +418,7 @@ mod tests {
             ("PORT", "5050"),
             ("TLS_ENABLED", "true"),
             ("MAX_CONNECTIONS", "10"),
+            ("TRUSTED_PROXIES", "10.0.0.0/8"),
         ] {
             let error = listeners(&[
                 ("LISTENERS", "public"),
@@ -532,6 +574,7 @@ mod tests {
     fn unknown_listener_variables_stop_startup() {
         for (key, value) in [
             ("LISTENER_PUBLIC_PROXIES", "10.0.0.0/8"),
+            ("LISTENER_PUBLIC_TRUSTED_PROXY", "10.0.0.0/8"),
             ("LISTENER_PRIVATE_ADDRESS", "0.0.0.0:5051"),
             ("LISTENER_PUBLICADRESS", "0.0.0.0:5050"),
             ("LISTENER_PUBLIC_ADDRESS_TLS", "on"),
@@ -548,5 +591,103 @@ mod tests {
                 "{key}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn the_implicit_listener_reads_its_proxy_trust_once() {
+        let parsed = listeners(&[("TRUSTED_PROXIES", "127.0.0.1, 10.42.0.0/16")]).unwrap();
+        assert_eq!(parsed[0].trusted_proxies.source_count(), 2);
+        assert!(
+            parsed[0]
+                .trusted_proxies
+                .trusts("10.42.9.8".parse().unwrap())
+        );
+        assert!(
+            !parsed[0]
+                .trusted_proxies
+                .trusts("10.43.0.1".parse().unwrap())
+        );
+
+        assert_eq!(listeners(&[]).unwrap()[0].trusted_proxies.source_count(), 0);
+
+        // Unlike the old process-wide list, an invalid entry stops startup.
+        let error = listeners(&[("TRUSTED_PROXIES", "10.0.0.0/8, not-an-ip")]).unwrap_err();
+        assert!(matches!(error, SettingsError::Env(_)), "{error}");
+    }
+
+    #[test]
+    fn declared_listeners_carry_their_own_proxy_trust() {
+        let parsed = listeners(&[
+            ("LISTENERS", "public,internal"),
+            ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+            ("LISTENER_PUBLIC_PLANES", "identity,gateway"),
+            ("LISTENER_PUBLIC_TRUSTED_PROXIES", "10.42.0.0/16"),
+            ("LISTENER_INTERNAL_ADDRESS", "0.0.0.0:5052"),
+            ("LISTENER_INTERNAL_PLANES", "admin"),
+        ])
+        .unwrap();
+        assert_eq!(parsed[0].trusted_proxies.source_count(), 1);
+        assert!(
+            parsed[0]
+                .trusted_proxies
+                .trusts("10.42.1.2".parse().unwrap())
+        );
+        // A listener without the setting trusts nobody; there is no default.
+        assert_eq!(parsed[1].trusted_proxies.source_count(), 0);
+
+        let error = listeners(&[
+            ("LISTENERS", "public"),
+            ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+            ("LISTENER_PUBLIC_PLANES", "identity"),
+            ("LISTENER_PUBLIC_TRUSTED_PROXIES", "10.42.0.0/16, nonsense"),
+        ])
+        .unwrap_err();
+        assert!(matches!(error, SettingsError::Env(_)), "{error}");
+
+        // With LISTENERS the trust has one source: the per-listener setting.
+        let error = listeners(&[
+            ("LISTENERS", "public"),
+            ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+            ("LISTENER_PUBLIC_PLANES", "identity"),
+            ("TRUSTED_PROXIES", "10.42.0.0/16"),
+        ])
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                SettingsError::SingleListenerSetting("TRUSTED_PROXIES")
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn declared_listeners_need_an_explicit_issuer() {
+        let base = [
+            ("LISTENERS", "public"),
+            ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+            ("LISTENER_PUBLIC_PLANES", "identity"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect::<Vec<_>>();
+        let error = from_vars(&base).unwrap_err();
+        assert!(matches!(error, SettingsError::MissingIssuer), "{error}");
+
+        // `OAUTH_BASE_URL` does not set the issuer: `issuer_from_env` reads
+        // `JWT_ISSUER` only, so the localhost default would remain.
+        let mut vars = base.clone();
+        vars.push((
+            "OAUTH_BASE_URL".to_string(),
+            "https://identity.example.com".to_string(),
+        ));
+        let error = from_vars(&vars).unwrap_err();
+        assert!(matches!(error, SettingsError::MissingIssuer), "{error}");
+
+        vars.push((
+            "JWT_ISSUER".to_string(),
+            "https://identity.example.com".to_string(),
+        ));
+        assert!(from_vars(&vars).is_ok());
     }
 }

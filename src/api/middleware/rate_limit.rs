@@ -138,9 +138,8 @@ mod tests {
 
     fn request(peer: &str) -> Request<Body> {
         let mut req = Request::builder().uri("/").body(Body::empty()).unwrap();
-        req.extensions_mut().insert(axum::extract::ConnectInfo(
-            peer.parse::<std::net::SocketAddr>().unwrap(),
-        ));
+        req.extensions_mut()
+            .insert(crate::srv::test_connection(peer.parse().unwrap()));
         req
     }
 

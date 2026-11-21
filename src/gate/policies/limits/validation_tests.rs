@@ -318,7 +318,7 @@ async fn removing_an_attribute_referenced_limit_fails_new_requests_but_preserves
  {
     use crate::gate::{IngressPause, authentication::TestAuthenticator};
     use crate::iam::auth::identity::VerifiedIdentity;
-    use axum::{body::Body, extract::ConnectInfo};
+    use axum::body::Body;
     use http::Request;
     use http_body_util::BodyExt;
     use tokio::sync::Barrier;
@@ -340,8 +340,8 @@ async fn removing_an_attribute_referenced_limit_fails_new_requests_but_preserves
         let mut req = Request::new(Body::empty());
         req.extensions_mut().insert(gate.clone());
         req.extensions_mut().insert(authenticator.clone());
-        req.extensions_mut().insert(ConnectInfo(
-            "203.0.113.8:443".parse::<std::net::SocketAddr>().unwrap(),
+        req.extensions_mut().insert(crate::srv::test_connection(
+            "203.0.113.8:443".parse().unwrap(),
         ));
         req
     };

@@ -2,7 +2,9 @@ use super::{AuthResponse, RefreshTokenRequestBody};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::{jwt::jwt_config, subject::Subject};
 use crate::web::cookies::build_jwt_cookie;
+use crate::web::request::RequestExt;
 use axum::Json;
+use axum::extract::{FromRequest, Request};
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
 use store::Store;
@@ -20,9 +22,13 @@ use store::Store;
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
-pub async fn put_refresh_token(
-    Json(body): Json<RefreshTokenRequestBody>,
-) -> Result<Response, ErrorResponse> {
+pub async fn put_refresh_token(req: Request) -> Result<Response, ErrorResponse> {
+    let secure = req.is_https();
+    let Json(body) = Json::<RefreshTokenRequestBody>::from_request(req, &())
+        .await
+        .map_err(|error| {
+            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
+        })?;
     let claims = jwt_config()
         .validate_session_refresh_token(&body.refresh_token)
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
@@ -142,7 +148,7 @@ pub async fn put_refresh_token(
         .await
         .map_err(ErrorResponse::internal)?;
 
-    let cookie = build_jwt_cookie(&tokens.access_token, cttl);
+    let cookie = build_jwt_cookie(&tokens.access_token, cttl, secure);
     let body = AuthResponse {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,

@@ -539,9 +539,9 @@ async fn concurrent_activation_and_requests_always_use_a_complete_generation() {
                 // Requests use distinct buckets so this test exercises generation
                 // consistency rather than exhaustion of the small fixture limits.
                 let mut req = request(&gate);
-                req.extensions_mut().insert(axum::extract::ConnectInfo(
+                req.extensions_mut().insert(crate::srv::test_connection(
                     format!("10.{reader}.0.{}:12345", iteration + 1)
-                        .parse::<std::net::SocketAddr>()
+                        .parse()
                         .unwrap(),
                 ));
                 let response = crate::gate::service(req).await.unwrap();
