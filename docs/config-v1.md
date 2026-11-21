@@ -297,6 +297,25 @@ reservations after cancellation or a failed refund expire with their buckets.
   bucket. Unknown login names use the same policy with their normalized
   identifier.
 
+A completed password login recognizes the account/source IP pair for 30 days.
+The JSON login, OAuth password form and login MFA completion record the address
+resolved by the server after session issuance, once password, MFA and
+password-expiry checks have completed. Each completed password login renews
+the deadline. Thirty days covers routine
+returning users while bounding recognition of an address that may be reassigned.
+
+A recognized pair skips the account-wide backoff bucket. Its per-IP and
+per-account/IP limits still apply on every attempt, including during a
+distributed attack. New addresses and expired recognition use all three
+buckets. The password and any required MFA are still verified. A store error
+while checking recognition rejects the attempt. A failed recognition write
+is logged and leaves ordinary account backoff in effect.
+
+A sustained distributed attack can repeatedly take the next account-wide
+attempt and delay sign-in from a new address. Recognition lets returning users
+on the same address complete their login during that pause. A shared address
+also shares recognition for this account until its deadline.
+
 Rejections leave the charged attempts and their deadlines in place, so
 repeated requests during a pause do not extend it. The JSON API returns
 `429 auth.login_rate_limited` with `Retry-After` for the bucket that refused

@@ -1,7 +1,7 @@
 use super::{AuthResponse, UserCredentials};
 use crate::api::account::credentials::expired::maybe_password_expired_response;
 use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
-use crate::api::account::session::issue_user_session;
+use crate::api::account::session::issue_password_session;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::login_guard;
 use crate::web::request::RequestExt;
@@ -52,11 +52,12 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         return Ok(response);
     }
 
-    issue_user_session(
+    issue_password_session(
         user,
         auth_time,
         credentials.org_id.as_deref(),
         vec![oidc::authentication::AMR_PASSWORD.to_string()],
+        &client_ip,
     )
     .await
 }

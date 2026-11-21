@@ -61,6 +61,7 @@ subjects never appear in a key or a tag.
 | `{ip:<ip>}:login-attempts` | Reserved password attempts from one address | 5 min from the first reservation |
 | `{u:<user_id>}:login-attempts:<ip>` | Reserved password attempts against a user from one address | 5 min from the first reservation |
 | `{id:<identifier hash>}:login-attempts:<ip>` | Reserved password attempts for an unknown identifier from one address | 5 min from the first reservation |
+| `{u:<user_id>}:login-known:<ip>` | Recognition deadline of a completed password login from this address | 30 days, renewed on completed password login |
 | `{u:<user_id>}:login-attempts` | Account-wide password attempts and backoff timestamp | 5 min from the last reservation |
 | `{id:<identifier hash>}:login-attempts` | Password attempts and backoff for an unknown identifier across addresses | 5 min from the last reservation |
 | `{ip:<ip>}:ingress` | Per-address ingress allowance | limiter |
@@ -82,7 +83,8 @@ tag and do not change slot selection.
 The [password login guard](config-v1.md#password-login-guard) reserves each
 bucket with a single-key atomic update. The source and account keys can occupy
 different slots, so a later denial refunds earlier reservations for that
-request.
+request. A live `login-known` deadline lets that account/address pair skip the
+account-wide backoff bucket. Both address-related buckets are always enforced.
 
 ## Redis Cluster rules
 

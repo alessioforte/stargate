@@ -15,7 +15,7 @@
 
 use super::interactions::{self, INTERACTION_COOKIE, LoginPage};
 use crate::api::account::login::verify_login_password;
-use crate::api::account::session::issue_user_session;
+use crate::api::account::session::issue_password_session;
 use crate::err::ErrorResponse;
 use crate::iam::otp::service::login_mfa_required;
 use crate::web::request::RequestExt;
@@ -84,7 +84,7 @@ pub async fn post_login(req: Request) -> Response {
 
     let auth_time = chrono::Utc::now().timestamp() as usize;
     let password = vec![oidc::authentication::AMR_PASSWORD.to_string()];
-    let session = match issue_user_session(user, auth_time, None, password).await {
+    let session = match issue_password_session(user, auth_time, None, password, &client_ip).await {
         Ok(session) => session,
         Err(_) => return back_to_login(page(), "server_error"),
     };

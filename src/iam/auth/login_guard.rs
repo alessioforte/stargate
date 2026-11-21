@@ -8,6 +8,9 @@ const BACKOFF_THRESHOLD: u32 = 5;
 const WINDOW_MS: i64 = 300_000;
 const MAX_BACKOFF_SECS: u64 = 30;
 const MAX_CAS_ATTEMPTS: usize = 32;
+// A month covers routine returning users while bounding recognition of an
+// address that may later be reassigned. Only a completed login renews it.
+const KNOWN_IP_TTL_SECS: u64 = 30 * 24 * 60 * 60;
 
 struct Bucket {
     key: String,
@@ -22,6 +25,7 @@ enum Policy {
 
 pub(crate) struct LoginThrottle {
     buckets: [Bucket; 3],
+    known_key: Option<String>,
 }
 
 pub(crate) enum Admission<T> {
@@ -36,9 +40,11 @@ pub(crate) struct LoginAttempt<'a>(Vec<Reservation<'a>>);
 
 impl LoginThrottle {
     pub(crate) fn for_user(client_ip: &str, user_id: &str) -> Self {
-        Self::new(client_ip, |ip| {
+        let mut throttle = Self::new(client_ip, |ip| {
             store::keys::account::login_user(user_id, ip)
-        })
+        });
+        throttle.known_key = Some(store::keys::account::login_known(user_id, client_ip));
+        throttle
     }
 
     pub(crate) fn for_identifier(client_ip: &str, identifier: &str) -> Self {
@@ -49,6 +55,7 @@ impl LoginThrottle {
 
     fn new(client_ip: &str, subject_key: impl Fn(Option<&str>) -> String) -> Self {
         Self {
+            known_key: None,
             buckets: [
                 Bucket {
                     key: store::keys::account::login_ip(client_ip),
@@ -72,10 +79,22 @@ impl LoginThrottle {
 
     pub(crate) async fn reserve(&self) -> StoreResult<Admission<LoginAttempt<'_>>> {
         let store = use_store();
-        let mut attempt = LoginAttempt(Vec::with_capacity(self.buckets.len()));
+        let known_ip = match &self.known_key {
+            Some(key) => store
+                .get::<i64>(key)
+                .await?
+                .is_some_and(|expires_at| expires_at > chrono::Utc::now().timestamp()),
+            None => false,
+        };
+        let buckets = if known_ip {
+            &self.buckets[..2]
+        } else {
+            &self.buckets
+        };
+        let mut attempt = LoginAttempt(Vec::with_capacity(buckets.len()));
         // IP and account have different Redis slots. Each bucket enforces its
         // own limit atomically. Only verify once every reservation succeeds.
-        for bucket in &self.buckets {
+        for bucket in buckets {
             match bucket.reserve(store).await {
                 Ok(Admission::Allowed(reservation)) => attempt.0.push(reservation),
                 Ok(Admission::Limited { retry_after }) => {
@@ -89,6 +108,22 @@ impl LoginThrottle {
             }
         }
         Ok(Admission::Allowed(attempt))
+    }
+}
+
+/// Called only after the password flow has issued a session, including MFA
+/// when required. A failed write leaves the ordinary account backoff in force.
+pub(crate) async fn record_success(user_id: &str, client_ip: &str) {
+    if client_ip.parse::<std::net::IpAddr>().is_err() {
+        return;
+    }
+    let key = store::keys::account::login_known(user_id, client_ip);
+    let expires_at = chrono::Utc::now().timestamp() + KNOWN_IP_TTL_SECS as i64;
+    if let Err(error) = use_store()
+        .set(&key, &expires_at, Some(KNOWN_IP_TTL_SECS))
+        .await
+    {
+        tracing::warn!(%error, "failed to remember password login address");
     }
 }
 
@@ -256,6 +291,94 @@ mod tests {
             bucket.reserve(&store).await.unwrap(),
             Admission::Limited { .. }
         ));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(feature = "redis", ignore = "requires the disposable Redis fixture")]
+    async fn known_addresses_bypass_only_account_backoff() {
+        #[cfg(feature = "redis")]
+        crate::data::store::init().await.unwrap();
+
+        let store = use_store();
+        let user_id = ulid::Ulid::generate().to_string();
+        let known_ip = "2001:db8:23::1";
+        let throttle = LoginThrottle::for_user(known_ip, &user_id);
+        let now = chrono::Utc::now().timestamp_millis();
+        // Seed the account at maximum backoff so the assertions have a stable
+        // 30-second pause, independently of Argon2 speed or scheduler load.
+        let paused = Attempts {
+            count: 40,
+            ..Attempts::new(now)
+        };
+        store
+            .set(&throttle.buckets[2].key, &paused, Some(300))
+            .await
+            .unwrap();
+        assert!(matches!(
+            throttle.reserve().await.unwrap(),
+            Admission::Limited { .. }
+        ));
+
+        record_success(&user_id, known_ip).await;
+        let expires_at = store
+            .get::<i64>(throttle.known_key.as_ref().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            (now / 1000 + KNOWN_IP_TTL_SECS as i64
+                ..=chrono::Utc::now().timestamp() + KNOWN_IP_TTL_SECS as i64)
+                .contains(&expires_at)
+        );
+        let Admission::Allowed(attempt) = throttle.reserve().await.unwrap() else {
+            panic!("a recognized address must pass the account pause");
+        };
+        attempt.refund().await;
+
+        let new_ip = LoginThrottle::for_user("2001:db8:23::2", &user_id);
+        assert!(matches!(
+            new_ip.reserve().await.unwrap(),
+            Admission::Limited { .. }
+        ));
+
+        // Expiration is checked against the stored deadline even if backend
+        // cleanup has not yet removed the key.
+        store
+            .set(throttle.known_key.as_ref().unwrap(), &0_i64, Some(60))
+            .await
+            .unwrap();
+        assert!(matches!(
+            throttle.reserve().await.unwrap(),
+            Admission::Limited { .. }
+        ));
+        record_success(&user_id, known_ip).await;
+
+        for _ in 0..MAX_SUBJECT_IP_ATTEMPTS {
+            assert!(matches!(
+                throttle.reserve().await.unwrap(),
+                Admission::Allowed(_)
+            ));
+        }
+        assert!(
+            matches!(throttle.reserve().await.unwrap(), Admission::Limited { retry_after } if retry_after > MAX_BACKOFF_SECS)
+        );
+
+        // This recognized pair has no failures of its own. Other accounts
+        // still consume its address-wide budget.
+        let other_user = ulid::Ulid::generate().to_string();
+        record_success(&other_user, known_ip).await;
+        let other_pair = LoginThrottle::for_user(known_ip, &other_user);
+        for index in 0..MAX_IP_ATTEMPTS - MAX_SUBJECT_IP_ATTEMPTS {
+            let identifier = format!("spray-{index}");
+            let throttle = LoginThrottle::for_identifier(known_ip, &identifier);
+            assert!(matches!(
+                throttle.reserve().await.unwrap(),
+                Admission::Allowed(_)
+            ));
+        }
+        assert!(
+            matches!(other_pair.reserve().await.unwrap(), Admission::Limited { retry_after } if retry_after > MAX_BACKOFF_SECS)
+        );
     }
 
     #[test]

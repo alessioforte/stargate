@@ -1188,8 +1188,11 @@ with `Retry-After: 10`. Invalid limit configuration remains `500`.
 Password verification reserves an attempt atomically in each of three buckets
 (`iam/auth/login_guard.rs`): per IP, per account and IP, and per account across IPs.
 A valid password refunds its own reservations. The account-wide bucket uses
-bounded progressive backoff. See "Password login guard" in `docs/config-v1.md`
-for defaults and retry behavior. OTP flows have their own throttles.
+bounded progressive backoff. A completed password login (JSON, OAuth form or MFA
+completion) recognizes the server-resolved account/IP pair for 30 days. This
+skips only the account-wide pause. The per-IP and account/IP limits always apply.
+See "Password login guard" in `docs/config-v1.md` for defaults and retry behavior.
+OTP flows have their own throttles.
 
 ## Error Response Format
 

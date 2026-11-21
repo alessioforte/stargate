@@ -616,3 +616,255 @@ async fn concurrent_password_attempts_respect_login_limits() {
         login_guard_suite().await;
     }
 }
+
+fn login_request(ip: &str, uri: &str, body: Value) -> Request<Body> {
+    let mut request = request(uri, body);
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(
+            ip.parse().unwrap(),
+            12345,
+        )));
+    // An untrusted source cannot choose the address that is remembered.
+    request
+        .headers_mut()
+        .insert("x-forwarded-for", "192.0.2.99".parse().unwrap());
+    request
+}
+
+async fn assert_remembered(user: &User, ip: &str, remembered: bool) {
+    let expires_at = crate::data::store::use_store()
+        .get::<i64>(&store::keys::account::login_known(&user.id, ip))
+        .await
+        .unwrap();
+    assert_eq!(expires_at.is_some(), remembered);
+    if let Some(expires_at) = expires_at {
+        assert!(expires_at > chrono::Utc::now().timestamp());
+    }
+    assert!(
+        !crate::data::store::use_store()
+            .exists(&store::keys::account::login_known(&user.id, "192.0.2.99"))
+            .await
+            .unwrap()
+    );
+}
+
+async fn completed_password_login_suite() {
+    use crate::api::account::login::{post_login, verify_login_password};
+    use crate::iam::oidc::{interactions, request::AuthorizationRequest};
+    use crate::iam::otp::{
+        DEFAULT_MFA_PURPOSE,
+        types::{PendingMfaLogin, StoredOtpChallenge},
+        util,
+    };
+
+    let hash = pwd::hash::hash_password(PASSWORD.into()).await.unwrap();
+    let user = create_user_with_password_hash(&hash).await;
+    let json_ip = "2001:db8:24::1";
+    let credentials = json!({"username": user.email, "password": PASSWORD});
+
+    let wrong = json!({"username": user.email, "password": "wrong"});
+    assert_eq!(
+        post_login(login_request(json_ip, "/account/login", wrong))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AuthInvalidCredentials
+    );
+    assert_remembered(&user, json_ip, false).await;
+    // Verification alone cannot recognize an address before the rest of the flow.
+    verify_login_password(json_ip, &user.email, PASSWORD)
+        .await
+        .unwrap();
+    assert_remembered(&user, json_ip, false).await;
+    let invalid_org = json!({"username": user.email, "password": PASSWORD, "orgId": "missing"});
+    assert!(
+        post_login(login_request(json_ip, "/account/login", invalid_org))
+            .await
+            .is_err()
+    );
+    assert_remembered(&user, json_ip, false).await;
+    assert_eq!(
+        post_login(login_request(json_ip, "/account/login", credentials))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_remembered(&user, json_ip, true).await;
+
+    let form_ip = "2001:db8:24::2";
+    let interaction = interactions::park(AuthorizationRequest::default())
+        .await
+        .unwrap();
+    let body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("username", &user.email)
+        .append_pair("password", PASSWORD)
+        .finish();
+    let mut form = login_request(form_ip, "/oauth/login", Value::Null);
+    *form.body_mut() = Body::from(body);
+    form.headers_mut().insert(
+        CONTENT_TYPE,
+        "application/x-www-form-urlencoded".parse().unwrap(),
+    );
+    form.headers_mut().insert(
+        http::header::COOKIE,
+        format!("oauth_interaction={interaction}").parse().unwrap(),
+    );
+    let response = crate::api::oidc::login::post_login(form).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers()[http::header::LOCATION]
+            .to_str()
+            .unwrap()
+            .ends_with(&interaction)
+    );
+    assert_remembered(&user, form_ip, true).await;
+
+    // Seed a delivered challenge so the real completion endpoint can be tested
+    // without SMTP. The password was checked from this address before parking.
+    let mfa_ip = "2001:db8:24::3";
+    verify_login_password(mfa_ip, &user.email, PASSWORD)
+        .await
+        .unwrap();
+    assert_remembered(&user, mfa_ip, false).await;
+    let now = chrono::Utc::now().timestamp() as u64;
+    let issued = otp::issue_email_otp(
+        &user.email,
+        DEFAULT_MFA_PURPOSE,
+        util::email_otp_pepper().unwrap().as_bytes(),
+        now,
+        util::email_otp_config(),
+    )
+    .unwrap();
+    let challenge_id = issued.record.id_hex();
+    let pending = PendingMfaLogin {
+        user_id: user.id.clone(),
+        method: crate::iam::otp::OtpMethod::Email,
+        challenge: StoredOtpChallenge {
+            user_id: user.id.clone(),
+            method: crate::iam::otp::OtpMethod::Email,
+            purpose: DEFAULT_MFA_PURPOSE.into(),
+            record: issued.record,
+        },
+        auth_time: now as usize,
+        requested_org_id: None,
+        created_at_unix: now,
+        expires_at_unix: now + 300,
+    };
+    crate::data::store::use_store()
+        .set(&util::pending_login_key(&challenge_id), &pending, Some(300))
+        .await
+        .unwrap();
+    let verify = crate::api::account::otp::put_login_mfa_challenge;
+    assert!(
+        verify(
+            axum::extract::Path(challenge_id.clone()),
+            login_request(
+                mfa_ip,
+                "/account/login/mfa/challenges/test",
+                json!({"code": "wrong"})
+            ),
+        )
+        .await
+        .is_err()
+    );
+    assert_remembered(&user, mfa_ip, false).await;
+    assert_eq!(
+        verify(
+            axum::extract::Path(challenge_id),
+            login_request(
+                mfa_ip,
+                "/account/login/mfa/challenges/test",
+                json!({"code": issued.code})
+            ),
+        )
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::OK
+    );
+    assert_remembered(&user, mfa_ip, true).await;
+
+    // Four distributed failures plus the first wrong password activate the
+    // account pause. Remembered addresses can still complete a login.
+    for index in 0..4 {
+        assert_eq!(
+            verify_login_password(
+                &format!("2001:db8:25::{index}"),
+                &user.nickname,
+                "wrong-password",
+            )
+            .await
+            .unwrap_err()
+            .code,
+            ErrorCode::AuthInvalidCredentials
+        );
+    }
+    let fresh_ip = "2001:db8:25::100";
+    assert_eq!(
+        verify_login_password(fresh_ip, &user.email, PASSWORD)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AuthLoginRateLimited
+    );
+    let credentials = json!({"username": user.email, "password": PASSWORD});
+    assert_eq!(
+        post_login(login_request(json_ip, "/account/login", credentials))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    crate::data::store::use_store()
+        .set(
+            &store::keys::account::login_known(&user.id, json_ip),
+            &0_i64,
+            Some(60),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        verify_login_password(json_ip, &user.email, PASSWORD)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AuthLoginRateLimited
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(
+    feature = "redis",
+    ignore = "requires the disposable PostgreSQL/Redis fixture"
+)]
+async fn completed_password_logins_remember_server_addresses() {
+    const CHILD: &str = "STARGATE_TEST_REMEMBER_LOGIN_ADDRESSES";
+    if std::env::var_os(CHILD).is_none() {
+        let output = tokio::task::spawn_blocking(|| {
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "api::account::credentials::credential_security::completed_password_logins_remember_server_addresses", "--include-ignored", "--nocapture"])
+                .env(CHILD, "1")
+                .env("MFA_MODE", "optional")
+                .env("EMAIL_OTP_PEPPER", "synthetic-login-test-pepper")
+                .env("TRUSTED_PROXIES", "")
+                .output().unwrap()
+        }).await.unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    #[cfg(feature = "memory")]
+    crate::data::db::with_test_database(completed_password_login_suite()).await;
+    #[cfg(feature = "redis")]
+    {
+        crate::data::store::init().await.unwrap();
+        crate::data::db::init().await.unwrap();
+        completed_password_login_suite().await;
+    }
+}
