@@ -140,9 +140,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   concurrent-create errors are benign only for `42P04`, or `23505` on
   `pg_database_datname_index`, after a fresh existence query confirms the target.
   `data/store/`: selected profile interface; `memory.rs` persistence (backup at
-  `CONFIG_PATH/memory.bin`, `STORE_MAX_MEMORY_MB` validated at startup),
-  `redis.rs` init/readiness and Redis TLS/credential settings (`settings.rs`).
-  Redis uses verified TLS for `rediss://`, public roots by default or `REDIS_CA_FILE`, and
+  `.stargate/memory.bin`, next to the edge SQLite database;
+  `STORE_MAX_MEMORY_MB` validated at startup), `redis.rs` init/readiness and
+  Redis TLS/credential settings (`settings.rs`). Redis uses verified TLS for
+  `rediss://`, public roots by default or `REDIS_CA_FILE`, and
   separate credentials without URL encoding. The store, limiter, and audit relay
   share the same pool; URL credentials cannot be combined with separate fields.
   `crates/store/src/keys.rs` owns every state-key name:
@@ -962,7 +963,7 @@ the same logical columns on PostgreSQL and SQLite.
 
 | Var                                                                                    | Default                                | Purpose                                                                                                                             |
 | -------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `CONFIG_PATH`                                                                          | `.stargate`                            | Runtime directory: gateway/policy seed files and the in-memory store backup (`memory.bin`)                                          |
+| `CONFIG_PATH`                                                                          | `.stargate`                            | Gateway/policy seed directory (read-only in the chart); the edge data lives in `.stargate` under the working directory              |
 | `CONFIG_FILENAME`                                                                      | `config.yaml`                          | Gateway seed filename, used only when its database document is absent                                                               |
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
 | `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |

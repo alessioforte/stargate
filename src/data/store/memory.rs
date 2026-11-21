@@ -7,6 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use store::{MemoryStore, memory::MemoryStoreConfig};
 
 const MAX_MEMORY_ENV: &str = "STORE_MAX_MEMORY_MB";
+/// The writable edge data directory, next to `sqlite.db` and `jwks/`. It is
+/// distinct from `CONFIG_PATH`, which holds the read-only seed files in the
+/// chart.
+const DATA_DIR: &str = ".stargate";
 const MEMORY_BACKUP_FILE: &str = "memory.bin";
 const DEFAULT_MEMORY_BACKUP_INTERVAL_SECS: u64 = 30;
 const DEFAULT_MEMORY_BACKUP_WRITE_THRESHOLD: u64 = 100;
@@ -16,7 +20,7 @@ const DEFAULT_MAX_MEMORY_MB: usize = 100;
 static RESTORE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 static BACKUP_TASK_STARTED: AtomicBool = AtomicBool::new(false);
 static MAX_MEMORY_MB: OnceLock<NonZeroUsize> = OnceLock::new();
-static MEMORY_BACKUP_PATH: Lazy<PathBuf> = Lazy::new(|| backup_path_in(&crate::conf::config_dir()));
+static MEMORY_BACKUP_PATH: Lazy<PathBuf> = Lazy::new(backup_path);
 
 pub static STORE: Lazy<MemoryStore> = Lazy::new(|| {
     let config = MemoryStoreConfig {
@@ -48,10 +52,11 @@ fn max_memory_mb() -> usize {
         .get()
 }
 
-/// The snapshot lives inside the configured runtime directory (`CONFIG_PATH`),
-/// like the gateway seeds and the other runtime assets.
-fn backup_path_in(config_dir: &str) -> PathBuf {
-    Path::new(config_dir).join(MEMORY_BACKUP_FILE)
+/// The snapshot lives in the writable edge data directory, next to
+/// `sqlite.db`, not in `CONFIG_PATH` (which the chart mounts read-only for the
+/// seed files).
+fn backup_path() -> PathBuf {
+    Path::new(DATA_DIR).join(MEMORY_BACKUP_FILE)
 }
 
 pub async fn init() -> &'static MemoryStore {
@@ -76,7 +81,8 @@ pub fn use_store() -> &'static MemoryStore {
 ///
 /// # What it does
 ///
-/// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`] (`CONFIG_PATH/memory.bin`, `.stargate/memory.bin` by default).
+/// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`] (`.stargate/memory.bin`,
+///    on the same volume as the edge SQLite database).
 /// 2. Replaces the contents of the already-initialised global [`STORE`] (empty at this
 ///    point since the `Lazy` constructor does not populate any data) via
 ///    `MemoryStore::absorb`, which also resets operational stats to zero so metrics
@@ -231,14 +237,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_backup_lives_under_the_config_path() {
-        assert_eq!(
-            backup_path_in(".stargate"),
-            Path::new(".stargate/memory.bin")
-        );
-        assert_eq!(
-            backup_path_in("/srv/stargate"),
-            Path::new("/srv/stargate/memory.bin")
-        );
+    fn the_backup_lives_next_to_the_edge_database() {
+        assert_eq!(backup_path(), Path::new(".stargate/memory.bin"));
     }
 }
