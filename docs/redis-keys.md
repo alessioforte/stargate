@@ -45,7 +45,7 @@ subjects never appear in a key or a tag.
 | `{f:<family id>}:refresh` | Rotating OAuth refresh-token family | refresh-token TTL |
 | `{i:<id>}:authorize` | Parked authorization request | 10 min |
 | `{i:<id>}:logout` | Parked RP-initiated logout request | 10 min |
-| `{o:<state>}:state` | Social sign-in state | 5 min |
+| `{o:<state>}:state` | Social sign-in state consumed with `GETDEL` | 5 min |
 | `{a:<client id>}:assertion:<jti hash>` | Accepted `private_key_jwt` assertion | assertion expiry |
 | `{otp:<challenge>}:passwordless` | Passwordless email login challenge | OTP TTL |
 | `{otp:<challenge>}:login` | MFA challenge of a pending login | OTP TTL |
@@ -58,9 +58,12 @@ subjects never appear in a key or a tag.
 | `{em:<email hash>}:verification-lookup` | Address → verification request id | 1 h |
 | `{sg:<sid>}:signup` | Sign-up copy created after verification | 1 h |
 | `{em:<email hash>}:email:<flow>` | Per-recipient email throttle | 1 h |
-| `{ip:<ip>}:login` | Failed logins from one address | 5 min |
-| `{u:<user_id>}:login:<ip>` | Failed logins against a user from an address | 5 min |
-| `{id:<identifier hash>}:login:<ip>` | Failed logins against a login identifier | 5 min |
+| `{ip:<ip>}:login-attempts` | Reserved password attempts from one address | 5 min from the first reservation |
+| `{u:<user_id>}:login-attempts:<ip>` | Reserved password attempts against a user from one address | 5 min from the first reservation |
+| `{id:<identifier hash>}:login-attempts:<ip>` | Reserved password attempts for an unknown identifier from one address | 5 min from the first reservation |
+| `{u:<user_id>}:login-known:<ip>` | Recognition deadline of a completed password login from this address | 30 days, renewed on completed password login |
+| `{u:<user_id>}:login-attempts` | Account-wide password attempts and backoff timestamp | 5 min from the last reservation |
+| `{id:<identifier hash>}:login-attempts` | Password attempts and backoff for an unknown identifier across addresses | 5 min from the last reservation |
 | `{ip:<ip>}:ingress` | Per-address ingress allowance | limiter |
 | `{sub:<subject>}:rate` / `:quota` | Subject rate limit and quota buckets | limiter |
 | `{org:<org_id>}:rate` / `:quota` | Organization rate limit and quota buckets | limiter |
@@ -76,6 +79,12 @@ keeps the window marker and the counter as fields of one hash key.
 
 IP addresses may be IPv6 (`{ip:2001:db8::1}:ingress`): the colons belong to the
 tag and do not change slot selection.
+
+The [password login guard](config-v1.md#password-login-guard) reserves each
+bucket with a single-key atomic update. The source and account keys can occupy
+different slots, so a later denial refunds earlier reservations for that
+request. A live `login-known` deadline lets that account/address pair skip the
+account-wide backoff bucket. Both address-related buckets are always enforced.
 
 ## Redis Cluster rules
 

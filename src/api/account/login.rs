@@ -1,7 +1,7 @@
 use super::{AuthResponse, UserCredentials};
 use crate::api::account::credentials::expired::maybe_password_expired_response;
 use crate::api::account::otp::{LoginMfaRequiredResponse, maybe_start_login_mfa};
-use crate::api::account::session::issue_user_session;
+use crate::api::account::session::issue_password_session;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::login_guard;
 use crate::web::request::RequestExt;
@@ -52,11 +52,12 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         return Ok(response);
     }
 
-    issue_user_session(
+    issue_password_session(
         user,
         auth_time,
         credentials.org_id.as_deref(),
         vec![oidc::authentication::AMR_PASSWORD.to_string()],
+        &client_ip,
     )
     .await
 }
@@ -85,63 +86,43 @@ pub(crate) async fn verify_login_password(
         }
     };
 
-    let allowed = login_guard::check_login_allowed(&throttle)
-        .await
-        .map_err(login_guard_unavailable)?;
-
-    if !allowed {
-        let mut err = ErrorResponse::new(ErrorCode::AuthLoginRateLimited);
-        err.insert_header("Retry-After", &login_guard::lockout_seconds().to_string());
-        return Err(err);
-    }
-
-    let Some(user) = user else {
-        // Verify against a dummy hash so the unknown-user path takes about as
-        // long as the valid-user path, preventing username enumeration via
-        // response timing.
-        crate::iam::pwd::hash::verify_password(
-            password.to_string(),
-            crate::iam::pwd::hash::dummy_hash(),
-        )
-        .await?;
-        login_guard::record_failed_attempt(&throttle)
-            .await
-            .map_err(login_guard_unavailable)?;
-        return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
+    let attempt = match throttle.reserve().await.map_err(login_guard_unavailable)? {
+        login_guard::Admission::Allowed(attempt) => attempt,
+        login_guard::Admission::Limited { retry_after } => {
+            let mut error = ErrorResponse::new(ErrorCode::AuthLoginRateLimited);
+            error.insert_header("Retry-After", &retry_after.to_string());
+            return Err(error);
+        }
     };
 
-    let user_credential = crate::data::db::get_credential(&user.id, CredentialType::Password)
-        .await
-        .map_err(ErrorResponse::internal)?;
-
-    let Some(user_credential) = user_credential else {
-        crate::iam::pwd::hash::verify_password(
-            password.to_string(),
-            crate::iam::pwd::hash::dummy_hash(),
-        )
-        .await?;
-        login_guard::record_failed_attempt(&throttle)
-            .await
-            .map_err(login_guard_unavailable)?;
-        return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
+    let checked = async {
+        let credential = match user.as_ref() {
+            Some(user) => crate::data::db::get_credential(&user.id, CredentialType::Password)
+                .await
+                .map_err(ErrorResponse::internal)?,
+            None => None,
+        };
+        // Use the same Argon2 path for unknown users and users without a password.
+        let hash = credential
+            .as_ref()
+            .map(|credential| credential.value.clone())
+            .unwrap_or_else(crate::iam::pwd::hash::dummy_hash);
+        let check = crate::iam::pwd::hash::check_password(password.to_string(), hash).await?;
+        Ok::<_, ErrorResponse>((credential, check))
+    }
+    .await;
+    let (credential, password_check) = match checked {
+        Ok(checked) => checked,
+        Err(error) => {
+            attempt.refund().await;
+            return Err(error);
+        }
     };
 
-    let password_check =
-        crate::iam::pwd::hash::check_password(password.to_string(), user_credential.value.clone())
-            .await?;
-    if !password_check.valid {
-        login_guard::record_failed_attempt(&throttle)
-            .await
-            .map_err(login_guard_unavailable)?;
+    let (Some(user), Some(user_credential), true) = (user, credential, password_check.valid) else {
         return Err(ErrorResponse::new(ErrorCode::AuthInvalidCredentials));
-    }
-
-    if let Err(error) = login_guard::clear_subject_attempts(&throttle).await {
-        tracing::warn!(
-            "Failed to clear login attempts after successful login: {}",
-            error
-        );
-    }
+    };
+    attempt.refund().await;
 
     if password_check.needs_rehash {
         spawn_credential_rehash(
@@ -195,7 +176,6 @@ mod tests {
     use crate::iam::pwd::hash::with_exhausted_budget;
     use ::db::ent::{Profile, TrustedAuditContext};
     use axum::response::IntoResponse;
-    use store::AtomicStore;
 
     #[tokio::test]
     async fn overload_is_identical_for_known_missing_and_passwordless_users_without_failed_attempts()
@@ -238,13 +218,15 @@ mod tests {
                 assert_eq!(response.headers().get_all("retry-after").iter().count(), 1);
                 assert_eq!(response.headers()["retry-after"], "10");
             }
-            assert_eq!(
-                crate::data::store::use_store()
-                    .get_i64(&store::keys::account::login_ip(ip))
-                    .await
-                    .unwrap(),
-                None
-            );
+            // The overloads left enough room for the entire source allowance.
+            for n in 0..20 {
+                let username = format!("probe-{n}-{suffix}");
+                let throttle = login_guard::LoginThrottle::for_identifier(ip, &username);
+                assert!(matches!(
+                    throttle.reserve().await.unwrap(),
+                    login_guard::Admission::Allowed(_)
+                ));
+            }
         })
         .await;
     }

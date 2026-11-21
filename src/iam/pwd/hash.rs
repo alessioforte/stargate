@@ -99,15 +99,6 @@ static DUMMY_HASH: LazyLock<String> = LazyLock::new(|| {
         .expect("failed to precompute dummy password hash")
 });
 
-/// Verify a password against an Argon2 hash on the blocking pool.
-///
-/// Mismatches and malformed hashes return false; admission errors remain distinct.
-pub async fn verify_password(password: String, hash: String) -> Result<bool, HashError> {
-    budget::current()
-        .run("verify", move || Hash::verify(&password, &hash).is_ok())
-        .await
-}
-
 /// Hash on the bounded blocking pool, with a five-second admission deadline.
 pub async fn hash_password(password: String) -> Result<String, HashError> {
     budget::current()
@@ -153,10 +144,6 @@ mod tests {
         with_exhausted_budget(async {
             assert!(matches!(
                 check_password("pw".into(), "hash".into()).await,
-                Err(HashError::Overloaded)
-            ));
-            assert!(matches!(
-                verify_password("pw".into(), "hash".into()).await,
                 Err(HashError::Overloaded)
             ));
             assert!(matches!(

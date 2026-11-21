@@ -186,22 +186,31 @@ pub mod account {
         scoped(&format!("em:{}", digest(email)), &format!("email:{flow}"))
     }
 
-    /// Failed logins from one client address.
+    /// Password attempts from one client address.
     pub fn login_ip(client_ip: &str) -> String {
-        scoped(&format!("ip:{client_ip}"), "login")
+        scoped(&format!("ip:{client_ip}"), "login-attempts")
     }
 
-    /// Failed logins against one user from an address.
-    pub fn login_user(user_id: &str, client_ip: &str) -> String {
-        scoped(&format!("u:{user_id}"), &format!("login:{client_ip}"))
+    /// Password attempts against one account, across all addresses or from one address.
+    pub fn login_user(user_id: &str, client_ip: Option<&str>) -> String {
+        login_attempts(&format!("u:{user_id}"), client_ip)
     }
 
-    /// Failed logins against an identifier typed at login, from an address.
-    pub fn login_identifier(identifier: &str, client_ip: &str) -> String {
-        scoped(
-            &format!("id:{}", digest(identifier)),
-            &format!("login:{client_ip}"),
-        )
+    /// Source address of a completed password login for this account.
+    pub fn login_known(user_id: &str, client_ip: &str) -> String {
+        scoped(&format!("u:{user_id}"), &format!("login-known:{client_ip}"))
+    }
+
+    /// Password attempts for an unknown identifier, across all addresses or from one address.
+    pub fn login_identifier(identifier: &str, client_ip: Option<&str>) -> String {
+        login_attempts(&format!("id:{}", digest(identifier)), client_ip)
+    }
+
+    fn login_attempts(tag: &str, client_ip: Option<&str>) -> String {
+        match client_ip {
+            Some(ip) => scoped(tag, &format!("login-attempts:{ip}")),
+            None => scoped(tag, "login-attempts"),
+        }
     }
 }
 
@@ -296,8 +305,11 @@ mod tests {
             account::signup(sid),
             account::email_throttle("signup", "alice@example.com"),
             account::login_ip("203.0.113.1"),
-            account::login_user("01JZ00000000000000000000U1", "203.0.113.1"),
-            account::login_identifier("alice@example.com", "203.0.113.1"),
+            account::login_user("01JZ00000000000000000000U1", Some("203.0.113.1")),
+            account::login_user("01JZ00000000000000000000U1", None),
+            account::login_known("01JZ00000000000000000000U1", "203.0.113.1"),
+            account::login_identifier("alice@example.com", Some("203.0.113.1")),
+            account::login_identifier("alice@example.com", None),
             limits::ingress("203.0.113.1"),
             limits::subject_rate("01JZ00000000000000000000U1"),
             limits::subject_quota("01JZ00000000000000000000U1"),
@@ -327,8 +339,8 @@ mod tests {
             tag(&otp::verified(sid, "login"))
         );
         assert_eq!(
-            tag(&account::login_user(user, "203.0.113.1")),
-            tag(&account::login_user(user, "203.0.113.2"))
+            tag(&account::login_user(user, Some("203.0.113.1"))),
+            tag(&account::login_user(user, None))
         );
         assert_eq!(
             tag(&limits::subject_rate(user)),

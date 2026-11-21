@@ -19,6 +19,9 @@ pub trait Store: Send + Sync {
     /// Get a value from the store.
     async fn get<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>>;
 
+    /// Atomically retrieve and remove a live value.
+    async fn take<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>>;
+
     /// Set a value in the store.
     async fn set<T: SerializeValue>(
         &self,

@@ -382,6 +382,32 @@ impl Store for MemoryStore {
         self.get_if_not_expired(key)
     }
 
+    async fn take<T: DeserializeValue>(&self, key: &str) -> StoreResult<Option<T>> {
+        if key.trim().is_empty() {
+            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
+        }
+
+        let DashEntry::Occupied(entry) = self.data.entry(key.to_string()) else {
+            return Ok(None);
+        };
+        if self.store_value_is_expired_at(entry.get(), self.get_cached_now()) {
+            entry.remove();
+            self.stats
+                .expired_entries_cleaned
+                .fetch_add(1, Ordering::Relaxed);
+            return Ok(None);
+        }
+        if !matches!(entry.get(), StoreValue::Simple(..)) {
+            return Err(self.wrong_type_error());
+        }
+
+        let StoreValue::Simple(data, _) = entry.remove() else {
+            unreachable!("entry type checked under the same lock");
+        };
+        self.stats.deletes.fetch_add(1, Ordering::Relaxed);
+        self.deserialize(&data).map(Some)
+    }
+
     async fn set<T: SerializeValue>(
         &self,
         key: &str,

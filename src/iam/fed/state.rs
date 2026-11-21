@@ -37,11 +37,8 @@ pub async fn take_oauth_state(state: &str) -> Result<Option<OAuthState>, store::
     }
     let store = use_store();
     let key = store::keys::oauth::state(state);
-    let record = store.get::<OAuthState>(key.as_str()).await?;
-    if record.is_some() {
-        store.delete(key.as_str()).await?;
-    }
-    Ok(record)
+    // RFC 9700 §2.1 requires single-use state tokens for CSRF protection.
+    store.take(&key).await
 }
 
 #[cfg(all(test, feature = "memory"))]

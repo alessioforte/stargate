@@ -39,3 +39,17 @@ pub(crate) async fn issue_user_session(
 ) -> Result<Response, ErrorResponse> {
     session_response(start_user_session(user, auth_time, requested_org_id, amr).await?)
 }
+
+/// Complete a password login and remember its server-resolved source address.
+pub(crate) async fn issue_password_session(
+    user: db::ent::User,
+    auth_time: usize,
+    requested_org_id: Option<&str>,
+    amr: Vec<String>,
+    client_ip: &str,
+) -> Result<Response, ErrorResponse> {
+    let user_id = user.id.clone();
+    let response = issue_user_session(user, auth_time, requested_org_id, amr).await?;
+    crate::iam::auth::login_guard::record_success(&user_id, client_ip).await;
+    Ok(response)
+}

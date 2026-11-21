@@ -578,9 +578,10 @@ Source layout:
   `interactions.rs` there is the browser side (interaction cookie, hosted page URLs).
 - `src/api/social`: Google/GitHub consumer login. Browsers start at
   `/oauth/{provider}/start?return_to=` (state bound to an HttpOnly `social_state` cookie,
-  `Path=/oauth`), the callback `/oauth/{provider}` signs in (`start_user_session`, amr
-  `fed`) and redirects to the auth app's org picker then `return_to`, or to its login
-  page with `error=social_*`; `return_to` must be a path or a URL on the issuer /
+  `Path=/oauth`), the callback `/oauth/{provider}` consumes the state atomically,
+  signs in (`start_user_session`, amr `fed`), and redirects to the auth app's org
+  picker then `return_to`, or to its login page with `error=social_*`.
+  `return_to` must be a path or a URL on the issuer /
   `OAUTH_BASE_URL` / `AUTH_PUBLIC_BASE_URL` / `TRUSTED_ORIGINS` / `CORS_ORIGINS` origins or
   the one the request reached (else `400`, logged). `POST /oauth/state` states (API
   clients) get JSON tokens.
@@ -1184,7 +1185,14 @@ credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
 the console or other keys behind the same IP. `ingress.on_store_error` governs both IAM checks: store errors/timeouts pass
 without allowance headers by default; `deny` returns `503 iam.limiter_unavailable`
 with `Retry-After: 10`. Invalid limit configuration remains `500`.
-Login brute force is handled separately by `iam/auth/login_guard.rs` and OTP throttles.
+Password verification reserves an attempt atomically in each of three buckets
+(`iam/auth/login_guard.rs`): per IP, per account and IP, and per account across IPs.
+A valid password refunds its own reservations. The account-wide bucket uses
+bounded progressive backoff. A completed password login (JSON, OAuth form or MFA
+completion) recognizes the server-resolved account/IP pair for 30 days. This
+skips only the account-wide pause. The per-IP and account/IP limits always apply.
+See "Password login guard" in `docs/config-v1.md` for defaults and retry behavior.
+OTP flows have their own throttles.
 
 ## Error Response Format
 
