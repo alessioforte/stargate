@@ -65,8 +65,8 @@ subjects never appear in a key or a tag.
 | `{u:<user_id>}:login-attempts` | Account-wide password attempts and backoff timestamp | 5 min from the last reservation |
 | `{id:<identifier hash>}:login-attempts` | Password attempts and backoff for an unknown identifier across addresses | 5 min from the last reservation |
 | `{ip:<ip>}:ingress` | Per-address ingress allowance | limiter |
-| `{sub:<subject>}:rate` / `:quota` | Subject rate limit and quota buckets | limiter |
-| `{org:<org_id>}:rate` / `:quota` | Organization rate limit and quota buckets | limiter |
+| `{sub:<subject>}:rate` / `:quota` | Subject rate limit and short quota buckets (second, minute, hour) | limiter |
+| `{org:<org_id>}:rate` / `:quota` | Organization rate limit and short quota buckets | limiter |
 | `{ip:<ip>}:org-rate` / `:org-quota` | Organization limits charged to the address | limiter |
 | `{org:<org_id>}:limit-overrides` | Cached named-limit overrides of an org | 60 s |
 | `{admin:<user|key>:<id>}:requests` | An admin principal's own bucket | limiter |
@@ -74,8 +74,10 @@ subjects never appear in a key or a tag.
 The named-limiter suffix is appended by `crates/lim`: `Limiter::check` turns the
 key above into `<key>:<limiter name>`, after the tag, so two named limits never
 share state and the key keeps its slot. The token-bucket strategy declares two
-keys, `<key>:tokens` and `<key>:time`; both keep the tag. The quota tracker
-keeps the window marker and the counter as fields of one hash key.
+keys, `<key>:tokens` and `<key>:time`; both keep the tag. The short quota
+tracker keeps the window marker and the counter as fields of one hash key.
+Calendar-window quotas (day and longer) keep their balance in SQL instead and
+never touch a Redis key.
 
 IP addresses may be IPv6 (`{ip:2001:db8::1}:ingress`): the colons belong to the
 tag and do not change slot selection.
@@ -93,7 +95,7 @@ in one command, with no `SCAN` or per-address index.
 - A command, Lua script or transaction may only touch keys with the same tag.
   The schema makes every co-accessed set share one tag by construction.
 - Lua scripts declare **all** keys they touch in `KEYS`; the token bucket
-  receives both of its keys, and the quota tracker derives no key inside the
+  receives both of its keys, and the short quota tracker derives no key inside the
   script.
 - Batch store operations split their work by tag and send one pipeline per
   slot. `RedisStore::batch_get`, `batch_set`, `batch_delete` and `batch_exists`
