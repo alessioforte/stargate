@@ -196,7 +196,9 @@ mod tests {
             use_store()
                 .set(
                     &store::keys::session::subject(&sid),
-                    &Subject::from(user.clone()),
+                    &crate::iam::sess::subjects::PublishedSubject::from(Subject::from(
+                        user.clone(),
+                    )),
                     Some(3600),
                 )
                 .await

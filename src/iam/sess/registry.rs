@@ -14,6 +14,7 @@
 //! Every function that ends sessions here also notifies the relying parties
 //! linked to them (OIDC Back-Channel Logout, see `backchannel_logout`).
 
+use super::subjects::{self, Publication};
 use crate::data::store::use_store;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
@@ -21,7 +22,7 @@ use crate::iam::auth::subject::{Subject, SubjectType};
 use crate::iam::oidc::backchannel_logout::{self, LogoutDelivery};
 use db::ent::OrgMembership;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use store::{Store, StoreError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,130 +429,66 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
     Ok(revoked)
 }
 
-struct SubjectState {
-    base: Subject,
-    roles: HashMap<String, String>,
-}
-
-impl SubjectState {
-    fn for_org(&self, org_id: Option<&str>) -> Option<Subject> {
-        let mut subject = self.base.clone();
-        if let Some(org_id) = org_id {
-            subject.org_role = Some(self.roles.get(org_id)?.clone());
-            subject.org_id = Some(org_id.to_string());
-        }
-        Some(subject)
-    }
-}
-
-async fn publish_current_subjects<T, Fut>(
-    user_id: &str,
-    publish: impl FnOnce(SubjectState) -> Fut + Send + 'static,
-) -> anyhow::Result<Option<T>>
-where
-    T: Send + 'static,
-    Fut: std::future::Future<Output = T> + Send + 'static,
-{
-    let db = crate::data::db::service();
-    let user_id = user_id.to_owned();
-    #[cfg(test)]
-    let pause = super::test_support::Pause::current();
-
-    // A cancelled HTTP request must not release the SQL lock while a queued
-    // Redis write can still run on its multiplexed connection.
-    tokio::spawn(async move {
-        #[cfg(test)]
-        if let Some(pause) = &pause {
-            pause.hit(super::test_support::Stage::SubjectLock).await;
-        }
-
-        db.with_locked_user_profile(&user_id, |user, memberships| async move {
-            let state = SubjectState {
-                base: Subject::from(user),
-                roles: memberships
-                    .into_iter()
-                    .map(|membership| (membership.organization.id, membership.role))
-                    .collect(),
-            };
-            #[cfg(test)]
-            if let Some(pause) = &pause {
-                pause.hit(super::test_support::Stage::SubjectWrite).await;
-            }
-            publish(state).await
-        })
-        .await
-    })
-    .await?
-}
-
 /// Reconcile a session after registration and before returning its tokens.
 pub(super) async fn reconcile_new_session(
     user_id: &str,
     sid: &str,
     org_id: Option<&str>,
 ) -> Result<(), ErrorResponse> {
-    let key = store::keys::session::subject(sid);
-    let org_id = org_id.map(str::to_owned);
-    publish_current_subjects(user_id, |state| async move {
-        let subject = state
-            .for_org(org_id.as_deref())
-            .ok_or_else(|| ErrorResponse::new(ErrorCode::SessionOrganizationMembershipRequired))?;
-        if !use_store()
-            .replace(&key, &subject)
-            .await
-            .map_err(ErrorResponse::internal)?
-        {
-            return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
-        }
-        Ok(())
-    })
+    match subjects::publish(
+        use_store(),
+        &crate::data::db::service(),
+        user_id,
+        sid,
+        org_id,
+    )
     .await
     .map_err(ErrorResponse::internal)?
-    .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
-}
-
-/// Rebuild the user's live subjects after a committed profile or membership
-/// mutation. The response waits for the update, and failures are logged
-/// because the SQL mutation has already committed.
-pub async fn refresh_user_subjects(user_id: &str) {
-    if let Err(error) = refresh_subjects_from_db(user_id).await {
-        tracing::error!(user_id, %error, "Failed to refresh user session subjects");
+    {
+        Publication::Updated => Ok(()),
+        Publication::Gone => Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid)),
+        Publication::MembershipRemoved => Err(ErrorResponse::new(
+            ErrorCode::SessionOrganizationMembershipRequired,
+        )),
     }
 }
 
-async fn refresh_subjects_from_db(user_id: &str) -> anyhow::Result<()> {
-    let store = use_store();
-    let entries = store
+/// Finish updating the user's live sessions even if the HTTP caller disconnects
+/// after its SQL mutation committed.
+pub async fn refresh_user_subjects(user_id: &str) {
+    let db = crate::data::db::service();
+    let id = user_id.to_owned();
+    let work = async move {
+        if let Err(error) = refresh_subjects_from_db(&db, &id).await {
+            tracing::error!(user_id = id, %error, "Failed to refresh user session subjects");
+        }
+    };
+    #[cfg(test)]
+    let work = super::test_support::inherit_pause(work);
+    if let Err(error) = tokio::spawn(work).await {
+        tracing::error!(user_id, %error, "Session publication worker failed");
+    }
+}
+
+async fn refresh_subjects_from_db(db: &db::service::Service, user_id: &str) -> anyhow::Result<()> {
+    let entries = use_store()
         .hgetall::<SessionIndexEntry>(&index_key(user_id))
         .await?;
-    if entries.is_empty() {
-        return Ok(());
+    #[cfg(test)]
+    super::test_support::pause_at(super::test_support::Stage::IndexRead).await;
+    let mut missing_orgs = HashSet::new();
+    for (sid, entry) in entries {
+        match subjects::publish(use_store(), db, user_id, &sid, entry.org_id.as_deref()).await {
+            Ok(Publication::MembershipRemoved) => missing_orgs.extend(entry.org_id),
+            Ok(Publication::Updated | Publication::Gone) => {}
+            Err(error) => {
+                tracing::error!(user_id, sid, %error, "Failed to refresh user session subject")
+            }
+        }
     }
-
-    publish_current_subjects(user_id, move |state| async move {
-        let user_id = &state.base.id;
-        let now = now_unix();
-        let mut missing_orgs = HashSet::new();
-        for (sid, entry) in &entries {
-            if entry.expires_at_unix <= now {
-                continue;
-            }
-            let Some(subject) = state.for_org(entry.org_id.as_deref()) else {
-                missing_orgs.extend(entry.org_id.as_deref());
-                continue;
-            };
-            if let Err(error) = store
-                .replace(&store::keys::session::subject(sid), &subject)
-                .await
-            {
-                tracing::error!(user_id, sid, %error, "Failed to refresh user session subject");
-            }
-        }
-        for org_id in missing_orgs {
-            revoke_removed_org_sessions(user_id, org_id).await;
-        }
-    })
-    .await?;
+    for org_id in missing_orgs {
+        revoke_removed_org_sessions(user_id, &org_id).await;
+    }
     Ok(())
 }
 
@@ -596,8 +533,7 @@ pub async fn authenticated_session(
     }
 
     let sid = claims.sid.clone().ok_or_else(invalid)?;
-    let subject = use_store()
-        .get::<Subject>(&store::keys::session::subject(&sid))
+    let subject = crate::iam::sess::subjects::read(&sid)
         .await
         .map_err(|_| invalid())?
         .ok_or_else(invalid)?;

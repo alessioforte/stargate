@@ -5,7 +5,7 @@ use std::time::Duration;
 
 const WIDE: &[&str] = &["read", "write"];
 
-async fn set_grants(router: &Router, admin: (&str, &str), user: &User, grants: &[&str]) {
+pub(super) async fn set_grants(router: &Router, admin: (&str, &str), user: &User, grants: &[&str]) {
     let path = format!("/admin/users/{}/attrs", user.id);
     json_request(
         router,
@@ -95,7 +95,7 @@ async fn publication_races(router: &Router, admin: (&str, &str)) {
 
     // The older mutation commits first and resumes after the reduction has
     // replied. Its publication must read the reduced SQL state.
-    let pause = Pause::new(Stage::SubjectLock);
+    let pause = Pause::new(Stage::ProfileRead);
     let older = pause.scope(set_grants(router, admin, &user, WIDE));
     let reduce = async {
         pause.wait().await;
@@ -106,23 +106,15 @@ async fn publication_races(router: &Router, admin: (&str, &str)) {
     tokio::join!(older, reduce);
     assert_subject(tokens, &reduced, None).await;
 
-    // An older publication already holding its snapshot has to finish before
-    // the reduction can respond. Keep it parked while polling that request.
+    // The older writer captured wide SQL grants. The reduction republishes the
+    // same grants already in the store, so only its revision fences the late CAS.
     let pause = Pause::new(Stage::SubjectWrite);
     let older = pause.scope(set_grants(router, admin, &user, WIDE));
     let reduce = async {
         pause.wait().await;
-        let reduction = set_grants(router, admin, &user, &["read"]);
-        tokio::pin!(reduction);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(250), &mut reduction)
-                .await
-                .is_err(),
-            "reduction replied while an older SQL snapshot could still be published"
-        );
-        pause.resume();
-        reduction.await;
+        set_grants(router, admin, &user, &["read"]).await;
         assert_subject(tokens, &reduced, None).await;
+        pause.resume();
     };
     tokio::join!(older, reduce);
     assert_subject(tokens, &reduced, None).await;
@@ -131,10 +123,59 @@ async fn publication_races(router: &Router, admin: (&str, &str)) {
     registry::revoke_session(&sid).await.unwrap();
 }
 
+async fn renewed_during_publication(router: &Router, admin: (&str, &str)) {
+    let user = create_user().await;
+    let (sid, native, refresh, oauth) = start_session(&user, None).await;
+    assert!(registry::renew_session(&user.id, &sid, 3).await.unwrap());
+    let original_expiry = registry::get_session(&sid)
+        .await
+        .unwrap()
+        .unwrap()
+        .expires_at_unix;
+    let pause = Pause::new(Stage::IndexRead);
+    let publication = pause.scope(set_grants(router, admin, &user, &["read"]));
+    let renew = async {
+        pause.wait().await;
+        let refreshed = json_request(
+            router,
+            "PUT",
+            "/account/refresh-token",
+            ("authorization", &bearer(&native)),
+            json!({"refresh_token": refresh}),
+        )
+        .await;
+        assert!(
+            registry::get_session(&sid)
+                .await
+                .unwrap()
+                .unwrap()
+                .expires_at_unix
+                > original_expiry
+        );
+        while chrono::Utc::now().timestamp() < original_expiry as i64 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        pause.resume();
+        refreshed
+    };
+    let ((), refreshed) = tokio::join!(publication, renew);
+    assert_subject(
+        [refreshed["accessToken"].as_str().unwrap(), &oauth],
+        &json!({"grants":["read"]}),
+        None,
+    )
+    .await;
+    revise_session(&sid, |record| record.client_ids.clear()).await;
+    registry::revoke_session(&sid).await.unwrap();
+}
+
 pub(super) async fn run(router: &Router, admin: (&str, &str)) {
     tokio::time::timeout(Duration::from_secs(20), async {
         registration_races(router, admin).await;
         publication_races(router, admin).await;
+        renewed_during_publication(router, admin).await;
+        #[cfg(feature = "redis")]
+        super::delayed_publication::run(router, admin).await;
     })
     .await
     .expect("session race tests timed out");

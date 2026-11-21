@@ -1,7 +1,6 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
-use crate::iam::auth::subject::{Subject, SubjectType};
-use store::Store;
+use crate::iam::auth::subject::SubjectType;
 
 use super::types::AuthenticatedUser;
 
@@ -25,8 +24,7 @@ pub(crate) async fn authenticated_user(
         .sid
         .clone()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-    let subject = crate::data::store::use_store()
-        .get::<Subject>(&store::keys::session::subject(&sid))
+    let subject = crate::iam::sess::subjects::read(&sid)
         .await
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;

@@ -124,30 +124,21 @@ impl Service {
         Ok(())
     }
 
-    /// Read a user's authorization state and hold its write lock through publication.
-    pub async fn with_locked_user_profile<T, Fut>(
+    /// Read the attributes and selected membership role in one SQL snapshot.
+    pub async fn session_profile(
         &self,
         user_id: &str,
-        publish: impl FnOnce(User, Vec<OrgMembership>) -> Fut,
-    ) -> Result<Option<T>>
-    where
-        Fut: std::future::Future<Output = T>,
-    {
-        #[cfg(feature = "postgres")]
-        let mut tx = self.pool.begin().await?;
-        // SQLite has a single writer and no row-level FOR UPDATE.
-        #[cfg(feature = "sqlite")]
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let Some(user) = self.user.get_by_id_for_update(&mut tx, user_id).await? else {
-            return Ok(None);
-        };
-        let memberships = self
-            .organization
-            .get_orgs_by_user(&mut *tx, user_id)
-            .await?;
-        let result = publish(user, memberships).await;
-        tx.commit().await?;
-        Ok(Some(result))
+        org_id: Option<&str>,
+    ) -> Result<Option<(JsonValue, Option<String>)>> {
+        Ok(sqlx::query_as(
+            "SELECT u.attrs, m.role FROM users u
+             LEFT JOIN user_organizations m ON m.user_id = u.id AND m.org_id = $2
+             WHERE u.id = $1",
+        )
+        .bind(user_id)
+        .bind(org_id)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 
     /// Lightweight connectivity check — executes `SELECT 1`.

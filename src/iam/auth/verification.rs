@@ -93,12 +93,8 @@ async fn verify_session_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> 
         return None;
     }
 
-    let store = crate::data::store::use_store();
     let sid = claims.sid.clone()?;
-    match store
-        .get::<Subject>(&store::keys::session::subject(&sid))
-        .await
-    {
+    match crate::iam::sess::subjects::read(&sid).await {
         Ok(Some(subject)) => VerifiedIdentity::jwt(subject, sid, claims.auth_time),
         Ok(None) => None,
         Err(e) => {
@@ -147,10 +143,7 @@ async fn verify_oauth_claims(claims: jwt::Claims) -> Option<VerifiedIdentity> {
         return None;
     }
 
-    let subject = match crate::data::store::use_store()
-        .get::<Subject>(&store::keys::session::subject(&sid))
-        .await
-    {
+    let subject = match crate::iam::sess::subjects::read(&sid).await {
         Ok(Some(subject)) if subject.id == user_id => subject,
         Ok(_) => return None,
         Err(e) => {

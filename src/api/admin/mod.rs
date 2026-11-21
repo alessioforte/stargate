@@ -20,13 +20,11 @@ mod protection_tests;
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
-use crate::iam::auth::subject::Subject;
 use crate::{api::middleware::rate_limit, web::request::RequestExt};
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use store::Store;
 
 use authorization::{AdminAuthorization, parse_stored_permissions};
 
@@ -147,11 +145,7 @@ async fn resolve_authorization(
             match crate::iam::auth::revocation::is_revoked(&claims).await {
                 Ok(false) => {
                     let sid = claims.sid.clone().unwrap_or_default();
-                    let store = crate::data::store::use_store();
-                    let session = store
-                        .get::<Subject>(&store::keys::session::subject(&sid))
-                        .await
-                        .unwrap_or(None);
+                    let session = crate::iam::sess::subjects::read(&sid).await.unwrap_or(None);
                     if let Some(subject) = session.as_ref()
                         && subject.sub_type == crate::iam::auth::subject::SubjectType::User
                         && claims.sub_id.as_deref() == Some(subject.id.as_str())

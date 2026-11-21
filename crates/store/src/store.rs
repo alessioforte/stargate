@@ -38,8 +38,13 @@ pub trait Store: Send + Sync {
         ttl: Option<u64>,
     ) -> StoreResult<bool>;
 
-    /// Replace an existing value without changing its expiration.
-    async fn replace<T: SerializeValue>(&self, key: &str, value: &T) -> StoreResult<bool>;
+    /// Replace a live value only if its serialized bytes still match, keeping its expiration.
+    async fn replace_if_equal<T: SerializeValue>(
+        &self,
+        key: &str,
+        expected: &T,
+        value: &T,
+    ) -> StoreResult<bool>;
 
     /// Set the remaining lifetime of an existing key, leaving its value intact.
     async fn expire(&self, key: &str, ttl: u64) -> StoreResult<bool>;

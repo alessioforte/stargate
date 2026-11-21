@@ -1,4 +1,6 @@
 mod concurrency;
+#[cfg(feature = "redis")]
+mod delayed_publication;
 
 use crate::data::{db, store::use_store};
 use crate::iam::{
@@ -355,9 +357,20 @@ async fn suite() {
     // Represent a subject publication after a refresh has taken its SQL
     // snapshot. Any refresh that writes its own snapshot will erase this value.
     let key = store::keys::session::subject(&sid);
-    let mut published = subject(&native).await;
-    published.attrs = json!({"locale": "it", "publication": "new"});
-    assert!(use_store().replace(&key, &published).await.unwrap());
+    let current = use_store()
+        .get::<crate::iam::sess::subjects::PublishedSubject>(&key)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut published = current.clone();
+    published.revision += 1;
+    published.subject.attrs = json!({"locale": "it", "publication": "new"});
+    assert!(
+        use_store()
+            .replace_if_equal(&key, &current, &published)
+            .await
+            .unwrap()
+    );
 
     let refreshed = json_request(
         &router,
@@ -381,7 +394,7 @@ async fn suite() {
             refreshed["accessToken"].as_str().unwrap(),
             refreshed_oauth["access_token"].as_str().unwrap(),
         ],
-        &published.attrs,
+        &published.subject.attrs,
         None,
     )
     .await;
@@ -396,8 +409,7 @@ async fn suite() {
         json!({"active": false})
     );
     assert!(
-        use_store()
-            .get::<Subject>(&store::keys::session::subject(&org_sid))
+        crate::iam::sess::subjects::read(&org_sid)
             .await
             .unwrap()
             .is_none()

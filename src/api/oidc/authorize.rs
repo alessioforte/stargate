@@ -16,7 +16,6 @@ use oidc::scopes::{
     contains as scope_contains, parse_space_delimited, resolve_audience,
 };
 use std::collections::HashSet;
-use store::Store;
 use url::Url;
 
 /// The browser's signed-in user, from the session cookie.
@@ -561,8 +560,7 @@ pub(super) async fn current_authorized_user(
     let Some(sid) = claims.sid.as_deref().filter(|sid| !sid.is_empty()) else {
         return Ok(None);
     };
-    let Some(subject) = crate::data::store::use_store()
-        .get::<crate::iam::auth::subject::Subject>(&store::keys::session::subject(sid))
+    let Some(subject) = crate::iam::sess::subjects::read(sid)
         .await
         .map_err(OAuthErrorResponse::internal)?
     else {
