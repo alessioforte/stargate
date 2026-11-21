@@ -113,6 +113,11 @@ async fn serve() -> std::io::Result<()> {
         std::io::Error::other(error)
     })?;
     #[cfg(feature = "memory")]
+    conf::data::init().map_err(|error| {
+        tracing::error!("Invalid edge data directory settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
+    #[cfg(feature = "memory")]
     store::init_settings().map_err(|error| {
         tracing::error!("Invalid memory store settings: {error}");
         std::io::Error::other(error.to_string())
