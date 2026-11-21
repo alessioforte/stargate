@@ -131,14 +131,11 @@ pub async fn decide_consent(
     Ok(true)
 }
 
-pub async fn get(id: &str) -> OAuthResult<Option<PendingAuthorization>> {
+pub async fn get(id: &str) -> store::StoreResult<Option<PendingAuthorization>> {
     if !valid_id(id) {
         return Ok(None);
     }
-    crate::data::store::use_store()
-        .get(&key(id))
-        .await
-        .map_err(Into::into)
+    crate::data::store::use_store().get(&key(id)).await
 }
 
 /// Load and delete a parked request so it resumes at most once.
