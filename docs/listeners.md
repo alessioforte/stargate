@@ -33,7 +33,6 @@ LISTENER_PUBLIC_PLANES=identity,gateway
 LISTENER_PUBLIC_TRUSTED_PROXIES=10.42.0.0/16
 LISTENER_ADMIN_ADDRESS=127.0.0.1:5051
 LISTENER_ADMIN_PLANES=admin
-LISTENER_ADMIN_TRUSTED_PROXIES=10.42.0.0/16
 LISTENER_INTERNAL_ADDRESS=[::1]:5052
 LISTENER_INTERNAL_PLANES=admin
 LISTENER_INTERNAL_TLS=off
@@ -165,6 +164,6 @@ lets open connections finish within `SERVER_SHUTDOWN_TIMEOUT_SECS`. WebSocket
 connections are closed with `1001` as described in `AGENTS.md`.
 
 Because `PORT` does not apply with `LISTENERS`, the default issuer
-(`http://localhost:5050`) is meaningless there: set `JWT_ISSUER` or
-`OAUTH_BASE_URL` to the public URL. Declaring `LISTENERS` without either one stops
-startup.
+(`http://localhost:5050`) is meaningless there: set `JWT_ISSUER` to the public URL.
+Declaring `LISTENERS` without it stops startup; `OAUTH_BASE_URL` alone does not
+set the issuer.
