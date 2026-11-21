@@ -54,7 +54,8 @@ pub async fn bootstrap_instance(
             let nickname = nickname.unwrap_or_else(|| email.clone());
             if !db::ent::nickname_is_valid(&nickname, &email) {
                 bail!(
-                    "nickname must not be empty and may contain '@' only as the account's own email"
+                    "nickname must not be empty or exceed {} octets, and may contain '@' only as the account's own email",
+                    db::ent::MAX_NICKNAME_LEN
                 );
             }
             (

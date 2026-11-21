@@ -3346,6 +3346,27 @@ mod sqlite_tests {
         .await
     }
 
+    /// A valid 254-octet address, unique per call so repeated runs against a
+    /// shared PostgreSQL database do not collide.
+    fn email_254() -> String {
+        format!(
+            "{}@{}.{}.{}.{}",
+            ulid::Ulid::generate().to_string().to_lowercase(),
+            "b".repeat(63),
+            "c".repeat(63),
+            "e".repeat(63),
+            "f".repeat(35)
+        )
+    }
+
+    fn nickname_254() -> String {
+        format!(
+            "{}{}",
+            "n".repeat(228),
+            ulid::Ulid::generate().to_string().to_lowercase()
+        )
+    }
+
     #[tokio::test]
     async fn logins_resolve_canonical_emails_and_nicknames_by_shape() {
         let svc = test_service().await;
@@ -3398,14 +3419,7 @@ mod sqlite_tests {
     #[tokio::test]
     async fn email_column_accepts_254_characters_and_rejects_more() {
         let svc = test_service().await;
-        let accepted = format!(
-            "{}@{}.{}.{}",
-            "a".repeat(64),
-            "b".repeat(63),
-            "c".repeat(63),
-            "d".repeat(61)
-        );
-        assert_eq!(accepted.len(), 254);
+        let accepted = email_254();
         let user = create_identity(&svc, &accepted, "email-254")
             .await
             .expect("254-octet email");
@@ -3417,6 +3431,29 @@ mod sqlite_tests {
             .await
             .expect_err("255-octet email");
         assert!(error.to_string().contains("254"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn nickname_column_accepts_254_characters_and_rejects_more() {
+        let svc = test_service().await;
+
+        // Callers that omit the nickname default it to the email.
+        let email = email_254();
+        let user = create_identity(&svc, &email, &email)
+            .await
+            .expect("default nickname at 254 octets");
+        assert_eq!(user.nickname, email);
+
+        let at_limit = nickname_254();
+        let user = create_identity(&svc, &email_254(), &at_limit)
+            .await
+            .expect("explicit 254-octet nickname");
+        assert_eq!(user.nickname, at_limit);
+
+        let error = create_identity(&svc, &email_254(), &format!("{at_limit}n"))
+            .await
+            .expect_err("255-octet nickname");
+        assert!(error.to_string().contains("nickname"), "{error}");
     }
 
     #[tokio::test]
@@ -4805,6 +4842,27 @@ mod tests {
         ulid::Ulid::generate().to_string()
     }
 
+    /// A valid 254-octet address, unique per call so repeated runs against a
+    /// shared PostgreSQL database do not collide.
+    fn email_254() -> String {
+        format!(
+            "{}@{}.{}.{}.{}",
+            ulid::Ulid::generate().to_string().to_lowercase(),
+            "b".repeat(63),
+            "c".repeat(63),
+            "e".repeat(63),
+            "f".repeat(35)
+        )
+    }
+
+    fn nickname_254() -> String {
+        format!(
+            "{}{}",
+            "n".repeat(228),
+            ulid::Ulid::generate().to_string().to_lowercase()
+        )
+    }
+
     async fn create_identity(svc: &Service, email: &str, nickname: &str) -> Result<User> {
         svc.create_user(
             Profile::new(email.to_string(), nickname.to_string()),
@@ -4820,14 +4878,7 @@ mod tests {
     #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
     async fn email_column_accepts_254_characters_and_rejects_more() {
         let svc = test_service().await;
-        let accepted = format!(
-            "{}@{}.{}.{}",
-            "a".repeat(64),
-            "b".repeat(63),
-            "c".repeat(63),
-            "d".repeat(61)
-        );
-        assert_eq!(accepted.len(), 254);
+        let accepted = email_254();
         let user = create_identity(&svc, &accepted, &unique_nick())
             .await
             .expect("254-octet email");
@@ -4839,6 +4890,30 @@ mod tests {
             .await
             .expect_err("255-octet email");
         assert!(error.to_string().contains("254"), "{error}");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
+    async fn nickname_column_accepts_254_characters_and_rejects_more() {
+        let svc = test_service().await;
+
+        // Callers that omit the nickname default it to the email.
+        let email = email_254();
+        let user = create_identity(&svc, &email, &email)
+            .await
+            .expect("default nickname at 254 octets");
+        assert_eq!(user.nickname, email);
+
+        let at_limit = nickname_254();
+        let user = create_identity(&svc, &unique_email(), &at_limit)
+            .await
+            .expect("explicit 254-octet nickname");
+        assert_eq!(user.nickname, at_limit);
+
+        let error = create_identity(&svc, &unique_email(), &format!("{at_limit}n"))
+            .await
+            .expect_err("255-octet nickname");
+        assert!(error.to_string().contains("nickname"), "{error}");
     }
 
     #[tokio::test]

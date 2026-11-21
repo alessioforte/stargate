@@ -1,19 +1,22 @@
 -- no-transaction
 -- RFC 5321 §4.5.3.1.3: a forward-path is at most 256 octets including the
--- angle brackets, so an address is at most 254.
+-- angle brackets, so an address is at most 254. The default nickname is the
+-- email, so it needs the same room.
 --
--- SQLite does not enforce VARCHAR lengths, so the column is rebuilt to keep
--- the schema identical to PostgreSQL. The rebuild follows the documented
--- procedure: foreign keys are disabled around it, so DROP TABLE does not
--- cascade into the child tables, and the old and new tables keep the same ids.
+-- SQLite does not enforce VARCHAR lengths, so the columns are rebuilt to keep
+-- the schema identical to PostgreSQL. Foreign keys are disabled outside the
+-- transaction (the documented procedure), so DROP TABLE does not cascade into
+-- the child tables; the explicit transaction makes the rebuild atomic.
 PRAGMA foreign_keys = OFF;
+
+BEGIN;
 
 CREATE TABLE "users_new" (
     "id" TEXT PRIMARY KEY,
     "email" VARCHAR(254) NOT NULL UNIQUE,
     "given_name" VARCHAR(50),
     "family_name" VARCHAR(50),
-    "nickname" VARCHAR(50) NOT NULL UNIQUE,
+    "nickname" VARCHAR(254) NOT NULL UNIQUE,
     "picture" TEXT,
     "phone_number" VARCHAR(20) UNIQUE,
     "attrs" JSON NOT NULL DEFAULT '{}',
@@ -48,5 +51,7 @@ FROM "users";
 
 DROP TABLE "users";
 ALTER TABLE "users_new" RENAME TO "users";
+
+COMMIT;
 
 PRAGMA foreign_keys = ON;

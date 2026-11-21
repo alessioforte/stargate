@@ -1,5 +1,6 @@
 use crate::ent::{
-    MAX_EMAIL_LEN, User, canonical_email, canonical_nickname, email_fits_column, nickname_is_valid,
+    MAX_EMAIL_LEN, MAX_NICKNAME_LEN, User, canonical_email, canonical_nickname, email_fits_column,
+    nickname_is_valid,
 };
 use anyhow::{Result, ensure};
 use chrono::Utc;
@@ -291,7 +292,7 @@ fn ensure_email_fits_column(user: &User) -> Result<()> {
 fn ensure_nickname_is_valid(user: &User) -> Result<()> {
     ensure!(
         nickname_is_valid(&user.nickname, &user.email),
-        "nickname must not be empty and may contain '@' only as the account's own email"
+        "nickname must not be empty or exceed {MAX_NICKNAME_LEN} octets, and may contain '@' only as the account's own email"
     );
     Ok(())
 }

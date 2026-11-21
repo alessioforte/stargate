@@ -7,6 +7,10 @@ use serde_json::Value;
 /// 254 for the address itself.
 pub const MAX_EMAIL_LEN: usize = 254;
 
+/// Longest nickname the schema stores (`VARCHAR(254)`). The default nickname
+/// is the email, so it needs the same room.
+pub const MAX_NICKNAME_LEN: usize = 254;
+
 /// The stored and compared form of an email address. One mailbox is one
 /// account, whatever casing is used at signup, login, or recovery.
 pub fn canonical_email(raw: &str) -> String {
@@ -30,12 +34,16 @@ pub fn canonical_nickname(raw: &str) -> String {
 /// take another person's email as its handle.
 pub fn nickname_is_valid(nickname: &str, email: &str) -> bool {
     let nickname = canonical_nickname(nickname);
-    !nickname.is_empty() && (!nickname.contains('@') || nickname == canonical_email(email))
+    !nickname.is_empty()
+        && nickname.len() <= MAX_NICKNAME_LEN
+        && (!nickname.contains('@') || nickname == canonical_email(email))
 }
 
 #[cfg(test)]
 mod identity_tests {
-    use super::{MAX_EMAIL_LEN, canonical_nickname, email_fits_column, nickname_is_valid};
+    use super::{
+        MAX_EMAIL_LEN, MAX_NICKNAME_LEN, canonical_nickname, email_fits_column, nickname_is_valid,
+    };
 
     #[test]
     fn an_address_fits_the_column_up_to_254_octets() {
@@ -50,6 +58,16 @@ mod identity_tests {
             "a".repeat(64),
             "b".repeat(MAX_EMAIL_LEN - 64)
         )));
+    }
+
+    #[test]
+    fn a_nickname_fits_the_column_up_to_254_octets() {
+        let at_limit = "n".repeat(MAX_NICKNAME_LEN);
+        assert!(nickname_is_valid(&at_limit, "ada@example.com"));
+        assert!(!nickname_is_valid(
+            &"n".repeat(MAX_NICKNAME_LEN + 1),
+            "ada@example.com"
+        ));
     }
 
     #[test]
