@@ -203,11 +203,16 @@ mod tests {
         )
     }
 
-    async fn app_client(client_id: &str, enabled: bool, initiate_login_uri: Option<&str>) {
+    async fn app_client(
+        client_id: &str,
+        name: &str,
+        enabled: bool,
+        initiate_login_uri: Option<&str>,
+    ) {
         let mut client = OAuthClient::new(
             client_id.to_string(),
             None,
-            "Orders".to_string(),
+            name.to_string(),
             None,
             "none".to_string(),
             vec!["authorization_code".to_string()],
@@ -235,7 +240,7 @@ mod tests {
         let sid = email_verification::create_email_verification_request(&profile)
             .await
             .expect("pending email verification");
-        signup::create_signup_request(&sid, &profile)
+        signup::store_signup_request(&sid, &profile)
             .await
             .expect("pending signup");
         sid
@@ -275,7 +280,13 @@ mod tests {
     #[tokio::test]
     async fn a_signup_that_started_in_an_app_continues_there() {
         with_test_database(async {
-            app_client("orders", true, Some("https://orders.example/login")).await;
+            app_client(
+                "orders",
+                "Orders",
+                true,
+                Some("https://orders.example/login"),
+            )
+            .await;
             let sid = pending_signup(
                 "ada@example.com",
                 Some(LoginContinuation::new(
@@ -329,7 +340,13 @@ mod tests {
     #[tokio::test]
     async fn the_link_works_in_another_tab_and_after_the_interaction_expires() {
         with_test_database(async {
-            app_client("orders", true, Some("https://orders.example/login")).await;
+            app_client(
+                "orders",
+                "Orders",
+                true,
+                Some("https://orders.example/login"),
+            )
+            .await;
             let query = crate::iam::oidc::request::AuthorizationRequest {
                 client_id: Some("orders".to_string()),
                 ..Default::default()
@@ -360,7 +377,13 @@ mod tests {
     #[tokio::test]
     async fn a_client_disabled_before_completion_has_no_continuation() {
         with_test_database(async {
-            app_client("orders", true, Some("https://orders.example/login")).await;
+            app_client(
+                "orders",
+                "Orders",
+                true,
+                Some("https://orders.example/login"),
+            )
+            .await;
             let sid = pending_signup(
                 "edsger@example.com",
                 Some(LoginContinuation::new("orders", None)),
@@ -375,5 +398,148 @@ mod tests {
             assert_eq!(response.continue_url, None);
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn an_endpoint_written_outside_the_admin_api_has_no_continuation() {
+        with_test_database(async {
+            app_client("dangerous", "Dangerous", true, Some("javascript:alert(1)")).await;
+            let sid = pending_signup(
+                "ada@example.com",
+                Some(LoginContinuation::new("dangerous", None)),
+            )
+            .await;
+
+            let response = complete_signup(&sid).await;
+
+            assert_eq!(response.continue_url, None);
+            assert_eq!(response.client_name, None);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn an_invitation_keeps_the_app_the_administrator_chose() {
+        with_test_database(async {
+            app_client(
+                "orders",
+                "Orders",
+                true,
+                Some("https://orders.example/login"),
+            )
+            .await;
+            app_client(
+                "billing",
+                "Billing",
+                true,
+                Some("https://billing.example/login"),
+            )
+            .await;
+            let profile = PendingSignupProfile {
+                origin: SignupOrigin::Invitation,
+                continuation: Some(LoginContinuation::new("orders", None)),
+                ..PendingSignupProfile::self_service("grace@example.com", Locale::En)
+            };
+            let sid = email_verification::create_email_verification_request(&profile)
+                .await
+                .expect("pending email verification");
+            signup::store_signup_request(&sid, &profile)
+                .await
+                .expect("pending signup");
+            // A self-service request for the same address names another app.
+            email_verification::renew_email_verification_request(
+                &sid,
+                Some(LoginContinuation::new("billing", None)),
+            )
+            .await
+            .expect("renew request");
+
+            let response = complete_signup(&sid).await;
+
+            assert_eq!(response.client_name.as_deref(), Some("Orders"));
+        })
+        .await;
+    }
+
+    const SELF_SERVICE_CHILD: &str = "STARGATE_TEST_SELF_SERVICE_CONTINUATION";
+
+    /// A self-service signup completes only while `SIGNUP_MODE=open`, read once
+    /// per process, so the child runs with that setting.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_self_service_signup_follows_the_last_app_its_link_was_requested_from() {
+        if std::env::var_os(SELF_SERVICE_CHILD).is_some() {
+            with_test_database(async {
+                app_client(
+                    "orders",
+                    "Orders",
+                    true,
+                    Some("https://orders.example/login"),
+                )
+                .await;
+                app_client(
+                    "billing",
+                    "Billing",
+                    true,
+                    Some("https://billing.example/login"),
+                )
+                .await;
+                let profile = PendingSignupProfile {
+                    origin: SignupOrigin::SelfService,
+                    continuation: Some(LoginContinuation::new("orders", None)),
+                    ..PendingSignupProfile::self_service("ada@example.com", Locale::En)
+                };
+                let sid = email_verification::create_email_verification_request(&profile)
+                    .await
+                    .expect("pending email verification");
+                // The user opens the link: `GET /signup` stores the copy the
+                // completion page reads.
+                signup::store_signup_request(&sid, &profile)
+                    .await
+                    .expect("pending signup");
+                // A later registration request for the same address starts in
+                // another app.
+                email_verification::renew_email_verification_request(
+                    &sid,
+                    Some(LoginContinuation::new("billing", None)),
+                )
+                .await
+                .expect("renew request");
+
+                let response = complete_signup(&sid).await;
+
+                assert_eq!(response.client_name.as_deref(), Some("Billing"));
+            })
+            .await;
+            return;
+        }
+
+        let output = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(std::env::current_exe().expect("test binary"))
+                .args([
+                    "--exact",
+                    "api::signup::complete::tests::a_self_service_signup_follows_the_last_app_its_link_was_requested_from",
+                    "--nocapture",
+                ])
+                .env(SELF_SERVICE_CHILD, "1")
+                .env("SIGNUP_MODE", "open")
+                // Sign with an in-process secret: a child that generated its
+                // own keyring would race the parent's key files.
+                .env("JWT_ALGORITHM", "HS256")
+                .env(
+                    "JWT_SECRET",
+                    "test-secret-for-the-self-service-continuation-signup-child-0001",
+                )
+                .output()
+                .expect("run child test")
+        })
+        .await
+        .expect("child test task");
+
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

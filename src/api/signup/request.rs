@@ -74,11 +74,9 @@ pub async fn post_signup(
             .map_err(ErrorResponse::internal)?
         {
             Some(sid) => {
-                if let Some(continuation) = continuation {
-                    email_verification::set_continuation(&sid, continuation)
-                        .await
-                        .map_err(ErrorResponse::internal)?;
-                }
+                email_verification::renew_email_verification_request(&sid, continuation)
+                    .await
+                    .map_err(ErrorResponse::internal)?;
                 let locale = email_verification::get_email_verification_request(&sid)
                     .await
                     .map_err(ErrorResponse::internal)?
