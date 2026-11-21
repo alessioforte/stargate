@@ -1223,6 +1223,58 @@ Quota is selected independently from rate limiting. A router `quota` policy or
 subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
 limit and quota are selected, both checks run.
 
+### Quota windows
+
+`quota_tracker` has two classes, chosen by `period`:
+
+- `second`, `minute`, `hour` are **short quotas**. Their fixed-window counter
+  lives in the state store (Redis or the edge memory store) next to rate
+  limits. Losing the store resets them at most one window early.
+- `day`, `week`, `month`, `year` are **long quotas**. Their balance lives in the
+  `quota_usage` PostgreSQL/SQLite table, so a Redis flush, an eviction, or an
+  edge restart does not reset it. A long quota requires an explicit IANA
+  `timezone`; a week starts on Monday.
+
+Calendar periods use local midnight boundaries, so a daylight-saving day can be
+23 or 25 hours long. `anchor_day` (1..=28, `month` only) moves the start of a
+billing month to that day: for example, an organization billed on the 15th
+selects a limit with `anchor_day: 15` through `organizations.attrs.quota`.
+Different organizations can therefore select different named billing limits.
+Changing a window's period, time zone or anchor starts the current balance from
+zero, because the stored boundaries no longer describe the same window.
+
+```yaml
+limits:
+  monthly:
+    strategy: quota_tracker
+    params:
+      limit: 100000
+      period: month
+      timezone: Europe/Rome
+  billing-15:
+    strategy: quota_tracker
+    params:
+      limit: 500000
+      period: month
+      timezone: Europe/Rome
+      anchor_day: 15
+```
+
+Each replica reserves a batch with one atomic SQL statement and spends it in
+memory, so the request path performs no quota round trip. The batch starts at 1%
+of the limit (at most 1024 units) and halves as the remaining headroom shrinks.
+Reserved units count as used even if the replica crashes before spending them,
+so replicas can never exceed the limit; a crash can strand at most one batch,
+`max(1, min(limit / 100, 1024))` units. A denied request does not reserve
+anything.
+
+Long quotas are always **fail-closed**: a SQL failure or the `ingress.timeout`
+deadline returns `503 gateway.limiter_unavailable` even when the policy says
+`on_store_error: allow`, because admitting traffic without charging it would
+exceed the limit. The `x-quota-remaining` header reflects this replica's exact
+consumption plus its latest shared reservation; another replica's reservation
+made afterwards can lower it slightly. Short quotas keep the policy below.
+
 `rate_limit` and `quota` policies each accept `on_store_error: allow | deny`
 (default `allow`), independently for subject and organization checks. Attribute
 selections inherit the selected policy's setting; implicit default rate and
@@ -1237,6 +1289,13 @@ ingress:
   limit: ingress
   timeout: 250ms
   on_store_error: allow
+limits:
+  billing:
+    strategy: quota_tracker
+    params:
+      limit: 100000
+      period: month
+      timezone: Europe/Rome
 http:
   policies:
     api-rate:
@@ -1245,7 +1304,7 @@ http:
       on_store_error: allow
     billing-quota:
       kind: quota
-      limit: monthly
+      limit: billing
       on_store_error: deny
 ```
 
