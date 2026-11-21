@@ -1,7 +1,8 @@
 use super::repo::{
     AdminKeyRepository, AdminOverviewRepository, ApiKeyRepository, ConfigDocumentRepository,
     CredentialRepository, OAuthClientRepository, OAuthConsentRepository, OrganizationRepository,
-    OutboxRepository, ServiceAccountRepository, SuperAdminRepository, UserRepository,
+    OutboxRepository, QuotaRepository, ServiceAccountRepository, SuperAdminRepository,
+    UserRepository,
 };
 use crate::backend::Pool;
 use crate::db::{DbStore, InstanceBootstrapResult};
@@ -49,6 +50,7 @@ pub struct Service {
     service_account: ServiceAccountRepository,
     organization: OrganizationRepository,
     super_admin: SuperAdminRepository,
+    quota: QuotaRepository,
 }
 
 impl Service {
@@ -67,7 +69,16 @@ impl Service {
             service_account: ServiceAccountRepository::new(),
             organization: OrganizationRepository::new(),
             super_admin: SuperAdminRepository::new(),
+            quota: QuotaRepository::new(),
         }
+    }
+
+    /// Reserve a durable quota batch. See [`QuotaRepository::reserve`].
+    pub async fn reserve_quota(
+        &self,
+        reservation: crate::repo::QuotaReservation<'_>,
+    ) -> Result<Option<u64>> {
+        self.quota.reserve(&self.pool, reservation).await
     }
 
     pub fn pool_stats(&self) -> PoolStats {
