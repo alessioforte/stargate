@@ -660,7 +660,7 @@ async fn completed_password_login_suite() {
 
     let hash = pwd::hash::hash_password(PASSWORD.into()).await.unwrap();
     let user = create_user_with_password_hash(&hash).await;
-    let json_ip = "2001:db8:24::1";
+    let json_ip = "2001:db8:bbbb::1";
     let credentials = json!({"username": user.email, "password": PASSWORD});
 
     let wrong = json!({"username": user.email, "password": "wrong"});
@@ -693,7 +693,7 @@ async fn completed_password_login_suite() {
     );
     assert_remembered(&user, json_ip, true).await;
 
-    let form_ip = "2001:db8:24::2";
+    let form_ip = "2001:db8:bbbb::2";
     let interaction = interactions::park(AuthorizationRequest::default())
         .await
         .unwrap();
@@ -723,7 +723,7 @@ async fn completed_password_login_suite() {
 
     // Seed a delivered challenge so the real completion endpoint can be tested
     // without SMTP. The password was checked from this address before parking.
-    let mfa_ip = "2001:db8:24::3";
+    let mfa_ip = "2001:db8:bbbb::3";
     verify_login_password(mfa_ip, &user.email, PASSWORD)
         .await
         .unwrap();
@@ -791,7 +791,7 @@ async fn completed_password_login_suite() {
     for index in 0..4 {
         assert_eq!(
             verify_login_password(
-                &format!("2001:db8:25::{index}"),
+                &format!("2001:db8:cccc::{index}"),
                 &user.nickname,
                 "wrong-password",
             )
@@ -801,7 +801,7 @@ async fn completed_password_login_suite() {
             ErrorCode::AuthInvalidCredentials
         );
     }
-    let fresh_ip = "2001:db8:25::100";
+    let fresh_ip = "2001:db8:cccc::100";
     assert_eq!(
         verify_login_password(fresh_ip, &user.email, PASSWORD)
             .await

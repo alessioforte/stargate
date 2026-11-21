@@ -301,7 +301,7 @@ mod tests {
 
         let store = use_store();
         let user_id = ulid::Ulid::generate().to_string();
-        let known_ip = "2001:db8:23::1";
+        let known_ip = "2001:db8:aaaa::1";
         let throttle = LoginThrottle::for_user(known_ip, &user_id);
         let now = chrono::Utc::now().timestamp_millis();
         // Seed the account at maximum backoff so the assertions have a stable
@@ -335,7 +335,7 @@ mod tests {
         };
         attempt.refund().await;
 
-        let new_ip = LoginThrottle::for_user("2001:db8:23::2", &user_id);
+        let new_ip = LoginThrottle::for_user("2001:db8:aaaa::2", &user_id);
         assert!(matches!(
             new_ip.reserve().await.unwrap(),
             Admission::Limited { .. }
