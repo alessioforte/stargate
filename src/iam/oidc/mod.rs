@@ -1,5 +1,6 @@
 pub mod backchannel_logout;
 pub mod client_jwks;
+pub mod client_url;
 pub mod codes;
 pub mod continuation;
 pub mod http_client;

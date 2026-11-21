@@ -4,6 +4,7 @@ use super::{
 };
 use crate::api::admin::take_admin_audit_context;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::oidc::client_url::{is_client_endpoint_url, is_loopback_host};
 use crate::web::messages::{MessageCode, MessageResponse};
 use axum::Json;
 use axum::extract::Request;
@@ -340,7 +341,7 @@ fn validate_redirect_uris(redirect_uris: &[String]) -> Result<(), ErrorResponse>
 
         match parsed.scheme() {
             "https" => {}
-            "http" if is_loopback_redirect_host(parsed.host_str()) => {}
+            "http" if is_loopback_host(parsed.host_str()) => {}
             _ => {
                 return Err(
                     ErrorResponse::new(ErrorCode::OAuthClientRedirectUriInsecure)
@@ -350,22 +351,6 @@ fn validate_redirect_uris(redirect_uris: &[String]) -> Result<(), ErrorResponse>
         }
     }
     Ok(())
-}
-
-/// A client endpoint Stargate calls: an absolute URL without a fragment;
-/// HTTPS except on loopback hosts, as for redirect URIs.
-fn is_client_endpoint_url(uri: &str) -> bool {
-    if uri.contains('#') || uri.chars().any(char::is_whitespace) {
-        return false;
-    }
-    match url::Url::parse(uri) {
-        Ok(parsed) => match parsed.scheme() {
-            "https" => true,
-            "http" => is_loopback_redirect_host(parsed.host_str()),
-            _ => false,
-        },
-        Err(_) => false,
-    }
 }
 
 /// Back-Channel Logout 1.0 §2.2 and OpenID Connect Core 1.0 §4: URLs the
@@ -402,10 +387,6 @@ fn validate_client_keys(input: &NormalizedClientInput) -> Result<(), ErrorRespon
         )),
         _ => Err(ErrorResponse::new(ErrorCode::OAuthClientJwksRequired)),
     }
-}
-
-fn is_loopback_redirect_host(host: Option<&str>) -> bool {
-    matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
 }
 
 fn validate_client_config(input: &NormalizedClientInput) -> Result<(), ErrorResponse> {

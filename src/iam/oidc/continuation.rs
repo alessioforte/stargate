@@ -7,7 +7,7 @@
 //! sends the browser to that endpoint with `iss` and `login_hint`, and the app
 //! starts a normal authorization request from there.
 
-use super::interactions;
+use super::{client_url, interactions};
 use serde::{Deserialize, Serialize};
 
 /// The app a flow began in, kept with the pending request so a link opened
@@ -97,14 +97,23 @@ fn can_continue(client: &db::ent::OAuthClient) -> bool {
 /// `initiate_login_uri` with `iss`, `login_hint`, and, when set,
 /// `target_link_uri` (OpenID Connect Core 1.0 §4). Query parameters the app
 /// already put in the endpoint are kept.
+///
+/// The endpoint is validated again here: registration rejects anything that
+/// is not a client endpoint URL, but a row can also reach the database from an
+/// import or direct SQL, and the page uses the result as an `href`. The value
+/// is never logged: a rejected scheme is exactly what must not be followed.
 pub fn initiate_login_url(
     base: &str,
     issuer: &str,
     email: &str,
     target_link_uri: Option<&str>,
 ) -> Option<String> {
-    // Registration rejects anything else; a row that no longer parses simply
-    // has no continuation.
+    if !client_url::is_client_endpoint_url(base) {
+        tracing::warn!(
+            "OAuth client initiate_login_uri is not a client endpoint URL; no continuation"
+        );
+        return None;
+    }
     let mut url = url::Url::parse(base).ok()?;
     let mut query = url.query_pairs_mut();
     query
@@ -154,6 +163,31 @@ mod tests {
         assert_eq!(
             initiate_login_url("not a url", "https://id.example", "a@b.c", None),
             None
+        );
+    }
+
+    #[test]
+    fn an_endpoint_that_is_not_a_client_url_has_no_continuation() {
+        for base in [
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "http://app.example/login",
+            "https://app.example/login#fragment",
+        ] {
+            assert_eq!(
+                initiate_login_url(base, "https://id.example", "a@b.c", None),
+                None,
+                "{base}"
+            );
+        }
+        assert!(
+            initiate_login_url(
+                "http://localhost:3000/login",
+                "https://id.example",
+                "a@b.c",
+                None,
+            )
+            .is_some()
         );
     }
 }
