@@ -87,9 +87,9 @@ pub async fn post_login(req: Request) -> Response {
     let password = vec![oidc::authentication::AMR_PASSWORD.to_string()];
     let session =
         match issue_password_session(user, auth_time, None, password, &client_ip, secure).await {
-        Ok(session) => session,
-        Err(_) => return back_to_login(page(), "server_error"),
-    };
+            Ok(session) => session,
+            Err(_) => return back_to_login(page(), "server_error"),
+        };
 
     let mut response = see_other(&interactions::resume_path(&id));
     for cookie in session.headers().get_all(SET_COOKIE) {
