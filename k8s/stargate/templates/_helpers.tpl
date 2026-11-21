@@ -271,6 +271,9 @@ Cross-field validation that JSON Schema cannot express.
 
 {{- $runtimeData := default (dict) .Values.runtimeConfig.data -}}
 {{- $managed := dict "POD_NAME" "Deployment pod identity" "POD_NAMESPACE" "Deployment pod identity" "OTEL_RESOURCE_ATTRIBUTES" "Deployment pod identity" -}}
+{{- if eq $mode "edge" -}}
+  {{- $_ := set $managed "DATA_PATH" "persistence.mountPath" -}}
+{{- end -}}
 {{- if .Values.migrations.job.enabled -}}
   {{- if eq $mode "edge" -}}
     {{- fail "migrations.job.enabled is cluster-only: edge runs SQLite migrations on startup" -}}
@@ -437,10 +440,6 @@ Cross-field validation that JSON Schema cannot express.
   {{- if ne (toString (get $gatewayConfig "schema")) "stargate/v1" -}}
     {{- fail "gatewayConfig.config requires an explicit schema of stargate/v1" -}}
   {{- end -}}
-{{- end -}}
-
-{{- if and (eq $mode "edge") .Values.persistence.enabled (ne .Values.persistence.mountPath "/app/.stargate") -}}
-  {{- fail "edge persistence.mountPath must be /app/.stargate because SQLite and local state use that path" -}}
 {{- end -}}
 
 {{- if .Values.bootstrap.enabled -}}
