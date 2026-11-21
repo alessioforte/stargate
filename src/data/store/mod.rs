@@ -21,6 +21,18 @@ pub(crate) async fn with_security_budget<T>(
     future.await
 }
 
+/// Bulk operations run after authentication and use the pool's timeouts.
+pub(crate) async fn without_security_budget<T>(future: impl Future<Output = T>) -> T {
+    #[cfg(feature = "redis")]
+    {
+        store::with_request_budget(None, future).await
+    }
+    #[cfg(feature = "memory")]
+    {
+        future.await
+    }
+}
+
 pub(crate) async fn delete_confirmed(key: &str) -> store::StoreResult<bool> {
     #[cfg(feature = "redis")]
     {

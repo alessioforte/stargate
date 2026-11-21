@@ -71,16 +71,19 @@ pub async fn purge_api_key_subject(key_hash: &str) {
 
 /// Purge all revoked keys even if a replica fails to acknowledge one.
 pub async fn purge_revoked_api_keys(key_hashes: &[String]) -> store::StoreResult<()> {
-    let mut result = Ok(());
-    for hash in key_hashes {
-        if let Err(error) =
-            crate::data::store::delete_confirmed(&store::keys::api_key::subject(hash)).await
-        {
-            tracing::warn!(%error, "Failed to purge revoked API key");
-            result = Err(error);
+    crate::data::store::without_security_budget(async {
+        let mut result = Ok(());
+        for hash in key_hashes {
+            if let Err(error) =
+                crate::data::store::delete_confirmed(&store::keys::api_key::subject(hash)).await
+            {
+                tracing::warn!(%error, "Failed to purge revoked API key");
+                result = Err(error);
+            }
         }
-    }
-    result
+        result
+    })
+    .await
 }
 
 async fn verify_session_claims(

@@ -1295,6 +1295,20 @@ def scenario_replicated_logout(ctx):
         )
         fresh, _ = server.login()
         require(request(server.url("/account/profile"), token=fresh)[0] == 200, "promoted server is not usable")
+
+        # The promoted primary has no replicas. A shortfall must be reported
+        # after every session has been revoked on that primary.
+        second, _ = server.login()
+        third, _ = server.login()
+        sessions = (fresh, second, third)
+        for session in sessions:
+            require(request(server.url("/account/profile"), token=session)[0] == 200,
+                    "session was inactive before logout everywhere")
+        timed_unavailable(server, "/account/logout/all", "auth.state_unavailable", 2000,
+                          method="POST", token=fresh)
+        for session in sessions:
+            require(request(server.url("/account/profile"), token=session)[0] == 401,
+                    "session remained active after a replication shortfall")
     finally:
         proxy.close()
     return scenario_summary("replicated-logout", final="logout survived promotion")

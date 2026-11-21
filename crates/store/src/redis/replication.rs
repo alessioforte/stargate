@@ -46,9 +46,10 @@ impl Replication {
                 "Redis write replication timed out"
             );
             if fail {
-                return Err(StoreError::BackendUnavailable(
-                    "Redis write was not confirmed by enough replicas".into(),
-                ));
+                return Err(StoreError::ReplicationShortfall {
+                    acknowledged,
+                    required: config.replicas.get(),
+                });
             }
         }
         Ok(result)
