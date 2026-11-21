@@ -17,7 +17,7 @@ key or a user-delegated OAuth access token.
 | `memory-full` | Redis rejects writes under `noeviction`. Session reads and PING work, login fails closed, and the limit store is reported degraded. Writes recover when memory is freed. |
 | `absent-at-startup` | Stargate starts and serves readiness while Redis is down. Admin diagnostics show Redis unhealthy and session access fails closed. The existing process recovers when Redis starts. |
 | `incompatible` | An older Redis without `HEXPIRE` is rejected with a capability diagnostic while Stargate serves readiness. |
-| `replicated-logout` | With replica confirmation enabled, missing acknowledgments produce either an error or a warning according to settings. A successful logout stays revoked after promotion, including for the old refresh token. |
+| `replicated-logout` | With replica confirmation enabled, missing acknowledgments produce either an error or a warning according to settings. A successful logout stays revoked after promotion, including for the old refresh token. A subsequent logout everywhere revokes all three sessions on the promoted primary and reports the missing replica acknowledgment with `503`. |
 
 The report records recovery per endpoint when the workload can probe it
 continuously. The first successful traffic check must finish within one second
@@ -76,17 +76,34 @@ counts failed responses and transport failures during the fault, including
 expected `503` responses. The assertions include requests started far enough
 inside the fault to complete within their budget.
 
+## Recorded results
 
-## Historical results
+Recorded on 2026-11-21 on an Apple M1 Pro with macOS 27.2.1 and Docker 29.9.3.
+The run used the Redis and PostgreSQL images in [Run locally](#run-locally)
+and wrote the report with `--output`.
 
-Recorded on 2026-11-17 on an Apple M1 Pro with Docker 29.9.3, before lazy
-connections and shared request budgets. These timings describe the earlier
-scenario definitions.
+| Scenario | Requests | Unexpected | Errors | Disturbance (s) | Recovery (s) | Final state |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `restart` | 207 | 0 | 40 | 1.77 | 0.09 | healthy |
+| `empty` | 212 | 0 | 42 | 1.72 | 0.22 | signed-out then healthy |
+| `partition` | 304 | 0 | 36 | 3.55 | 0.10 | healthy |
+| `memory-full` | 221 | 0 | 10 | 1.10 | 0.21 | healthy |
+| `absent-at-startup` | 0 | 0 | 0 | 0.33 | 0.09 | healthy |
+| `incompatible` | 0 | 0 | 0 | 0.00 | 0.00 | ready, Redis rejected |
+| `replicated-logout` | 0 | 0 | 0 | 0.00 | 0.00 | logout survived promotion |
 
-| Scenario            | Requests | Unexpected | Errors | public | deny | profile | Disturbance (s) | Recovery (s) | Final state             |
-| ------------------- | -------- | ---------- | ------ | ------ | ---- | ------- | --------------- | ------------ | ----------------------- |
-| `restart`           | 200      | 0          | 38     | 0      | 38   | 0       | 11.99           | 1.76         | healthy                 |
-| `empty`             | 188      | 0          | 34     | 0      | 32   | 2       | 10.57           | 1.33         | signed-out then healthy |
-| `partition`         | 159      | 0          | 26     | 0      | 26   | 0       | 8.78            | 0.08         | healthy                 |
-| `memory-full`       | 214      | 0          | 10     | 0      | 10   | 0       | 1.04            | 0.18         | healthy                 |
-| `absent-at-startup` | 0        | 0          | 0      | 0      | 0    | 0       | 9.50            | —            | failed at startup       |
+Partition recovery times in `recovery_by_endpoint_ms` are measured from the
+moment the relay resumed traffic.
+
+| Endpoint | Recovery (ms) |
+| --- | ---: |
+| `public` | 34 |
+| `deny` | 102 |
+| `profile` | 116 |
+| `jwt` | 114 |
+| `api_key` | 113 |
+| `oauth` | 119 |
+| `userinfo` | 118 |
+| `iam_ingress_deny` | 106 |
+| `gateway_ingress_deny` | 109 |
+| `oauth_refresh` | 121 |

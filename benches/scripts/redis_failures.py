@@ -1296,6 +1296,16 @@ def scenario_replicated_logout(ctx):
         fresh, _ = server.login()
         require(request(server.url("/account/profile"), token=fresh)[0] == 200, "promoted server is not usable")
 
+        # The dedicated WAIT connection reconnects on use after promotion.
+        # Exercise it on a separate session before measuring shortfall behavior.
+        probe, _ = server.login()
+
+        def wait_connection_recovered():
+            status, _, _, _ = request(server.url("/account/logout"), "DELETE", token=probe)
+            return status == 503 and request(server.url("/account/profile"), token=probe)[0] == 401
+
+        wait_until(wait_connection_recovered, 5, "WAIT connection did not reach the promoted primary")
+
         # The promoted primary has no replicas. A shortfall must be reported
         # after every session has been revoked on that primary.
         second, _ = server.login()
@@ -1307,8 +1317,8 @@ def scenario_replicated_logout(ctx):
         timed_unavailable(server, "/account/logout/all", "auth.state_unavailable", 2000,
                           method="POST", token=fresh)
         for session in sessions:
-            require(request(server.url("/account/profile"), token=session)[0] == 401,
-                    "session remained active after a replication shortfall")
+            status, _, _, _ = request(server.url("/account/profile"), token=session)
+            require(status == 401, f"expected revoked session after replication shortfall, got {status}")
     finally:
         proxy.close()
     return scenario_summary("replicated-logout", final="logout survived promotion")
