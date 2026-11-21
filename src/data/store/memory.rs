@@ -1,8 +1,17 @@
+use crate::conf::env::{EnvError, parse_or};
 use once_cell::sync::Lazy;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use store::{MemoryStore, memory::MemoryStoreConfig};
 
-pub const MEMORY_BACKUP_PATH: &str = ".stargate/memory.bin";
+const MAX_MEMORY_ENV: &str = "STORE_MAX_MEMORY_MB";
+/// The writable edge data directory, next to `sqlite.db` and `jwks/`. It is
+/// distinct from `CONFIG_PATH`, which holds the read-only seed files in the
+/// chart.
+const DATA_DIR: &str = ".stargate";
+const MEMORY_BACKUP_FILE: &str = "memory.bin";
 const DEFAULT_MEMORY_BACKUP_INTERVAL_SECS: u64 = 30;
 const DEFAULT_MEMORY_BACKUP_WRITE_THRESHOLD: u64 = 100;
 const MEMORY_BACKUP_CHECK_INTERVAL_SECS: u64 = 1;
@@ -10,21 +19,45 @@ const DEFAULT_MAX_MEMORY_MB: usize = 100;
 
 static RESTORE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 static BACKUP_TASK_STARTED: AtomicBool = AtomicBool::new(false);
+static MAX_MEMORY_MB: OnceLock<NonZeroUsize> = OnceLock::new();
+static MEMORY_BACKUP_PATH: Lazy<PathBuf> = Lazy::new(backup_path);
 
 pub static STORE: Lazy<MemoryStore> = Lazy::new(|| {
-    let max_memory_mb: usize = std::env::var("STORE_MAX_MEMORY_MB")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_MAX_MEMORY_MB);
-
     let config = MemoryStoreConfig {
-        max_memory_usage: max_memory_mb * 1024 * 1024,
+        max_memory_usage: max_memory_mb() * 1024 * 1024,
         ..MemoryStoreConfig::default()
     };
     let store = MemoryStore::with_config(config);
     store.run_adaptive_cleaner(60);
     store
 });
+
+/// Reads and validates `STORE_MAX_MEMORY_MB`; the server calls it once at
+/// startup, so an invalid value stops it instead of silently using the default.
+pub fn init_settings() -> Result<usize, EnvError> {
+    let default = NonZeroUsize::new(DEFAULT_MAX_MEMORY_MB).expect("the default is positive");
+    let max = parse_or(MAX_MEMORY_ENV, default)?;
+    Ok(MAX_MEMORY_MB.get_or_init(|| max).get())
+}
+
+fn max_memory_mb() -> usize {
+    MAX_MEMORY_MB
+        .get_or_init(|| {
+            parse_or(
+                MAX_MEMORY_ENV,
+                NonZeroUsize::new(DEFAULT_MAX_MEMORY_MB).expect("the default is positive"),
+            )
+            .expect("STORE_MAX_MEMORY_MB is validated at startup")
+        })
+        .get()
+}
+
+/// The snapshot lives in the writable edge data directory, next to
+/// `sqlite.db`, not in `CONFIG_PATH` (which the chart mounts read-only for the
+/// seed files).
+fn backup_path() -> PathBuf {
+    Path::new(DATA_DIR).join(MEMORY_BACKUP_FILE)
+}
 
 pub async fn init() -> &'static MemoryStore {
     Lazy::force(&STORE);
@@ -48,7 +81,8 @@ pub fn use_store() -> &'static MemoryStore {
 ///
 /// # What it does
 ///
-/// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`] (`.stargate/memory.bin`).
+/// 1. Loads the MessagePack snapshot from [`MEMORY_BACKUP_PATH`] (`.stargate/memory.bin`,
+///    on the same volume as the edge SQLite database).
 /// 2. Replaces the contents of the already-initialised global [`STORE`] (empty at this
 ///    point since the `Lazy` constructor does not populate any data) via
 ///    `MemoryStore::absorb`, which also resets operational stats to zero so metrics
@@ -64,18 +98,18 @@ async fn restore_memory_backup() {
         return;
     }
 
-    match MemoryStore::load_from_binary(MEMORY_BACKUP_PATH).await {
+    match MemoryStore::load_from_binary(MEMORY_BACKUP_PATH.as_path()).await {
         Ok(restored_store) => {
             STORE.absorb(&restored_store);
             tracing::info!(
-                path = MEMORY_BACKUP_PATH,
+                path = %MEMORY_BACKUP_PATH.display(),
                 keys = STORE.get_total_keys(),
                 "Memory store restored from backup"
             );
         }
         Err(error) => {
             tracing::info!(
-                path = MEMORY_BACKUP_PATH,
+                path = %MEMORY_BACKUP_PATH.display(),
                 %error,
                 "No memory backup restored at startup"
             );
@@ -175,9 +209,9 @@ fn run_memory_backup() {
                 continue;
             }
 
-            if let Err(error) = store.save_to_binary(MEMORY_BACKUP_PATH).await {
+            if let Err(error) = store.save_to_binary(MEMORY_BACKUP_PATH.as_path()).await {
                 tracing::warn!(
-                    path = MEMORY_BACKUP_PATH,
+                    path = %MEMORY_BACKUP_PATH.display(),
                     %error,
                     "Failed to persist memory backup"
                 );
@@ -191,9 +225,19 @@ fn run_memory_backup() {
 
 pub async fn save() {
     let store = use_store();
-    if let Err(error) = store.save_to_binary(MEMORY_BACKUP_PATH).await {
+    if let Err(error) = store.save_to_binary(MEMORY_BACKUP_PATH.as_path()).await {
         tracing::warn!("Failed to save memory store on shutdown: {}", error);
     } else {
         tracing::info!("Memory store saved on shutdown");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_backup_lives_next_to_the_edge_database() {
+        assert_eq!(backup_path(), Path::new(".stargate/memory.bin"));
     }
 }

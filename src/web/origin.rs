@@ -3,16 +3,16 @@ use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::header::ORIGIN;
-use http::{HeaderMap, Method};
+use http::{HeaderMap, HeaderValue, Method};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 const TRUSTED_ORIGINS_ENV: &str = "TRUSTED_ORIGINS";
 
-static TRUSTED_ORIGINS: OnceLock<Result<Option<TrustedOrigins>, String>> = OnceLock::new();
+static TRUSTED_ORIGINS: OnceLock<Option<TrustedOrigins>> = OnceLock::new();
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct Origin {
+pub(crate) struct Origin {
     scheme: String,
     host: String,
     port: u16,
@@ -30,7 +30,7 @@ enum OriginDecision {
 }
 
 impl Origin {
-    fn parse(raw: &str) -> Result<Self, String> {
+    pub(crate) fn parse(raw: &str) -> Result<Self, String> {
         let raw = raw.trim();
         if raw.eq_ignore_ascii_case("null") {
             return Err("null origin is not trusted".to_string());
@@ -55,6 +55,9 @@ impl Origin {
             .filter(|host| !host.is_empty())
             .ok_or_else(|| format!("origin `{raw}` must contain a host"))?
             .to_ascii_lowercase();
+        if host.contains('*') {
+            return Err(format!("origin `{raw}` must not contain a wildcard"));
+        }
         let port = url
             .port_or_known_default()
             .ok_or_else(|| format!("origin `{raw}` must contain a port"))?;
@@ -64,6 +67,25 @@ impl Origin {
             host,
             port,
         })
+    }
+
+    /// The origin as a browser serializes it: a default port is omitted.
+    pub(crate) fn to_url(&self) -> String {
+        let default_port = match self.scheme.as_str() {
+            "http" => 80,
+            "https" => 443,
+            _ => 0,
+        };
+        if self.port == default_port {
+            format!("{}://{}", self.scheme, self.host)
+        } else {
+            format!("{}://{}:{}", self.scheme, self.host, self.port)
+        }
+    }
+
+    pub(crate) fn header_value(&self) -> HeaderValue {
+        HeaderValue::from_str(&self.to_url())
+            .expect("a parsed origin is always a valid HTTP header value")
     }
 }
 
@@ -81,7 +103,7 @@ impl TrustedOrigins {
             .filter(|entry| !entry.is_empty())
         {
             if entry == "*" {
-                return Err("TRUSTED_ORIGINS does not allow wildcard `*`".to_string());
+                return Err("wildcard `*` is not allowed".to_string());
             }
             origins.insert(Origin::parse(entry)?);
         }
@@ -100,20 +122,38 @@ impl TrustedOrigins {
     }
 }
 
-fn trusted_origins() -> &'static Result<Option<TrustedOrigins>, String> {
-    TRUSTED_ORIGINS.get_or_init(|| {
-        let raw = std::env::var(TRUSTED_ORIGINS_ENV).unwrap_or_default();
-        let parsed = TrustedOrigins::parse(&raw);
-        match &parsed {
-            Ok(Some(origins)) => tracing::info!(
-                "Trusted browser origins configured: {} entries from TRUSTED_ORIGINS",
-                origins.origins.len()
-            ),
-            Ok(None) => {}
-            Err(error) => tracing::error!("Invalid TRUSTED_ORIGINS: {}", error),
-        }
-        parsed
-    })
+/// Reads and validates `TRUSTED_ORIGINS`; the server calls it once at startup,
+/// so an invalid value stops it instead of failing every sensitive request.
+pub(crate) fn init() -> Result<(), String> {
+    let raw = std::env::var(TRUSTED_ORIGINS_ENV).unwrap_or_default();
+    let trusted =
+        TrustedOrigins::parse(&raw).map_err(|error| format!("{TRUSTED_ORIGINS_ENV}: {error}"))?;
+    if let Some(trusted) = &trusted {
+        tracing::info!(
+            "Trusted browser origins configured: {} entries from {TRUSTED_ORIGINS_ENV}",
+            trusted.origins.len()
+        );
+    }
+    let _ = TRUSTED_ORIGINS.set(trusted);
+    Ok(())
+}
+
+/// The validated origins. Outside the server (tests) they are read on first use.
+fn trusted_origins() -> Option<&'static TrustedOrigins> {
+    TRUSTED_ORIGINS
+        .get_or_init(|| {
+            TrustedOrigins::parse(&std::env::var(TRUSTED_ORIGINS_ENV).unwrap_or_default())
+                .expect("TRUSTED_ORIGINS is validated at startup")
+        })
+        .as_ref()
+}
+
+/// The trusted origins as browser-serialized URLs, for destinations that must
+/// stay on this deployment (the social sign-in `return_to`).
+pub(crate) fn configured_origin_urls() -> Vec<String> {
+    trusted_origins()
+        .map(|trusted| trusted.origins.iter().map(Origin::to_url).collect())
+        .unwrap_or_default()
 }
 
 fn origin_decision(
@@ -145,16 +185,8 @@ fn origin_decision(
 }
 
 pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
-    let trusted = match trusted_origins() {
-        Ok(Some(trusted)) => trusted,
-        Ok(None) => return next.run(req).await,
-        Err(error) => {
-            tracing::error!(
-                "Rejecting request because TRUSTED_ORIGINS is invalid: {}",
-                error
-            );
-            return ErrorResponse::internal("invalid trusted origin configuration").into_response();
-        }
+    let Some(trusted) = trusted_origins() else {
+        return next.run(req).await;
     };
 
     match origin_decision(req.method(), req.headers(), trusted) {
@@ -240,7 +272,22 @@ mod tests {
     #[test]
     fn rejects_invalid_config_entries() {
         assert!(TrustedOrigins::parse("*").is_err());
+        assert!(TrustedOrigins::parse("https://*.example.com").is_err());
         assert!(TrustedOrigins::parse("https://app.example.com/login").is_err());
         assert!(TrustedOrigins::parse("ftp://app.example.com").is_err());
+    }
+
+    #[test]
+    fn origins_serialize_as_browsers_send_them() {
+        assert_eq!(
+            Origin::parse("https://app.example.com:443")
+                .unwrap()
+                .to_url(),
+            "https://app.example.com"
+        );
+        assert_eq!(
+            Origin::parse("http://[::1]:8080").unwrap().to_url(),
+            "http://[::1]:8080"
+        );
     }
 }

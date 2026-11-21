@@ -124,8 +124,9 @@ Details:
   cannot sign another browser in. `return_to` must be a path on this server
   or a URL on an origin the deployment trusts with browsers: `JWT_ISSUER`,
   `OAUTH_BASE_URL`, `AUTH_PUBLIC_BASE_URL`, `TRUSTED_ORIGINS`, `CORS_ORIGINS`,
-  or the origin the browser reached Stargate at. Others get `400` and a
-  warning in the log that names the value.
+  or the origin the browser reached Stargate at. Both origin lists are read
+  and validated at startup: an invalid entry stops the server. Others get
+  `400` and a warning in the log that names the value.
 - API clients can run the provider authorization themselves: take a `state`
   from `POST /oauth/state`, and the callback answers the tokens as JSON.
 

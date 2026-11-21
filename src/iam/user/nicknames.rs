@@ -1,8 +1,8 @@
 use crate::err::{ErrorCode, ErrorResponse};
 use db::ent::{canonical_nickname, nickname_is_valid};
 
-/// Longest nickname the schema stores (`VARCHAR(50)`).
-const MAX_NICKNAME_CHARS: usize = 50;
+/// Longest nickname the schema stores (`VARCHAR(254)`).
+const MAX_NICKNAME_CHARS: usize = db::ent::MAX_NICKNAME_LEN;
 /// Numbered handles (`name_2` ... `name_9`) tried before random ones.
 const LAST_NUMBERED_SUFFIX: u32 = 9;
 /// Random handles tried after the numbered ones.
@@ -117,5 +117,14 @@ mod tests {
     #[test]
     fn an_empty_handle_has_no_candidates() {
         assert!(nickname_candidates("  ").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_overlong_nickname_is_invalid_before_storage() {
+        let error =
+            ensure_nickname_available(&"n".repeat(MAX_NICKNAME_CHARS + 1), "ada@example.com", None)
+                .await
+                .expect_err("255-octet nickname");
+        assert_eq!(error.code, ErrorCode::UserNicknameInvalid);
     }
 }

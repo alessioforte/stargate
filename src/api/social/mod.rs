@@ -365,20 +365,10 @@ fn safe_return_to(value: &str, own_origin: Option<String>) -> Option<String> {
         crate::conf::public_base_url(),
         std::env::var("AUTH_PUBLIC_BASE_URL").unwrap_or_default(),
     ];
-    for name in ["TRUSTED_ORIGINS", "CORS_ORIGINS"] {
-        bases.extend(origin_list(&std::env::var(name).unwrap_or_default()));
-    }
+    bases.extend(crate::web::origin::configured_origin_urls());
+    bases.extend(crate::web::cors::configured_origin_urls());
     bases.extend(own_origin);
     return_to_within(value, &bases)
-}
-
-/// The entries of a comma-separated origin list, without the `*` wildcard.
-fn origin_list(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|origin| !origin.is_empty() && *origin != "*")
-        .map(str::to_string)
-        .collect()
 }
 
 fn return_to_within(value: &str, bases: &[String]) -> Option<String> {
@@ -458,17 +448,6 @@ mod tests {
         ] {
             assert_eq!(return_to_within(refused, &bases()), None, "{refused}");
         }
-    }
-
-    #[test]
-    fn origin_lists_skip_blanks_and_the_wildcard() {
-        assert_eq!(
-            origin_list(" https://app.example.com, ,*,http://localhost:5173 "),
-            ["https://app.example.com", "http://localhost:5173"]
-        );
-        let mut bases = bases();
-        bases.extend(origin_list("http://localhost:5173"));
-        assert!(return_to_within("http://localhost:5173/auth/x", &bases).is_some());
     }
 
     #[test]

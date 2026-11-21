@@ -797,3 +797,86 @@ async fn oauth_tokens_without_a_backing_session_cannot_reach_the_admin_api() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn creating_a_user_without_a_nickname_keeps_a_254_octet_email() {
+    crate::data::db::with_test_database(async {
+        let f = Fixture::new(false).await;
+        let email = format!(
+            "{}@{}.{}.{}.{}",
+            ulid::Ulid::generate().to_string().to_lowercase(),
+            "b".repeat(63),
+            "c".repeat(63),
+            "e".repeat(63),
+            "f".repeat(35)
+        );
+        assert_eq!(email.len(), 254);
+
+        let response = router()
+            .oneshot(
+                f.request(
+                    "POST",
+                    "/admin/users",
+                    json!({
+                        "email": email,
+                        "password": "Stargate-test-password-1!",
+                    }),
+                    true,
+                )
+                .await,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["email"], email);
+        assert_eq!(body["nickname"], email);
+
+        let stored = crate::data::db::get_user_by_email(&email)
+            .await
+            .unwrap()
+            .expect("created user");
+        assert_eq!(stored.nickname, email);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn an_overlong_nickname_is_rejected_before_the_user_is_created() {
+    crate::data::db::with_test_database(async {
+        let f = Fixture::new(false).await;
+        let email = format!("overlong-{}@example.test", ulid::Ulid::generate());
+
+        let response = router()
+            .oneshot(
+                f.request(
+                    "POST",
+                    "/admin/users",
+                    json!({
+                        "email": email,
+                        "password": "Stargate-test-password-1!",
+                        "nickname": "n".repeat(255),
+                    }),
+                    true,
+                )
+                .await,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(body["code"], "user.nickname_invalid");
+
+        assert!(
+            crate::data::db::get_user_by_email(&email)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    })
+    .await;
+}

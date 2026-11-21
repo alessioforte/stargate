@@ -63,6 +63,17 @@ pub async fn run() -> std::io::Result<()> {
     let guard = logging::init(log_settings);
     iam::pwd::hash::init();
 
+    // Every `?` below passes through the guard shutdown, so startup errors
+    // reach the file sink and the OTLP log exporter instead of staying in a
+    // batch that the process exit discards.
+    let result = serve().await;
+    guard.shutdown();
+    result
+}
+
+/// The server after logging is initialized. The caller shuts the log guard
+/// down on every outcome, normal shutdown and startup error alike.
+async fn serve() -> std::io::Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let listeners = settings::from_env().map_err(|error| {
         tracing::error!("Invalid listener settings: {error}");
@@ -89,6 +100,23 @@ pub async fn run() -> std::io::Result<()> {
         tracing::error!("Invalid IAM host settings: {error}");
         std::io::Error::other(error)
     })?;
+    web::cors::init().map_err(|error| {
+        tracing::error!("Invalid CORS settings: {error}");
+        std::io::Error::other(error)
+    })?;
+    web::origin::init().map_err(|error| {
+        tracing::error!("Invalid trusted origin settings: {error}");
+        std::io::Error::other(error)
+    })?;
+    iam::oidc::http_client::init().map_err(|error| {
+        tracing::error!("Invalid OAuth client endpoint settings: {error}");
+        std::io::Error::other(error)
+    })?;
+    #[cfg(feature = "memory")]
+    store::init_settings().map_err(|error| {
+        tracing::error!("Invalid memory store settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
     iam::otp::settings::init().map_err(|error| {
         tracing::error!("Invalid MFA settings: {error}");
         std::io::Error::other(error.to_string())
@@ -109,10 +137,10 @@ pub async fn run() -> std::io::Result<()> {
     store::init().await;
     #[cfg(feature = "redis")]
     store::init().await.map_err(std::io::Error::other)?;
-    if let Err(e) = data::db::init().await {
-        tracing::error!("Database initialization failed: {}", e);
-        std::process::exit(1);
-    }
+    data::db::init().await.map_err(|error| {
+        tracing::error!("Database initialization failed: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
 
     aud::spawn()?;
 
@@ -174,7 +202,6 @@ pub async fn run() -> std::io::Result<()> {
     aud::shutdown().await;
     store::save().await;
     info!("Shutdown complete");
-    guard.shutdown();
 
     result
 }
