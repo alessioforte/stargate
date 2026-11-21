@@ -36,10 +36,19 @@ interface FormValues {
   organizationId: string;
   role: string;
   attrs: string;
+  clientId: string;
+  targetLinkUri: string;
+}
+
+interface App {
+  id: string;
+  name: string;
 }
 
 interface Props {
   organizations: Organization[];
+  /** Enabled OAuth clients that register an `initiate_login_uri`. */
+  apps: App[];
   onSave: (user: CreateUserRequest) => void;
   onInvite: (user: CreateUserInvitationRequest) => void;
   /** False with `SIGNUP_MODE=closed`: only password creation is offered. */
@@ -61,10 +70,13 @@ const emptyFormValues: FormValues = {
   organizationId: "",
   role: "member",
   attrs: "{}",
+  clientId: "",
+  targetLinkUri: "",
 };
 
 const CreateUser: React.FC<Props> = ({
   organizations,
+  apps,
   onSave,
   onInvite,
   invitationsEnabled,
@@ -115,7 +127,17 @@ const CreateUser: React.FC<Props> = ({
     };
 
     if (mode === "invitation") {
-      onInvite(profile);
+      const invitation: CreateUserInvitationRequest = { ...profile };
+      // Without an app the request is the one the Console sent before: no
+      // client fields at all.
+      if (values.clientId) {
+        invitation.clientId = values.clientId;
+        const targetLinkUri = values.targetLinkUri.trim();
+        if (targetLinkUri) {
+          invitation.targetLinkUri = targetLinkUri;
+        }
+      }
+      onInvite(invitation);
     } else {
       onSave({ ...profile, password: values.password });
     }
@@ -215,6 +237,37 @@ const CreateUser: React.FC<Props> = ({
                       form.setFieldValue("locale", value ?? "")
                     }
                   />
+                )}
+                {mode === "invitation" && (
+                  <>
+                    <Select
+                      clearable
+                      searchable
+                      variant="filled"
+                      label={t("returnToApp")}
+                      description={t("returnToAppDescription")}
+                      data={apps.map((app) => ({
+                        label: app.name,
+                        value: app.id,
+                      }))}
+                      value={form.values.clientId || null}
+                      onChange={(value) => {
+                        const clientId = value ?? "";
+                        if (clientId !== form.values.clientId) {
+                          form.setFieldValue("targetLinkUri", "");
+                        }
+                        form.setFieldValue("clientId", clientId);
+                      }}
+                    />
+                    {form.values.clientId && (
+                      <TextInput
+                        variant="filled"
+                        label={t("targetLinkUri")}
+                        description={t("targetLinkUriDescription")}
+                        {...form.getInputProps("targetLinkUri")}
+                      />
+                    )}
+                  </>
                 )}
                 {mode === "password" && (
                   <>

@@ -16,9 +16,11 @@ const UsersPage = () => {
     getAdminHealth,
     users,
     organizations,
+    oauthClients,
     superAdminUsers,
     getUsers,
     getOrganizations,
+    getOAuthClients,
     getSuperAdminUsers,
     createUser,
     inviteUser,
@@ -61,6 +63,17 @@ const UsersPage = () => {
     getOrganizations({ limit: 100 });
   }, [getOrganizations]);
 
+  // The invitation form can send the user back to an app that starts the
+  // login (OpenID Connect Core 1.0 §4). Without permission to list clients
+  // the select stays empty and the invitation goes without an app.
+  useEffect(() => {
+    getOAuthClients({ limit: 100 });
+  }, [getOAuthClients]);
+
+  const apps = (oauthClients?.data?.data ?? [])
+    .filter((client) => client.enabled && client.initiateLoginUri)
+    .map((client) => ({ id: client.clientId, name: client.name }));
+
   useEffect(() => {
     const total = users?.data?.total;
     if (total === undefined) return;
@@ -89,6 +102,7 @@ const UsersPage = () => {
       actions={
         <CreateUser
           organizations={organizations?.data?.data ?? []}
+          apps={apps}
           onSave={createUser}
           onInvite={inviteUser}
           invitationsEnabled={invitationsEnabled}

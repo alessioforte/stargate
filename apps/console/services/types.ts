@@ -610,6 +610,10 @@ export interface CreateUserInvitationRequest {
   phoneNumber?: string | null;
   picture?: string | null;
   membership?: InitialOrganizationMembershipRequest;
+  /** OAuth client of the app that receives the user after signup. */
+  clientId?: string | null;
+  /** `target_link_uri` for that app; only with `clientId`. */
+  targetLinkUri?: string | null;
 }
 
 export interface UpdateUserRequest {
