@@ -625,7 +625,7 @@ fn login_request(ip: &str, uri: &str, body: Value) -> Request<Body> {
     let mut request = request(uri, body);
     request
         .extensions_mut()
-        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(
+        .insert(crate::srv::test_connection(std::net::SocketAddr::new(
             ip.parse().unwrap(),
             12345,
         )));
@@ -633,6 +633,7 @@ fn login_request(ip: &str, uri: &str, body: Value) -> Request<Body> {
     request
         .headers_mut()
         .insert("x-forwarded-for", "192.0.2.99".parse().unwrap());
+    crate::srv::client_ip::prepare(&mut request);
     request
 }
 
