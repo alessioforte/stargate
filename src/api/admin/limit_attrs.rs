@@ -59,7 +59,7 @@ mod tests {
     async fn admin_attrs_require_existing_correctly_typed_names_and_allow_explicit_removal() {
         let mut value = serde_json::to_value(Config::default()).unwrap();
         value["limits"]["daily"] =
-            json!({"strategy":"quota_tracker","params":{"limit":3,"period":"day"}});
+            json!({"strategy":"quota_tracker","params":{"limit":3,"period":"hour"}});
         let gate = test_support::gate(serde_json::from_value(value).unwrap());
         let runtime = gate.snapshot();
         for attrs in [

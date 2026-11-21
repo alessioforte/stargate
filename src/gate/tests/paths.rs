@@ -211,7 +211,7 @@ fn config() -> Config {
             "default": generous.clone(),
             "ingress": generous.clone(),
             "rate": generous,
-            "quota": {"strategy": "quota_tracker", "params": {"limit": 1_000_000_000, "period": "day"}},
+            "quota": {"strategy": "quota_tracker", "params": {"limit": 1_000_000_000, "period": "day", "timezone": "UTC"}},
         },
         "http": {
             "services": {"local": {"kind": "direct_response", "status": 200}},
@@ -411,6 +411,9 @@ async fn cluster_request_path_workload() {
             Arc::new(use_store().clone()),
             prepare_config(config()).unwrap(),
             PolicySnapshot::default(),
+            Some(Arc::new(crate::gate::limits::SqlQuotaLedger::new(
+                crate::data::db::service(),
+            ))),
         )
         .unwrap(),
     );

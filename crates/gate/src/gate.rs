@@ -107,6 +107,7 @@ impl Drop for Runtime {
 pub struct RuntimeBuilder {
     store: Arc<lim::State>,
     clock: Arc<lim::CachedClock>,
+    quota_ledger: Option<Arc<dyn lim::QuotaLedger>>,
 }
 
 impl RuntimeBuilder {
@@ -114,7 +115,15 @@ impl RuntimeBuilder {
         Self {
             store,
             clock: lim::CachedClock::new(),
+            quota_ledger: None,
         }
+    }
+
+    /// Supply the SQL ledger that backs calendar-window quotas. A
+    /// configuration with such a quota cannot be prepared without it.
+    pub fn with_quota_ledger(mut self, ledger: Option<Arc<dyn lim::QuotaLedger>>) -> Self {
+        self.quota_ledger = ledger;
+        self
     }
 
     pub fn prepare(&self, config: &RuntimeConfig) -> Result<Runtime, CompileError> {
@@ -123,9 +132,11 @@ impl RuntimeBuilder {
         for limit in config.limits() {
             limiter.add_limit(
                 limit.name.clone(),
-                limit
-                    .clone()
-                    .build(self.store.clone(), self.clock.clone())?,
+                limit.clone().build(
+                    self.store.clone(),
+                    self.clock.clone(),
+                    self.quota_ledger.clone(),
+                )?,
             );
         }
         Runtime::prepare(graph, limiter)

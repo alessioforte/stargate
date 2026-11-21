@@ -24,9 +24,9 @@ async fn cluster_backend_round_trips() {
     state.set(&key, &subject, Some(60)).await.unwrap();
     let clock = lim::CachedClock::new();
     let rate: gate::cfg::Limit = serde_json::from_value(json!({"name":"benchmark-rate", "strategy":"gcra", "params":{"max_burst":1_000_000, "replenish_1_per":"1us"}})).unwrap();
-    let rate = rate.build(state.clone(), clock.clone()).unwrap();
-    let quota: gate::cfg::Limit = serde_json::from_value(json!({"name":"benchmark-quota", "strategy":"quota_tracker", "params":{"limit":1_000_000, "period":"day"}})).unwrap();
-    let quota = quota.build(state.clone(), clock).unwrap();
+    let rate = rate.build(state.clone(), clock.clone(), None).unwrap();
+    let quota: gate::cfg::Limit = serde_json::from_value(json!({"name":"benchmark-quota", "strategy":"quota_tracker", "params":{"limit":1_000_000, "period":"hour"}})).unwrap();
+    let quota = quota.build(state.clone(), clock, None).unwrap();
     let mut results = Vec::new();
     for operation in [
         "redis_session_get_1k",

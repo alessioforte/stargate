@@ -96,6 +96,13 @@ pub(crate) async fn check_traffic_limit(
 ) -> Result<Option<RateLimitDecision>, ErrorResponse> {
     let limiter = &runtime.core.limiter;
     super::validate_limit(limiter, check.name, point.kind(), check.scope)?;
+    // A durable quota must never exceed its limit, so its failure mode is
+    // always closed even when the policy says `allow`.
+    let policy = if limiter.is_durable(check.name) {
+        OnStoreError::Deny
+    } else {
+        policy
+    };
     let reason = match within_traffic_budget(
         runtime.ingress.timeout,
         limiter.check(check.name, check.key, check.cost),

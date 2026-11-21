@@ -25,3 +25,7 @@ utoipa = { workspace = true }
 default = []
 memory = ["lim/memory"]
 redis = ["lim/redis"]
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
