@@ -108,6 +108,7 @@ mod postgres {
 
 #[cfg(feature = "sqlite")]
 mod sqlite {
+    use anyhow::Context;
     use db::service;
     use once_cell::sync::OnceCell;
     use tracing::info;
@@ -118,13 +119,23 @@ mod sqlite {
         crate::conf::data::init()?;
         let path = crate::conf::data::sqlite_file();
         if let Some(directory) = path.parent() {
-            std::fs::create_dir_all(directory)?;
+            std::fs::create_dir_all(directory).with_context(|| {
+                format!(
+                    "cannot create the edge data directory {} (DATA_PATH)",
+                    directory.display()
+                )
+            })?;
         }
         if !path.exists() {
             info!(path = %path.display(), "SQLite database file not found, creating it...");
         }
 
-        service::init_sqlite_file(&path).await
+        service::init_sqlite_file(&path).await.with_context(|| {
+            format!(
+                "cannot open the SQLite database {} (DATA_PATH)",
+                path.display()
+            )
+        })
     }
 
     pub async fn migrate() -> anyhow::Result<()> {

@@ -142,8 +142,8 @@ async fn serve() -> std::io::Result<()> {
     #[cfg(feature = "redis")]
     store::init().await.map_err(std::io::Error::other)?;
     data::db::init().await.map_err(|error| {
-        tracing::error!("Database initialization failed: {error}");
-        std::io::Error::other(error.to_string())
+        tracing::error!("Database initialization failed: {error:#}");
+        std::io::Error::other(format!("{error:#}"))
     })?;
 
     aud::spawn()?;

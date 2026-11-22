@@ -208,6 +208,30 @@ fn the_cli_opens_the_database_in_data_path() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+#[test]
+fn an_unusable_data_path_names_the_variable_and_the_path() {
+    let root = isolated_root();
+    let data = root.join("not-a-directory");
+    std::fs::write(&data, "a regular file").expect("write the invalid data path");
+
+    let output = isolated_command(&root)
+        .env("DATA_PATH", &data)
+        .args(["db", "migrate"])
+        .output()
+        .expect("run the CLI");
+
+    assert!(!output.status.success(), "db migrate must fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("DATA_PATH"), "{stderr}");
+    assert!(stderr.contains(&data.display().to_string()), "{stderr}");
+    assert!(
+        stderr.contains("File exists"),
+        "the OS cause must stay visible: {stderr}"
+    );
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
 #[cfg(feature = "memory")]
 #[test]
 fn the_server_writes_both_edge_files_and_flushes_the_snapshot() {
