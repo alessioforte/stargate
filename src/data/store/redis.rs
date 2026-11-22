@@ -166,14 +166,17 @@ mod pool_tests {
             (Some(""), "error"),
             (Some("invalid"), "error"),
         ] {
-            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child.args(["--exact", "data::store::redis::pool_tests::invalid_pool_sizes_fail_with_the_variable_name", "--nocapture"]).env(CHILD, expected);
-            if let Some(value) = value {
-                child.env("REDIS_POOL_SIZE", value);
-            } else {
-                child.env_remove("REDIS_POOL_SIZE");
-            }
-            let output = child.output().unwrap();
+            let output = crate::conf::child_test::run(
+                "data::store::redis::pool_tests::invalid_pool_sizes_fail_with_the_variable_name",
+                |command| {
+                    command.env(CHILD, expected);
+                    if let Some(value) = value {
+                        command.env("REDIS_POOL_SIZE", value);
+                    } else {
+                        command.env_remove("REDIS_POOL_SIZE");
+                    }
+                },
+            );
             assert!(
                 output.status.success(),
                 "{value:?}: {} {}",
@@ -206,20 +209,17 @@ mod prefix_tests {
             (Some("tenant:{tag}:"), "error"),
             (Some("tenant}:"), "error"),
         ] {
-            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child
-                .args([
-                    "--exact",
-                    "data::store::redis::prefix_tests::key_prefix_rejects_hash_tags",
-                    "--nocapture",
-                ])
-                .env(CHILD, expected);
-            if let Some(value) = value {
-                child.env("REDIS_KEY_PREFIX", value);
-            } else {
-                child.env_remove("REDIS_KEY_PREFIX");
-            }
-            let output = child.output().unwrap();
+            let output = crate::conf::child_test::run(
+                "data::store::redis::prefix_tests::key_prefix_rejects_hash_tags",
+                |command| {
+                    command.env(CHILD, expected);
+                    if let Some(value) = value {
+                        command.env("REDIS_KEY_PREFIX", value);
+                    } else {
+                        command.env_remove("REDIS_KEY_PREFIX");
+                    }
+                },
+            );
             assert!(
                 output.status.success(),
                 "{value:?}: {} {}",
@@ -288,25 +288,21 @@ mod security_settings_tests {
             (FAIL, Some("false"), "2/250/false"),
             (FAIL, Some("invalid"), "error"),
         ] {
-            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child
-                .args([
-                    "--exact",
-                    "data::store::redis::security_settings_tests::startup_validates_security_budget_and_replication_settings",
-                    "--nocapture",
-                ])
-                .env(TEST_VAR, name)
-                .env(EXPECTED, expected);
-            for setting in [SECURITY, REPLICAS, TIMEOUT, FAIL] {
-                child.env_remove(setting);
-            }
-            if matches!(name, TIMEOUT | FAIL) {
-                child.env(REPLICAS, "2");
-            }
-            if let Some(value) = value {
-                child.env(name, value);
-            }
-            let output = child.output().unwrap();
+            let output = crate::conf::child_test::run(
+                "data::store::redis::security_settings_tests::startup_validates_security_budget_and_replication_settings",
+                |command| {
+                    command.env(TEST_VAR, name).env(EXPECTED, expected);
+                    for setting in [SECURITY, REPLICAS, TIMEOUT, FAIL] {
+                        command.env_remove(setting);
+                    }
+                    if matches!(name, TIMEOUT | FAIL) {
+                        command.env(REPLICAS, "2");
+                    }
+                    if let Some(value) = value {
+                        command.env(name, value);
+                    }
+                },
+            );
             assert!(
                 output.status.success()
                     && String::from_utf8_lossy(&output.stdout).contains("running 1 test"),

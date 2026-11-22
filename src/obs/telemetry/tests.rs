@@ -1,9 +1,7 @@
+use crate::conf::child_test;
 use axum::{Router, body::Bytes, extract::State, routing::post};
 use http::{HeaderMap, Uri};
-use std::{
-    process::Command,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use tracing::Instrument;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -56,27 +54,35 @@ async fn http_export_workers_deliver_traces_and_logs_without_a_tokio_runtime() {
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let output = tokio::task::spawn_blocking(move || {
-        let mut command = Command::new(std::env::current_exe().unwrap());
-        command.args(["--exact", "obs::telemetry::tests::http_export_workers_deliver_traces_and_logs_without_a_tokio_runtime", "--nocapture"])
-            .env(CHILD, "1")
-            .env("OTEL_ENABLED", "true")
-            .env("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
-            .env("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
-            .env("OTEL_TRACES_SAMPLER", "always_on")
-            .env("OTEL_RESOURCE_ATTRIBUTES", "service.instance.id=http-export-test-replica,custom.test.attribute=preserved")
-            .env("OTEL_EXPORTER_OTLP_TIMEOUT", "3000")
-            .env("LOG_FORMAT", "json")
-            .env("LOG_FILE_ENABLED", "false")
-            .env("LOG_CONSOLE_ENABLED", "true")
-            .env("RUST_LOG", "info");
-        for signal in ["TRACES", "LOGS", "METRICS"] {
-            for setting in ["ENDPOINT", "PROTOCOL", "HEADERS", "TIMEOUT"] {
-                command.env_remove(format!("OTEL_EXPORTER_OTLP_{signal}_{setting}"));
-            }
-        }
-        command.env_remove("OTEL_EXPORTER_OTLP_HEADERS");
-        command.output().unwrap()
-    }).await.unwrap();
+        child_test::run(
+            "obs::telemetry::tests::http_export_workers_deliver_traces_and_logs_without_a_tokio_runtime",
+            |command| {
+                command
+                    .env(CHILD, "1")
+                    .env("OTEL_ENABLED", "true")
+                    .env("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+                    .env("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+                    .env("OTEL_TRACES_SAMPLER", "always_on")
+                    .env(
+                        "OTEL_RESOURCE_ATTRIBUTES",
+                        "service.instance.id=http-export-test-replica,custom.test.attribute=preserved",
+                    )
+                    .env("OTEL_EXPORTER_OTLP_TIMEOUT", "3000")
+                    .env("LOG_FORMAT", "json")
+                    .env("LOG_FILE_ENABLED", "false")
+                    .env("LOG_CONSOLE_ENABLED", "true")
+                    .env("RUST_LOG", "info");
+                for signal in ["TRACES", "LOGS", "METRICS"] {
+                    for setting in ["ENDPOINT", "PROTOCOL", "HEADERS", "TIMEOUT"] {
+                        command.env_remove(format!("OTEL_EXPORTER_OTLP_{signal}_{setting}"));
+                    }
+                }
+                command.env_remove("OTEL_EXPORTER_OTLP_HEADERS");
+            },
+        )
+    })
+    .await
+    .unwrap();
     server.abort();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -146,13 +152,18 @@ fn resource_identity_is_stable_per_process_and_preserves_environment_attributes(
         return;
     }
     fn child(attributes: Option<&str>) -> serde_json::Value {
-        let mut command = Command::new(std::env::current_exe().unwrap());
-        command.args(["--exact", "obs::telemetry::tests::resource_identity_is_stable_per_process_and_preserves_environment_attributes", "--nocapture"])
-            .env(CHILD, "1").env_remove("OTEL_RESOURCE_ATTRIBUTES").env_remove("OTEL_SERVICE_NAME");
-        if let Some(attributes) = attributes {
-            command.env("OTEL_RESOURCE_ATTRIBUTES", attributes);
-        }
-        let output = command.output().unwrap();
+        let output = child_test::run(
+            "obs::telemetry::tests::resource_identity_is_stable_per_process_and_preserves_environment_attributes",
+            |command| {
+                command
+                    .env(CHILD, "1")
+                    .env_remove("OTEL_RESOURCE_ATTRIBUTES")
+                    .env_remove("OTEL_SERVICE_NAME");
+                if let Some(attributes) = attributes {
+                    command.env("OTEL_RESOURCE_ATTRIBUTES", attributes);
+                }
+            },
+        );
         assert!(
             output.status.success(),
             "{}\n{}",

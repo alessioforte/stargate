@@ -147,9 +147,13 @@ fn ensure_key(
             root.join(KEYS_DIR).display()
         ));
     }
-    generate(root, key_id, algorithm)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    match generate(root, key_id, algorithm) {
+        Ok(_) => Ok(()),
+        // Another process starting on the same fresh keyring published the
+        // key first: load that one, so every replica signs with the same key.
+        Err(_) if key_dir(root, key_id).is_dir() => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// `(kid, path)` of every directory under `keys/`, sorted by kid.
@@ -229,9 +233,17 @@ fn read_algorithm(dir: &Path) -> Result<Option<Algorithm>, String> {
 }
 
 /// Create `keys/<kid>/` with a new key pair. Refuses to overwrite.
+///
+/// The files are written to a staging directory beside `keys/`, then renamed
+/// into place: a key directory is either absent or complete, and when
+/// several processes generate the same key only the first rename succeeds.
 pub(crate) fn generate(root: &Path, key_id: &str, algorithm: Algorithm) -> io::Result<PathBuf> {
     jwt::validate_key_id(key_id)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let dir = key_dir(root, key_id);
+    if dir.exists() {
+        return Err(refusing_to_overwrite(&dir));
+    }
     let (private_pem, public_pem) = match algorithm {
         Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
             jwt::generate_rsa_keys(RSA_KEY_BITS)
@@ -247,32 +259,57 @@ pub(crate) fn generate(root: &Path, key_id: &str, algorithm: Algorithm) -> io::R
     }
     .map_err(|error| io::Error::other(error.to_string()))?;
 
-    let dir = key_dir(root, key_id);
-    create_key_dir(&dir)?;
+    fs::create_dir_all(root.join(KEYS_DIR))?;
+    let staging = root.join(format!(".{key_id}.{}", ulid::Ulid::generate()));
+    let published = write_key(&staging, &private_pem, &public_pem, algorithm)
+        .and_then(|()| publish(&staging, &dir));
+    if published.is_err() {
+        // Best effort: the staging directory is outside `keys/`, so a
+        // leftover is never loaded as a key.
+        let _ = fs::remove_dir_all(&staging);
+    }
+    published.map(|()| dir)
+}
+
+/// Write a key pair into the new directory `dir`, readable by its owner only.
+fn write_key(
+    dir: &Path,
+    private_pem: &str,
+    public_pem: &str,
+    algorithm: Algorithm,
+) -> io::Result<()> {
+    fs::create_dir(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    }
     write_new(&dir.join(PRIVATE_KEY), private_pem.as_bytes(), 0o600)?;
     write_new(&dir.join(PUBLIC_KEY), public_pem.as_bytes(), 0o644)?;
     write_new(
         &dir.join(ALGORITHM_FILE),
         format!("{algorithm:?}\n").as_bytes(),
         0o644,
-    )?;
-    Ok(dir)
+    )
 }
 
-fn create_key_dir(dir: &Path) -> io::Result<()> {
-    if dir.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("refusing to overwrite '{}'", dir.display()),
-        ));
-    }
-    fs::create_dir_all(dir)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(())
+/// Move the complete `staging` directory to `dir`. POSIX `rename(2)` never
+/// replaces a non-empty directory, so a published key is never overwritten.
+fn publish(staging: &Path, dir: &Path) -> io::Result<()> {
+    fs::rename(staging, dir).map_err(|error| {
+        if dir.exists() {
+            refusing_to_overwrite(dir)
+        } else {
+            error
+        }
+    })
+}
+
+fn refusing_to_overwrite(dir: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!("refusing to overwrite '{}'", dir.display()),
+    )
 }
 
 fn write_new(path: &Path, contents: &[u8], mode: u32) -> io::Result<()> {
@@ -440,6 +477,57 @@ mod tests {
         assert_eq!(keyring.additional[0].algorithm(), Algorithm::RS256);
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(generated).unwrap();
+    }
+
+    /// Replicas that share one keyring volume can start together on a fresh
+    /// keyring. Threads stand in for them: the keyring holds no in-process
+    /// lock, so they race on the filesystem exactly as processes do.
+    #[test]
+    fn starts_racing_on_a_fresh_keyring_load_the_same_keys() {
+        const STARTS: usize = 8;
+        let root = temp_root("jwt-keyring-race");
+        let barrier = std::sync::Barrier::new(STARTS);
+        let published: Vec<_> = std::thread::scope(|scope| {
+            let starts: Vec<_> = (0..STARTS)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        load(&root, "k1", Some("rsa-1"), Some(Algorithm::ES256))
+                    })
+                })
+                .collect();
+            starts
+                .into_iter()
+                .map(|start| {
+                    let keyring = start.join().unwrap().unwrap();
+                    let minute = chrono::Duration::minutes(1);
+                    let config = jwt::JwtConfig::from_keyring(
+                        keyring.active,
+                        keyring.additional,
+                        minute,
+                        minute,
+                    )
+                    .unwrap()
+                    .with_id_token_key("rsa-1")
+                    .unwrap();
+                    serde_json::to_value(config.public_jwks().unwrap()).unwrap()
+                })
+                .collect()
+        });
+
+        assert!(published.iter().all(|jwks| jwks == &published[0]));
+        let key_ids: Vec<_> = key_dirs(&root)
+            .unwrap()
+            .into_iter()
+            .map(|(key_id, _)| key_id)
+            .collect();
+        assert_eq!(key_ids, ["k1", "rsa-1"]);
+        let entries: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, [KEYS_DIR], "no staging directory is left behind");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

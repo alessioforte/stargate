@@ -126,6 +126,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   issuer; never the listening host), the hosted apps' base paths (`apps.rs`, read by the app routers,
   links, and the Console's default callback), IAM host selection (`hosts.rs`,
   `IAM_HOSTS`, validated once at startup), and feature toggles (`features.rs`, below).
+  Tests of process-wide state rerun one test of the binary through
+  `conf::child_test::run`, which starts the child in its own empty working directory
+  (never the parent's `.stargate`, so no shared JWT keyring).
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
   `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS
@@ -717,7 +720,8 @@ Signing keys (`src/iam/auth/jwt_keyring.rs`, `crates/jwt/src/keyring.rs`):
   probe-checked at load; inactive keys need only `public.pem`.
 - First start generates `keys/<JWT_KID>/` (and `keys/<JWT_ID_TOKEN_KID>/`, RS256) only on
   a fresh keyring; afterwards a missing named key fails startup (no silent new keys).
-  `alg` is inferred from the public key when absent. Tokens without a known `kid` are
+  Each key is staged beside `keys/` and renamed into place, so nodes starting together
+  on a shared fresh keyring load the first published key. `alg` is inferred from the public key when absent. Tokens without a known `kid` are
   rejected. `JWT_ALGORITHM` mismatch with the active key fails startup.
 - Rotation: generate next key + restart (published), wait JWKS cache, set `JWT_KID`
   - restart, remove the old dir after `JWT_REFRESH_EXP`. HMAC (`HS*`) is single-key.

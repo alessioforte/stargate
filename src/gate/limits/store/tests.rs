@@ -309,9 +309,12 @@ fn degraded_state_survives_configuration_activation() {
 async fn store_errors_are_counted_per_outcome_and_logs_only_describe_transitions() {
     const CHILD: &str = "STARGATE_TEST_LIMIT_OBSERVABILITY";
     if std::env::var_os(CHILD).is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "gate::limits::store::tests::store_errors_are_counted_per_outcome_and_logs_only_describe_transitions", "--nocapture"])
-            .env(CHILD, "1").output().unwrap();
+        let output = crate::conf::child_test::run(
+            "gate::limits::store::tests::store_errors_are_counted_per_outcome_and_logs_only_describe_transitions",
+            |command| {
+                command.env(CHILD, "1");
+            },
+        );
         assert!(
             output.status.success(),
             "{}\n{}",

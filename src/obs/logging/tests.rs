@@ -10,15 +10,12 @@ async fn nested_request_logs_keep_request_id_without_an_otel_trace_id() {
     // Run this capture once in its own process, with no retries.
     const CHILD: &str = "STARGATE_TEST_JSON_LOGS_CHILD";
     if std::env::var_os(CHILD).is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "obs::logging::tests::nested_request_logs_keep_request_id_without_an_otel_trace_id",
-                "--nocapture",
-            ])
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
+        let output = crate::conf::child_test::run(
+            "obs::logging::tests::nested_request_logs_keep_request_id_without_an_otel_trace_id",
+            |command| {
+                command.env(CHILD, "1");
+            },
+        );
         assert!(
             output.status.success(),
             "{}\n{}",

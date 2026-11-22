@@ -843,14 +843,19 @@ async fn completed_password_logins_remember_server_addresses() {
     const CHILD: &str = "STARGATE_TEST_REMEMBER_LOGIN_ADDRESSES";
     if std::env::var_os(CHILD).is_none() {
         let output = tokio::task::spawn_blocking(|| {
-            std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "api::account::credentials::credential_security::completed_password_logins_remember_server_addresses", "--include-ignored", "--nocapture"])
-                .env(CHILD, "1")
-                .env("MFA_MODE", "optional")
-                .env("EMAIL_OTP_PEPPER", "synthetic-login-test-pepper")
-                .env("TRUSTED_PROXIES", "")
-                .output().unwrap()
-        }).await.unwrap();
+            crate::conf::child_test::run(
+                "api::account::credentials::credential_security::completed_password_logins_remember_server_addresses",
+                |command| {
+                    command
+                        .env(CHILD, "1")
+                        .env("MFA_MODE", "optional")
+                        .env("EMAIL_OTP_PEPPER", "synthetic-login-test-pepper")
+                        .env("TRUSTED_PROXIES", "");
+                },
+            )
+        })
+        .await
+        .unwrap();
         assert!(
             output.status.success(),
             "{}\n{}",

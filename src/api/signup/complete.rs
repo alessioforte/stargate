@@ -514,23 +514,14 @@ mod tests {
         }
 
         let output = tokio::task::spawn_blocking(move || {
-            std::process::Command::new(std::env::current_exe().expect("test binary"))
-                .args([
-                    "--exact",
-                    "api::signup::complete::tests::a_self_service_signup_follows_the_last_app_its_link_was_requested_from",
-                    "--nocapture",
-                ])
-                .env(SELF_SERVICE_CHILD, "1")
-                .env("SIGNUP_MODE", "open")
-                // Sign with an in-process secret: a child that generated its
-                // own keyring would race the parent's key files.
-                .env("JWT_ALGORITHM", "HS256")
-                .env(
-                    "JWT_SECRET",
-                    "test-secret-for-the-self-service-continuation-signup-child-0001",
-                )
-                .output()
-                .expect("run child test")
+            crate::conf::child_test::run(
+                "api::signup::complete::tests::a_self_service_signup_follows_the_last_app_its_link_was_requested_from",
+                |command| {
+                    command
+                        .env(SELF_SERVICE_CHILD, "1")
+                        .env("SIGNUP_MODE", "open");
+                },
+            )
         })
         .await
         .expect("child test task");

@@ -302,15 +302,12 @@ async fn grpc_rejects_http1_only_upstream_without_contacting_it() {
     // logging test. Other scoped dispatchers must not alter its cached interest.
     const CHILD: &str = "STARGATE_TEST_GRPC_HTTP1_LOGS_CHILD";
     if std::env::var_os(CHILD).is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "gate::tests::grpc::grpc_rejects_http1_only_upstream_without_contacting_it",
-                "--nocapture",
-            ])
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
+        let output = crate::conf::child_test::run(
+            "gate::tests::grpc::grpc_rejects_http1_only_upstream_without_contacting_it",
+            |command| {
+                command.env(CHILD, "1");
+            },
+        );
         assert!(
             output.status.success(),
             "{}\n{}",
@@ -418,15 +415,12 @@ async fn grpc_http1_protocol_failover_reaches_http2_and_records_metric() {
     // fresh process without disturbing metrics used by other tests.
     const CHILD: &str = "STARGATE_TEST_GRPC_PROTOCOL_METRIC_CHILD";
     if std::env::var_os(CHILD).is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "gate::tests::grpc::grpc_http1_protocol_failover_reaches_http2_and_records_metric",
-                "--nocapture",
-            ])
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
+        let output = crate::conf::child_test::run(
+            "gate::tests::grpc::grpc_http1_protocol_failover_reaches_http2_and_records_metric",
+            |command| {
+                command.env(CHILD, "1");
+            },
+        );
         assert!(
             output.status.success(),
             "{}\n{}",

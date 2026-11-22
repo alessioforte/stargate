@@ -422,25 +422,23 @@ fn upstreams_share_the_forwarding_trust_boundary() {
     // The proxy list is process-wide and cached. Child processes exercise its
     // production lookup without mutating the environment of concurrent tests.
     for case in ["trusted", "untrusted"] {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "gate::tests::forwarded_headers::upstreams_share_the_forwarding_trust_boundary",
-                "--nocapture",
-            ])
-            .env(CASE, case)
-            .env(
-                "TRUSTED_PROXIES",
-                if case == "trusted" {
-                    "127.0.0.1/32"
-                } else {
-                    ""
-                },
-            )
-            .env("TLS_ENABLED", "false")
-            .env("OAUTH_BASE_URL", "https://public.test")
-            .output()
-            .unwrap();
+        let output = crate::conf::child_test::run(
+            "gate::tests::forwarded_headers::upstreams_share_the_forwarding_trust_boundary",
+            |command| {
+                command
+                    .env(CASE, case)
+                    .env(
+                        "TRUSTED_PROXIES",
+                        if case == "trusted" {
+                            "127.0.0.1/32"
+                        } else {
+                            ""
+                        },
+                    )
+                    .env("TLS_ENABLED", "false")
+                    .env("OAUTH_BASE_URL", "https://public.test");
+            },
+        );
         assert!(
             output.status.success(),
             "{case}: {}\n{}",
