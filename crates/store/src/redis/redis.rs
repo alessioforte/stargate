@@ -1,14 +1,12 @@
+use super::pool::{RedisConnection, RedisPool, RedisPoolConfig};
+use super::replication::{RedisReplicationConfig, Replication};
 use super::scripts::{CAS_I64_SCRIPT, CAS_SCRIPT, DECR_SCRIPT, HSET_WITH_TTL_SCRIPT, INCR_SCRIPT};
 use crate::error::{StoreError, StoreResult};
 use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
 use async_trait::async_trait;
 use redis::AsyncCommands;
-use redis::aio::{ConnectionLike, ConnectionManager, ConnectionManagerConfig};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 pub use redis::Script as RedisScript;
 
@@ -138,190 +136,6 @@ impl CompressionConfig {
 }
 
 // =============================================================================
-// Pool Configuration
-// =============================================================================
-
-/// Configuration for the Redis connection pool.
-///
-/// The pool maintains multiple `ConnectionManager` instances, each backed by its
-/// own TCP socket to the Redis server. This enables truly parallel I/O across
-/// connections rather than multiplexing everything through a single socket.
-#[derive(Debug, Clone)]
-pub struct RedisPoolConfig {
-    /// Number of connections to maintain in the pool.
-    ///
-    /// Each connection is a separate `ConnectionManager` with its own TCP socket.
-    /// A higher value allows more parallel I/O but consumes more file descriptors
-    /// and Redis server connections.
-    ///
-    /// Defaults to `4`.
-    pub pool_size: usize,
-
-    /// Maximum time to wait for a command response before failing the
-    /// operation. `None` disables the timeout (a hung Redis server will hang
-    /// callers indefinitely — not recommended).
-    ///
-    /// Defaults to 5 seconds.
-    pub response_timeout: Option<Duration>,
-
-    /// Maximum time to wait when (re)establishing a TCP connection to the
-    /// Redis server. `None` disables the timeout.
-    ///
-    /// Defaults to 5 seconds.
-    pub connection_timeout: Option<Duration>,
-}
-
-impl Default for RedisPoolConfig {
-    fn default() -> Self {
-        Self {
-            pool_size: 4,
-            response_timeout: Some(Duration::from_secs(5)),
-            connection_timeout: Some(Duration::from_secs(5)),
-        }
-    }
-}
-
-impl RedisPoolConfig {
-    /// Create a new pool configuration with the given pool size and default
-    /// timeouts (5s response, 5s connection).
-    ///
-    /// # Panics
-    ///
-    /// Will not panic here, but a pool size of 0 will be rejected at pool creation time.
-    pub fn new(pool_size: usize) -> Self {
-        Self {
-            pool_size,
-            ..Default::default()
-        }
-    }
-
-    /// Set the per-command response timeout (`None` disables it).
-    pub fn with_response_timeout(mut self, timeout: Option<Duration>) -> Self {
-        self.response_timeout = timeout;
-        self
-    }
-
-    /// Set the connection-establishment timeout (`None` disables it).
-    pub fn with_connection_timeout(mut self, timeout: Option<Duration>) -> Self {
-        self.connection_timeout = timeout;
-        self
-    }
-}
-
-// =============================================================================
-// Connection Pool
-// =============================================================================
-
-/// A pooled Redis connection that reports each issued command to
-/// [`crate::observe`], so a caller can account for the round trips a request
-/// costs. Counts follow the future that issues them, not the connection.
-#[derive(Clone)]
-pub struct RedisConnection(ConnectionManager);
-
-impl RedisConnection {
-    fn new(connection: ConnectionManager) -> Self {
-        Self(connection)
-    }
-}
-
-impl ConnectionLike for RedisConnection {
-    fn req_packed_command<'a>(
-        &'a mut self,
-        cmd: &'a redis::Cmd,
-    ) -> redis::RedisFuture<'a, redis::Value> {
-        crate::observe::command_issued();
-        self.0.req_packed_command(cmd)
-    }
-
-    fn req_packed_commands<'a>(
-        &'a mut self,
-        pipeline: &'a redis::Pipeline,
-        offset: usize,
-        count: usize,
-    ) -> redis::RedisFuture<'a, Vec<redis::Value>> {
-        crate::observe::command_issued();
-        self.0.req_packed_commands(pipeline, offset, count)
-    }
-
-    fn get_db(&self) -> i64 {
-        self.0.get_db()
-    }
-}
-
-/// A lightweight, lock-free connection pool that distributes work across N
-/// `ConnectionManager` instances using round-robin selection.
-///
-/// Each `ConnectionManager` internally manages a single multiplexed TCP
-/// connection with automatic reconnection. Cloning a `ConnectionManager` is
-/// cheap (Arc-based) and shares the same underlying socket. By maintaining N
-/// *separate* managers we get N distinct TCP sockets, enabling truly parallel
-/// I/O to the Redis server.
-///
-/// The round-robin counter uses relaxed atomic ordering which is sufficient —
-/// perfect distribution is not required, only reasonable spread.
-#[derive(Clone)]
-struct RedisPool {
-    connections: Arc<Vec<ConnectionManager>>,
-    next: Arc<AtomicUsize>,
-}
-
-impl RedisPool {
-    /// Create a new pool with `config.pool_size` connections to the given Redis client.
-    async fn new(client: &redis::Client, config: &RedisPoolConfig) -> StoreResult<Self> {
-        let pool_size = config.pool_size;
-        if pool_size == 0 {
-            return Err(StoreError::InvalidInput(
-                "Pool size must be at least 1".to_string(),
-            ));
-        }
-
-        let manager_config = ConnectionManagerConfig::new()
-            .set_response_timeout(config.response_timeout)
-            .set_connection_timeout(config.connection_timeout);
-
-        let mut connections = Vec::with_capacity(pool_size);
-        for i in 0..pool_size {
-            let conn = ConnectionManager::new_with_config(client.clone(), manager_config.clone())
-                .await
-                .map_err(|e| {
-                    StoreError::ConnectionFailed(format!(
-                        "Failed to create Redis connection {} of {}: {}",
-                        i + 1,
-                        pool_size,
-                        e
-                    ))
-                })?;
-            connections.push(conn);
-        }
-
-        tracing::debug!(
-            "Redis connection pool created with {} connection(s)",
-            pool_size
-        );
-
-        Ok(Self {
-            connections: Arc::new(connections),
-            next: Arc::new(AtomicUsize::new(0)),
-        })
-    }
-
-    /// Acquire a connection from the pool using round-robin selection.
-    ///
-    /// This is a non-blocking, lock-free operation. The returned connection is
-    /// a cheap clone (Arc bump) of one of the pooled managers, so the caller
-    /// gets its own handle while the pool retains ownership.
-    fn get(&self) -> RedisConnection {
-        let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.connections.len();
-        RedisConnection::new(self.connections[idx].clone())
-    }
-
-    /// Return the number of connections in the pool.
-    fn size(&self) -> usize {
-        self.connections.len()
-    }
-}
-
-// =============================================================================
 // Streams
 // =============================================================================
 
@@ -354,8 +168,7 @@ impl StreamEntry {
 ///
 /// ## Connection Pool
 ///
-/// Under the hood, each pool slot is a `redis::aio::ConnectionManager` — a
-/// multiplexed, auto-reconnecting connection. Multiple slots mean multiple TCP
+/// Each pool slot opens and validates its own multiplexed connection on demand. Multiple slots mean multiple TCP
 /// sockets, which allows the OS and Redis server to process requests in parallel
 /// rather than serialising them through a single socket.
 ///
@@ -378,6 +191,7 @@ impl StreamEntry {
 pub struct RedisStore {
     pool: RedisPool,
     compression: CompressionConfig,
+    replication: Option<Replication>,
     key_prefix: String,
 }
 
@@ -400,12 +214,12 @@ impl RedisStore {
             StoreError::ConnectionFailed(format!("Failed to create Redis client: {}", e))
         })?;
 
-        Self::with_client(client, config).await
+        Self::with_client(client, config)
     }
 
     /// Create a store from a client with prepared connection and TLS settings.
-    pub async fn with_client(client: redis::Client, config: RedisPoolConfig) -> StoreResult<Self> {
-        let pool = RedisPool::new(&client, &config).await?;
+    pub fn with_client(client: redis::Client, config: RedisPoolConfig) -> StoreResult<Self> {
+        let pool = RedisPool::new(client, config)?;
 
         tracing::info!(
             "Redis store created with pool of {} connection(s)",
@@ -415,8 +229,60 @@ impl RedisStore {
         Ok(Self {
             pool,
             compression: CompressionConfig::default(),
+            replication: None,
             key_prefix: String::new(),
         })
+    }
+
+    pub fn with_replication(mut self, config: RedisReplicationConfig) -> Self {
+        self.replication = Some(Replication::new(
+            self.pool
+                .replication_connection(std::time::Duration::from_millis(
+                    config.timeout_ms.get().into(),
+                )),
+            config,
+        ));
+        self
+    }
+
+    pub async fn set_confirmed<T: SerializeValue>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: u64,
+    ) -> StoreResult<()> {
+        let Some(replication) = &self.replication else {
+            return self.set(key, value, Some(ttl)).await;
+        };
+        self.validate_key(key)?;
+        if ttl == 0 {
+            return Err(StoreError::InvalidInput("TTL cannot be zero".into()));
+        }
+        let mut writes = redis::pipe();
+        writes
+            .cmd("SET")
+            .arg(self.prefixed_key(key).as_ref())
+            .arg(self.serialize(value)?)
+            .arg("EX")
+            .arg(ttl);
+        replication.confirm::<()>(writes).await
+    }
+
+    pub async fn delete_confirmed(&self, key: &str) -> StoreResult<bool> {
+        let Some(replication) = &self.replication else {
+            return self.delete(key).await;
+        };
+        self.validate_key(key)?;
+        let mut writes = redis::pipe();
+        // If a previous deletion reached only the primary, a retry still
+        // needs to advance this socket's replication offset.
+        writes.cmd("EVAL").arg(
+            "local deleted = redis.call('DEL', KEYS[1]);              if deleted == 0 then redis.call('SET', KEYS[1], ''); redis.call('DEL', KEYS[1]); end;              return deleted"
+        ).arg(1).arg(self.prefixed_key(key).as_ref());
+        replication
+            .confirm::<i32>(writes)
+            .await
+            .map(|deleted| deleted > 0)
     }
 
     /// Set the operator prefix for state keys (empty by default). It is
@@ -555,9 +421,9 @@ impl RedisStore {
         }
 
         let mut con = self.pool.get();
-        pipe.query_async::<()>(&mut con).await.map_err(|e| {
-            StoreError::RedisFailed(format!("Failed to XADD to stream '{}': {}", stream, e))
-        })?;
+        pipe.query_async::<()>(&mut con)
+            .await
+            .map_err(StoreError::from)?;
         Ok(())
     }
 }
@@ -584,10 +450,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let value: Option<Vec<u8>> = con
-            .get(key)
-            .await
-            .map_err(|e| StoreError::RedisFailed(format!("Failed to get key '{}': {}", key, e)))?;
+        let value: Option<Vec<u8>> = con.get(key).await.map_err(StoreError::from)?;
 
         match value {
             Some(v) => {
@@ -629,16 +492,15 @@ impl Store for RedisStore {
         let serialized_value = self.serialize(value)?;
 
         if let Some(ttl) = ttl {
-            let _: () = con.set_ex(key, serialized_value, ttl).await.map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to set key '{}' with TTL {}: {}",
-                    key, ttl, e
-                ))
-            })?;
+            let _: () = con
+                .set_ex(key, serialized_value, ttl)
+                .await
+                .map_err(StoreError::from)?;
         } else {
-            let _: () = con.set(key, serialized_value).await.map_err(|e| {
-                StoreError::RedisFailed(format!("Failed to set key '{}': {}", key, e))
-            })?;
+            let _: () = con
+                .set(key, serialized_value)
+                .await
+                .map_err(StoreError::from)?;
         }
 
         Ok(())
@@ -669,12 +531,7 @@ impl Store for RedisStore {
             .query_async::<Option<String>>(&mut con)
             .await
             .map(|result| result.is_some())
-            .map_err(|error| {
-                StoreError::RedisFailed(format!(
-                    "Failed to set key '{}' when absent: {}",
-                    key, error
-                ))
-            })
+            .map_err(StoreError::from)
     }
 
     async fn delete(&self, key: &str) -> StoreResult<bool> {
@@ -684,9 +541,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let result: i32 = con.del(key).await.map_err(|e| {
-            StoreError::RedisFailed(format!("Failed to delete key '{}': {}", key, e))
-        })?;
+        let result: i32 = con.del(key).await.map_err(StoreError::from)?;
 
         Ok(result > 0)
     }
@@ -698,9 +553,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let result: bool = con.exists(key).await.map_err(|e| {
-            StoreError::RedisFailed(format!("Failed to check existence of key '{}': {}", key, e))
-        })?;
+        let result: bool = con.exists(key).await.map_err(StoreError::from)?;
 
         Ok(result)
     }
@@ -736,19 +589,11 @@ impl Store for RedisStore {
                 .arg(ttl)
                 .invoke_async(&mut con)
                 .await
-                .map_err(|e| {
-                    StoreError::RedisFailed(format!(
-                        "Failed to set hash field '{}' in key '{}' with TTL {}: {}",
-                        field, key, ttl, e
-                    ))
-                })?
+                .map_err(StoreError::from)?
         } else {
-            con.hset(key, field, serialized_value).await.map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to set hash field '{}' in key '{}': {}",
-                    field, key, e
-                ))
-            })?
+            con.hset(key, field, serialized_value)
+                .await
+                .map_err(StoreError::from)?
         };
 
         // HSET returns 1 when the field was newly created, 0 on overwrite —
@@ -764,12 +609,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let value: Option<Vec<u8>> = con.hget(key, field).await.map_err(|e| {
-            StoreError::RedisFailed(format!(
-                "Failed to get hash field '{}' from key '{}': {}",
-                field, key, e
-            ))
-        })?;
+        let value: Option<Vec<u8>> = con.hget(key, field).await.map_err(StoreError::from)?;
 
         match value {
             Some(v) => {
@@ -788,12 +628,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let result: i32 = con.hdel(key, field).await.map_err(|e| {
-            StoreError::RedisFailed(format!(
-                "Failed to delete hash field '{}' from key '{}': {}",
-                field, key, e
-            ))
-        })?;
+        let result: i32 = con.hdel(key, field).await.map_err(StoreError::from)?;
 
         Ok(result > 0)
     }
@@ -805,12 +640,8 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let hash_data: HashMap<String, Vec<u8>> = con.hgetall(key).await.map_err(|e| {
-            StoreError::RedisFailed(format!(
-                "Failed to get all hash fields from key '{}': {}",
-                key, e
-            ))
-        })?;
+        let hash_data: HashMap<String, Vec<u8>> =
+            con.hgetall(key).await.map_err(StoreError::from)?;
 
         let mut result = HashMap::with_capacity(hash_data.len());
 
@@ -835,12 +666,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let result: bool = con.hexists(key, field).await.map_err(|e| {
-            StoreError::RedisFailed(format!(
-                "Failed to check existence of hash field '{}' in key '{}': {}",
-                field, key, e
-            ))
-        })?;
+        let result: bool = con.hexists(key, field).await.map_err(StoreError::from)?;
 
         Ok(result)
     }
@@ -852,9 +678,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let result: Vec<String> = con.hkeys(key).await.map_err(|e| {
-            StoreError::RedisFailed(format!("Failed to get hash keys from key '{}': {}", key, e))
-        })?;
+        let result: Vec<String> = con.hkeys(key).await.map_err(StoreError::from)?;
 
         Ok(result)
     }
@@ -866,12 +690,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let values: Vec<Vec<u8>> = con.hvals(key).await.map_err(|e| {
-            StoreError::RedisFailed(format!(
-                "Failed to get hash values from key '{}': {}",
-                key, e
-            ))
-        })?;
+        let values: Vec<Vec<u8>> = con.hvals(key).await.map_err(StoreError::from)?;
 
         let mut result = Vec::with_capacity(values.len());
 
@@ -895,12 +714,7 @@ impl Store for RedisStore {
 
         let mut con = self.pool.get();
 
-        let len: usize = con.hlen(key).await.map_err(|e| {
-            StoreError::RedisFailed(format!(
-                "Failed to get hash length from key '{}': {}",
-                key, e
-            ))
-        })?;
+        let len: usize = con.hlen(key).await.map_err(StoreError::from)?;
 
         Ok(len)
     }
@@ -934,12 +748,7 @@ impl Store for RedisStore {
             .arg(ttl_str)
             .invoke_async(&mut con)
             .await
-            .map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to perform compare and swap on key '{}': {}",
-                    key, e
-                ))
-            })?;
+            .map_err(StoreError::from)?;
 
         Ok(result == 1)
     }
@@ -973,10 +782,8 @@ impl RedisStore {
         let mut values: Vec<Option<Vec<u8>>> = vec![None; keys.len()];
         for indices in groups.values() {
             let group_keys: Vec<&str> = indices.iter().map(|&i| physical[i].as_ref()).collect();
-            let group_values: Vec<Option<Vec<u8>>> = con
-                .mget(group_keys)
-                .await
-                .map_err(|e| StoreError::RedisFailed(format!("Failed to mget keys: {}", e)))?;
+            let group_values: Vec<Option<Vec<u8>>> =
+                con.mget(group_keys).await.map_err(StoreError::from)?;
             for (&index, value) in indices.iter().zip(group_values) {
                 values[index] = value;
             }
@@ -1037,7 +844,7 @@ impl RedisStore {
             }
             pipe.query_async::<()>(&mut con)
                 .await
-                .map_err(|e| StoreError::RedisFailed(format!("Failed to set keys: {}", e)))?;
+                .map_err(StoreError::from)?;
         }
 
         Ok(())
@@ -1062,10 +869,8 @@ impl RedisStore {
             for &index in indices {
                 pipe.del(physical[index].as_ref());
             }
-            let group_deleted: Vec<i32> = pipe
-                .query_async(&mut con)
-                .await
-                .map_err(|e| StoreError::RedisFailed(format!("Failed to delete keys: {}", e)))?;
+            let group_deleted: Vec<i32> =
+                pipe.query_async(&mut con).await.map_err(StoreError::from)?;
             for (&index, count) in indices.iter().zip(group_deleted) {
                 deleted[index] = count > 0;
             }
@@ -1092,9 +897,8 @@ impl RedisStore {
             for &index in indices {
                 pipe.exists(physical[index].as_ref());
             }
-            let group_exists: Vec<bool> = pipe.query_async(&mut con).await.map_err(|e| {
-                StoreError::RedisFailed(format!("Failed to check existence of keys: {}", e))
-            })?;
+            let group_exists: Vec<bool> =
+                pipe.query_async(&mut con).await.map_err(StoreError::from)?;
             for (&index, value) in indices.iter().zip(group_exists) {
                 exists[index] = value;
             }
@@ -1147,10 +951,7 @@ impl AtomicStore for RedisStore {
 
         let mut con = self.pool.get();
 
-        let value: Option<i64> = con
-            .get(key)
-            .await
-            .map_err(|e| StoreError::RedisFailed(format!("Failed to get key '{}': {}", key, e)))?;
+        let value: Option<i64> = con.get(key).await.map_err(StoreError::from)?;
 
         Ok(value)
     }
@@ -1167,16 +968,12 @@ impl AtomicStore for RedisStore {
         let mut con = self.pool.get();
 
         if let Some(ttl) = ttl {
-            let _: () = con.set_ex(key, value, ttl).await.map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to set key '{}' with TTL {}: {}",
-                    key, ttl, e
-                ))
-            })?;
+            let _: () = con
+                .set_ex(key, value, ttl)
+                .await
+                .map_err(StoreError::from)?;
         } else {
-            let _: () = con.set(key, value).await.map_err(|e| {
-                StoreError::RedisFailed(format!("Failed to set key '{}': {}", key, e))
-            })?;
+            let _: () = con.set(key, value).await.map_err(StoreError::from)?;
         }
 
         Ok(())
@@ -1195,12 +992,7 @@ impl AtomicStore for RedisStore {
 
         // Fast path: use native INCRBY when no TTL is needed (avoids Lua overhead)
         if ttl.is_none() {
-            let new_value: i64 = con.incr(key, by).await.map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to increment key '{}' by {}: {}",
-                    key, by, e
-                ))
-            })?;
+            let new_value: i64 = con.incr(key, by).await.map_err(StoreError::from)?;
             return Ok(Some(new_value));
         }
 
@@ -1213,12 +1005,7 @@ impl AtomicStore for RedisStore {
             .arg(ttl_str)
             .invoke_async(&mut con)
             .await
-            .map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to increment key '{}' by {}: {}",
-                    key, by, e
-                ))
-            })?;
+            .map_err(StoreError::from)?;
 
         Ok(Some(new_value))
     }
@@ -1236,12 +1023,7 @@ impl AtomicStore for RedisStore {
 
         // Fast path: use native DECRBY when no TTL is needed (avoids Lua overhead)
         if ttl.is_none() {
-            let new_value: i64 = con.decr(key, by).await.map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to decrement key '{}' by {}: {}",
-                    key, by, e
-                ))
-            })?;
+            let new_value: i64 = con.decr(key, by).await.map_err(StoreError::from)?;
             return Ok(Some(new_value));
         }
 
@@ -1254,12 +1036,7 @@ impl AtomicStore for RedisStore {
             .arg(ttl_str)
             .invoke_async(&mut con)
             .await
-            .map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to decrement key '{}' by {}: {}",
-                    key, by, e
-                ))
-            })?;
+            .map_err(StoreError::from)?;
 
         Ok(Some(new_value))
     }
@@ -1290,12 +1067,7 @@ impl AtomicStore for RedisStore {
             .arg(ttl_str)
             .invoke_async(&mut con)
             .await
-            .map_err(|e| {
-                StoreError::RedisFailed(format!(
-                    "Failed to perform compare and swap on key '{}': {}",
-                    key, e
-                ))
-            })?;
+            .map_err(StoreError::from)?;
 
         Ok(result == 1)
     }

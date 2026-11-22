@@ -172,8 +172,7 @@ async fn assertion_client(
     let ttl = (accepted.exp - now + REPLAY_LEEWAY_SECS).max(1) as u64;
     if !crate::data::store::use_store()
         .set_if_absent(&replay_key, &true, Some(ttl))
-        .await
-        .map_err(OAuthErrorResponse::internal)?
+        .await?
     {
         return Err(oauth_invalid_client("client_assertion was already used"));
     }

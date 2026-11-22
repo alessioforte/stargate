@@ -11,7 +11,6 @@ use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use store::Store;
 
 const DEFAULT_LIMIT: i64 = 20;
 const MAX_LIMIT: i64 = 100;
@@ -322,10 +321,7 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?;
 
-    crate::data::store::use_store()
-        .delete(&store::keys::api_key::subject(&api_key.key_hash))
-        .await
-        .map_err(ErrorResponse::internal)?;
+    crate::data::store::delete_confirmed(&store::keys::api_key::subject(&api_key.key_hash)).await?;
 
     Ok(Json(MessageResponse::new(MessageCode::ApiKeyDeleted)).into_response())
 }
@@ -360,6 +356,8 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         })?;
 
     if api_key.revoked {
+        crate::data::store::delete_confirmed(&store::keys::api_key::subject(&api_key.key_hash))
+            .await?;
         return Err(ErrorResponse::new(ErrorCode::ApiKeyAlreadyRevoked));
     }
 
@@ -367,10 +365,7 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
         .await
         .map_err(ErrorResponse::internal)?;
 
-    crate::data::store::use_store()
-        .delete(&store::keys::api_key::subject(&api_key.key_hash))
-        .await
-        .map_err(ErrorResponse::internal)?;
+    crate::data::store::delete_confirmed(&store::keys::api_key::subject(&api_key.key_hash)).await?;
 
     Ok(Json(MessageResponse::new(MessageCode::ApiKeyRevoked)).into_response())
 }

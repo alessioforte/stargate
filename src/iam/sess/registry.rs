@@ -14,9 +14,10 @@
 //! Every function that ends sessions here also notifies the relying parties
 //! linked to them (OIDC Back-Channel Logout, see `backchannel_logout`).
 
-use crate::data::store::use_store;
+use crate::data::store::{delete_confirmed, use_store, without_security_budget};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
+use crate::iam::auth::revocation::RevocationConfirmations;
 use crate::iam::auth::subject::{Subject, SubjectType};
 use crate::iam::oidc::backchannel_logout::{self, LogoutDelivery};
 use db::ent::OrgMembership;
@@ -295,29 +296,32 @@ pub async fn get_session(sid: &str) -> Result<Option<SessionRecord>, StoreError>
 }
 
 pub async fn list_sessions() -> Result<Vec<SessionRecord>, StoreError> {
-    let store = use_store();
-    let sessions = store.hvals::<SessionRecord>(&directory_key()).await?;
-    let now = now_unix();
-    let mut active = Vec::with_capacity(sessions.len());
-    for session in sessions {
-        if session.expires_at_unix > now
-            && store
-                .exists(&store::keys::session::subject(&session.id))
-                .await?
-        {
-            active.push(session);
-        } else {
-            let _ = store.hdel(&index_key(&session.user_id), &session.id).await;
-            let _ = store.hdel(&directory_key(), &session.id).await;
+    without_security_budget(async {
+        let store = use_store();
+        let sessions = store.hvals::<SessionRecord>(&directory_key()).await?;
+        let now = now_unix();
+        let mut active = Vec::with_capacity(sessions.len());
+        for session in sessions {
+            if session.expires_at_unix > now
+                && store
+                    .exists(&store::keys::session::subject(&session.id))
+                    .await?
+            {
+                active.push(session);
+            } else {
+                let _ = store.hdel(&index_key(&session.user_id), &session.id).await;
+                let _ = store.hdel(&directory_key(), &session.id).await;
+            }
         }
-    }
-    active.sort_by(|left, right| {
-        right
-            .last_seen_at_unix
-            .cmp(&left.last_seen_at_unix)
-            .then_with(|| right.id.cmp(&left.id))
-    });
-    Ok(active)
+        active.sort_by(|left, right| {
+            right
+                .last_seen_at_unix
+                .cmp(&left.last_seen_at_unix)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        Ok(active)
+    })
+    .await
 }
 
 pub async fn session_summary() -> Result<SessionSummary, StoreError> {
@@ -339,14 +343,13 @@ pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreErr
     let Some(record) = get_session(sid).await? else {
         return Ok(None);
     };
-    store
-        .delete(&store::keys::session::subject(&record.id))
-        .await?;
+    let mut confirmations = RevocationConfirmations::default();
+    confirmations.record(delete_confirmed(&store::keys::session::subject(&record.id)).await)?;
     store.delete(&refresh_rotation_key(&record.id)).await?;
     store.hdel(&index_key(&record.user_id), sid).await?;
     store.hdel(&directory_key(), sid).await?;
     backchannel_logout::notify(std::slice::from_ref(&record));
-    Ok(Some(record))
+    confirmations.finish(Some(record))
 }
 
 /// End the user's own session `sid` (logout): delete its subject, refresh
@@ -357,66 +360,79 @@ pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, Sto
     let record = get_session(sid)
         .await?
         .filter(|record| record.user_id == user_id);
-    store.delete(&store::keys::session::subject(sid)).await?;
+    let mut confirmations = RevocationConfirmations::default();
+    confirmations.record(delete_confirmed(&store::keys::session::subject(sid)).await)?;
     store.delete(&refresh_rotation_key(sid)).await?;
     store.hdel(&index_key(user_id), sid).await?;
     store.hdel(&directory_key(), sid).await?;
-    Ok(backchannel_logout::notify(record.as_slice()))
+    confirmations.finish(backchannel_logout::notify(record.as_slice()))
 }
 
 /// Delete every live session of the user (directory records are
 /// authoritative) and the user's session index.
 pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
-    let store = use_store();
-    let records = store.hgetall::<SessionRecord>(&directory_key()).await?;
-    let mut revoked = Vec::new();
-    for (sid, record) in records {
-        if record.user_id != user_id {
-            continue;
+    without_security_budget(async {
+        let store = use_store();
+        let records = store.hgetall::<SessionRecord>(&directory_key()).await?;
+        let mut revoked = Vec::new();
+        let mut confirmations = RevocationConfirmations::default();
+        for (sid, record) in records {
+            if record.user_id != user_id {
+                continue;
+            }
+            confirmations.record(delete_confirmed(&store::keys::session::subject(&sid)).await)?;
+            store.delete(&refresh_rotation_key(&sid)).await?;
+            store.hdel(&directory_key(), &sid).await?;
+            revoked.push(record);
         }
-        store.delete(&store::keys::session::subject(&sid)).await?;
-        store.delete(&refresh_rotation_key(&sid)).await?;
-        store.hdel(&directory_key(), &sid).await?;
-        revoked.push(record);
-    }
-    store.delete(&index_key(user_id)).await?;
-    backchannel_logout::notify(&revoked);
-    Ok(revoked.len())
+        store.delete(&index_key(user_id)).await?;
+        backchannel_logout::notify(&revoked);
+        confirmations.finish(revoked.len())
+    })
+    .await
 }
 
 /// Delete the user's sessions whose active org is `org_id`; org-less and
 /// other-org sessions survive. Lazily prunes expired index entries. Returns
 /// the number of session records actually deleted.
 pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, StoreError> {
-    let store = use_store();
-    let key = index_key(user_id);
-    let entries = store.hgetall::<SessionIndexEntry>(&key).await?;
-    let now = now_unix();
-    let mut revoked = 0;
-    let mut records = Vec::new();
-    for (sid, entry) in entries {
-        let expired = entry.expires_at_unix <= now;
-        let matches = entry.org_id.as_deref() == Some(org_id);
-        if matches && !expired {
-            if let Some(record) = get_session(&sid).await? {
-                store
-                    .delete(&store::keys::session::subject(&record.id))
-                    .await?;
-                store.delete(&refresh_rotation_key(&record.id)).await?;
-                store.hdel(&directory_key(), &sid).await?;
-                revoked += 1;
-                records.push(record);
-            } else if store.delete(&store::keys::session::subject(&sid)).await? {
-                store.delete(&refresh_rotation_key(&sid)).await?;
-                revoked += 1;
+    without_security_budget(async {
+        let store = use_store();
+        let key = index_key(user_id);
+        let entries = store.hgetall::<SessionIndexEntry>(&key).await?;
+        let now = now_unix();
+        let mut revoked = 0;
+        let mut records = Vec::new();
+        let mut confirmations = RevocationConfirmations::default();
+        for (sid, entry) in entries {
+            let expired = entry.expires_at_unix <= now;
+            let matches = entry.org_id.as_deref() == Some(org_id);
+            if matches && !expired {
+                if let Some(record) = get_session(&sid).await? {
+                    confirmations.record(
+                        delete_confirmed(&store::keys::session::subject(&record.id)).await,
+                    )?;
+                    store.delete(&refresh_rotation_key(&record.id)).await?;
+                    store.hdel(&directory_key(), &sid).await?;
+                    revoked += 1;
+                    records.push(record);
+                } else if confirmations
+                    .record(delete_confirmed(&store::keys::session::subject(&sid)).await)?
+                    .unwrap_or(true)
+                {
+                    // A shortfall hides the deletion count. Clean up refresh state anyway.
+                    store.delete(&refresh_rotation_key(&sid)).await?;
+                    revoked += 1;
+                }
+            }
+            if matches || expired {
+                store.hdel(&key, &sid).await?;
             }
         }
-        if matches || expired {
-            let _ = store.hdel(&key, &sid).await;
-        }
-    }
-    backchannel_logout::notify(&records);
-    Ok(revoked)
+        backchannel_logout::notify(&records);
+        confirmations.finish(revoked)
+    })
+    .await
 }
 
 // ── Session authentication ───────────────────────────────────────────────────
@@ -441,18 +457,14 @@ pub async fn authenticated_session(
         .validate_session_access_token(&token)
         .map_err(|_| invalid())?;
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if crate::iam::auth::revocation::is_revoked(&claims).await? {
         return Err(invalid());
     }
 
     let sid = claims.sid.clone().ok_or_else(invalid)?;
     let subject = use_store()
         .get::<Subject>(&store::keys::session::subject(&sid))
-        .await
-        .map_err(|_| invalid())?
+        .await?
         .ok_or_else(invalid)?;
 
     if subject.sub_type != SubjectType::User {

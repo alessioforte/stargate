@@ -285,9 +285,11 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
     let revoked_key_hashes = crate::data::db::delete_organization(&id, ctx)
         .await
         .map_err(ErrorResponse::internal)?;
-    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
+    let key_revocations =
+        crate::iam::auth::verification::purge_revoked_api_keys(&revoked_key_hashes).await;
     crate::gate::invalidate_org_limits(&id).await;
 
+    let mut session_revocations = Ok(());
     for member in &members {
         if let Err(error) =
             crate::iam::sess::registry::revoke_org_sessions(&member.user.id, &id).await
@@ -297,8 +299,11 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
                 org_id = %id,
                 "failed to revoke org sessions after org delete: {error}"
             );
+            session_revocations = Err(error);
         }
     }
+    session_revocations?;
+    key_revocations?;
 
     Ok((
         StatusCode::NO_CONTENT,

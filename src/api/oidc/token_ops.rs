@@ -5,6 +5,7 @@ use super::client_auth::{
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::oauth::oauth_bad_request;
 use crate::err::{OAuthErrorResponse, OAuthResult};
+use crate::iam::auth::revocation::{RevocationConfirmations, revoke_claims};
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
@@ -173,17 +174,16 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
 
     match validate_revocable_jwt(&form.token) {
         Ok(claims) => {
-            crate::iam::auth::revocation::revoke_claims(&claims)
-                .await
-                .map_err(OAuthErrorResponse::internal)?;
+            let mut confirmations = RevocationConfirmations::default();
+            confirmations.record(revoke_claims(&claims).await)?;
             if claims.typ.as_deref() == Some("refresh")
                 && let (Some(user_id), Some(sid)) =
                     (claims.sub_id.as_deref(), claims.sid.as_deref())
             {
-                crate::iam::sess::registry::end_session(user_id, sid)
-                    .await
-                    .map_err(OAuthErrorResponse::internal)?;
+                confirmations
+                    .record(crate::iam::sess::registry::end_session(user_id, sid).await)?;
             }
+            confirmations.finish(())?;
         }
         Err(_) => {
             revoke_api_key_token(
@@ -240,8 +240,7 @@ async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
     if let Some(sid) = claims.sid.as_deref() {
         let active = crate::data::store::use_store()
             .exists(&store::keys::session::subject(sid))
-            .await
-            .map_err(OAuthErrorResponse::internal)?;
+            .await?;
         if !active {
             return Ok(false);
         }
@@ -264,9 +263,7 @@ async fn introspect_jwt_claims(claims: jwt::Claims) -> OAuthResult<Introspection
         return Ok(IntrospectionResponse::inactive());
     }
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
+    if crate::iam::auth::revocation::is_revoked(&claims).await?
         || !jwt_session_active(&claims).await?
     {
         return Ok(IntrospectionResponse::inactive());
@@ -474,10 +471,7 @@ async fn revoke_api_key_token(
     crate::data::db::revoke_api_key(&auth.api_key.id, context)
         .await
         .map_err(OAuthErrorResponse::internal)?;
-    crate::data::store::use_store()
-        .delete(&store::keys::api_key::subject(&hash))
-        .await
-        .map_err(OAuthErrorResponse::internal)?;
+    crate::data::store::delete_confirmed(&store::keys::api_key::subject(&hash)).await?;
 
     Ok(())
 }

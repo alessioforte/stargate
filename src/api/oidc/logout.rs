@@ -280,8 +280,7 @@ fn get_location(query: &LogoutQuery) -> OAuthResult<String> {
 /// to receive their back-channel logout tokens.
 async fn end_browser_session(session: &AuthorizedUser) -> OAuthResult<()> {
     crate::iam::sess::registry::end_session(&session.user.id, &session.sid)
-        .await
-        .map_err(OAuthErrorResponse::internal)?
+        .await?
         .wait(BACKCHANNEL_WAIT)
         .await;
     Ok(())
@@ -353,8 +352,7 @@ async fn park(pending: &PendingLogout) -> OAuthResult<String> {
     let id = format!("{}_{}", ulid::Ulid::generate(), pw::generate_api_key());
     crate::data::store::use_store()
         .set(&key(&id), pending, Some(LOGOUT_REQUEST_TTL_SECS))
-        .await
-        .map_err(OAuthErrorResponse::internal)?;
+        .await?;
     Ok(id)
 }
 
@@ -369,18 +367,10 @@ async fn take(id: &str) -> OAuthResult<Option<PendingLogout>> {
         return Ok(None);
     }
     let store = crate::data::store::use_store();
-    let Some(pending) = store
-        .get::<PendingLogout>(&key(id))
-        .await
-        .map_err(OAuthErrorResponse::internal)?
-    else {
+    let Some(pending) = store.get::<PendingLogout>(&key(id)).await? else {
         return Ok(None);
     };
-    if !store
-        .delete(&key(id))
-        .await
-        .map_err(OAuthErrorResponse::internal)?
-    {
+    if !store.delete(&key(id)).await? {
         return Ok(None);
     }
     Ok(Some(pending))

@@ -27,10 +27,7 @@ pub async fn put_refresh_token(
         .validate_session_refresh_token(&body.refresh_token)
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if crate::iam::auth::revocation::is_revoked(&claims).await? {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
@@ -46,8 +43,7 @@ pub async fn put_refresh_token(
     let store = crate::data::store::use_store();
     let session = store
         .get::<Subject>(&store::keys::session::subject(&sid))
-        .await
-        .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
+        .await?;
 
     let old_subject = match session {
         Some(subject) => subject,
@@ -122,8 +118,7 @@ pub async fn put_refresh_token(
         &tokens.refresh_jti,
         sttl,
     )
-    .await
-    .map_err(ErrorResponse::internal)?;
+    .await?;
     if !rotated {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
@@ -132,15 +127,13 @@ pub async fn put_refresh_token(
     // and must not get its subject record back.
     let renewed =
         crate::iam::sess::registry::renew_session(&user.id, &sid, subject.org_id.as_deref(), sttl)
-            .await
-            .map_err(ErrorResponse::internal)?;
+            .await?;
     if !renewed {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
     store
         .set(&store::keys::session::subject(&sid), &subject, Some(sttl))
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
 
     let cookie = build_jwt_cookie(&tokens.access_token, cttl);
     let body = AuthResponse {

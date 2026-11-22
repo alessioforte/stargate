@@ -1,8 +1,7 @@
 name: Redis
 
 # The Redis suites are slow and need disposable containers, so they run only
-# when the code they exercise changes, or on demand. The OIDC conformance
-# workflow is the only place that needs a live provider.
+# when the code they exercise changes, or on demand.
 on:
   pull_request:
     paths:
@@ -22,6 +21,7 @@ on:
       - 'docs/redis-keys.md'
       - 'src/api/admin/health.rs'
       - 'src/api/middleware/rate_limit.rs'
+      - 'src/api/oidc/**'
       - 'src/data/store/**'
       - 'src/gate/limits.rs'
       - 'src/gate/limits/**'

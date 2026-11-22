@@ -130,9 +130,7 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
         .and_then(|claims| claims.sid.as_deref())
         .map(str::to_string);
 
-    let mut sessions = crate::iam::sess::registry::list_sessions()
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let mut sessions = crate::iam::sess::registry::list_sessions().await?;
     sessions.retain(|session| {
         user_id
             .as_deref()
@@ -215,8 +213,7 @@ pub async fn delete_session(
         .map(str::to_string);
     let session_id: String = extract_path(&mut req).await?;
     let target = crate::iam::sess::registry::get_session(&session_id)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .ok_or_else(|| {
             ErrorResponse::new(ErrorCode::SessionNotFound).with_param("id", session_id.clone())
         })?;
@@ -224,8 +221,7 @@ pub async fn delete_session(
         .require_user_mutation(&target.user_id)
         .await?;
     let session = crate::iam::sess::registry::revoke_session(&session_id)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .ok_or_else(|| {
             ErrorResponse::new(ErrorCode::SessionNotFound).with_param("id", session_id.clone())
         })?;
@@ -279,9 +275,7 @@ pub async fn delete_user_sessions(
             ErrorResponse::new(ErrorCode::UserNotFound).with_param("id", user_id.clone())
         })?;
 
-    let revoked_sessions = crate::iam::sess::registry::revoke_all_sessions(&user_id)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let revoked_sessions = crate::iam::sess::registry::revoke_all_sessions(&user_id).await?;
     tracing::info!(
         admin_user_id,
         user_id = %user_id,

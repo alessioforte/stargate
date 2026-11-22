@@ -81,20 +81,14 @@ async fn active_user_claims(token: &str) -> Result<(jwt::Claims, HashSet<String>
         return Err(bearer_unauthorized("token does not represent a user"));
     }
 
-    if crate::iam::auth::revocation::is_revoked(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if crate::iam::auth::revocation::is_revoked(&claims).await? {
         return Err(bearer_unauthorized("invalid token"));
     }
     if let Some(sid) = claims.sid.as_deref() {
         let Some(user_id) = claims.sub_id.as_deref() else {
             return Err(bearer_unauthorized("invalid token"));
         };
-        if !crate::iam::sess::registry::is_session_active(sid, user_id)
-            .await
-            .map_err(ErrorResponse::internal)?
-        {
+        if !crate::iam::sess::registry::is_session_active(sid, user_id).await? {
             return Err(bearer_unauthorized("invalid token"));
         }
     }

@@ -131,7 +131,7 @@ and exits without stopping the server. See [CLI](cli.md) for all options.
 
 ## Run the cluster image
 
-Configure PostgreSQL and Redis in the environment file, then run the image with
+Configure PostgreSQL and Redis 7.4+ (or Valkey 9.0+) in the environment file, then run the image with
 the same gateway configuration mount:
 
 ```bash

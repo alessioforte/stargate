@@ -73,6 +73,16 @@ impl ErrorResponse {
     }
 }
 
+impl From<store::StoreError> for ErrorResponse {
+    fn from(error: store::StoreError) -> Self {
+        if !error.is_unavailable() {
+            return Self::internal(error);
+        }
+        tracing::debug!(%error, "Security state store unavailable");
+        Self::new(ErrorCode::AuthStateUnavailable)
+    }
+}
+
 impl From<ErrorCode> for ErrorResponse {
     fn from(code: ErrorCode) -> Self {
         Self::new(code)

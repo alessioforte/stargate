@@ -15,10 +15,6 @@ pub use memory::MemoryStore;
 #[cfg(feature = "redis")]
 mod redis;
 #[cfg(feature = "redis")]
-pub use redis::RedisConnection;
-#[cfg(feature = "redis")]
-pub use redis::RedisPoolConfig;
-#[cfg(feature = "redis")]
 pub use redis::RedisScript;
 #[cfg(feature = "redis")]
 pub use redis::RedisStore;
@@ -26,6 +22,10 @@ pub use redis::RedisStore;
 pub use redis::StreamEntry;
 #[cfg(feature = "redis")]
 pub use redis::{Compression, CompressionConfig};
+#[cfg(feature = "redis")]
+pub use redis::{RedisConnection, with_request_budget};
+#[cfg(feature = "redis")]
+pub use redis::{RedisPoolConfig, RedisReplicationConfig};
 
 #[cfg(feature = "redis")]
 pub use redis::{StreamGroupState, StreamId};
