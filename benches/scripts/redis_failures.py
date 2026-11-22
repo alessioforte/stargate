@@ -39,6 +39,8 @@ SECURITY_MS = 1000
 # The Rust budget test checks the exact timer with Tokio's clock.
 HTTP_MARGIN_MS = 40
 
+# `bench_quota` uses an hour window so its counter stays in Redis: day and
+# longer quotas keep their balance in SQL and would not see the partition.
 CONFIG = """schema: stargate/v1
 ingress:
   limit: ingress
@@ -55,7 +57,7 @@ limits:
     params: {max_burst: 10000, replenish_1_per: 1h}
   bench_quota:
     strategy: quota_tracker
-    params: {limit: 10000, period: day}
+    params: {limit: 10000, period: hour}
   bench_deny:
     strategy: gcra
     params: {max_burst: 10000, replenish_1_per: 1ms}
