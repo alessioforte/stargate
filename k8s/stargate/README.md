@@ -44,12 +44,13 @@ Use `persistence.existingClaim` to reuse a claim. Do not mount an empty claim
 over `/app/.stargate` without `persistence.seed.enabled=true`, or the bundled
 applications will be hidden.
 
-`persistence.mountPath` is the writable data directory (`DATA_PATH`): the
-SQLite database and the `memory.bin` snapshot live there, while the gateway and
-policy seeds stay on the read-only `gatewayConfig.mountPath`. A custom path,
-for example `/app/data`, is mounted into the pod together with the constant
-`/app/.stargate` path used by the bundled applications, email templates, and
-signing keys. Both mounts use the same claim.
+`persistence.mountPath` (default `/app/.stargate`) is the writable data
+directory (`DATA_PATH`): the SQLite database and the `memory.bin` snapshot live
+there, while the gateway and policy seeds stay on the read-only
+`gatewayConfig.mountPath`. A custom path, for example `/app/data`, is mounted
+into the pod together with the constant `/app/.stargate` path used by the
+bundled applications, email templates, and signing keys. Both mounts use the
+same claim.
 
 ## Production cluster deployment
 

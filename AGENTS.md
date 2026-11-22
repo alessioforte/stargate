@@ -565,6 +565,11 @@ higher priority only on API hosts; the identity host, ordinary HTTP and WebSocke
 routes keep HTTP transport. Guide:
 `k8s/stargate/README.md`, "Traefik in front".
 
+In edge mode the chart sets the managed `DATA_PATH` from
+`persistence.mountPath`; a custom path is mounted together with
+`/app/.stargate` (bundled applications, email templates, signing keys) from the
+same claim, while the gateway and policy seeds stay read-only.
+
 An optional `traefik.rateLimit` middleware precedes every IngressRoute, including
 admin and gRPC routes. Its in-memory IP buckets survive Redis outages independently
 of Stargate. Allowances multiply with Traefik replicas and router instances; depth defaults to the
@@ -1016,7 +1021,7 @@ the same logical columns on PostgreSQL and SQLite.
 | -------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `CONFIG_PATH`                                                                          | `.stargate`                            | Gateway/policy seed directory (read-only in the chart)                                                                              |
 | `CONFIG_FILENAME`                                                                      | `config.yaml`                          | Gateway seed filename, used only when its database document is absent                                                               |
-| `DATA_PATH`                                                                            | `.stargate`                            | Writable edge directory for `sqlite.db` and `memory.bin`; keep it distinct from a read-only `CONFIG_PATH`                            |
+| `DATA_PATH`                                                                            | `.stargate`                            | Writable edge directory for `sqlite.db` and `memory.bin`; keep it distinct from a read-only `CONFIG_PATH` (for example `CONFIG_PATH=/etc/stargate` and `DATA_PATH=/var/lib/stargate`) |
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
 | `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |
 | `MAX_CONNECTIONS`                                                                      | 1024                                   | Concurrent connections of the implicit listener; stops startup with `LISTENERS`                                                     |
