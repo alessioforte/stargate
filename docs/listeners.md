@@ -1,9 +1,10 @@
 # Listeners
 
 Stargate binds one or more listeners at startup. Each listener has a name, a
-complete address, the serving planes it exposes, its own TLS switch, and its own
-connection cap. Without configuration there is one implicit listener, which is
-the single-port behavior every deployment had before named listeners.
+complete address, the serving planes it exposes, its own TLS switch, its proxy
+trust, and its own connection cap. Without configuration there is one implicit
+listener, which is the single-port behavior every deployment had before named
+listeners.
 
 Listeners are process settings: they come from the environment, need a restart,
 and never appear in the `stargate/v1` gateway document.
@@ -13,11 +14,12 @@ and never appear in the `stargate/v1` gateway document.
 With `LISTENERS` unset the process opens `0.0.0.0:$PORT` (default `5050`) and
 serves every plane on it:
 
-| Setting           | Default | Meaning                                                |
-| ----------------- | ------- | ------------------------------------------------------ |
-| `PORT`            | `5050`  | Port of the implicit listener                          |
-| `TLS_ENABLED`     | `false` | Terminates TLS on the implicit listener                |
-| `MAX_CONNECTIONS` | `1024`  | Concurrent connections the implicit listener accepts    |
+| Setting           | Default | Meaning                                                     |
+| ----------------- | ------- | ----------------------------------------------------------- |
+| `PORT`            | `5050`  | Port of the implicit listener                               |
+| `TLS_ENABLED`     | `false` | Terminates TLS on the implicit listener                     |
+| `MAX_CONNECTIONS` | `1024`  | Concurrent connections the implicit listener accepts         |
+| `TRUSTED_PROXIES` | none    | Proxy sources whose forwarding headers it accepts            |
 
 `TLS_CERT` and `TLS_KEY` hold the certificate when TLS is on. Routes, proxies,
 and hosted apps behave exactly as they did before named listeners.
@@ -28,6 +30,7 @@ and hosted apps behave exactly as they did before named listeners.
 LISTENERS=public,admin,internal,management
 LISTENER_PUBLIC_ADDRESS=0.0.0.0:5050
 LISTENER_PUBLIC_PLANES=identity,gateway
+LISTENER_PUBLIC_TRUSTED_PROXIES=10.42.0.0/16
 LISTENER_ADMIN_ADDRESS=127.0.0.1:5051
 LISTENER_ADMIN_PLANES=admin
 LISTENER_INTERNAL_ADDRESS=[::1]:5052
@@ -40,12 +43,13 @@ LISTENER_MANAGEMENT_PLANES=management
 
 `LISTENERS` is a comma-separated list of names. For each name:
 
-| Setting                          | Required | Default                     |
-| -------------------------------- | -------- | --------------------------- |
-| `LISTENER_<NAME>_ADDRESS`        | yes      | –                           |
-| `LISTENER_<NAME>_PLANES`         | yes      | –                           |
-| `LISTENER_<NAME>_TLS`            | no       | on, except for management   |
-| `LISTENER_<NAME>_MAX_CONNECTIONS`| no       | `1024`                      |
+| Setting                           | Required | Default                     |
+| --------------------------------- | -------- | --------------------------- |
+| `LISTENER_<NAME>_ADDRESS`         | yes      | –                           |
+| `LISTENER_<NAME>_PLANES`          | yes      | –                           |
+| `LISTENER_<NAME>_TLS`             | no       | on, except for management   |
+| `LISTENER_<NAME>_MAX_CONNECTIONS` | no       | `1024`                      |
+| `LISTENER_<NAME>_TRUSTED_PROXIES` | no       | none                        |
 
 Names are 1–32 ASCII letters or digits, start with a letter, and are compared
 case-insensitively; the environment variable uses the uppercase name. A field
@@ -55,8 +59,9 @@ silently fall back to a default.
 The address is a literal IP and a port — `0.0.0.0:5050`, `127.0.0.1:5051`,
 `[::1]:5052`. Hostnames and addresses without a port are rejected.
 
-`PORT`, `TLS_ENABLED`, and `MAX_CONNECTIONS` configure the implicit listener and
-stop startup when `LISTENERS` is declared: every listener states its own values.
+`PORT`, `TLS_ENABLED`, `MAX_CONNECTIONS`, and `TRUSTED_PROXIES` configure the
+implicit listener and stop startup when `LISTENERS` is declared: every listener
+states its own values.
 
 ### Planes
 
@@ -83,16 +88,34 @@ The management plane must be alone on its listener: probes carry no secret and
 stay in clear text, while the other planes can terminate TLS. `LISTENER_<NAME>_TLS=on`
 with only the management plane stops startup.
 
+### Proxy trust
+
+A listener trusts no forwarding header by default. Only a peer in its
+`LISTENER_<NAME>_TRUSTED_PROXIES` list may set `X-Forwarded-For`, `X-Real-IP`, or
+`Forwarded`; the client address is resolved from `X-Forwarded-For` (else
+`X-Real-IP`) once at ingress and every reader uses it (logs and spans, ingress and
+admin limits, brute-force guards, OTP, source-IP matching, audit, and the signed
+internal context). The same plane can serve an ingress listener and an internal
+listener with different trust: the internal listener keeps the peer address and
+removes `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*` field before routing,
+so an internal service cannot forge its address in logs, limits, or audit.
+
+Entries are IP addresses or CIDR blocks. Invalid entries stop startup instead of
+being dropped, and the list is read once. `TRUSTED_PROXIES` is the implicit
+listener's list; with `LISTENERS` it stops startup so the trust has one source.
+
 ### TLS
 
 All TLS listeners share one certificate (`TLS_CERT`, `TLS_KEY`, PKCS#8). Each
 listener offers ALPN `h2` and `http/1.1`, so TLS clients negotiate HTTP/2,
 including gRPC. A TLS listener without a certificate stops startup.
 
-Behind a proxy that terminates TLS, turn TLS off on the listener and set
-`JWT_ISSUER` or `OAUTH_BASE_URL` to the public `https://` URL: cookies get
-`Secure` and responses carry HSTS. Without `LISTENERS`, `TLS_ENABLED` is the
-equivalent switch.
+HTTPS is decided per request, not per process: a request is HTTPS when its
+listener terminates TLS or when `JWT_ISSUER` or `OAUTH_BASE_URL` is an
+`https://` public URL (a proxy terminates TLS). Cookies get `Secure`, responses
+carry HSTS, and the request's own origin and span scheme are `https://` only on
+those responses. With one listener in clear text and one with TLS and an
+`http://` public URL, only the TLS listener answers with `Secure` and HSTS.
 
 ## Connection protection
 
@@ -126,8 +149,8 @@ the cap as soon as the upgrade completes: those connections are bounded by the
 gateway's admission (`runtime` primary and mirror slots), not by the listener.
 
 Each accepted connection carries the peer address and the listener's name,
-planes, and TLS state; rules that differ per listener read them from there
-instead of a process-wide setting.
+planes, TLS state, and proxy trust; rules that differ per listener read them from
+there instead of a process-wide setting.
 
 ## Startup and shutdown
 
@@ -141,5 +164,6 @@ lets open connections finish within `SERVER_SHUTDOWN_TIMEOUT_SECS`. WebSocket
 connections are closed with `1001` as described in `AGENTS.md`.
 
 Because `PORT` does not apply with `LISTENERS`, the default issuer
-(`http://localhost:5050`) is meaningless there: set `JWT_ISSUER` or
-`OAUTH_BASE_URL` to the public URL.
+(`http://localhost:5050`) is meaningless there: set `JWT_ISSUER` to the public URL.
+Declaring `LISTENERS` without it stops startup; `OAUTH_BASE_URL` alone does not
+set the issuer.

@@ -204,18 +204,21 @@ does not consume the budget. Generated configs and the Helm defaults use
 burst 100 with one request replenished every `100ms` (10/s); tune these values
 for the gateway and IAM traffic sharing each client IP (NAT, VPN, office egress).
 
-Gateway requests first acquire process admission, then resolve the client IP and
-consume its ingress allowance, before credential verification, database lookup,
-or route matching. Invalid API keys/bearer tokens, rejected auth/access policies,
-and nonexistent routes all consume allowance. Keys use the resolved IP only;
-changing credentials or client headers cannot choose another bucket. Existing
-`TRUSTED_PROXIES` rules accept `X-Forwarded-For`/`X-Real-IP` only from trusted
-peers; an untrusted peer is keyed by its socket address. Without a peer address,
-requests share the conservative `unknown` bucket. Keep trusted-proxy CIDRs
-restricted to the deployment's actual proxy peers. Behind a load balancer or
-ingress controller, `TRUSTED_PROXIES` is required: otherwise every client
-resolves to the proxy's address and shares one allowance, so a single client
-can exhaust it for everyone, IAM logins included.
+Gateway requests first acquire process admission, then consume the ingress
+allowance of the client address the listener resolved once at ingress, before
+credential verification, database lookup, or route matching. Invalid API
+keys/bearer tokens, rejected auth/access policies, and nonexistent routes all
+consume allowance. Keys use the resolved IP only; changing credentials or client
+headers cannot choose another bucket. The peer's forwarding headers count only
+when the receiving listener trusts the peer (`TRUSTED_PROXIES` on the implicit
+listener, `LISTENER_<NAME>_TRUSTED_PROXIES` with `LISTENERS`); an untrusted peer
+is keyed by its socket address and its forwarding headers are removed. Without a
+peer address, requests share the conservative `unknown` bucket. Keep
+trusted-proxy entries restricted to the deployment's actual proxy peers. Behind
+a load balancer or ingress controller, trust the proxy on that listener:
+otherwise every client resolves to the proxy's address and shares one allowance,
+so a single client can exhaust it for everyone, IAM logins included. See
+`docs/listeners.md`.
 
 Ingress uses its own key namespace, distinct from resource subject/org rate and
 quota buckets even when both reference the same named limit. After admission,
@@ -422,13 +425,15 @@ and per-attempt signing run after the final handshake URI and headers are set.
 
 HTTP requests, failover attempts, mirrors, and WebSocket handshakes use the same
 forwarding rules, including upstreams with `internal_context`. Trust depends on
-the connection peer's IP in `TRUSTED_PROXIES`, independently of the client IP
-derived from incoming headers. Processing happens in this order:
+the connection peer's address in the receiving listener's proxy sources
+(`TRUSTED_PROXIES` or `LISTENER_<NAME>_TRUSTED_PROXIES`), independently of the
+client IP derived from incoming headers. Processing happens in this order:
 
-1. At gateway ingress, before router matching and route middleware, discard
-   `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*` field from an untrusted or
-   missing peer. This includes custom fields such as `X-Forwarded-Client-Cert`
-   and `X-Forwarded-Ssl`. Trusted proxy fields remain available to routing.
+1. At ingress, before routing and any plane's middleware, discard `Forwarded`,
+   `X-Real-IP`, and every `X-Forwarded-*` field from an untrusted or missing
+   peer. This includes custom fields such as `X-Forwarded-Client-Cert` and
+   `X-Forwarded-Ssl`, and it applies to IAM, admin, management, and gateway
+   requests alike. Trusted proxy fields remain available to routing.
 2. Apply route middleware. Operator-provided forwarding metadata, such as
    `X-Forwarded-Prefix: /api` alongside `strip_prefix`, is preserved regardless
    of the original peer's trust.

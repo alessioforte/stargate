@@ -1,5 +1,6 @@
 use super::Provider;
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::web::request::RequestExt;
 use axum::extract::Request;
 use axum::response::Response;
 use db::ent::{
@@ -23,7 +24,13 @@ use idp::github::{GitHubUser, get_github_oauth_token, get_github_user};
 )]
 pub async fn get_github_start(req: Request) -> Result<Response, ErrorResponse> {
     let own_origin = super::request_origin(&req);
-    super::start(Provider::GitHub, req.uri().clone(), own_origin).await
+    super::start(
+        Provider::GitHub,
+        req.uri().clone(),
+        own_origin,
+        req.is_https(),
+    )
+    .await
 }
 
 #[utoipa::path(

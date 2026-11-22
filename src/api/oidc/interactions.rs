@@ -22,11 +22,11 @@ pub(crate) const LOGIN_ENDPOINT_PATH: &str = "/oauth/login";
 /// guards the form post against login CSRF.
 pub(crate) const INTERACTION_COOKIE: &str = "oauth_interaction";
 
-pub(crate) fn interaction_cookie(id: &str, max_age_secs: u64) -> String {
+pub(crate) fn interaction_cookie(id: &str, max_age_secs: u64, secure: bool) -> String {
     let mut cookie = format!(
         "{INTERACTION_COOKIE}={id}; Path={LOGIN_ENDPOINT_PATH}; HttpOnly; SameSite=Strict; Max-Age={max_age_secs}"
     );
-    if crate::srv::tls::served_over_https() {
+    if secure {
         cookie.push_str("; Secure");
     }
     cookie
@@ -151,11 +151,13 @@ mod tests {
 
     #[test]
     fn interaction_cookie_is_strict_and_scoped_to_the_login_endpoint() {
-        let cookie = interaction_cookie("abc", 600);
+        let cookie = interaction_cookie("abc", 600, false);
 
         assert!(cookie.starts_with("oauth_interaction=abc; Path=/oauth/login;"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("SameSite=Strict"));
         assert!(cookie.contains("Max-Age=600"));
+        assert!(!cookie.contains("Secure"));
+        assert!(interaction_cookie("abc", 600, true).ends_with("; Secure"));
     }
 }

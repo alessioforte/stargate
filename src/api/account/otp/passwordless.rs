@@ -59,6 +59,7 @@ pub async fn post_login_email_otp(
 )]
 #[axum::debug_handler]
 pub async fn put_login_email_otp(req: Request) -> Result<Response, ErrorResponse> {
+    let secure = req.is_https();
     let Json(body) = Json::<PasswordlessEmailOtpVerifyRequestBody>::from_request(req, &())
         .await
         .map_err(|error| {
@@ -70,6 +71,7 @@ pub async fn put_login_email_otp(req: Request) -> Result<Response, ErrorResponse
         auth_time,
         None,
         vec![oidc::authentication::AMR_OTP.to_string()],
+        secure,
     )
     .await
 }

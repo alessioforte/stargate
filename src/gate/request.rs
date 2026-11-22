@@ -12,7 +12,7 @@ use super::{
         strip_internal_context_response,
     },
     routing::router_matches,
-    upstream::headers::{UpstreamHeaders, strip_untrusted_forwarded_headers},
+    upstream::headers::UpstreamHeaders,
     usage::StoreUsage,
 };
 use crate::{
@@ -187,7 +187,6 @@ async fn handle_request(
     let listener_tls =
         crate::srv::ConnectionInfo::of(&req).is_some_and(|connection| connection.listener.tls);
     let upstream_headers = UpstreamHeaders::from_request(&req, listener_tls);
-    strip_untrusted_forwarded_headers(req.headers_mut(), upstream_headers.peer);
     let ingress_started = tokio::time::Instant::now();
     ingress::apply_ingress_limit(&runtime, &client_ip, execution, usage)
         .instrument(tracing::debug_span!("gateway.ingress"))

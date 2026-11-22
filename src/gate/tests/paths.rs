@@ -307,7 +307,7 @@ async fn round_trips(
     request.extensions_mut().insert(gate.clone());
     request
         .extensions_mut()
-        .insert(axum::extract::ConnectInfo(SocketAddr::from((
+        .insert(crate::srv::test_connection(SocketAddr::from((
             [127, 0, 0, 1],
             1000,
         ))));
