@@ -854,8 +854,7 @@ async fn completed_password_logins_remember_server_addresses() {
                     command
                         .env(CHILD, "1")
                         .env("MFA_MODE", "optional")
-                        .env("EMAIL_OTP_PEPPER", "synthetic-login-test-pepper")
-                        .env("TRUSTED_PROXIES", "");
+                        .env("EMAIL_OTP_PEPPER", "synthetic-login-test-pepper");
                 },
             )
         })
