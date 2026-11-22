@@ -489,6 +489,16 @@ mod tests {
         }
     }
 
+    /// URL Standard, path percent-encode set: `^` is encoded in the path but
+    /// not in the query.
+    #[test]
+    fn return_to_is_serialized_per_the_url_standard() {
+        assert_eq!(
+            return_to_within("https://id.example.com/a^b?c^d", &bases()).as_deref(),
+            Some("https://id.example.com/a%5Eb?c^d")
+        );
+    }
+
     #[test]
     fn refusals_map_to_login_page_errors() {
         let cases = [

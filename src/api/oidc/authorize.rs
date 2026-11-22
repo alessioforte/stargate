@@ -931,6 +931,16 @@ mod tests {
         assert_eq!(ResponseMode::parse(Some("jwt")), None);
     }
 
+    /// URL Standard, path percent-encode set: a `^` in a registered path
+    /// reaches the client percent-encoded.
+    #[test]
+    fn redirect_location_is_serialized_per_the_url_standard() {
+        assert_eq!(
+            redirect_location("https://app.example.com/cb^1", &[("code", "c")]).unwrap(),
+            "https://app.example.com/cb%5E1?code=c"
+        );
+    }
+
     #[tokio::test]
     async fn form_post_escapes_the_action_and_values() {
         let response = form_post_response(

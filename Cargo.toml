@@ -132,7 +132,7 @@ tracing-appender = "0.2.5"
 tracing-opentelemetry = "0.34.0"
 tracing-subscriber = { version = "0.3.23", default-features = false }
 ulid = "3.0.0"
-url = "2.5.8"
+url = "2.5.9"
 utoipa = "6.0.0"
 
 [profile.dev]
