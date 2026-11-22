@@ -292,7 +292,7 @@ pub async fn delete_organization(mut req: Request) -> Result<Response, ErrorResp
     let mut session_revocations = Ok(());
     for member in &members {
         if let Err(error) =
-            crate::iam::sess::registry::revoke_org_sessions(&member.user.id, &id).await
+            crate::iam::sess::registry::membership_removed(&member.user.id, &id).await
         {
             tracing::error!(
                 user_id = %member.user.id,

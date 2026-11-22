@@ -69,25 +69,10 @@ async fn session_user(token: String) -> Result<db::ent::User, ErrorResponse> {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
-    let sid = claims
-        .sid
-        .as_deref()
-        .filter(|sid| !sid.is_empty())
-        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-    // By id: the email in `sub` may have changed, and a lookup by address
-    // must never resolve to another account's nickname.
-    let user_id = claims
-        .sub_id
-        .as_deref()
-        .filter(|user_id| !user_id.is_empty())
-        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
-    if crate::iam::sess::registry::get_active_session(sid, user_id)
+    let (session, _) = crate::iam::sess::registry::active_token_session(&claims)
         .await?
-        .is_none()
-    {
-        return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
-    }
-    crate::data::db::get_user_by_id(user_id)
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
+    crate::data::db::get_user_by_id(&session.user_id)
         .await
         .map_err(ErrorResponse::internal)?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::UserNotFound))
@@ -149,6 +134,7 @@ pub async fn put_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
     let user = crate::data::db::update_user_locale(&user.id, locale.as_str(), audit_context)
         .await
         .map_err(ErrorResponse::internal)?;
+    crate::iam::sess::registry::refresh_user_subjects(&user.id).await;
 
     Ok(Json(user.into()))
 }
@@ -206,7 +192,9 @@ mod tests {
             use_store()
                 .set(
                     &store::keys::session::subject(&sid),
-                    &Subject::from(user.clone()),
+                    &crate::iam::sess::subjects::PublishedSubject::from(Subject::from(
+                        user.clone(),
+                    )),
                     Some(3600),
                 )
                 .await
@@ -261,6 +249,7 @@ mod tests {
                 sid: Some(self.sid.clone()),
                 azp: oauth.then(|| self.client_id.clone()),
                 scope: oauth.then(|| "openid".into()),
+                auth_time: Some(1),
                 ..Default::default()
             }
         }

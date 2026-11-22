@@ -20,13 +20,11 @@ mod protection_tests;
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
-use crate::iam::auth::subject::Subject;
 use crate::{api::middleware::rate_limit, web::request::RequestExt};
 use axum::Json;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use store::Store;
 
 use authorization::{AdminAuthorization, parse_stored_permissions};
 
@@ -134,9 +132,7 @@ async fn resolve_authorization(
             if let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref())
                 && !crate::iam::auth::revocation::is_revoked(&claims).await?
             {
-                let session = crate::data::store::use_store()
-                    .get::<Subject>(&store::keys::session::subject(sid))
-                    .await?;
+                let session = crate::iam::sess::subjects::read(sid).await?;
                 authenticated = session.is_some_and(|subject| {
                     subject.sub_type == crate::iam::auth::subject::SubjectType::User
                         && subject.id == user_id
@@ -151,18 +147,19 @@ async fn resolve_authorization(
                 }
             }
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None)
-            && let (Some(sid), Some(user_id)) = (claims.sid.as_deref(), claims.sub_id.as_deref())
             && !crate::iam::auth::revocation::is_revoked(&claims).await?
-            && crate::iam::sess::registry::is_session_active(sid, user_id).await?
+            && let Some((session, _)) =
+                crate::iam::sess::registry::active_token_session(&claims).await?
         {
             authenticated = true;
             let client_id = claims.azp.as_deref().unwrap_or_default();
             if crate::iam::oidc::client_is_trusted_first_party(client_id).await
-                && grant_super_admin_if_allowed(user_id, sid).await?
+                && grant_super_admin_if_allowed(&session.user_id, &session.id).await?
             {
-                actor = Some(db::ent::TrustedAdminActor::admin(user_id));
+                let user_id = session.user_id;
+                actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
                 authorization = Some(AdminAuthorization::super_admin_user(
-                    user_id.to_owned(),
+                    user_id,
                     AdminAuthenticationKind::OAuth,
                     Box::new(claims),
                 ));
