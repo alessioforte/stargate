@@ -1,4 +1,6 @@
 pub mod apps;
+#[cfg(test)]
+pub(crate) mod child_test;
 pub mod env;
 pub mod features;
 pub mod hosts;

@@ -53,12 +53,20 @@ async fn login_guard_and_recipient_throttle_stay_closed_on_store_errors() {
         }
     });
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "iam::security_store_tests::login_guard_and_recipient_throttle_stay_closed_on_store_errors", "--nocapture"])
-            .env(CHILD, "1").env("REDIS_URL", url)
-            .env_remove("REDIS_USERNAME").env_remove("REDIS_PASSWORD").env_remove("REDIS_CA_FILE")
-            .output().unwrap()
-    }).await.unwrap();
+        crate::conf::child_test::run(
+            "iam::security_store_tests::login_guard_and_recipient_throttle_stay_closed_on_store_errors",
+            |command| {
+                command
+                    .env(CHILD, "1")
+                    .env("REDIS_URL", url)
+                    .env_remove("REDIS_USERNAME")
+                    .env_remove("REDIS_PASSWORD")
+                    .env_remove("REDIS_CA_FILE");
+            },
+        )
+    })
+    .await
+    .unwrap();
     server.abort();
     assert!(
         output.status.success(),

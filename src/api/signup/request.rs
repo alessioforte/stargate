@@ -265,16 +265,12 @@ mod tests {
         }
 
         let output = tokio::task::spawn_blocking(move || {
-            std::process::Command::new(std::env::current_exe().expect("test binary"))
-                .args([
-                    "--exact",
-                    "api::signup::request::tests::the_signup_response_does_not_reveal_an_existing_account",
-                    "--nocapture",
-                ])
-                .env(CHILD, "1")
-                .env("SIGNUP_MODE", "open")
-                .output()
-                .expect("run child test")
+            crate::conf::child_test::run(
+                "api::signup::request::tests::the_signup_response_does_not_reveal_an_existing_account",
+                |command| {
+                    command.env(CHILD, "1").env("SIGNUP_MODE", "open");
+                },
+            )
         })
         .await
         .expect("child test task");

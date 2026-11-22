@@ -174,15 +174,22 @@ mod tests {
             (Some("-1"), false),
             (Some("invalid"), false),
         ] {
-            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-            command.args(["--exact", "iam::pwd::hash::tests::startup_validates_concurrency_and_precomputes_the_dummy_hash", "--nocapture"])
-                .env(CHILD, "1").env("ARGON2_MEMORY_KIB", "8").env("ARGON2_ITERATIONS", "1").env("ARGON2_PARALLELISM", "1").env_remove("PASSWORD_PEPPER");
-            if let Some(value) = value {
-                command.env("PASSWORD_HASH_CONCURRENCY", value);
-            } else {
-                command.env_remove("PASSWORD_HASH_CONCURRENCY");
-            }
-            let output = command.output().unwrap();
+            let output = crate::conf::child_test::run(
+                "iam::pwd::hash::tests::startup_validates_concurrency_and_precomputes_the_dummy_hash",
+                |command| {
+                    command
+                        .env(CHILD, "1")
+                        .env("ARGON2_MEMORY_KIB", "8")
+                        .env("ARGON2_ITERATIONS", "1")
+                        .env("ARGON2_PARALLELISM", "1")
+                        .env_remove("PASSWORD_PEPPER");
+                    if let Some(value) = value {
+                        command.env("PASSWORD_HASH_CONCURRENCY", value);
+                    } else {
+                        command.env_remove("PASSWORD_HASH_CONCURRENCY");
+                    }
+                },
+            );
             assert_eq!(
                 output.status.success(),
                 success,

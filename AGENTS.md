@@ -126,6 +126,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   issuer; never the listening host), the hosted apps' base paths (`apps.rs`, read by the app routers,
   links, and the Console's default callback), IAM host selection (`hosts.rs`,
   `IAM_HOSTS`, validated once at startup), and feature toggles (`features.rs`, below).
+  Tests of process-wide state rerun one test of the binary through
+  `conf::child_test::run`, which starts the child in its own empty working directory
+  (never the parent's `.stargate`, so no shared JWT keyring).
 - `ctx/`: request metadata and ingress headers (`request.rs`), lazy GeoIP; signed-context
   drafts (`propagation.rs`) and audit/authorization projections (`adapters.rs`).
   `ctx/sign/`: internal-context signer runtime, `settings.rs`, `material.rs` key/JWKS

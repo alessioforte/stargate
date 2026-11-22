@@ -171,9 +171,12 @@ fn emit_metric_samples() {
 fn all_metric_attribute_keys_follow_the_semantic_namespace_contract() {
     const CHILD: &str = "STARGATE_TEST_METRIC_NAMESPACE_CHILD";
     if std::env::var_os(CHILD).is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "obs::telemetry::http::tests::all_metric_attribute_keys_follow_the_semantic_namespace_contract", "--nocapture"])
-            .env(CHILD, "1").output().unwrap();
+        let output = crate::conf::child_test::run(
+            "obs::telemetry::http::tests::all_metric_attribute_keys_follow_the_semantic_namespace_contract",
+            |command| {
+                command.env(CHILD, "1");
+            },
+        );
         assert!(
             output.status.success(),
             "{}\n{}",
@@ -248,9 +251,12 @@ fn all_metric_attribute_keys_follow_the_semantic_namespace_contract() {
 async fn server_spans_and_metrics_follow_http_conventions_without_query_values() {
     const CHILD: &str = "STARGATE_TEST_HTTP_SEMCONV_CHILD";
     if std::env::var_os(CHILD).is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "obs::telemetry::http::tests::server_spans_and_metrics_follow_http_conventions_without_query_values", "--nocapture"])
-            .env(CHILD,"1").output().unwrap();
+        let output = crate::conf::child_test::run(
+            "obs::telemetry::http::tests::server_spans_and_metrics_follow_http_conventions_without_query_values",
+            |command| {
+                command.env(CHILD, "1");
+            },
+        );
         assert!(
             output.status.success(),
             "{}\n{}",
