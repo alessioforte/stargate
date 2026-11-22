@@ -489,6 +489,22 @@ mod tests {
         }
     }
 
+    /// A `blob:` URL takes the origin of the URL it wraps, and resolving a
+    /// deeply nested one overflowed the stack in url 2.5.8
+    /// (RUSTSEC-2026-0592). The scheme check refuses both before any origin
+    /// is computed, even when the wrapped URL is on an allowed origin.
+    #[test]
+    fn blob_return_to_is_refused_before_its_origin_is_computed() {
+        let wrapped = "blob:https://id.example.com/x";
+        let origin = url::Url::parse(wrapped).unwrap().origin();
+        assert_eq!(origin.ascii_serialization(), "https://id.example.com");
+        assert_eq!(return_to_within(wrapped, &bases()), None);
+
+        let nested = format!("{}https://id.example.com/x", "blob:".repeat(10_000));
+        assert_eq!(url::Url::parse(&nested).unwrap().scheme(), "blob");
+        assert_eq!(return_to_within(&nested, &bases()), None);
+    }
+
     /// URL Standard, path percent-encode set: `^` is encoded in the path but
     /// not in the query.
     #[test]
