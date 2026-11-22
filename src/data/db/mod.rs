@@ -108,6 +108,7 @@ mod postgres {
 
 #[cfg(feature = "sqlite")]
 mod sqlite {
+    use anyhow::Context;
     use db::service;
     use once_cell::sync::OnceCell;
     use tracing::info;
@@ -115,14 +116,26 @@ mod sqlite {
     static DB: OnceCell<service::Service> = OnceCell::new();
 
     async fn connect() -> anyhow::Result<service::Service> {
-        if !std::path::Path::new(".stargate/sqlite.db").exists() {
-            info!("SQLite database file not found, creating directory and file...");
-            std::fs::create_dir_all(".stargate")?;
-            std::fs::File::create(".stargate/sqlite.db")?;
-            info!("SQLite database file created successfully");
+        crate::conf::data::init()?;
+        let path = crate::conf::data::sqlite_file();
+        if let Some(directory) = path.parent() {
+            std::fs::create_dir_all(directory).with_context(|| {
+                format!(
+                    "cannot create the edge data directory {} (DATA_PATH)",
+                    directory.display()
+                )
+            })?;
+        }
+        if !path.exists() {
+            info!(path = %path.display(), "SQLite database file not found, creating it...");
         }
 
-        service::init("sqlite://.stargate/sqlite.db").await
+        service::init_sqlite_file(&path).await.with_context(|| {
+            format!(
+                "cannot open the SQLite database {} (DATA_PATH)",
+                path.display()
+            )
+        })
     }
 
     pub async fn migrate() -> anyhow::Result<()> {

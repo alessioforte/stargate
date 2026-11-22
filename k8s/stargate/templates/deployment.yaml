@@ -130,6 +130,10 @@ spec:
               value: {{ .Values.gatewayConfig.mountPath | quote }}
             - name: CONFIG_FILENAME
               value: {{ .Values.gatewayConfig.fileName | quote }}
+            {{- if eq .Values.deployment.mode "edge" }}
+            - name: DATA_PATH
+              value: {{ .Values.persistence.mountPath | quote }}
+            {{- end }}
             {{- if .Values.migrations.job.enabled }}
             - name: DB_MIGRATE_ON_START
               value: "false"
@@ -180,6 +184,10 @@ spec:
             {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
+            {{- if and (eq .Values.deployment.mode "edge") (ne (trimSuffix "/" .Values.persistence.mountPath) "/app/.stargate") }}
+            - name: data
+              mountPath: /app/.stargate
+            {{- end }}
             {{- end }}
             {{- range $index, $key := .Values.jwt.keys }}
             - name: jwt-key-{{ $index }}

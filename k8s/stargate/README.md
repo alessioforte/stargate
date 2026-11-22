@@ -44,6 +44,14 @@ Use `persistence.existingClaim` to reuse a claim. Do not mount an empty claim
 over `/app/.stargate` without `persistence.seed.enabled=true`, or the bundled
 applications will be hidden.
 
+`persistence.mountPath` (default `/app/.stargate`) is the writable data
+directory (`DATA_PATH`): the SQLite database and the `memory.bin` snapshot live
+there, while the gateway and policy seeds stay on the read-only
+`gatewayConfig.mountPath`. A custom path, for example `/app/data`, is mounted
+into the pod together with the constant `/app/.stargate` path used by the
+bundled applications, email templates, and signing keys. Both mounts use the
+same claim.
+
 ## Production cluster deployment
 
 For a production deployment behind Traefik, layer [values-production.yaml](values-production.yaml)
@@ -756,6 +764,7 @@ The chart manages these environment variables and rejects duplicates in
 - `PORT`
 - `CONFIG_PATH`
 - `CONFIG_FILENAME`
+- `DATA_PATH` in edge mode (set `persistence.mountPath`)
 - `DB_MIGRATE_ON_START` when `migrations.job.enabled` (set that option)
 - `JWT_KID` and `JWT_ID_TOKEN_KID` (set `jwt.activeKid` and `jwt.idTokenKid`)
 - `IAM_HOSTS` when `traefik.enabled` (set `traefik.identityHost` and `traefik.internalIamHosts`)

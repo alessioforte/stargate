@@ -112,6 +112,11 @@ async fn serve() -> std::io::Result<()> {
         std::io::Error::other(error)
     })?;
     #[cfg(feature = "memory")]
+    conf::data::init().map_err(|error| {
+        tracing::error!("Invalid edge data directory settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
+    #[cfg(feature = "memory")]
     store::init_settings().map_err(|error| {
         tracing::error!("Invalid memory store settings: {error}");
         std::io::Error::other(error.to_string())
@@ -137,8 +142,8 @@ async fn serve() -> std::io::Result<()> {
     #[cfg(feature = "redis")]
     store::init().await.map_err(std::io::Error::other)?;
     data::db::init().await.map_err(|error| {
-        tracing::error!("Database initialization failed: {error}");
-        std::io::Error::other(error.to_string())
+        tracing::error!("Database initialization failed: {error:#}");
+        std::io::Error::other(format!("{error:#}"))
     })?;
 
     aud::spawn()?;

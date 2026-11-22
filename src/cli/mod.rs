@@ -121,7 +121,9 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
         Command::Db(args) => match args.command {
             DbCommand::Migrate => {
                 crate::srv::profile::validate_runtime_profile()?;
-                db::migrate().await.map_err(io::Error::other)
+                db::migrate()
+                    .await
+                    .map_err(|error| io::Error::other(format!("{error:#}")))
             }
         },
         Command::InternalContext(args) => internal_context::run(args),

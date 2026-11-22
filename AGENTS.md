@@ -121,7 +121,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 
 ### Shared Support (paths under `src/`)
 
-- `conf/`: strict env readers (`env.rs`), the config directory (`config_dir`,
+- `conf/`: strict env readers (`env.rs`), the edge data directory (`data.rs`, `DATA_PATH`,
+  default `.stargate`, for `sqlite.db` and `memory.bin`), the config directory (`config_dir`,
   `CONFIG_PATH`), the public base URL (`public_base_url`: `OAUTH_BASE_URL`, else the
   issuer; never the listening host), the hosted apps' base paths (`apps.rs`, read by the app routers,
   links, and the Console's default callback), IAM host selection (`hosts.rs`,
@@ -143,7 +144,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   concurrent-create errors are benign only for `42P04`, or `23505` on
   `pg_database_datname_index`, after a fresh existence query confirms the target.
   `data/store/`: selected profile interface; `memory.rs` persistence (backup at
-  `.stargate/memory.bin`, next to the edge SQLite database;
+  `DATA_PATH/memory.bin`, next to the edge SQLite database;
   `STORE_MAX_MEMORY_MB` validated at startup), `redis.rs` init/readiness and
   Redis TLS/credential settings (`settings.rs`). Redis uses verified TLS for
   `rediss://`, public roots by default or `REDIS_CA_FILE`, and
@@ -563,6 +564,11 @@ duplicates in runtimeConfig data and extraEnv. Optional gRPC routes use h2c with
 higher priority only on API hosts; the identity host, ordinary HTTP and WebSocket
 routes keep HTTP transport. Guide:
 `k8s/stargate/README.md`, "Traefik in front".
+
+In edge mode the chart sets the managed `DATA_PATH` from
+`persistence.mountPath`; a custom path is mounted together with
+`/app/.stargate` (bundled applications, email templates, signing keys) from the
+same claim, while the gateway and policy seeds stay read-only.
 
 An optional `traefik.rateLimit` middleware precedes every IngressRoute, including
 admin and gRPC routes. Its in-memory IP buckets survive Redis outages independently
@@ -1013,8 +1019,9 @@ the same logical columns on PostgreSQL and SQLite.
 
 | Var                                                                                    | Default                                | Purpose                                                                                                                             |
 | -------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `CONFIG_PATH`                                                                          | `.stargate`                            | Gateway/policy seed directory (read-only in the chart); the edge data lives in `.stargate` under the working directory              |
+| `CONFIG_PATH`                                                                          | `.stargate`                            | Gateway/policy seed directory (read-only in the chart)                                                                              |
 | `CONFIG_FILENAME`                                                                      | `config.yaml`                          | Gateway seed filename, used only when its database document is absent                                                               |
+| `DATA_PATH`                                                                            | `.stargate`                            | Writable edge directory for `sqlite.db` and `memory.bin`; keep it distinct from a read-only `CONFIG_PATH` (for example `CONFIG_PATH=/etc/stargate` and `DATA_PATH=/var/lib/stargate`) |
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
 | `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |
 | `MAX_CONNECTIONS`                                                                      | 1024                                   | Concurrent connections of the implicit listener; stops startup with `LISTENERS`                                                     |

@@ -1,6 +1,8 @@
 pub mod apps;
 #[cfg(test)]
 pub(crate) mod child_test;
+#[cfg(any(feature = "memory", feature = "sqlite"))]
+pub mod data;
 pub mod env;
 pub mod features;
 pub mod hosts;
