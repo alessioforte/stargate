@@ -85,8 +85,7 @@ async fn authorize_userinfo(token: &str) -> Result<(String, HashSet<String>), Er
         return Err(bearer_unauthorized("invalid token"));
     }
     let (session, _) = crate::iam::sess::registry::active_token_session(&claims)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .ok_or_else(|| bearer_unauthorized("invalid token"))?;
 
     let Some(client_id) = claims.azp.as_deref() else {

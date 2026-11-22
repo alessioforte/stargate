@@ -463,8 +463,10 @@ pub(super) async fn reconcile_new_session(
         org_id,
     )
     .await
-    .map_err(ErrorResponse::internal)?
-    {
+    .map_err(|error| match error.downcast::<StoreError>() {
+        Ok(error) => ErrorResponse::from(error),
+        Err(error) => ErrorResponse::internal(error),
+    })? {
         Publication::Updated => Ok(()),
         Publication::Gone => Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid)),
         Publication::MembershipRemoved => Err(ErrorResponse::new(
@@ -514,11 +516,10 @@ async fn refresh_subjects_from_db(db: &db::service::Service, user_id: &str) -> a
     Ok(())
 }
 
-pub async fn membership_removed(user_id: &str, org_id: &str) {
-    if let Err(error) = revoke_org_sessions(user_id, org_id).await {
-        tracing::error!(user_id, org_id, %error, "Failed to revoke sessions after membership removal");
-    }
+pub async fn membership_removed(user_id: &str, org_id: &str) -> Result<(), StoreError> {
+    let revocation = revoke_org_sessions(user_id, org_id).await;
     refresh_user_subjects(user_id).await;
+    revocation.map(|_| ())
 }
 
 // ── Session authentication ───────────────────────────────────────────────────
@@ -548,7 +549,8 @@ pub async fn authenticated_session(
     }
 
     let sid = claims.sid.clone().ok_or_else(invalid)?;
-    let subject = crate::iam::sess::subjects::read(&sid).await?
+    let subject = crate::iam::sess::subjects::read(&sid)
+        .await?
         .ok_or_else(invalid)?;
 
     if subject.sub_type != SubjectType::User {

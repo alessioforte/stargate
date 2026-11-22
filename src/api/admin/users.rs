@@ -1007,8 +1007,12 @@ pub async fn remove_user_from_organization(mut req: Request) -> Result<Response,
     // The membership is gone: org-bound keys were revoked in the same
     // transaction (purge their cached subjects), and sessions acting in
     // this org die now. Org-less and other-org sessions survive.
-    crate::iam::auth::verification::purge_api_key_subjects(&revoked_key_hashes).await;
-    crate::iam::sess::registry::membership_removed(&user_id, &org_id).await;
+    let key_revocations =
+        crate::iam::auth::verification::purge_revoked_api_keys(&revoked_key_hashes).await;
+    let session_revocations =
+        crate::iam::sess::registry::membership_removed(&user_id, &org_id).await;
+    session_revocations?;
+    key_revocations?;
 
     Ok(Json(MessageResponse::new(
         MessageCode::UserRemovedFromOrganization,

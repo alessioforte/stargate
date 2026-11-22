@@ -14,7 +14,6 @@ use oidc::scopes::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use store::Store;
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct TokenForm {
@@ -244,8 +243,7 @@ async fn jwt_session_active(claims: &jwt::Claims) -> OAuthResult<bool> {
         || claims.sid.is_some();
     if needs_session
         && crate::iam::sess::registry::active_token_session(claims)
-            .await
-            .map_err(OAuthErrorResponse::internal)?
+            .await?
             .is_none()
     {
         return Ok(false);

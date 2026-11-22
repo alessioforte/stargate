@@ -45,8 +45,7 @@ pub async fn put_refresh_token(
         .as_deref()
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
     let subject = crate::iam::sess::subjects::read(sid)
-        .await
-        .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?
+        .await?
         .filter(|subject| subject.id == user_id)
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
     let user = crate::data::db::get_user_by_id(user_id)
@@ -95,17 +94,13 @@ pub async fn put_refresh_token(
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
-    let rotated = registry::rotate_refresh_token(sid, presented_jti, &tokens.refresh_jti, sttl)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let rotated =
+        registry::rotate_refresh_token(sid, presented_jti, &tokens.refresh_jti, sttl).await?;
     if !rotated {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 
-    if !registry::renew_session(user_id, sid, sttl)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if !registry::renew_session(user_id, sid, sttl).await? {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 

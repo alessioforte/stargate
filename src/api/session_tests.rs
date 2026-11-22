@@ -150,6 +150,7 @@ async fn subject(token: &str) -> Subject {
         .unwrap();
     verify_bearer(&req)
         .await
+        .expect("security state available")
         .expect("valid session token")
         .subject()
         .expect("user subject")

@@ -41,9 +41,7 @@ pub async fn rotate(
         return Ok(None);
     };
     if let Some(sid) = family.sid.as_deref()
-        && crate::iam::sess::registry::touch_session(sid, &family.user_id)
-            .await
-            .map_err(OAuthErrorResponse::internal)?
+        && crate::iam::sess::registry::touch_session(sid, &family.user_id).await?
     {
         return Ok(Some((next, family)));
     }

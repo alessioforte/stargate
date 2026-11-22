@@ -26,7 +26,7 @@ async fn verify_endpoints(router: &Router, user: &User, sid: &str, oauth: &str, 
         .header(header::AUTHORIZATION, bearer(oauth))
         .body(Body::empty())
         .unwrap();
-    assert_eq!(verify_bearer(&request).await.is_some(), active);
+    assert_eq!(verify_bearer(&request).await.unwrap().is_some(), active);
 
     let token = refresh_family(user, sid).await;
     let request = oauth_request(

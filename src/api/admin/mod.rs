@@ -148,7 +148,8 @@ async fn resolve_authorization(
             }
         } else if let Ok(claims) = jwt.validate_oauth_access_token(&token, None)
             && !crate::iam::auth::revocation::is_revoked(&claims).await?
-            && let Some((session, _)) = crate::iam::sess::registry::active_token_session(&claims).await?
+            && let Some((session, _)) =
+                crate::iam::sess::registry::active_token_session(&claims).await?
         {
             authenticated = true;
             let client_id = claims.azp.as_deref().unwrap_or_default();
@@ -158,7 +159,9 @@ async fn resolve_authorization(
                 let user_id = session.user_id;
                 actor = Some(db::ent::TrustedAdminActor::admin(&user_id));
                 authorization = Some(AdminAuthorization::super_admin_user(
-                    user_id, AdminAuthenticationKind::OAuth, Box::new(claims),
+                    user_id,
+                    AdminAuthenticationKind::OAuth,
+                    Box::new(claims),
                 ));
             }
         }

@@ -507,6 +507,10 @@ impl Store for RedisStore {
         value: &T,
         ttl: Option<u64>,
     ) -> StoreResult<()> {
+        self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
+
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -987,6 +991,10 @@ impl AtomicStore for RedisStore {
     }
 
     async fn set_i64(&self, key: &str, value: i64, ttl: Option<u64>) -> StoreResult<()> {
+        self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
+
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -1006,6 +1014,10 @@ impl AtomicStore for RedisStore {
     }
 
     async fn incr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
+        self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
+
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -1033,6 +1045,10 @@ impl AtomicStore for RedisStore {
     }
 
     async fn decr_i64(&self, key: &str, by: i64, ttl: Option<u64>) -> StoreResult<Option<i64>> {
+        self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
+
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
@@ -1066,6 +1082,10 @@ impl AtomicStore for RedisStore {
         new: i64,
         ttl: Option<u64>,
     ) -> StoreResult<bool> {
+        self.validate_key(key)?;
+        let physical_key = self.prefixed_key(key);
+        let key = physical_key.as_ref();
+
         if ttl == Some(0) {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }

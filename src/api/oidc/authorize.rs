@@ -485,7 +485,8 @@ async fn authorization_client(query: &AuthorizationRequest) -> OAuthResult<db::e
     }
 
     let Some(client) = crate::data::db::get_oauth_client_by_client_id(client_id)
-        .await?
+        .await
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Err(oauth_bad_request("unknown client_id"));
     };
@@ -554,8 +555,7 @@ pub(super) async fn current_authorized_user(
     let Some(sid) = claims.sid.as_deref().filter(|sid| !sid.is_empty()) else {
         return Ok(None);
     };
-    let Some((session, _)) = crate::iam::sess::registry::load_active_session(sid).await?
-    else {
+    let Some((session, _)) = crate::iam::sess::registry::load_active_session(sid).await? else {
         return Ok(None);
     };
     if claims
@@ -714,7 +714,8 @@ async fn consent_satisfied(
     }
 
     let Some(consent) = crate::data::db::get_active_oauth_consent(&user.id, &client.client_id)
-        .await?
+        .await
+        .map_err(OAuthErrorResponse::internal)?
     else {
         return Ok(false);
     };

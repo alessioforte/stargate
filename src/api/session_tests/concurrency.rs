@@ -105,7 +105,9 @@ async fn readmission_during_revocation(router: &Router, admin: (&str, &str)) {
     let publication = pause.scope(registry::refresh_user_subjects(&user.id));
     let readmit = async {
         pause.wait().await;
-        registry::membership_removed(&user.id, &org.id).await;
+        registry::membership_removed(&user.id, &org.id)
+            .await
+            .unwrap();
         let path = format!("/admin/users/{}/organizations/{}", user.id, org.id);
         json_request(router, "PUT", &path, admin, json!({"role":"member"})).await;
         let session = start_session(&user, Some(&org.id)).await;
