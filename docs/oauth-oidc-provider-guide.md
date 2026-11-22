@@ -92,9 +92,12 @@ under `keys/` is a verification-only key: it is published in
 validating. Tokens are always verified with the key their `kid` names and that
 key's algorithm; an unknown `kid` is rejected. On first start Stargate creates
 `keys/<JWT_KID>/` with an `JWT_ALGORITHM` key (default RS256), and
-`keys/<JWT_ID_TOKEN_KID>/` (RS256) when set. Keys are generated only on a fresh
-keyring: once other keys exist, a `JWT_KID` or `JWT_ID_TOKEN_KID` naming a
-missing key fails startup instead of silently minting an unpublished key.
+`keys/<JWT_ID_TOKEN_KID>/` (RS256) when set. Nodes sharing the directory may
+start together: each key is written to a staging directory and renamed into
+place, so the first node publishes it and the others load that key. Keys are
+generated only on a fresh keyring: once other keys exist, a `JWT_KID` or
+`JWT_ID_TOKEN_KID` naming a missing key fails startup instead of silently
+minting an unpublished key.
 `JWT_ALGORITHM` may be left unset; when set it must match the active key, or
 startup fails.
 
