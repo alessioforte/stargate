@@ -81,6 +81,12 @@ impl Service {
         self.quota.reserve(&self.pool, reservation).await
     }
 
+    /// Delete one batch of durable quota balances whose owner no longer
+    /// exists. See [`QuotaRepository::prune_orphaned`].
+    pub async fn prune_orphaned_quotas(&self) -> Result<u64> {
+        self.quota.prune_orphaned(&self.pool).await
+    }
+
     pub fn pool_stats(&self) -> PoolStats {
         let size = self.pool.size();
         // Pool operations can race these independent atomic reads. Clamp idle

@@ -25,6 +25,13 @@ pub const FOR_UPDATE_API_KEY: &str = "FOR UPDATE OF ak";
 #[cfg(feature = "sqlite")]
 pub const FOR_UPDATE_API_KEY: &str = "";
 
+/// Row lock for a batch that concurrent workers split between them:
+/// PostgreSQL skips rows another transaction holds; SQLite has one writer.
+#[cfg(feature = "postgres")]
+pub const FOR_UPDATE_SKIP_LOCKED: &str = "FOR UPDATE SKIP LOCKED";
+#[cfg(feature = "sqlite")]
+pub const FOR_UPDATE_SKIP_LOCKED: &str = "";
+
 /// `ESCAPE` clause to append after every `LIKE`/`ILIKE $n` that binds a
 /// pattern built with [`like_contains`], so user-supplied `%` and `_` are
 /// matched literally rather than as wildcards.

@@ -66,6 +66,12 @@ impl LimitSpec {
         }
     }
 
+    /// Whether the limit keeps a durable balance in SQL: a quota with a
+    /// calendar period.
+    pub(super) fn is_durable(&self) -> bool {
+        matches!(&self.params, Strategy::QuotaTracker { period, .. } if !period.is_short())
+    }
+
     pub(super) fn resource_default() -> Self {
         Self {
             params: Strategy::Gcra {

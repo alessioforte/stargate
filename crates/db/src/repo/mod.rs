@@ -21,7 +21,7 @@ pub use oauth_client::*;
 pub use oauth_consent::*;
 pub use organization::*;
 pub use outbox::*;
-pub use quota::{QuotaRepository, QuotaReservation, QuotaReserved};
+pub use quota::{QUOTA_PRUNE_BATCH, QuotaOwner, QuotaRepository, QuotaReservation, QuotaReserved};
 pub use service_account::*;
 pub use super_admin::*;
 pub use user::*;

@@ -57,6 +57,11 @@ pub async fn init() -> anyhow::Result<Arc<Gate>> {
             crate::data::db::service(),
         ))),
     )?);
+    // Shutdown stops it with the gateway's other background work.
+    gate.resources.spawn(limits::prune_orphaned_quotas(
+        crate::data::db::service(),
+        gate.resources.shutdown.clone(),
+    ));
     metrics::register(&gate);
     Ok(gate)
 }

@@ -9,11 +9,39 @@
 use crate::backend::Pool;
 use anyhow::{Context, Result, ensure};
 
+/// Rows one prune statement deletes at most; callers repeat while a batch is
+/// full.
+pub const QUOTA_PRUNE_BATCH: u64 = 1000;
+
 #[derive(Clone, Copy)]
 pub struct QuotaRepository;
 
+/// Who a durable balance belongs to. Balances of deleted owners are pruned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaOwner<'a> {
+    /// A user or an API key.
+    Subject(&'a str),
+    Organization(&'a str),
+}
+
+impl<'a> QuotaOwner<'a> {
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Subject(_) => "subject",
+            Self::Organization(_) => "organization",
+        }
+    }
+
+    fn id(self) -> &'a str {
+        match self {
+            Self::Subject(id) | Self::Organization(id) => id,
+        }
+    }
+}
+
 /// One atomic reservation request.
 pub struct QuotaReservation<'a> {
+    pub owner: QuotaOwner<'a>,
     pub bucket: &'a str,
     /// Configured period, time zone and anchor; changing it starts a fresh
     /// balance.
@@ -55,6 +83,7 @@ impl QuotaRepository {
         reservation: QuotaReservation<'_>,
     ) -> Result<QuotaReserved> {
         let QuotaReservation {
+            owner,
             bucket,
             definition,
             window_start,
@@ -68,8 +97,8 @@ impl QuotaRepository {
         let units = i64::try_from(units).context("quota reservation exceeds i64")?;
         let used: Option<i64> = sqlx::query_scalar(
             "INSERT INTO quota_usage AS q
-                 (bucket, definition, window_start, window_end, used)
-             VALUES ($1, $2, $3, $4, $5)
+                 (bucket, owner_kind, owner_id, definition, window_start, window_end, used)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (bucket) DO UPDATE SET
                  used = CASE
                      WHEN q.definition = excluded.definition
@@ -82,10 +111,12 @@ impl QuotaRepository {
                  window_end = excluded.window_end
              WHERE q.definition <> excluded.definition
                  OR q.window_start < excluded.window_start
-                 OR (q.window_start = excluded.window_start AND q.used + excluded.used <= $6)
+                 OR (q.window_start = excluded.window_start AND q.used + excluded.used <= $8)
              RETURNING used",
         )
         .bind(bucket)
+        .bind(owner.kind())
+        .bind(owner.id())
         .bind(definition)
         .bind(window_start)
         .bind(window_end)
@@ -117,6 +148,27 @@ impl QuotaRepository {
         };
         Ok(QuotaReserved::Refused(used))
     }
+
+    /// Delete up to [`QUOTA_PRUNE_BATCH`] balances whose subject or
+    /// organization no longer exists. Returns the number of rows deleted.
+    pub async fn prune_orphaned(&self, pool: &Pool) -> Result<u64> {
+        let statement = format!(
+            "DELETE FROM quota_usage WHERE bucket IN (
+                 SELECT q.bucket FROM quota_usage q
+                 WHERE (q.owner_kind = 'organization' AND NOT EXISTS (
+                         SELECT 1 FROM organizations o WHERE o.id = q.owner_id))
+                     OR (q.owner_kind = 'subject'
+                         AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = q.owner_id)
+                         AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.id = q.owner_id))
+                 LIMIT {QUOTA_PRUNE_BATCH} {skip_locked}
+             )",
+            skip_locked = crate::backend::FOR_UPDATE_SKIP_LOCKED,
+        );
+        Ok(sqlx::query(sqlx::AssertSqlSafe(statement))
+            .execute(pool)
+            .await?
+            .rows_affected())
+    }
 }
 
 impl Default for QuotaRepository {
@@ -127,11 +179,24 @@ impl Default for QuotaRepository {
 
 #[cfg(test)]
 mod test_support {
-    use super::{QuotaRepository, QuotaReservation, QuotaReserved, Result};
+    use super::{QuotaOwner, QuotaRepository, QuotaReservation, QuotaReserved, Result};
     use crate::backend::Pool;
+
+    pub(super) const OWNER: QuotaOwner<'static> = QuotaOwner::Organization("quota-tests");
 
     pub(super) fn bucket() -> String {
         format!("stargate:v1:{{sub:{}}}:quota:test", ulid::Ulid::generate())
+    }
+
+    pub(super) async fn create_owner(pool: &Pool) {
+        sqlx::query(
+            "INSERT INTO organizations (id, name) VALUES ($1, 'Quota tests')
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(OWNER.id())
+        .execute(pool)
+        .await
+        .unwrap();
     }
 
     pub(super) async fn reserve(
@@ -147,6 +212,7 @@ mod test_support {
             .reserve(
                 pool,
                 QuotaReservation {
+                    owner: OWNER,
                     bucket,
                     definition,
                     window_start,
@@ -157,12 +223,94 @@ mod test_support {
             )
             .await
     }
+
+    /// Reserve one unit for `owner`, then delete the owners in `deleted`
+    /// and prune. Returns which of `owners` kept their balance.
+    pub(super) async fn prune_after_deleting(pool: &Pool) -> [bool; 5] {
+        let suffix = ulid::Ulid::generate().to_string();
+        let user = format!("user-{suffix}");
+        let api_key = format!("key-{suffix}");
+        let organization = format!("org-{suffix}");
+        let deleted_user = format!("gone-user-{suffix}");
+        let deleted_organization = format!("gone-org-{suffix}");
+        for id in [&user, &deleted_user] {
+            sqlx::query("INSERT INTO users (id, email, nickname) VALUES ($1, $2, $1)")
+                .bind(id)
+                .bind(format!("{id}@example.test"))
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query("INSERT INTO api_keys (id, key_hash, label) VALUES ($1, $1, 'quota')")
+            .bind(&api_key)
+            .execute(pool)
+            .await
+            .unwrap();
+        for id in [&organization, &deleted_organization] {
+            sqlx::query("INSERT INTO organizations (id, name) VALUES ($1, 'Quota')")
+                .bind(id)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+        let owners = [
+            QuotaOwner::Subject(&user),
+            QuotaOwner::Subject(&api_key),
+            QuotaOwner::Organization(&organization),
+            QuotaOwner::Subject(&deleted_user),
+            QuotaOwner::Organization(&deleted_organization),
+        ];
+        let buckets = owners.map(|_| bucket());
+        for (owner, bucket) in owners.iter().zip(&buckets) {
+            QuotaRepository::new()
+                .reserve(
+                    pool,
+                    QuotaReservation {
+                        owner: *owner,
+                        bucket,
+                        definition: "day:UTC",
+                        window_start: 100,
+                        window_end: 200,
+                        limit: 10,
+                        units: 1,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(&deleted_user)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM organizations WHERE id = $1")
+            .bind(&deleted_organization)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        while QuotaRepository::new().prune_orphaned(pool).await.unwrap() == super::QUOTA_PRUNE_BATCH
+        {
+        }
+
+        let mut kept = [false; 5];
+        for (kept, bucket) in kept.iter_mut().zip(&buckets) {
+            *kept =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM quota_usage WHERE bucket = $1")
+                    .bind(bucket)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap()
+                    == 1;
+        }
+        kept
+    }
 }
 
 #[cfg(all(test, feature = "sqlite"))]
 mod sqlite_tests {
     use super::QuotaReserved::{Granted, Refused};
-    use super::test_support::{bucket, reserve};
+    use super::test_support::{self, bucket, reserve};
     use crate::backend::Pool;
     use std::path::PathBuf;
 
@@ -182,6 +330,7 @@ mod sqlite_tests {
                 .migrate()
                 .await
                 .unwrap();
+            test_support::create_owner(&pool).await;
             Self { path, pool }
         }
     }
@@ -280,12 +429,21 @@ mod sqlite_tests {
         }
         assert_eq!(granted, 10);
     }
+
+    #[tokio::test]
+    async fn pruning_removes_only_the_balances_of_deleted_owners() {
+        let database = TestDatabase::new().await;
+        assert_eq!(
+            test_support::prune_after_deleting(&database.pool).await,
+            [true, true, true, false, false]
+        );
+    }
 }
 
 #[cfg(all(test, feature = "postgres"))]
 mod postgres_tests {
     use super::QuotaReserved::Granted;
-    use super::test_support::{bucket, reserve};
+    use super::test_support::{self, bucket, reserve};
     use crate::backend::Pool;
 
     async fn pool() -> Pool {
@@ -298,6 +456,7 @@ mod postgres_tests {
             .migrate()
             .await
             .unwrap();
+        test_support::create_owner(&pool).await;
         pool
     }
 
@@ -349,6 +508,16 @@ mod postgres_tests {
                 .await
                 .unwrap(),
             Refused(10)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
+    async fn postgres_pruning_removes_only_the_balances_of_deleted_owners() {
+        let pool = pool().await;
+        assert_eq!(
+            test_support::prune_after_deleting(&pool).await,
+            [true, true, true, false, false]
         );
     }
 }
