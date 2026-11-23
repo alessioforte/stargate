@@ -1,10 +1,11 @@
 //! Stable login-session registry and org context selection.
 //!
 //! Each login has one stable standard JWT `sid`. Refresh-token replay
-//! protection is tracked separately through a rotating JWT `jti`. The
-//! per-user index supports targeted cleanup and the global directory supports
-//! admin listing and aggregate counts. Hash fields carry their own TTL matching
-//! the refresh-token TTL.
+//! protection is tracked separately through a rotating JWT `jti`. A session
+//! keeps its record, subject and refresh rotation under its own key tag; the
+//! per-user index names the user's sessions for targeted cleanup, listing and
+//! reconciliation. Every key and index field expires with the session. No key
+//! lists the sessions of every user.
 //!
 //! Deleting a `sid` record kills the session completely: the gateway and
 //! account endpoints resolve subjects from the store by sid, and the
@@ -23,7 +24,6 @@ use crate::iam::auth::subject::{Subject, SubjectType};
 use crate::iam::oidc::backchannel_logout::{self, LogoutDelivery};
 use db::ent::OrgMembership;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use store::{Store, StoreError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,12 +50,6 @@ pub struct SessionRecord {
     pub amr: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SessionSummary {
-    pub active_sessions: usize,
-    pub active_users: usize,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct RefreshRotation {
     current_jti: String,
@@ -69,11 +63,11 @@ fn refresh_rotation_key(sid: &str) -> String {
     store::keys::session::refresh(sid)
 }
 
-fn directory_key() -> String {
-    store::keys::session::directory()
+fn record_key(sid: &str) -> String {
+    store::keys::session::record(sid)
 }
 
-fn now_unix() -> u64 {
+pub(super) fn now_unix() -> u64 {
     chrono::Utc::now().timestamp().max(0) as u64
 }
 
@@ -89,6 +83,8 @@ fn index_entry(record: &SessionRecord) -> SessionIndexEntry {
     }
 }
 
+/// Index the session for its user, then write its record. The index entry is
+/// written first so a live record is always reachable from the user.
 async fn store_record(record: &SessionRecord, ttl_secs: u64) -> Result<(), StoreError> {
     let store = use_store();
     let user_key = index_key(&record.user_id);
@@ -96,13 +92,24 @@ async fn store_record(record: &SessionRecord, ttl_secs: u64) -> Result<(), Store
         .hset(&user_key, &record.id, &index_entry(record), Some(ttl_secs))
         .await?;
     if let Err(error) = store
-        .hset(&directory_key(), &record.id, record, Some(ttl_secs))
+        .set(&record_key(&record.id), record, Some(ttl_secs))
         .await
     {
         let _ = store.hdel(&user_key, &record.id).await;
         return Err(error);
     }
     Ok(())
+}
+
+/// Rewrite a live record whose index entry is unchanged, keeping its expiry.
+async fn update_record(record: &SessionRecord) -> Result<bool, StoreError> {
+    let Some(ttl_secs) = ttl_until(record.expires_at_unix) else {
+        return Ok(false);
+    };
+    use_store()
+        .set(&record_key(&record.id), record, Some(ttl_secs))
+        .await?;
+    Ok(true)
 }
 
 /// A newly authenticated login: who, when, and how (`amr`).
@@ -186,8 +193,7 @@ pub async fn rotate_refresh_token(
 /// Renew a session after native refresh rotation. Extend the existing
 /// subject's TTL so a concurrent profile or membership write keeps its value.
 pub async fn renew_session(user_id: &str, sid: &str, ttl_secs: u64) -> Result<bool, StoreError> {
-    let Some(mut record) = use_store()
-        .hget::<SessionRecord>(&directory_key(), sid)
+    let Some(mut record) = get_session(sid)
         .await?
         .filter(|record| record.user_id == user_id)
     else {
@@ -212,7 +218,6 @@ pub async fn register_session_client(
     user_id: &str,
     client_id: &str,
 ) -> Result<bool, StoreError> {
-    let store = use_store();
     let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
@@ -221,13 +226,7 @@ pub async fn register_session_client(
         record.client_ids.sort_unstable();
     }
     record.last_seen_at_unix = now_unix();
-    let Some(ttl_secs) = ttl_until(record.expires_at_unix) else {
-        return Ok(false);
-    };
-    store
-        .hset(&directory_key(), sid, &record, Some(ttl_secs))
-        .await?;
-    Ok(true)
+    update_record(&record).await
 }
 
 /// Record an email OTP the user verified in session `sid` (an MFA step-up):
@@ -238,46 +237,34 @@ pub async fn add_otp_factor(sid: &str, user_id: &str) -> Result<bool, StoreError
         return Ok(false);
     };
     record.amr = oidc::authentication::with_otp(&record.amr);
-    let Some(ttl_secs) = ttl_until(record.expires_at_unix) else {
-        return Ok(false);
-    };
-    store_record(&record, ttl_secs).await?;
-    Ok(true)
+    update_record(&record).await
 }
 
 pub async fn touch_session(sid: &str, user_id: &str) -> Result<bool, StoreError> {
-    let store = use_store();
     let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
         return Ok(false);
     };
     record.last_seen_at_unix = now_unix();
-    let Some(ttl_secs) = ttl_until(record.expires_at_unix) else {
-        return Ok(false);
-    };
-    store
-        .hset(&directory_key(), sid, &record, Some(ttl_secs))
-        .await?;
-    Ok(true)
+    update_record(&record).await
 }
 
-/// A live login has a current user subject and a matching directory record.
+/// A live login has a current user subject and a matching, unexpired record.
 pub async fn load_active_session(
     sid: &str,
 ) -> Result<Option<(SessionRecord, Subject)>, StoreError> {
-    let Some(record) = get_session(sid).await? else {
-        return Ok(None);
-    };
-    let Some(subject) = subjects::read(sid).await? else {
-        return Ok(None);
-    };
-    if record.id != sid
-        || record.expires_at_unix <= now_unix()
-        || subject.sub_type != SubjectType::User
-        || subject.id != record.user_id
-    {
-        return Ok(None);
-    }
-    Ok(Some((record, subject)))
+    let (record, subject) = tokio::try_join!(get_session(sid), subjects::read(sid))?;
+    Ok(record
+        .zip(subject)
+        .filter(|(record, subject)| is_active(sid, record, subject, now_unix())))
+}
+
+/// The checks every path applies to a session it reads: the record names this
+/// sid and has not expired, and the subject is the record's user.
+fn is_active(sid: &str, record: &SessionRecord, subject: &Subject, now: u64) -> bool {
+    record.id == sid
+        && record.expires_at_unix > now
+        && subject.sub_type == SubjectType::User
+        && subject.id == record.user_id
 }
 
 pub async fn get_active_session(
@@ -305,105 +292,86 @@ pub async fn active_token_session(
     get_active_session(sid, user_id).await
 }
 
+/// The session's record. An unreadable record cannot describe a live
+/// session, so it reads as missing, like an unreadable subject; transport
+/// failures still reach the caller.
 pub async fn get_session(sid: &str) -> Result<Option<SessionRecord>, StoreError> {
-    use_store().hget(&directory_key(), sid).await
+    match use_store().get(&record_key(sid)).await {
+        Err(StoreError::DeserializationFailed(_)) => Ok(None),
+        result => result,
+    }
 }
 
-pub async fn list_sessions() -> Result<Vec<SessionRecord>, StoreError> {
-    without_security_budget(async {
-        let store = use_store();
-        let sessions = store.hvals::<SessionRecord>(&directory_key()).await?;
-        let mut active = Vec::with_capacity(sessions.len());
-        for session in sessions {
-            if let Some((record, _)) = load_active_session(&session.id).await? {
-                active.push(record);
-            }
-        }
-        active.sort_by(|left, right| {
-            right
-                .last_seen_at_unix
-                .cmp(&left.last_seen_at_unix)
-                .then_with(|| right.id.cmp(&left.id))
-        });
-        Ok(active)
-    })
-    .await
-}
-
-pub async fn session_summary() -> Result<SessionSummary, StoreError> {
-    let sessions = list_sessions().await?;
-    let active_users = sessions
-        .iter()
-        .map(|session| session.user_id.as_str())
-        .collect::<HashSet<_>>()
-        .len();
-    Ok(SessionSummary {
-        active_sessions: sessions.len(),
-        active_users,
-    })
-}
-
-/// Revoke one stable login session and return the removed record.
-pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreError> {
+/// Delete the state kept under the session's tag. Returns whether a subject
+/// was deleted, or `None` when replicas did not confirm the deletion.
+async fn delete_session_state(
+    sid: &str,
+    confirmations: &mut RevocationConfirmations,
+) -> Result<Option<bool>, StoreError> {
     let store = use_store();
-    let Some(record) = get_session(sid).await? else {
-        return Ok(None);
-    };
+    let deleted =
+        confirmations.record(delete_confirmed(&store::keys::session::subject(sid)).await)?;
+    store.delete(&refresh_rotation_key(sid)).await?;
+    store.delete(&record_key(sid)).await?;
+    Ok(deleted)
+}
+
+/// Revoke one stable login session, even when its record is missing or
+/// unreadable, and return the removed record.
+pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreError> {
+    let record = get_session(sid).await?;
     let mut confirmations = RevocationConfirmations::default();
-    confirmations.record(delete_confirmed(&store::keys::session::subject(&record.id)).await)?;
-    store.delete(&refresh_rotation_key(&record.id)).await?;
-    store.hdel(&index_key(&record.user_id), sid).await?;
-    store.hdel(&directory_key(), sid).await?;
-    backchannel_logout::notify(std::slice::from_ref(&record));
-    confirmations.finish(Some(record))
+    delete_session_state(sid, &mut confirmations).await?;
+    if let Some(record) = &record {
+        use_store().hdel(&index_key(&record.user_id), sid).await?;
+        backchannel_logout::notify(std::slice::from_ref(record));
+    }
+    confirmations.finish(record)
 }
 
 /// End a specific login session for this user: delete its subject, refresh
-/// rotation, and registry entries, whether or not the registry still knows
+/// rotation, record and index entry, whether or not the registry still knows
 /// it, and notify its relying parties.
 pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, StoreError> {
-    let store = use_store();
     let record = get_session(sid)
         .await?
         .filter(|record| record.user_id == user_id);
     let mut confirmations = RevocationConfirmations::default();
-    confirmations.record(delete_confirmed(&store::keys::session::subject(sid)).await)?;
-    store.delete(&refresh_rotation_key(sid)).await?;
-    store.hdel(&index_key(user_id), sid).await?;
-    store.hdel(&directory_key(), sid).await?;
+    delete_session_state(sid, &mut confirmations).await?;
+    use_store().hdel(&index_key(user_id), sid).await?;
     confirmations.finish(backchannel_logout::notify(record.as_slice()))
 }
 
-/// Delete the user's indexed sessions and notify linked clients when a
-/// matching directory record is available.
+/// Delete the user's indexed sessions and notify linked clients when their
+/// records are readable. A session registered meanwhile keeps its index entry,
+/// because only the observed fields are removed.
 pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
     without_security_budget(async {
         let store = use_store();
         let key = index_key(user_id);
-        let entries = store.hgetall::<SessionIndexEntry>(&key).await?;
-        let mut revoked = Vec::new();
+        let mut revoked = 0;
+        let mut records = Vec::new();
         let mut confirmations = RevocationConfirmations::default();
-        for sid in entries.keys() {
-            let record = get_session(sid).await?;
+        for sid in store.hkeys(&key).await? {
+            let record = get_session(&sid).await?;
             if record
                 .as_ref()
                 .is_some_and(|record| record.user_id != user_id)
             {
-                store.hdel(&key, sid).await?;
+                store.hdel(&key, &sid).await?;
                 continue;
             }
-            confirmations.record(delete_confirmed(&store::keys::session::subject(sid)).await)?;
-            store.delete(&refresh_rotation_key(sid)).await?;
-            if let Some(record) = record {
-                store.hdel(&directory_key(), sid).await?;
-                revoked.push(record);
+            let deleted = delete_session_state(&sid, &mut confirmations).await?;
+            if record.is_some() || deleted.unwrap_or(true) {
+                revoked += 1;
             }
-            store.hdel(&key, sid).await?;
+            records.extend(record);
+            store.hdel(&key, &sid).await?;
         }
         confirmations
             .record(delete_confirmed(&store::keys::account::login_known(user_id)).await)?;
-        backchannel_logout::notify(&revoked);
-        confirmations.finish(revoked.len())
+        backchannel_logout::notify(&records);
+        confirmations.finish(revoked)
     })
     .await
 }
@@ -424,22 +392,13 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
             let expired = entry.expires_at_unix <= now;
             let matches = entry.org_id.as_deref() == Some(org_id);
             if matches && !expired {
-                if let Some(record) = get_session(&sid).await? {
-                    confirmations.record(
-                        delete_confirmed(&store::keys::session::subject(&record.id)).await,
-                    )?;
-                    store.delete(&refresh_rotation_key(&record.id)).await?;
-                    store.hdel(&directory_key(), &sid).await?;
-                    revoked += 1;
-                    records.push(record);
-                } else if confirmations
-                    .record(delete_confirmed(&store::keys::session::subject(&sid)).await)?
-                    .unwrap_or(true)
-                {
-                    // A shortfall hides the deletion count. Clean up refresh state anyway.
-                    store.delete(&refresh_rotation_key(&sid)).await?;
+                let record = get_session(&sid).await?;
+                // A shortfall hides whether a subject was deleted: count it.
+                let deleted = delete_session_state(&sid, &mut confirmations).await?;
+                if record.is_some() || deleted.unwrap_or(true) {
                     revoked += 1;
                 }
+                records.extend(record);
             }
             if matches || expired {
                 store.hdel(&key, &sid).await?;
@@ -652,36 +611,9 @@ fn select_org<'a>(
 
 #[cfg(all(test, feature = "memory"))]
 mod index_tests {
+    use super::super::test_support::{corrupt_subject, expire_record, seed_session};
     use super::*;
     use serde_json::json;
-
-    async fn seed_session(user_id: &str, sid: &str, org: Option<&str>) {
-        use_store()
-            .set(
-                &store::keys::session::subject(sid),
-                &subjects::PublishedSubject::from(Subject::new(
-                    user_id.into(),
-                    SubjectType::User,
-                    None,
-                )),
-                Some(60),
-            )
-            .await
-            .unwrap();
-        register_session(
-            NewSession {
-                user_id,
-                sid,
-                org_id: org,
-                authenticated_at_unix: now_unix(),
-                amr: vec!["pwd".to_string()],
-            },
-            "refresh-jti",
-            60,
-        )
-        .await
-        .unwrap();
-    }
 
     fn unique(prefix: &str) -> String {
         format!("{prefix}-{}", ulid::Ulid::generate())
@@ -714,89 +646,78 @@ mod index_tests {
         assert_eq!(revoke_all_sessions(&user).await.unwrap(), 0);
     }
 
-    #[test]
-    fn revoke_all_does_not_read_other_users_directory_records() {
-        const CHILD: &str = "STARGATE_REVOKE_INDEX_TEST";
-        if std::env::var_os(CHILD).is_none() {
-            let output = crate::conf::child_test::run(
-                "iam::sess::registry::index_tests::revoke_all_does_not_read_other_users_directory_records",
-                |command| {
-                    command.env(CHILD, "1");
-                },
-            );
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return;
+    #[tokio::test]
+    async fn revocation_continues_past_unreadable_records() {
+        let user = unique("user");
+        let unreadable = unique("sid");
+        let valid = unique("sid");
+        let alone = unique("sid");
+        for sid in [&unreadable, &valid, &alone] {
+            seed_session(&user, sid, None).await;
         }
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let user = unique("user");
-            let sid = unique("sid");
-            seed_session(&user, &sid, None).await;
-            let foreign = unique("sid");
+        for sid in [&unreadable, &alone] {
             use_store()
-                .hset(&directory_key(), &foreign, &"unreadable record", Some(60))
+                .set(&record_key(sid), &"unreadable record", Some(60))
                 .await
                 .unwrap();
-            assert_eq!(revoke_all_sessions(&user).await.unwrap(), 1);
-            assert!(
-                use_store()
-                    .hexists(&directory_key(), &foreign)
-                    .await
-                    .unwrap()
-            );
-            assert!(
-                !use_store()
-                    .exists(&store::keys::session::subject(&sid))
-                    .await
-                    .unwrap()
-            );
-        });
+        }
+
+        assert_eq!(revoke_session(&alone).await.unwrap(), None);
+        assert!(
+            !use_store()
+                .exists(&store::keys::session::subject(&alone))
+                .await
+                .unwrap()
+        );
+        // Without a readable record the owner is unknown: the index entry
+        // stays until the user's revocation or its own expiry.
+        assert!(
+            use_store()
+                .hexists(&index_key(&user), &alone)
+                .await
+                .unwrap()
+        );
+        assert_eq!(revoke_all_sessions(&user).await.unwrap(), 2);
+        for sid in [&unreadable, &valid] {
+            for key in [store::keys::session::subject(sid), record_key(sid)] {
+                assert!(!use_store().exists(&key).await.unwrap(), "{key}");
+            }
+        }
+        assert!(
+            use_store()
+                .hkeys(&index_key(&user))
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
-    async fn list_excludes_unreadable_subjects() {
+    async fn active_sessions_need_a_readable_subject_of_their_owner() {
         let user = unique("user");
-        let valid = unique("sid");
-        let invalid = unique("sid");
-        let expired = unique("sid");
-        let wrong_owner = unique("sid");
-        seed_session(&user, &valid, None).await;
-        seed_session(&user, &invalid, None).await;
-        seed_session(&user, &expired, None).await;
-        seed_session(&user, &wrong_owner, None).await;
-        let mut record = get_session(&expired).await.unwrap().unwrap();
-        record.expires_at_unix = 0;
-        use_store()
-            .hset(&directory_key(), &expired, &record, Some(60))
-            .await
-            .unwrap();
-        let other = Subject::new(unique("other"), SubjectType::User, None);
+        let [valid, invalid, expired, wrong_owner] = ["", "", "", ""].map(|_| unique("sid"));
+        for sid in [&valid, &invalid, &expired, &wrong_owner] {
+            seed_session(&user, sid, None).await;
+        }
+        expire_record(&expired).await;
+        corrupt_subject(&invalid).await;
         use_store()
             .set(
                 &store::keys::session::subject(&wrong_owner),
-                &subjects::PublishedSubject::from(other),
-                Some(60),
-            )
-            .await
-            .unwrap();
-        use_store()
-            .set(
-                &store::keys::session::subject(&invalid),
-                &"unreadable",
+                &subjects::PublishedSubject::from(Subject::new(
+                    unique("other"),
+                    SubjectType::User,
+                    None,
+                )),
                 Some(60),
             )
             .await
             .unwrap();
 
-        let sessions = list_sessions().await.unwrap();
-        assert!(sessions.iter().any(|record| record.id == valid));
-        assert!(!sessions.iter().any(|record| record.id == invalid));
-        assert!(!sessions.iter().any(|record| record.id == expired));
-        assert!(!sessions.iter().any(|record| record.id == wrong_owner));
+        assert!(load_active_session(&valid).await.unwrap().is_some());
+        for sid in [&invalid, &expired, &wrong_owner] {
+            assert!(load_active_session(sid).await.unwrap().is_none(), "{sid}");
+        }
         revoke_all_sessions(&user).await.unwrap();
     }
 
@@ -994,25 +915,6 @@ mod index_tests {
         revoke_session(&sid).await.unwrap();
         assert!(!renew_session(&user, &sid, 60).await.unwrap());
         assert!(get_session(&sid).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn summary_counts_sessions_and_distinct_users() {
-        let user_a = unique("user");
-        let user_b = unique("user");
-        let sid_a1 = unique("sid");
-        let sid_a2 = unique("sid");
-        let sid_b = unique("sid");
-        seed_session(&user_a, &sid_a1, None).await;
-        seed_session(&user_a, &sid_a2, None).await;
-        seed_session(&user_b, &sid_b, None).await;
-
-        let summary = session_summary().await.unwrap();
-
-        assert!(summary.active_sessions >= 3);
-        assert!(summary.active_users >= 2);
-        revoke_all_sessions(&user_a).await.unwrap();
-        revoke_all_sessions(&user_b).await.unwrap();
     }
 }
 

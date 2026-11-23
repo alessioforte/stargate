@@ -466,17 +466,33 @@ Super-admins read delivery state via `GET /admin/outbox-events[/{event_id}]` (re
 ### Sessions
 
 Each login has a stable JWT `sid`, shared by native access/refresh tokens and
-linked user OAuth/OIDC tokens. The subject lives under `{s:<sid>}:subject` and
-native refresh rotation stores the current `jti` under `{s:<sid>}:refresh`
-(`store::keys::session`). The store keeps a per-user index plus the
-`{g}:sessions` directory hash (sid, org, times, linked OAuth client ids).
+linked user OAuth/OIDC tokens. A session's state shares the `{s:<sid>}` tag
+(`store::keys::session`): the subject (`:subject`), the current native refresh
+`jti` (`:refresh`) and the record (`:session`: owner, org, times, linked OAuth
+client ids, `amr`). The per-user index `{u:<user_id>}:sessions` (sid → org,
+expiry) names a user's sessions; no key lists every session.
 User-delegated OAuth access tokens need a `sid` for a live session owned by the
 token's `sub_id` on the admin API, profile, UserInfo, introspection, and gateway.
-The directory record must be unexpired and the versioned subject under the same
-`sid` must decode as a user with the record owner's ID.
+The record must be unexpired and the versioned subject under the same `sid` must
+decode as a user with the record owner's ID (`load_active_session` reads both
+concurrently; an unreadable record or subject reads as no session). Revocation
+deletes a session's state even when its record is unreadable.
 Client-credentials tokens are sessionless. OAuth refresh requires the family's
 live session. Admin endpoints list and revoke sessions, and a native refresh-token
 replay revokes the entire session.
+
+`GET /admin/sessions` returns cursor pages (`iam/sess/listing.rs`): users come
+from SQL in descending id order (only members with `organizationId`), sessions
+from each user's index newest first, each checked like `load_active_session`. A
+page examines at most 1000 users, so it can be short while `nextCursor` is set.
+The overview's session totals are estimates (`iam/sess/summary.rs`): opening or
+ending a session updates no counter. A reconciliation walks the users in batches
+of 500, counts the live sessions and their distinct users, and publishes both
+with its completion time under `{sessions}:summary`. The replica that takes the
+`{sessions}:reconciliation` lease (60 s, checked every 10 s) walks, so totals lag
+by about one interval plus one walk; a failed walk keeps the previous totals and
+time. `/admin/overview` returns `sessions: null` before the first walk, and the
+Console shows the totals as an estimate with the reconciliation age.
 
 After an attribute, profile, or membership write commits, IAM rebuilds each active
 session's stored `Subject` from SQL, keeping its org and reading the current role.
