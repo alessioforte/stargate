@@ -97,10 +97,9 @@ async fn verify_session_claims(
     }
 
     let subject = crate::iam::sess::subjects::read(sid).await?;
-    Ok(
-        subject
-            .and_then(|subject| VerifiedIdentity::jwt(subject, sid.to_owned(), claims.auth_time)),
-    )
+    Ok(subject
+        .filter(|subject| claims.sub_id.as_deref() == Some(subject.id.as_str()))
+        .and_then(|subject| VerifiedIdentity::jwt(subject, sid.to_owned(), claims.auth_time)))
 }
 
 async fn verify_oauth_claims(
@@ -166,4 +165,57 @@ pub async fn verify_bearer<R: RequestExt + ?Sized>(
         return Ok(None);
     };
     verify_oauth_claims(claims).await
+}
+
+#[cfg(all(test, feature = "memory"))]
+mod tests {
+    use super::*;
+    use crate::iam::auth::subject::SubjectType;
+    use crate::iam::sess::subjects::PublishedSubject;
+
+    #[test]
+    fn native_token_requires_the_subject_owner() {
+        const CHILD: &str = "STARGATE_NATIVE_OWNER_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = crate::conf::child_test::run(
+                "iam::auth::verification::tests::native_token_requires_the_subject_owner",
+                |command| {
+                    command.env(CHILD, "1");
+                },
+            );
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        crate::srv::tls::install_crypto_provider();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let sid = ulid::Ulid::generate().to_string();
+            let key = store::keys::session::subject(&sid);
+            let store = crate::data::store::use_store();
+            let token = crate::iam::auth::jwt::jwt_config()
+                .generate_session_access_token(
+                    jwt::Claims::default()
+                        .subject("token-user".into())
+                        .sub_id("token-user".into())
+                        .sid(sid),
+                )
+                .unwrap();
+            let req = http::Request::builder()
+                .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(())
+                .unwrap();
+            for (id, accepted) in [("token-user", true), ("other-user", false)] {
+                let subject = Subject::new(id.into(), SubjectType::User, None);
+                store
+                    .set(&key, &PublishedSubject::from(subject), Some(60))
+                    .await
+                    .unwrap();
+                assert_eq!(verify_bearer(&req).await.unwrap().is_some(), accepted);
+            }
+        });
+    }
 }

@@ -313,18 +313,10 @@ pub async fn list_sessions() -> Result<Vec<SessionRecord>, StoreError> {
     without_security_budget(async {
         let store = use_store();
         let sessions = store.hvals::<SessionRecord>(&directory_key()).await?;
-        let now = now_unix();
         let mut active = Vec::with_capacity(sessions.len());
         for session in sessions {
-            if session.expires_at_unix > now
-                && store
-                    .exists(&store::keys::session::subject(&session.id))
-                    .await?
-            {
-                active.push(session);
-            } else {
-                let _ = store.hdel(&index_key(&session.user_id), &session.id).await;
-                let _ = store.hdel(&directory_key(), &session.id).await;
+            if let Some((record, _)) = load_active_session(&session.id).await? {
+                active.push(record);
             }
         }
         active.sort_by(|left, right| {
@@ -382,24 +374,32 @@ pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, Sto
     confirmations.finish(backchannel_logout::notify(record.as_slice()))
 }
 
-/// Delete every live session of the user (directory records are
-/// authoritative) and the user's session index.
+/// Delete the user's indexed sessions and notify linked clients when a
+/// matching directory record is available.
 pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
     without_security_budget(async {
         let store = use_store();
-        let records = store.hgetall::<SessionRecord>(&directory_key()).await?;
+        let key = index_key(user_id);
+        let entries = store.hgetall::<SessionIndexEntry>(&key).await?;
         let mut revoked = Vec::new();
         let mut confirmations = RevocationConfirmations::default();
-        for (sid, record) in records {
-            if record.user_id != user_id {
+        for sid in entries.keys() {
+            let record = get_session(sid).await?;
+            if record
+                .as_ref()
+                .is_some_and(|record| record.user_id != user_id)
+            {
+                store.hdel(&key, sid).await?;
                 continue;
             }
-            confirmations.record(delete_confirmed(&store::keys::session::subject(&sid)).await)?;
-            store.delete(&refresh_rotation_key(&sid)).await?;
-            store.hdel(&directory_key(), &sid).await?;
-            revoked.push(record);
+            confirmations.record(delete_confirmed(&store::keys::session::subject(sid)).await)?;
+            store.delete(&refresh_rotation_key(sid)).await?;
+            if let Some(record) = record {
+                store.hdel(&directory_key(), sid).await?;
+                revoked.push(record);
+            }
+            store.hdel(&key, sid).await?;
         }
-        store.delete(&index_key(user_id)).await?;
         confirmations
             .record(delete_confirmed(&store::keys::account::login_known(user_id)).await)?;
         backchannel_logout::notify(&revoked);
@@ -611,7 +611,6 @@ pub async fn resolve_org_context(
     let default_org = user
         .attrs
         .get("default_org")
-        .or_else(|| user.attrs.get("defaultOrg"))
         .and_then(|value| value.as_str());
 
     select_org(&memberships, requested_org_id, default_org)
@@ -713,6 +712,92 @@ mod index_tests {
         );
         // Idempotent: nothing left to revoke.
         assert_eq!(revoke_all_sessions(&user).await.unwrap(), 0);
+    }
+
+    #[test]
+    fn revoke_all_does_not_read_other_users_directory_records() {
+        const CHILD: &str = "STARGATE_REVOKE_INDEX_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = crate::conf::child_test::run(
+                "iam::sess::registry::index_tests::revoke_all_does_not_read_other_users_directory_records",
+                |command| {
+                    command.env(CHILD, "1");
+                },
+            );
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let user = unique("user");
+            let sid = unique("sid");
+            seed_session(&user, &sid, None).await;
+            let foreign = unique("sid");
+            use_store()
+                .hset(&directory_key(), &foreign, &"unreadable record", Some(60))
+                .await
+                .unwrap();
+            assert_eq!(revoke_all_sessions(&user).await.unwrap(), 1);
+            assert!(
+                use_store()
+                    .hexists(&directory_key(), &foreign)
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !use_store()
+                    .exists(&store::keys::session::subject(&sid))
+                    .await
+                    .unwrap()
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn list_excludes_unreadable_subjects() {
+        let user = unique("user");
+        let valid = unique("sid");
+        let invalid = unique("sid");
+        let expired = unique("sid");
+        let wrong_owner = unique("sid");
+        seed_session(&user, &valid, None).await;
+        seed_session(&user, &invalid, None).await;
+        seed_session(&user, &expired, None).await;
+        seed_session(&user, &wrong_owner, None).await;
+        let mut record = get_session(&expired).await.unwrap().unwrap();
+        record.expires_at_unix = 0;
+        use_store()
+            .hset(&directory_key(), &expired, &record, Some(60))
+            .await
+            .unwrap();
+        let other = Subject::new(unique("other"), SubjectType::User, None);
+        use_store()
+            .set(
+                &store::keys::session::subject(&wrong_owner),
+                &subjects::PublishedSubject::from(other),
+                Some(60),
+            )
+            .await
+            .unwrap();
+        use_store()
+            .set(
+                &store::keys::session::subject(&invalid),
+                &"unreadable",
+                Some(60),
+            )
+            .await
+            .unwrap();
+
+        let sessions = list_sessions().await.unwrap();
+        assert!(sessions.iter().any(|record| record.id == valid));
+        assert!(!sessions.iter().any(|record| record.id == invalid));
+        assert!(!sessions.iter().any(|record| record.id == expired));
+        assert!(!sessions.iter().any(|record| record.id == wrong_owner));
+        revoke_all_sessions(&user).await.unwrap();
     }
 
     #[tokio::test]

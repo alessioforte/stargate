@@ -48,6 +48,7 @@ async fn gateway_release_workloads() {
     let token = session_jwt::jwt_config()
         .generate_session_access_token(jwt::Claims {
             sub: session.clone(),
+            sub_id: Some(session.clone()),
             sid: Some(session.clone()),
             auth_time: Some(chrono::Utc::now().timestamp() as usize),
             ..jwt::Claims::default()
