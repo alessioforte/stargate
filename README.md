@@ -232,3 +232,5 @@ license. For a managed-service offering, contact
 Third-party dependencies and incorporated components keep their own licenses
 and notices. This summary is informational; the [license text](LICENSE)
 governs use of Stargate.
+
+<!-- path filter proof -->
