@@ -422,6 +422,8 @@
   "refillRate": "Refill rate",
   "limit": "Limit",
   "period": "Period",
+  "timezone": "Time zone",
+  "anchorDay": "Anchor day (1-28)",
   "invalidLimitConfig": "Fill all required strategy fields with valid positive values.",
   "upstreamBuilder": "Upstream builder",
   "targets": "Targets",

@@ -2,6 +2,8 @@ mod store;
 pub(crate) use store::{
     LimitPoint, LimitStoreHealth, TrafficLimit, check_traffic_limit, with_traffic_budget,
 };
+mod ledger;
+pub(crate) use ledger::{SqlQuotaLedger, prune_orphaned_quotas};
 
 use crate::{
     err::{ErrorCode, ErrorResponse},

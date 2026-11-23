@@ -11,6 +11,7 @@ pub struct RuntimeSnapshot {
     pub core: gate::Runtime,
     pub version: u64,
     pub config_revision: String,
+    pub(crate) config_document_version: i64,
     pub ingress: gate::cfg::CompiledIngress,
     pub settings: gate::cfg::CompiledRuntimeSettings,
     pub resources: Arc<resources::ProcessResources>,
@@ -63,13 +64,34 @@ pub(crate) struct PreparedActivation {
 }
 
 impl Gate {
-    pub(crate) fn new(
+    pub(in crate::gate) async fn from_document(
         store: Arc<lim::State>,
         prepared: PreparedConfig,
         policies: PolicySnapshot,
     ) -> Result<Self, GatewayPreparationError> {
-        let builder = RuntimeBuilder::new(store);
-        let core = builder.prepare(&prepared.config)?;
+        let database = crate::data::db::service();
+        let ledger = crate::gate::limits::SqlQuotaLedger::new(database.clone());
+        let gate = Self::new(store, prepared, policies, Some(Arc::new(ledger)))?;
+        let runtime = gate.snapshot();
+        activate_quotas(
+            &database,
+            runtime.config_document_version,
+            &runtime.core.limiter,
+        )
+        .await?;
+        Ok(gate)
+    }
+
+    pub(crate) fn new(
+        store: Arc<lim::State>,
+        prepared: PreparedConfig,
+        policies: PolicySnapshot,
+        quota_ledger: Option<Arc<dyn lim::QuotaLedger>>,
+    ) -> Result<Self, GatewayPreparationError> {
+        let builder = RuntimeBuilder::new(store).with_quota_ledger(quota_ledger);
+        let mut core = builder.prepare(&prepared.config)?;
+        core.limiter
+            .set_quota_config_version(prepared.config_document_version);
         configure_probes(&core, &prepared.transports);
         let settings = prepared.config.compiled.runtime.clone();
         let resources = resources::ProcessResources::new(settings.budgets);
@@ -83,6 +105,7 @@ impl Gate {
             transports: prepared.transports,
             version: 0,
             config_revision: prepared.config_revision,
+            config_document_version: prepared.config_document_version,
         });
         runtime.core.start_probes();
         Ok(Self {
@@ -99,11 +122,13 @@ impl Gate {
         self.runtime.load_full()
     }
 
+    #[cfg(test)]
     pub(crate) fn activate(
         &self,
         prepared: PreparedConfig,
     ) -> Result<u64, GatewayPreparationError> {
-        self.publish(self.prepare_activation(prepared)?)
+        let version = prepared.config_document_version;
+        self.publish(self.prepare_activation(prepared)?, version)
     }
 
     pub(crate) fn prepare_activation(
@@ -117,20 +142,45 @@ impl Gate {
         Ok(PreparedActivation { core, prepared })
     }
 
-    pub(crate) fn publish(
+    pub(super) async fn publish_document(
+        self: &Arc<Self>,
+        activation: PreparedActivation,
+        version: i64,
+    ) -> Result<u64, GatewayPreparationError> {
+        let database = crate::data::db::service();
+        let gate = self.clone();
+        // Once publication starts, finish it even if the admin request ends.
+        tokio::spawn(async move {
+            activate_quotas(&database, version, &activation.core.limiter).await?;
+            gate.publish(activation, version)
+        })
+        .await?
+    }
+
+    fn publish(
         &self,
         activation: PreparedActivation,
+        config_document_version: i64,
     ) -> Result<u64, GatewayPreparationError> {
-        let PreparedActivation { core, mut prepared } = activation;
+        let PreparedActivation {
+            mut core,
+            mut prepared,
+        } = activation;
         // Preparation finishes before touching the active generation or its probes.
         let _activation = self.activation.lock().expect("Activation lock poisoned");
         let active = self.runtime.load();
+        if config_document_version > 0 && active.config_document_version >= config_document_version
+        {
+            return Ok(active.version);
+        }
         let version = active
             .version
             .checked_add(1)
             .ok_or(GatewayPreparationError::VersionExhausted)?;
         // A different generation may have been published since preparation.
         prepared.transports.reuse_from(&active.transports);
+        core.limiter
+            .set_quota_config_version(config_document_version);
         configure_probes(&core, &prepared.transports);
         let runtime = Arc::new(RuntimeSnapshot {
             core,
@@ -141,12 +191,25 @@ impl Gate {
             transports: prepared.transports,
             version,
             config_revision: prepared.config_revision,
+            config_document_version,
         });
         let previous = self.runtime.swap(runtime.clone());
         runtime.core.start_probes();
         previous.core.stop_probes();
         Ok(version)
     }
+}
+
+async fn activate_quotas(
+    database: &db::service::Service,
+    version: i64,
+    limiter: &lim::Limiter,
+) -> Result<(), GatewayPreparationError> {
+    let definitions: Vec<_> = limiter.durable_quota_definitions().collect();
+    database
+        .activate_quota_definitions(version, &definitions)
+        .await
+        .map_err(GatewayPreparationError::QuotaActivation)
 }
 
 fn configure_probes(core: &gate::Runtime, transports: &PreparedTransports) {

@@ -5,7 +5,7 @@ use lim::{
     strategies::{
         RateLimit,
         gcra::{Gcra, Quota},
-        quota_tracker::{QuotaTracker, TimeWindow},
+        quota_tracker::{QuotaTracker, ShortWindow},
         token_bucket::{TokenBucket, TokenBucketConfig},
     },
 };
@@ -27,7 +27,7 @@ async fn all_lua_limiters_use_the_store_prefix() -> Result<(), Box<dyn std::erro
         Quota::per_duration(1, Duration::from_secs(3600)),
     );
     let token = TokenBucket::new(store.clone(), clock.clone(), TokenBucketConfig::new(1, 0));
-    let quota = QuotaTracker::new(store.clone(), clock, 1, TimeWindow::Day);
+    let quota = QuotaTracker::new(store.clone(), clock, 1, ShortWindow::Hour);
     let tag = format!("test:{}", ulid::Ulid::generate());
     for (name, limiter) in [
         ("gcra", &gcra as &dyn RateLimit),

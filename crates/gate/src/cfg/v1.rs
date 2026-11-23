@@ -80,6 +80,7 @@ impl Config {
             &self.http.services,
             &self.http.middlewares,
             &self.http.policies,
+            &self.limits,
         )?;
 
         Ok(CompiledConfig {
@@ -726,6 +727,17 @@ fn compile_policies(
             } => {
                 validate_policy_limit(name, limit, limits, lim::LimitKind::Quota)?;
                 let on_missing = resolve_on_missing(name, *scope, *on_missing)?;
+                // A durable balance belongs to an organization or subject, never to
+                // a client address that anyone can rotate.
+                if on_missing == OnMissingOrg::IpFallback && limits[limit].is_durable() {
+                    return Err(CompileError::new(
+                        format!("http.policies.{name}.on_missing"),
+                        format!(
+                            "quota policy '{name}' uses calendar limit '{limit}', which cannot \
+                             fall back to the client address"
+                        ),
+                    ));
+                }
                 PolicyNode::Quota {
                     limit: limit.clone(),
                     scope: *scope,
@@ -742,6 +754,41 @@ fn compile_policies(
     }
 
     Ok(out)
+}
+
+/// A subject-scoped durable quota charges the authenticated subject; without
+/// an auth policy an anonymous request would be keyed by its client address.
+fn validate_durable_quota_subjects(
+    router_name: &str,
+    router: &Router,
+    policies: &IndexMap<String, Policy>,
+    limits: &IndexMap<String, LimitSpec>,
+) -> Result<(), CompileError> {
+    let authenticated = router
+        .policies
+        .iter()
+        .any(|policy| matches!(policies[policy], Policy::Auth { .. }));
+    if authenticated {
+        return Ok(());
+    }
+    for (idx, policy) in router.policies.iter().enumerate() {
+        if let Policy::Quota {
+            limit,
+            scope: LimitScope::Subject,
+            ..
+        } = &policies[policy]
+            && limits[limit].is_durable()
+        {
+            return Err(CompileError::new(
+                format!("http.routers.{router_name}.policies[{idx}]"),
+                format!(
+                    "quota policy '{policy}' uses calendar limit '{limit}', which needs an \
+                     authenticated subject: add an auth policy to the router"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn resolve_on_missing(
@@ -982,6 +1029,7 @@ fn compile_routers(
     services: &IndexMap<String, Service>,
     middlewares: &IndexMap<String, Middleware>,
     policies: &IndexMap<String, Policy>,
+    limits: &IndexMap<String, LimitSpec>,
 ) -> Result<Vec<RouterNode>, CompileError> {
     let mut out = Vec::with_capacity(routers.len());
 
@@ -1010,6 +1058,7 @@ fn compile_routers(
                 ));
             }
         }
+        validate_durable_quota_subjects(name, router, policies, limits)?;
 
         if router.quota_cost == Some(0) {
             return Err(CompileError::new(
@@ -1579,6 +1628,7 @@ limits:
     params:
       limit: 1000
       period: day
+      timezone: UTC
 http:
   upstreams:
     reports-v1:
@@ -1711,6 +1761,7 @@ limits:
     params:
       limit: 1000
       period: day
+      timezone: UTC
 http:
   services:
     ok:
@@ -1811,6 +1862,105 @@ http:
 
         let error = config.compile().expect_err("compile should fail");
         assert_eq!(error.path, "http.policies.bad.on_missing");
+    }
+
+    /// A calendar quota with the given policies and router policy list.
+    fn calendar_quota_config(policies: &str, router_policies: &str) -> Config {
+        parse_config(&format!(
+            r#"
+schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
+  default:
+    strategy: gcra
+    params:
+      max_burst: 3
+      replenish_1_per: 500ms
+  monthly:
+    strategy: quota_tracker
+    params:
+      limit: 1000
+      period: month
+      timezone: UTC
+  hourly:
+    strategy: quota_tracker
+    params:
+      limit: 1000
+      period: hour
+http:
+  services:
+    ok:
+      kind: direct_response
+      status: 200
+  policies:
+    keys:
+      kind: auth
+      strategies: [api_key]
+{policies}
+  routers:
+    api:
+      match:
+        path:
+          prefix: /
+      service: ok
+      policies: {router_policies}
+"#
+        ))
+    }
+
+    #[test]
+    fn rejects_a_calendar_quota_that_falls_back_to_the_client_address() {
+        let config = calendar_quota_config(
+            "    billing:\n      kind: quota\n      limit: monthly\n      scope: org\n      on_missing: ip_fallback",
+            "[keys, billing]",
+        );
+        let error = config.compile().expect_err("compile should fail");
+        assert_eq!(error.path, "http.policies.billing.on_missing");
+        assert!(error.message.contains("'billing'"), "{}", error.message);
+    }
+
+    #[test]
+    fn rejects_a_subject_calendar_quota_on_a_router_without_auth() {
+        let config = calendar_quota_config(
+            "    billing:\n      kind: quota\n      limit: monthly",
+            "[billing]",
+        );
+        let error = config.compile().expect_err("compile should fail");
+        assert_eq!(error.path, "http.routers.api.policies[0]");
+        assert!(error.message.contains("'billing'"), "{}", error.message);
+    }
+
+    #[test]
+    fn calendar_quotas_compile_for_authenticated_subjects_and_organizations() {
+        for (policy, router_policies) in [
+            (
+                "    billing:\n      kind: quota\n      limit: monthly",
+                "[keys, billing]",
+            ),
+            (
+                "    billing:\n      kind: quota\n      limit: monthly\n      scope: org\n      on_missing: skip",
+                "[billing]",
+            ),
+            (
+                "    billing:\n      kind: quota\n      limit: hourly\n      scope: org\n      on_missing: ip_fallback",
+                "[billing]",
+            ),
+            (
+                "    billing:\n      kind: quota\n      limit: hourly",
+                "[billing]",
+            ),
+        ] {
+            calendar_quota_config(policy, router_policies)
+                .compile()
+                .unwrap_or_else(|error| panic!("{router_policies}: {error:?}"));
+        }
     }
 
     /// `quota_cost` of zero is a compile error.
@@ -2294,7 +2444,9 @@ mod limit_validation_tests {
         let valid = serde_json::to_value(Config::default()).unwrap();
         for spec in [
             None,
-            Some(json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}})),
+            Some(
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}}),
+            ),
             Some(json!({"strategy":"token_bucket","params":{"capacity":0,"refill_rate":1}})),
         ] {
             let mut value = valid.clone();
@@ -2318,8 +2470,7 @@ mod limit_validation_tests {
             ("quota", "default"),
         ] {
             let mut value = serde_json::to_value(Config::default()).unwrap();
-            value["limits"]["daily"] =
-                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}});
+            value["limits"]["daily"] = json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}});
             value["http"]["policies"] = json!({"selected":{"kind":kind,"limit":name}});
             let config: Config = serde_json::from_value(value).unwrap();
             assert_eq!(
@@ -2328,8 +2479,7 @@ mod limit_validation_tests {
             );
         }
         let mut value = serde_json::to_value(Config::default()).unwrap();
-        value["limits"]["daily"] =
-            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day"}});
+        value["limits"]["daily"] = json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}});
         value["http"]["policies"] = json!({
             "rate":{"kind":"rate_limit","limit":"default"},
             "quota":{"kind":"quota","limit":"daily"},
@@ -2341,5 +2491,66 @@ mod limit_validation_tests {
                 .compile()
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn calendar_quota_windows_require_a_timezone_and_a_valid_anchor() {
+        for (spec, message) in [
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month"}}),
+                "timezone",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month","timezone":"Mars/Olympus"}}),
+                "timezone",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC","anchor_day":5}}),
+                "anchor_day",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month","timezone":"UTC","anchor_day":29}}),
+                "anchor_day",
+            ),
+            (
+                json!({"strategy":"quota_tracker","params":{"limit":0,"period":"hour"}}),
+                "greater than zero",
+            ),
+        ] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] = spec;
+            let config: Config = serde_json::from_value(value).unwrap();
+            let error = config.compile().unwrap_err();
+            assert_eq!(error.path, "limits.daily");
+            assert!(
+                error.to_string().contains(message),
+                "unexpected error: {error}"
+            );
+        }
+
+        for spec in [
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"day","timezone":"UTC"}}),
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"month","timezone":"Europe/Rome","anchor_day":15}}),
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"hour"}}),
+        ] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] = spec;
+            let config: Config = serde_json::from_value(value).unwrap();
+            config.compile().unwrap();
+        }
+    }
+
+    #[test]
+    fn short_quota_windows_reject_calendar_settings() {
+        for spec in [
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"hour","timezone":"UTC"}}),
+            json!({"strategy":"quota_tracker","params":{"limit":10,"period":"minute","anchor_day":1}}),
+        ] {
+            let mut value = serde_json::to_value(Config::default()).unwrap();
+            value["limits"]["daily"] = spec;
+            let config: Config = serde_json::from_value(value).unwrap();
+            let error = config.compile().unwrap_err();
+            assert_eq!(error.path, "limits.daily");
+        }
     }
 }

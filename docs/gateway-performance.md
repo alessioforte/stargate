@@ -246,8 +246,8 @@ issues one round trip.
 
 The Redis CI job runs this workload in a short configuration with
 `--check-round-trips`: a path above the caps recorded above (2 anonymous and
-rate limit, 3 API key and quota, 4 session, 6 OAuth) fails the job. Only the
-round-trip counts are gated; latency in CI is not.
+rate limit, 3 API key, quota and durable quota, 4 session, 6 OAuth) fails the
+job. Only the round-trip counts are gated; latency in CI is not.
 
 The paths compose: every request pays the ingress admission check and the
 subject rate check (two round trips, both GCRA scripts), and then:
@@ -263,7 +263,25 @@ subject rate check (two round trips, both GCRA scripts), and then:
 - `rate_limit` selects a named bucket for the existing subject rate check
   instead of the default one. It adds no round trip; only the bucket differs.
 - `quota` adds the quota tracker script (`EVALSHA`, `GET`, `SET`, `INCRBY`,
-  `TTL`, `TIME`) on top of the default rate check.
+  `TTL`, `TIME`) on top of the default rate check. It measures a short quota
+  (one-hour window), whose counter lives in Redis.
+- `durable_quota` adds a calendar quota (one-day window) to the `api_key`
+  path, because a long quota needs an authenticated subject. Its balance lives
+  in PostgreSQL and is reserved in batches, so it adds no Redis round trip.
+  CI enforces a cap of 3 Redis round trips. The latency threshold is pending.
+
+`durable_quota` reference measurements were recorded 2026-11-23 from `837a78a`
+with the same machine, images and workload (macOS 27.2.1, Rust 1.99.1, median
+of three five-second runs with sixteen clients), next to the two paths it builds on:
+
+| Path | Successful requests/s | Body p50 / p95 / p99, ms | Redis round trips per request | Redis commands per request |
+| --- | ---: | --- | ---: | ---: |
+| `api_key` | 7,719 | 2.02 / 2.61 / 3.31 | 3 | 9 |
+| `quota` | 7,555 | 2.07 / 2.69 / 3.46 | 3 | 14 |
+| `durable_quota` | 7,599 | 2.04 / 2.71 / 3.76 | 3 | 9 |
+
+The durable quota issues the same Redis commands as `api_key`: its balance is
+reserved in PostgreSQL in batches and spent in memory.
 
 One application store read (`redis_get_1k`, a 1 KiB MessagePack subject) measured
 inside the same workload: **0.288 / 0.393 / 0.600 ms** at p50/p95/p99. At that

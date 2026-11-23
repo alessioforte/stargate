@@ -279,6 +279,7 @@ async fn suite() {
         Arc::new(use_store().clone()),
         crate::gate::prepare_config(gate::cfg::Config::default()).unwrap(),
         gate::PolicySnapshot::default(),
+        None,
     )
     .unwrap();
     let router = super::router().layer(Extension(Arc::new(gateway)));

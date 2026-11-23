@@ -1,7 +1,8 @@
 use super::repo::{
     AdminKeyRepository, AdminOverviewRepository, ApiKeyRepository, ConfigDocumentRepository,
     CredentialRepository, OAuthClientRepository, OAuthConsentRepository, OrganizationRepository,
-    OutboxRepository, ServiceAccountRepository, SuperAdminRepository, UserRepository,
+    OutboxRepository, QuotaRepository, ServiceAccountRepository, SuperAdminRepository,
+    UserRepository,
 };
 use crate::backend::Pool;
 use crate::db::{DbStore, InstanceBootstrapResult};
@@ -49,6 +50,7 @@ pub struct Service {
     service_account: ServiceAccountRepository,
     organization: OrganizationRepository,
     super_admin: SuperAdminRepository,
+    quota: QuotaRepository,
 }
 
 impl Service {
@@ -67,7 +69,30 @@ impl Service {
             service_account: ServiceAccountRepository::new(),
             organization: OrganizationRepository::new(),
             super_admin: SuperAdminRepository::new(),
+            quota: QuotaRepository::new(),
         }
+    }
+
+    /// Reserve a durable quota batch. See [`QuotaRepository::reserve`].
+    pub async fn reserve_quota(
+        &self,
+        reservation: crate::repo::QuotaReservation<'_>,
+    ) -> Result<crate::repo::QuotaReserved> {
+        self.quota.reserve(&self.pool, reservation).await
+    }
+
+    pub async fn activate_quota_definitions(
+        &self,
+        version: i64,
+        definitions: &[(&str, &str)],
+    ) -> Result<()> {
+        self.quota.activate(&self.pool, version, definitions).await
+    }
+
+    /// Delete one batch of durable quota balances whose owner no longer
+    /// exists. See [`QuotaRepository::prune_orphaned`].
+    pub async fn prune_orphaned_quotas(&self) -> Result<u64> {
+        self.quota.prune_orphaned(&self.pool).await
     }
 
     pub fn pool_stats(&self) -> PoolStats {
@@ -2889,10 +2914,12 @@ mod sqlite_tests {
             vec![
                 ConfigRevision {
                     kind: ConfigKind::Gateway,
+                    version: gateway.version,
                     revision: gateway.revision
                 },
                 ConfigRevision {
                     kind: ConfigKind::Policies,
+                    version: policies.version,
                     revision: policies.revision
                 },
             ]

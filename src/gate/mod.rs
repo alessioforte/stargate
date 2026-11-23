@@ -40,20 +40,22 @@ use axum::{
     body::Body,
     response::{IntoResponse, Response},
 };
-use snap::{load_gateway_document, prepare_gateway_config};
+use snap::{load_gateway_document, prepare_gateway_document};
 use std::{convert::Infallible, sync::Arc};
 
 pub async fn init() -> anyhow::Result<Arc<Gate>> {
     let document = load_gateway_document().await?;
-    let prepared = prepare_gateway_config(&document.content)?;
+    let prepared = prepare_gateway_document(&document)?;
     let policies = crate::iam::authz::storage::load_policies_document().await?;
     let policies = crate::iam::authz::rules::compile_policy_snapshot(&policies.content)
         .map_err(|error| anyhow::anyhow!("Unable to load access-control policies: {error}"))?;
-    let gate = Arc::new(Gate::new(
-        Arc::new(use_store().clone()),
-        prepared,
-        policies,
-    )?);
+    let gate =
+        Arc::new(Gate::from_document(Arc::new(use_store().clone()), prepared, policies).await?);
+    // Shutdown stops it with the gateway's other background work.
+    gate.resources.spawn(limits::prune_orphaned_quotas(
+        crate::data::db::service(),
+        gate.resources.shutdown.clone(),
+    ));
     metrics::register(&gate);
     Ok(gate)
 }

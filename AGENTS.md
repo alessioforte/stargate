@@ -350,7 +350,18 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   `direct_response`.
 - Policies: `auth` (strategies `jwt`, `api_key`, `oauth`; OAuth requires an exact
   `audience` and a live linked session), `access_control`, `rate_limit`, `quota`.
-  Org-scoped limits have `on_missing: skip | ip_fallback | deny`.
+  Org-scoped limits have `on_missing: skip | ip_fallback | deny`. Quota windows
+  up to an hour stay in the state store; day, week, month and year keep a
+  durable balance in SQL (`timezone` required, `anchor_day` for a billing
+  month) and are always fail-closed. A long quota belongs to an authenticated
+  subject or an organization: compilation rejects it with `ip_fallback` or, at
+  subject scope, on a router without an `auth` policy. `lim::DurableQuotas`
+  keeps a replica's reserved batches across generations of the same named quota.
+  Each bucket retains its charged units and window bounds when its calendar
+  changes. The new calendar starts at the stored end. Each named quota's
+  activated definition controls SQL reservations. Saving a configuration for
+  restart leaves the definitions active. A snapshot with a retired definition
+  can consume previously reserved units and fails closed on new reservations.
 - Upstreams: `transport.connect_timeout`, `transport.protocols` (`http1`/`http2`;
   WebSocket needs `http1`), `load_balancer.liveness_probe` and `circuit_breaker`
   (`fail_threshold` 3, `cooldown` 30s), optional `internal_context.audience`.
@@ -973,7 +984,13 @@ supported placeholders.
 Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_history`,
 `api_keys`, `admin_keys`, `service_accounts`, `oauth_clients`, `oauth_consents`,
 `user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`,
-`config_documents` (append-only gateway configuration and ACE policy versions).
+`config_documents` (append-only gateway configuration and ACE policy versions),
+`quota_config` (last activated gateway document version),
+`quota_definitions` (active fingerprints and the version from which each can
+reserve), and `quota_usage`
+(durable calendar-window quota balance; replicas reserve batches
+with one conditional upsert; balances of deleted subjects and organizations are
+pruned in batches every ten minutes).
 The initial migration per backend (`migrations/{postgres,sqlite}/..._init_schema.sql`)
 creates the complete initial schema. After a release, published migrations are
 immutable: never edit or squash them. Every schema change must be a new forward

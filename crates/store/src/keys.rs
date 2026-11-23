@@ -40,6 +40,15 @@ pub fn scoped(tag: &str, name: &str) -> String {
     format!("{ROOT}:{{{tag}}}:{name}")
 }
 
+/// The entity of a key built here, split into its kind and identifier:
+/// `stargate:v1:{sub:<id>}:quota` gives `("sub", "<id>")`. `None` for a key
+/// outside the schema.
+pub fn entity(key: &str) -> Option<(&str, &str)> {
+    let rest = key.strip_prefix(ROOT)?.strip_prefix(":{")?;
+    let (tag, _) = rest.split_once('}')?;
+    tag.split_once(':')
+}
+
 fn digest(value: &str) -> String {
     let hash = Sha256::digest(value.as_bytes());
     hash.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -276,6 +285,22 @@ mod tests {
         let rest = rest.strip_prefix('{').expect("opening brace");
         let (tag, _) = rest.split_once('}').expect("closing brace");
         tag
+    }
+
+    #[test]
+    fn the_entity_of_a_limit_bucket_names_its_owner() {
+        let bucket = format!(
+            "{}:monthly",
+            limits::subject_quota("01JZ00000000000000000000U1")
+        );
+        assert_eq!(entity(&bucket), Some(("sub", "01JZ00000000000000000000U1")));
+        assert_eq!(entity(&limits::org_quota("org-1")), Some(("org", "org-1")));
+        assert_eq!(
+            entity(&limits::org_ip_quota("2001:db8::1")),
+            Some(("ip", "2001:db8::1"))
+        );
+        assert_eq!(entity(&session::directory()), None);
+        assert_eq!(entity("other:{sub:1}:quota"), None);
     }
 
     #[test]

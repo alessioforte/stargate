@@ -30,7 +30,7 @@ fn config(namespace: &str) -> Config {
             "default":{"strategy":"gcra", "params":{"max_burst":1_000_000,"replenish_1_per":"1s"}},
             namespace:{"strategy":"gcra", "params":{"max_burst":2,"replenish_1_per":"1h"}},
             "rate":{"strategy":"gcra", "params":{"max_burst":2,"replenish_1_per":"1h"}},
-            "quota":{"strategy":"quota_tracker", "params":{"limit":6,"period":"day"}}
+            "quota":{"strategy":"quota_tracker", "params":{"limit":6,"period":"hour"}}
         },
         "http":{
             "services":{"local":{"kind":"direct_response","status":200}},
@@ -98,6 +98,7 @@ async fn cluster_gateway_redis_integration() {
             state.clone(),
             prepare_config(raw.clone()).unwrap(),
             gate::PolicySnapshot::default(),
+            None,
         )
         .unwrap(),
     );
@@ -325,7 +326,7 @@ async fn cluster_gateway_redis_integration() {
             1_000_000,
             8,
         ),
-        ("quota_tracker", json!({"limit":6,"period":"day"}), 3, 2),
+        ("quota_tracker", json!({"limit":6,"period":"hour"}), 3, 2),
     ] {
         let mut tasks = tokio::task::JoinSet::new();
         let key = format!("stargate:v1:{{test:{namespace}}}:{strategy}");
@@ -340,7 +341,7 @@ async fn cluster_gateway_redis_integration() {
             } else {
                 other_state.clone()
             };
-            let limit = limit.build(backend, clock.clone()).unwrap();
+            let limit = limit.build(backend, clock.clone(), None).unwrap();
             let key = key.clone();
             let barrier = barrier.clone();
             tasks.spawn(async move {

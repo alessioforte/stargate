@@ -39,7 +39,7 @@ impl RateLimit for FixedLimit {
 fn gate(denied_limit: &str, retry_after: Option<Duration>) -> Arc<Gate> {
     let mut value = serde_json::to_value(Config::default()).unwrap();
     value["limits"]["daily"] =
-        json!({"strategy":"quota_tracker", "params":{"limit":17, "period":"day"}});
+        json!({"strategy":"quota_tracker", "params":{"limit":17, "period":"hour"}});
     value["runtime"]["primary_concurrency"] = json!(1);
     value["http"] = json!({
         "services":{"local":{"kind":"direct_response", "status":200}},

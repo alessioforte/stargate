@@ -20,7 +20,7 @@ fn config() -> Config {
     }
     for (name, limit) in [("daily", 3), ("org-daily", 4)] {
         value["limits"][name] =
-            json!({"strategy":"quota_tracker","params":{"limit":limit,"period":"day"}});
+            json!({"strategy":"quota_tracker","params":{"limit":limit,"period":"hour"}});
     }
     value["http"] = json!({
         "services":{"local":{"kind":"direct_response","status":200}},

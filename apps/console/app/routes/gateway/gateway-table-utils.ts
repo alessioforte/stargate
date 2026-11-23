@@ -59,10 +59,16 @@ function limitSummary(value: JsonValue) {
   }
 
   if (strategy === "quota_tracker") {
-    return [
-      `limit ${numberValue(params.limit) ?? "-"}`,
+    const timezone = stringValue(params.timezone);
+    const anchorDay = numberValue(params.anchor_day);
+    const windowLabel = [
       `period ${stringValue(params.period, "-")}`,
-    ].join(", ");
+      timezone ? `in ${timezone}` : "",
+      anchorDay ? `from day ${anchorDay}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return [`limit ${numberValue(params.limit) ?? "-"}`, windowLabel].join(", ");
   }
 
   return "";

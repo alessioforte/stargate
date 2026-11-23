@@ -143,7 +143,7 @@ mod store_error_tests {
         for kind in ["rate_limit", "quota"] {
             let mut value = serde_json::to_value(Config::default()).unwrap();
             value["limits"]["daily"] =
-                json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"day"}});
+                json!({"strategy":"quota_tracker", "params":{"limit":100,"period":"hour"}});
             value["http"]["policies"]["traffic"] =
                 json!({"kind":kind,"limit":if kind == "quota" {"daily"} else {"default"}});
             let config: Config = serde_json::from_value(value.clone()).unwrap();

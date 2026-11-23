@@ -90,6 +90,10 @@ jobs:
           --health-interval 2s
           --health-timeout 5s
           --health-retries 30
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
@@ -103,6 +107,11 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/stargate_test
         run: cargo test -p db --features postgres -- --ignored
+      - name: Durable quota activation through the gateway
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/stargate_test
+          TEST_REDIS_URL: redis://localhost:6379
+        run: cargo test --no-default-features --features cluster postgres_capacity_saved_for_restart_keeps_durable_quota_available -- --ignored
 
   apps:
     name: app ${{ matrix.app }}

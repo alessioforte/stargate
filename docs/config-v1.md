@@ -66,9 +66,10 @@ The update response includes the saved document and `activation: applied` after
 publishing on the receiving replica. An identical save whose revision is already
 active returns `applied` without replacing the generation or restarting probes;
 a replica that is behind still activates the document. A change to process
-capacity budgets is
-saved with `activation: restart_required`: existing routing stays active until
-restart. The Console preserves the draft on a revision conflict and offers Reload or
+capacity budgets is saved with `activation: restart_required`. The replica
+continues to use its existing routing and quota definitions until it restarts.
+Saving the document leaves durable quota reservation permissions in place.
+The Console preserves the draft on a revision conflict and offers Reload or
 Overwrite using the latest document revision. It warns when a restart
 is required. Restart always uses the latest database document.
 
@@ -1232,6 +1233,86 @@ Quota is selected independently from rate limiting. A router `quota` policy or
 subject `attrs.quota` selects a named `quota_tracker` limit; when both a rate
 limit and quota are selected, both checks run.
 
+### Quota windows
+
+`quota_tracker` has two classes, chosen by `period`:
+
+- `second`, `minute`, `hour` are **short quotas**. Their fixed-window counter
+  lives in the state store (Redis or the edge memory store) next to rate
+  limits. Losing the store resets them at most one window early.
+- `day`, `week`, `month`, `year` are **long quotas**. Their balance lives in the
+  `quota_usage` PostgreSQL/SQLite table, so a Redis flush, an eviction, or an
+  edge restart does not reset it. A long quota requires an explicit IANA
+  `timezone`; a week starts on Monday.
+
+Calendar periods use local midnight boundaries, so a daylight-saving day can be
+23 or 25 hours long. `anchor_day` (1..=28, `month` only) moves the start of a
+billing month to that day: for example, an organization billed on the 15th
+selects a limit with `anchor_day: 15` through `organizations.attrs.quota`.
+Different organizations can therefore select different named billing limits.
+Changing the period, time zone or anchor of a named long quota preserves the
+current window and every unit already charged, including reserved units. SQL
+stores the current window's end for each bucket. The new calendar takes effect
+at that end. If a new calendar window overlaps the boundary, its first balance
+covers only the part after the old window. Replicas and restarts keep the same
+stored boundary. A change to the limit applies to new reservations against the
+existing balance.
+
+```yaml
+limits:
+  monthly:
+    strategy: quota_tracker
+    params:
+      limit: 100000
+      period: month
+      timezone: Europe/Rome
+  billing-15:
+    strategy: quota_tracker
+    params:
+      limit: 500000
+      period: month
+      timezone: Europe/Rome
+      anchor_day: 15
+```
+
+Each replica reserves a batch with one atomic SQL statement and spends it in
+memory, so the request path performs no quota round trip. The batch starts at 1%
+of the limit (at most 1024 units) and halves as the remaining headroom shrinks.
+Reserved units count as used as soon as SQL charges them, so replicas can never
+exceed the limit. Each crash or reservation timeout can strand at most one
+batch per bucket. A batch caps out at `max(1, min(limit / 100, 1024))` units
+unless the request itself costs more. Batches belong to the process and can be
+reused by later configurations of the same named quota. SQL authorizes new
+reservations against each quota's activated definition (limit, period, time
+zone and anchor). Snapshots with the same unchanged definition can reserve
+across document versions. The first replica to activate a change retires the
+previous definition. Replicas serving it can spend units they already reserved
+until their batches expire, and new reservations return
+`503 gateway.limiter_unavailable` until the replicas apply the change. A
+configuration saved for restart only changes quota permissions when a replica
+activates it. Each SQL reservation
+attempt has a 5-second timeout, including a retry. If the request runs out of
+traffic budget while a reservation is in flight, its cost is still deducted
+from any batch the reservation returns. When a reservation is refused for lack
+of capacity, the replica caches the balance and denies requests that no longer
+fit until the window ends.
+
+A long quota belongs to an authenticated subject or an organization, never to a
+client address that anyone can change. Compilation rejects a long quota with
+`on_missing: ip_fallback`, and a subject-scoped long quota on a router without
+an `auth` policy, naming the policy. At runtime, a check keyed by the client
+address never reaches SQL: it returns `500 gateway.limit_configuration_invalid`.
+Each replica removes the balances of deleted users, API keys and organizations
+every ten minutes, in batches of 1000 rows.
+
+Long quotas are always **fail-closed**: a SQL failure or an exhausted traffic
+budget (`ingress.timeout`, shared with the request's other traffic checks)
+returns `503 gateway.limiter_unavailable` even when the policy says
+`on_store_error: allow`, because admitting traffic without charging it would
+exceed the limit. The `x-quota-remaining` header reflects this replica's exact
+consumption plus its latest shared reservation; another replica's reservation
+made afterwards can lower it slightly. Short quotas keep the policy below.
+
 `rate_limit` and `quota` policies each accept `on_store_error: allow | deny`
 (default `allow`), independently for subject and organization checks. Attribute
 selections inherit the selected policy's setting; implicit default rate and
@@ -1246,17 +1327,30 @@ ingress:
   limit: ingress
   timeout: 250ms
   on_store_error: allow
+limits:
+  billing:
+    strategy: quota_tracker
+    params:
+      limit: 100000
+      period: month
+      timezone: Europe/Rome
 http:
   policies:
+    api-keys:
+      kind: auth
+      strategies: [api_key]
     api-rate:
       kind: rate_limit
       limit: default
       on_store_error: allow
     billing-quota:
       kind: quota
-      limit: monthly
+      limit: billing
       on_store_error: deny
 ```
+
+A router that applies `billing-quota` must also list an auth policy such as
+`api-keys`.
 
 `stargate.limits.store_errors` counts every failed traffic store check with bounded
 labels `stargate.point` (`gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`,

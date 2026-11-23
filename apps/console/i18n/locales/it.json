@@ -422,6 +422,8 @@
   "refillRate": "Tasso refill",
   "limit": "Limite",
   "period": "Periodo",
+  "timezone": "Fuso orario",
+  "anchorDay": "Giorno di ancoraggio (1-28)",
   "invalidLimitConfig": "Compila tutti i campi richiesti della strategia con valori positivi validi.",
   "upstreamBuilder": "Builder upstream",
   "targets": "Target",

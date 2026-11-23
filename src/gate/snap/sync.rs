@@ -2,7 +2,7 @@ use super::Gate;
 use crate::data::db;
 use crate::gate::snap::{
     config::GatewayPreparationError,
-    reload::{apply_gateway_config, apply_policy_document},
+    reload::{apply_gateway_document, apply_policy_document},
 };
 use ::db::ent::ConfigKind;
 use once_cell::sync::OnceCell;
@@ -55,24 +55,23 @@ enum Trigger {
 
 #[derive(Default)]
 struct RevisionState {
-    failed_revision: Option<String>,
+    failed_version: Option<i64>,
 }
 
 impl RevisionState {
-    fn should_apply(&self, active: &str, desired: &str, trigger: Trigger) -> bool {
-        active != desired
-            && (trigger == Trigger::Tick || self.failed_revision.as_deref() != Some(desired))
+    fn should_apply(&self, is_active: bool, desired: i64, trigger: Trigger) -> bool {
+        !is_active && (trigger == Trigger::Tick || self.failed_version != Some(desired))
     }
 
     /// Returns whether this failure needs its first log entry.
-    fn failed(&mut self, revision: &str) -> bool {
-        let first = self.failed_revision.as_deref() != Some(revision);
-        self.failed_revision = Some(revision.to_string());
+    fn failed(&mut self, version: i64) -> bool {
+        let first = self.failed_version != Some(version);
+        self.failed_version = Some(version);
         first
     }
 
     fn applied(&mut self) {
-        self.failed_revision = None;
+        self.failed_version = None;
     }
 }
 
@@ -203,60 +202,52 @@ async fn synchronize(
     policies: &mut RevisionState,
     trigger: Trigger,
 ) -> anyhow::Result<()> {
-    for ::db::ent::ConfigRevision { kind, revision } in db::get_config_revisions().await? {
-        let (kind, state, active) = match kind {
-            ConfigKind::Gateway => (
-                ConfigKind::Gateway,
-                &mut *gateway,
-                gate.snapshot().config_revision.clone(),
-            ),
-            ConfigKind::Policies => (
-                ConfigKind::Policies,
-                &mut *policies,
-                gate.policy_snapshot.load().revision.clone(),
-            ),
+    for ::db::ent::ConfigRevision {
+        kind,
+        version,
+        revision,
+    } in db::get_config_revisions().await?
+    {
+        let state = match kind {
+            ConfigKind::Gateway => &mut *gateway,
+            ConfigKind::Policies => &mut *policies,
         };
-        if !state.should_apply(&active, &revision, trigger) {
+        let is_active = |version, revision: &str| match kind {
+            ConfigKind::Gateway => gate.snapshot().config_document_version >= version,
+            ConfigKind::Policies => gate.policy_snapshot.load().revision == revision,
+        };
+        if !state.should_apply(is_active(version, &revision), version, trigger) {
             continue;
         }
         let Some(document) = db::get_active_config_document(kind).await? else {
             continue;
         };
-        let active = match kind {
-            ConfigKind::Gateway => gate.snapshot().config_revision.clone(),
-            ConfigKind::Policies => gate.policy_snapshot.load().revision.clone(),
-        };
-        if !state.should_apply(&active, &document.revision, trigger) {
+        let version = document.version;
+        if !state.should_apply(is_active(version, &document.revision), version, trigger) {
             continue;
         }
+        let revision = document.revision.clone();
         let result = match kind {
-            ConfigKind::Gateway => {
-                let gate = gate.clone();
-                let content = document.content;
-                tokio::task::spawn_blocking(move || {
-                    apply_gateway_config(&gate, &content)
-                        .map(|_| ())
-                        .map_err(|error| {
-                            (
-                                matches!(&error, GatewayPreparationError::BudgetChange),
-                                error.reload_outcome(),
-                            )
-                        })
-                })
+            ConfigKind::Gateway => apply_gateway_document(gate, document)
                 .await
-                .unwrap_or(Err((false, "error")))
-            }
+                .map(|_| ())
+                .map_err(|error| {
+                    (
+                        matches!(&error, GatewayPreparationError::BudgetChange),
+                        error.reload_outcome(),
+                    )
+                }),
             ConfigKind::Policies => apply_policy_document(gate, &document.content)
                 .map(|_| ())
                 .map_err(|_| (false, "error")),
         };
         match result {
             Ok(()) => state.applied(),
-            Err((restart_required, outcome)) if state.failed(&document.revision) => {
+            Err((restart_required, outcome)) if state.failed(version) => {
                 if restart_required {
-                    tracing::warn!(kind = kind.as_str(), revision = %document.revision, "Gateway configuration restart required; keeping the active snapshot");
+                    tracing::warn!(kind = kind.as_str(), %revision, "Gateway configuration restart required; keeping the active snapshot");
                 } else {
-                    tracing::error!(kind = kind.as_str(), revision = %document.revision, outcome, "Configuration activation failed; keeping the active snapshot and retrying on the next tick");
+                    tracing::error!(kind = kind.as_str(), %revision, outcome, "Configuration activation failed; keeping the active snapshot and retrying on the next tick");
                 }
             }
             Err(_) => {}

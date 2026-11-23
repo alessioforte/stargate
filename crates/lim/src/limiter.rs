@@ -96,6 +96,21 @@ impl Limiter {
         self.limits.insert(name, limit);
     }
 
+    /// Bind a prepared limiter to the persisted version before publication.
+    pub fn set_quota_config_version(&mut self, version: i64) {
+        for limit in self.limits.values_mut() {
+            limit.set_quota_config_version(version);
+        }
+    }
+
+    pub fn durable_quota_definitions(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.limits.iter().filter_map(|(name, limit)| {
+            limit
+                .quota_fingerprint()
+                .map(|fingerprint| (name.as_str(), fingerprint))
+        })
+    }
+
     pub fn get_limit(&self, name: &str) -> Option<&dyn RateLimit> {
         self.limits.get(name).map(Box::as_ref)
     }
@@ -106,6 +121,12 @@ impl Limiter {
 
     pub fn has_limit(&self, name: &str) -> bool {
         self.limits.contains_key(name)
+    }
+
+    /// Whether a named limit has a durable balance. Unknown limits are not
+    /// durable; callers validate the name first.
+    pub fn is_durable(&self, name: &str) -> bool {
+        self.get_limit(name).is_some_and(RateLimit::is_durable)
     }
 
     pub fn validate_limit(&self, name: &str, expected: LimitKind) -> Result<()> {

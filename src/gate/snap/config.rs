@@ -20,6 +20,10 @@ pub(crate) enum GatewayPreparationError {
     Serialization(String),
     #[error("gateway configuration version exhausted")]
     VersionExhausted,
+    #[error("unable to activate durable quota definitions: {0}")]
+    QuotaActivation(#[source] anyhow::Error),
+    #[error("gateway configuration task failed: {0}")]
+    ActivationTask(#[from] tokio::task::JoinError),
     #[error(
         "process gateway budgets cannot change on reload; restart the process to apply runtime capacities"
     )]
@@ -33,7 +37,9 @@ impl GatewayPreparationError {
             | Self::Core(_)
             | Self::Serialization(_)
             | Self::VersionExhausted
+            | Self::ActivationTask(_)
             | Self::BudgetChange => "error",
+            Self::QuotaActivation(_) => "quota_activation_error",
             Self::InternalContext(_) => "internal_context_error",
             Self::Transport(_) => "transport_error",
         }
@@ -43,6 +49,7 @@ impl GatewayPreparationError {
 pub(crate) struct PreparedConfig {
     pub(crate) config: RuntimeConfig,
     pub(super) config_revision: String,
+    pub(super) config_document_version: i64,
     pub(super) transports: PreparedTransports,
 }
 
@@ -65,6 +72,7 @@ pub(super) fn prepare_runtime_config(
     Ok(PreparedConfig {
         config,
         config_revision,
+        config_document_version: 0,
         transports,
     })
 }
@@ -97,6 +105,7 @@ async fn load_gateway_document_from_path(path: &str) -> anyhow::Result<ConfigDoc
     .await
 }
 
+#[cfg(all(test, feature = "memory"))]
 pub(in crate::gate) fn prepare_gateway_config(
     yaml: &str,
 ) -> Result<PreparedConfig, GatewayPreparationError> {
@@ -104,6 +113,17 @@ pub(in crate::gate) fn prepare_gateway_config(
         RuntimeConfig::from_yaml_str(yaml)?,
         ::db::ent::config_revision(yaml),
     )
+}
+
+pub(in crate::gate) fn prepare_gateway_document(
+    document: &ConfigDocument,
+) -> Result<PreparedConfig, GatewayPreparationError> {
+    let mut prepared = prepare_runtime_config(
+        RuntimeConfig::from_yaml_str(&document.content)?,
+        document.revision.clone(),
+    )?;
+    prepared.config_document_version = document.version;
+    Ok(prepared)
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -150,7 +170,7 @@ pub(crate) async fn save_gateway_config(
             return Err(ErrorResponse::new(ErrorCode::ConfigurationRevisionConflict));
         }
         ConfigSaveOutcome::Unchanged(document)
-            if gate.snapshot().config_revision == document.revision =>
+            if gate.snapshot().config_document_version == document.version =>
         {
             return Ok((document, ConfigActivation::Applied));
         }
@@ -158,7 +178,9 @@ pub(crate) async fn save_gateway_config(
     };
     let outcome = match activation {
         Some(activation) => {
-            gate.publish(activation).map_err(invalid_config)?;
+            gate.publish_document(activation, document.version)
+                .await
+                .map_err(ErrorResponse::internal)?;
             crate::obs::telemetry::record_config_reload("gateway_config", "success");
             ConfigActivation::Applied
         }

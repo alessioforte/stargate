@@ -1,3 +1,6 @@
+mod calendar;
+mod durable;
+mod ledger;
 mod time_window;
 
 use crate::clock::CachedClock;
@@ -9,7 +12,10 @@ use async_trait::async_trait;
 use core::time::Duration;
 use std::sync::Arc;
 
-pub use time_window::TimeWindow;
+pub use calendar::{CalendarPeriod, CalendarWindow, WindowBounds, WindowError};
+pub use durable::{DurableQuotaTracker, DurableQuotas};
+pub use ledger::{QuotaBalance, QuotaLedger, Reservation, ReservationRequest};
+pub use time_window::ShortWindow;
 
 // ========================== IN-MEMORY IMPLEMENTATION =========================
 
@@ -30,7 +36,12 @@ pub struct QuotaTracker {
 
 #[cfg(feature = "memory")]
 impl QuotaTracker {
-    pub fn new(store: Arc<State>, clock: Arc<CachedClock>, limit: u64, window: TimeWindow) -> Self {
+    pub fn new(
+        store: Arc<State>,
+        clock: Arc<CachedClock>,
+        limit: u64,
+        window: ShortWindow,
+    ) -> Self {
         Self {
             store,
             clock,
@@ -135,7 +146,7 @@ impl QuotaTracker {
         store: Arc<State>,
         _clock: Arc<CachedClock>,
         limit: u64,
-        window: TimeWindow,
+        window: ShortWindow,
     ) -> Self {
         Self {
             store,
@@ -185,13 +196,15 @@ impl RateLimit for QuotaTracker {
 
 #[cfg(test)]
 mod tests {
+    use super::ShortWindow;
+
     /// A denied check must not consume budget: after a cost-5 check is
     /// rejected with 3 units left, a cost-1 check on the same key still
     /// succeeds. Mirrors the Redis Lua script's check-then-increment.
     #[cfg(feature = "memory")]
     #[tokio::test]
     async fn denied_check_does_not_consume_remaining_budget() {
-        use super::{QuotaTracker, TimeWindow};
+        use super::{QuotaTracker, ShortWindow};
         use crate::clock::CachedClock;
         use crate::state::State;
         use crate::strategies::RateLimit;
@@ -201,7 +214,7 @@ mod tests {
             Arc::new(State::new()),
             CachedClock::new(),
             10,
-            TimeWindow::Day,
+            ShortWindow::Hour,
         );
 
         let key = "quota:sub_123";
@@ -222,18 +235,11 @@ mod tests {
     }
 
     #[test]
-    fn test_time_window_in_key() {
-        // Verify that different windows produce different aligned timestamps
+    fn short_window_alignment_rotates_with_its_duration() {
         let timestamp = 1234567890u64;
-
-        let minute_window = 60u64;
-        let hour_window = 3600u64;
-
-        let minute_start = (timestamp / minute_window) * minute_window;
-        let hour_start = (timestamp / hour_window) * hour_window;
-
-        assert_ne!(minute_start, hour_start);
-        assert_eq!(minute_start % minute_window, 0);
-        assert_eq!(hour_start % hour_window, 0);
+        for window in [ShortWindow::Second, ShortWindow::Minute, ShortWindow::Hour] {
+            let seconds = window.duration().as_secs();
+            assert_eq!((timestamp / seconds) * seconds % seconds, 0);
+        }
     }
 }

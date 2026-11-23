@@ -34,6 +34,7 @@ ROUND_TRIP_CAPS = {
     "rate_limit": 2,
     "api_key": 3,
     "quota": 3,
+    "durable_quota": 3,
     "session": 4,
     "oauth": 6,
 }
@@ -116,7 +117,7 @@ def main() -> None:
     parser.add_argument(
         "--scenarios",
         default="",
-        help="comma-separated subset: anonymous,api_key,session,oauth,rate_limit,quota",
+        help="comma-separated subset: anonymous,api_key,session,oauth,rate_limit,quota,durable_quota",
     )
     parser.add_argument(
         "--check-round-trips",

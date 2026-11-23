@@ -28,6 +28,7 @@ impl ConfigKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigRevision {
     pub kind: ConfigKind,
+    pub version: i64,
     pub revision: String,
 }
 

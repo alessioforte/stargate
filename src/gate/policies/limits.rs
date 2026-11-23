@@ -3,13 +3,16 @@ use crate::gate::RuntimeSnapshot;
 use crate::gate::policies::org_limits::OrgLimitOverrides;
 use crate::gate::usage::StoreUsage;
 use crate::{
-    gate::limits::{LimitPoint, TrafficLimit, attribute_name, check_traffic_limit, validate_limit},
+    gate::limits::{
+        LimitPoint, TrafficLimit, attribute_name, check_traffic_limit, configuration_error,
+        validate_limit,
+    },
     web::limits::{insert_limit_headers, limited_response},
 };
 use crate::{iam::auth::subject::Subject, obs::telemetry};
 use ::http::HeaderMap;
 use gate::cfg::{OnMissingOrg, OnStoreError};
-use lim::{LimitKind, RateLimitDecision};
+use lim::{LimitKind, RateLimitDecision, RateLimitError};
 
 const DEFAULT_RATE_LIMIT: &str = "default";
 
@@ -118,6 +121,8 @@ struct LimitCheck {
     kind: LimitKind,
     scope: &'static str,
     on_store_error: OnStoreError,
+    /// Keyed by the client address: an anonymous subject or `ip_fallback`.
+    by_address: bool,
 }
 
 fn org_check(
@@ -134,7 +139,7 @@ fn org_check(
         LimitKind::Rate => "rate_limit",
         LimitKind::Quota => "quota",
     };
-    let (name, key, scope) = match org_target(org_id, policy.on_missing, policy_kind)? {
+    let (name, key, scope, by_address) = match org_target(org_id, policy.on_missing, policy_kind)? {
         Some(OrgTarget::Org(id)) => (
             override_name.unwrap_or(&policy.limit),
             match kind {
@@ -142,6 +147,7 @@ fn org_check(
                 LimitKind::Quota => store::keys::limits::org_quota(id),
             },
             "org",
+            false,
         ),
         Some(OrgTarget::Ip) => (
             policy.limit.as_str(),
@@ -150,6 +156,7 @@ fn org_check(
                 LimitKind::Quota => store::keys::limits::org_ip_quota(client_ip),
             },
             "ip",
+            true,
         ),
         None => return Ok(None),
     };
@@ -159,6 +166,7 @@ fn org_check(
         kind,
         scope,
         on_store_error: policy.on_store_error,
+        by_address,
     }))
 }
 
@@ -204,6 +212,7 @@ async fn apply_selected_limits(
             .subject_rate
             .as_ref()
             .map_or(OnStoreError::Allow, |policy| policy.on_store_error),
+        by_address: subject.is_none(),
     });
     if let Some(check) = org_check(
         org_id,
@@ -224,12 +233,23 @@ async fn apply_selected_limits(
                 .subject_quota
                 .as_ref()
                 .map_or(OnStoreError::Allow, |policy| policy.on_store_error),
+            by_address: subject.is_none(),
         });
     }
     // All selected references must be valid before any consuming check runs.
     // Config/attribute mistakes must not charge unrelated valid buckets.
     for check in &checks {
         validate_limit(limiter, &check.name, check.kind, check.scope)?;
+        // A durable balance belongs to a subject or an organization: whatever
+        // the configuration, a client address never writes one to SQL.
+        if check.by_address && limiter.is_durable(&check.name) {
+            return Err(configuration_error(
+                &check.name,
+                check.kind,
+                check.scope,
+                &RateLimitError::InvalidConfig("durable quota keyed by a client address".into()),
+            ));
+        }
     }
     let mut rate_checks = Vec::with_capacity(2);
     let mut quota_checks = Vec::with_capacity(2);

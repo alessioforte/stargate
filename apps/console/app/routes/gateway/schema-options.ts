@@ -140,6 +140,15 @@ export function isLimitPeriod(value: unknown): value is LimitPeriod {
   return limitPeriodOptions.some((option) => option.value === value);
 }
 
+export function isCalendarPeriod(period: LimitPeriod): boolean {
+  return (
+    period === "day" ||
+    period === "week" ||
+    period === "month" ||
+    period === "year"
+  );
+}
+
 export function isLoadBalancerStrategy(
   value: unknown,
 ): value is LoadBalancerStrategy {

@@ -1,5 +1,6 @@
 #[cfg(feature = "redis")]
 mod cluster;
+mod durable_quota;
 mod forwarded_headers;
 #[cfg(feature = "memory")]
 mod grpc;
