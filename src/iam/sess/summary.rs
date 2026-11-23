@@ -226,7 +226,8 @@ async fn reconcile_when_due() {
             Err(error) => tracing::warn!(%error, "Session reconciliation failed"),
         },
         Ok(false) => {}
-        Err(error) => tracing::warn!(%error, "Session reconciliation lease unavailable"),
+        // The store reports its own outages; the totals' age shows the delay.
+        Err(error) => tracing::debug!(%error, "Session reconciliation lease unavailable"),
     }
 }
 
