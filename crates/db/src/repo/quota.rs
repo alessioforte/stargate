@@ -8,6 +8,7 @@
 
 use crate::backend::Pool;
 use anyhow::{Context, Result, ensure};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// Rows one prune statement deletes at most; callers repeat while a batch is
@@ -44,6 +45,8 @@ impl<'a> QuotaOwner<'a> {
 pub struct QuotaReservation<'a> {
     pub owner: QuotaOwner<'a>,
     pub bucket: &'a str,
+    pub name: &'a str,
+    pub fingerprint: &'a str,
     pub config_version: i64,
     pub now: i64,
     pub window_start: i64,
@@ -74,22 +77,22 @@ impl QuotaBalance {
 pub enum QuotaReserved {
     Granted(QuotaBalance),
     Refused(QuotaBalance),
-    StaleConfig,
+    StaleDefinition,
 }
 
 #[cfg(feature = "postgres")]
-const CONFIG_SHARE_LOCK: &str = "FOR SHARE";
+const DEFINITION_SHARE_LOCK: &str = "FOR SHARE";
 #[cfg(feature = "sqlite")]
-const CONFIG_SHARE_LOCK: &str = "";
+const DEFINITION_SHARE_LOCK: &str = "";
 
 // Hold the PostgreSQL row lock through the upsert so an old reservation
-// either completes before the config save or sees the new version and stops.
+// either completes before the activation or sees the new definition and stops.
 // SQLite serializes these statements as writes.
 static RESERVE_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "INSERT INTO quota_usage AS q (bucket, owner_kind, owner_id, window_start, window_end, used)
-         SELECT $1, $2, $3, $4, $5, $6 FROM quota_config
-         WHERE id = 1 AND version = $9 {CONFIG_SHARE_LOCK}
+         SELECT $1, $2, $3, $4, $5, $6 FROM quota_definitions
+         WHERE name = $9 AND fingerprint = $10 AND version <= $11 {DEFINITION_SHARE_LOCK}
          ON CONFLICT (bucket) DO UPDATE SET
              used = CASE WHEN $7 < q.window_end THEN q.used + excluded.used ELSE excluded.used END,
              window_start = CASE
@@ -109,7 +112,56 @@ impl QuotaRepository {
         Self
     }
 
-    /// Charge the active window using the latest persisted gateway version.
+    /// Publish all durable definitions from one prepared gateway document.
+    /// Leave unchanged rows intact so older snapshots can still reserve.
+    pub async fn activate(
+        &self,
+        pool: &Pool,
+        version: i64,
+        definitions: &[(&str, &str)],
+    ) -> Result<()> {
+        let mut tx = pool.begin().await?;
+        let advanced =
+            sqlx::query("UPDATE quota_config SET version = $1 WHERE id = 1 AND version < $1")
+                .bind(version)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        if advanced == 0 {
+            tx.rollback().await?;
+            return Ok(());
+        }
+        let mut previous: HashMap<String, String> =
+            sqlx::query_as("SELECT name, fingerprint FROM quota_definitions")
+                .fetch_all(&mut *tx)
+                .await?
+                .into_iter()
+                .collect();
+        for &(name, fingerprint) in definitions {
+            if previous.remove(name).as_deref() == Some(fingerprint) {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO quota_definitions (name, fingerprint, version) VALUES ($1, $2, $3)
+                 ON CONFLICT (name) DO UPDATE SET fingerprint = excluded.fingerprint, version = excluded.version",
+            )
+            .bind(name)
+            .bind(fingerprint)
+            .bind(version)
+            .execute(&mut *tx)
+            .await?;
+        }
+        for name in previous.keys() {
+            sqlx::query("DELETE FROM quota_definitions WHERE name = $1")
+                .bind(name)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Charge the active window using the activated quota definition.
     /// Keep the stored bounds until they expire. The first window of a new
     /// calendar starts at the old boundary if the calendars overlap.
     pub async fn reserve(
@@ -120,6 +172,8 @@ impl QuotaRepository {
         let QuotaReservation {
             owner,
             bucket,
+            name,
+            fingerprint,
             config_version,
             now,
             window_start,
@@ -127,7 +181,7 @@ impl QuotaRepository {
             limit,
             units,
         } = reservation;
-        // The insert has no condition: a fresh balance must fit on its own.
+        // A fresh bucket has no stored balance against which to check the limit.
         ensure!(units <= limit, "quota reservation exceeds its limit");
         ensure!(
             window_start <= now && now < window_end,
@@ -144,6 +198,8 @@ impl QuotaRepository {
             .bind(units)
             .bind(now)
             .bind(stored_limit)
+            .bind(name)
+            .bind(fingerprint)
             .bind(config_version)
             .fetch_optional(pool)
             .await?;
@@ -152,17 +208,20 @@ impl QuotaRepository {
         }
 
         // Read once on refusal so the tracker can cache a full balance.
-        let (version, start, end, used): (i64, Option<i64>, Option<i64>, Option<i64>) =
-            sqlx::query_as(
-                "SELECT c.version, q.window_start, q.window_end, q.used FROM quota_config c
-             LEFT JOIN quota_usage q ON q.bucket = $1 WHERE c.id = 1",
-            )
-            .bind(bucket)
-            .fetch_one(pool)
-            .await?;
-        if version != config_version {
-            return Ok(QuotaReserved::StaleConfig);
-        }
+        let row: Option<(Option<i64>, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT q.window_start, q.window_end, q.used FROM quota_definitions d
+             LEFT JOIN quota_usage q ON q.bucket = $1
+             WHERE d.name = $2 AND d.fingerprint = $3 AND d.version <= $4",
+        )
+        .bind(bucket)
+        .bind(name)
+        .bind(fingerprint)
+        .bind(config_version)
+        .fetch_optional(pool)
+        .await?;
+        let Some((start, end, used)) = row else {
+            return Ok(QuotaReserved::StaleDefinition);
+        };
         let (Some(start), Some(end), Some(used)) = (start, end, used) else {
             anyhow::bail!("quota balance disappeared after a refused reservation");
         };
@@ -216,7 +275,7 @@ mod test_support {
         format!("stargate:v1:{{sub:{}}}:quota:test", ulid::Ulid::generate())
     }
 
-    pub(super) async fn create_owner(pool: &Pool) {
+    pub(super) async fn prepare_database(pool: &Pool) {
         sqlx::query(
             "INSERT INTO organizations (id, name) VALUES ($1, 'Quota tests')
              ON CONFLICT (id) DO NOTHING",
@@ -225,6 +284,15 @@ mod test_support {
         .execute(pool)
         .await
         .unwrap();
+        let document = save_gateway(pool, "day", None).await;
+        QuotaRepository::new()
+            .activate(
+                pool,
+                document.version,
+                &[("daily", "day"), ("unchanged", "day")],
+            )
+            .await
+            .unwrap();
     }
 
     pub(super) async fn reserve(
@@ -241,7 +309,9 @@ mod test_support {
                 QuotaReservation {
                     owner: OWNER,
                     bucket,
-                    config_version: 0,
+                    name: "daily",
+                    fingerprint: "day",
+                    config_version: 1,
                     now: window_start,
                     window_start,
                     window_end,
@@ -278,14 +348,20 @@ mod test_support {
     }
 
     pub(super) async fn verify_calendar_transition(pool: &Pool) {
-        use QuotaReserved::{Granted, Refused, StaleConfig};
+        use QuotaReserved::{Granted, Refused, StaleDefinition};
 
         let bucket = bucket();
         let repo = QuotaRepository::new();
-        let first = save_gateway(pool, "day", None).await;
+        let first = Service::new(pool.clone())
+            .get_active_config_document(ConfigKind::Gateway)
+            .await
+            .unwrap()
+            .unwrap();
         let old = || QuotaReservation {
             owner: OWNER,
             bucket: &bucket,
+            name: "daily",
+            fingerprint: "day",
             config_version: first.version,
             now: 170,
             window_start: 100,
@@ -299,8 +375,44 @@ mod test_support {
         );
         let delayed = old();
         let second = save_gateway(pool, "month", Some(first.revision.clone())).await;
+        assert!(matches!(
+            repo.reserve(
+                pool,
+                QuotaReservation {
+                    bucket: "staged",
+                    ..old()
+                }
+            )
+            .await
+            .unwrap(),
+            Granted(_)
+        ));
+        repo.activate(
+            pool,
+            second.version,
+            &[("daily", "month"), ("unchanged", "day")],
+        )
+        .await
+        .unwrap();
+        repo.activate(pool, first.version, &[("daily", "day")])
+            .await
+            .unwrap();
+        assert!(matches!(
+            repo.reserve(
+                pool,
+                QuotaReservation {
+                    name: "unchanged",
+                    bucket: "unchanged",
+                    ..old()
+                }
+            )
+            .await
+            .unwrap(),
+            Granted(_)
+        ));
         let new = |now| QuotaReservation {
             config_version: second.version,
+            fingerprint: "month",
             now,
             window_start: 150,
             window_end: 400,
@@ -308,8 +420,8 @@ mod test_support {
         };
 
         // A reservation prepared in the previous generation cannot charge
-        // after the save, even before B makes its first reservation.
-        assert_eq!(repo.reserve(pool, delayed).await.unwrap(), StaleConfig);
+        // after activation, even before B makes its first reservation.
+        assert_eq!(repo.reserve(pool, delayed).await.unwrap(), StaleDefinition);
         assert_eq!(
             repo.reserve(
                 pool,
@@ -320,14 +432,14 @@ mod test_support {
             )
             .await
             .unwrap(),
-            StaleConfig,
+            StaleDefinition,
         );
         assert_eq!(
             repo.reserve(pool, new(175)).await.unwrap(),
             Granted(balance(100, 200, 10))
         );
         for _ in 0..2 {
-            assert_eq!(repo.reserve(pool, old()).await.unwrap(), StaleConfig);
+            assert_eq!(repo.reserve(pool, old()).await.unwrap(), StaleDefinition);
             assert_eq!(
                 repo.reserve(pool, new(199)).await.unwrap(),
                 Refused(balance(100, 200, 10))
@@ -350,7 +462,7 @@ mod test_support {
             )
             .await
             .unwrap(),
-            StaleConfig,
+            StaleDefinition,
         );
         assert_eq!(
             repo.reserve(pool, new(199)).await.unwrap(),
@@ -364,6 +476,24 @@ mod test_support {
             repo.reserve(pool, new(201)).await.unwrap(),
             Refused(balance(200, 400, 10))
         );
+        let restored = save_gateway(pool, "day", Some(second.revision)).await;
+        repo.activate(pool, restored.version, &[("daily", "day")])
+            .await
+            .unwrap();
+        assert_eq!(repo.reserve(pool, old()).await.unwrap(), StaleDefinition);
+        assert!(matches!(
+            repo.reserve(
+                pool,
+                QuotaReservation {
+                    config_version: restored.version,
+                    bucket: "restored",
+                    ..old()
+                }
+            )
+            .await
+            .unwrap(),
+            Granted(_)
+        ));
     }
 
     pub(super) async fn verify_maximum_balance(pool: &Pool) {
@@ -428,7 +558,9 @@ mod test_support {
                     QuotaReservation {
                         owner: *owner,
                         bucket,
-                        config_version: 0,
+                        name: "daily",
+                        fingerprint: "day",
+                        config_version: 1,
                         now: 100,
                         window_start: 100,
                         window_end: 200,
@@ -491,7 +623,7 @@ mod sqlite_tests {
                 .migrate()
                 .await
                 .unwrap();
-            test_support::create_owner(&pool).await;
+            test_support::prepare_database(&pool).await;
             Self { path, pool }
         }
     }
@@ -619,7 +751,7 @@ mod postgres_tests {
             .migrate()
             .await
             .unwrap();
-        test_support::create_owner(&pool).await;
+        test_support::prepare_database(&pool).await;
         test(&pool).await;
         pool.close().await;
         sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))

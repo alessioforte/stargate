@@ -13,17 +13,18 @@ CREATE TABLE "quota_usage" (
     "used" INTEGER NOT NULL DEFAULT 0 CHECK ("used" >= 0)
 );
 
--- SQLite serializes quota reservations with configuration writes.
+-- Only activation advances this version, so older activations cannot
+-- restore retired definitions. SQLite serializes these writes.
 CREATE TABLE "quota_config" (
     "id" INTEGER PRIMARY KEY CHECK ("id" = 1),
     "version" INTEGER NOT NULL CHECK ("version" >= 0)
 );
 
 INSERT INTO "quota_config" ("id", "version")
-SELECT 1, COALESCE(MAX("version"), 0) FROM "config_documents" WHERE "kind" = 'gateway';
+VALUES (1, 0);
 
-CREATE TRIGGER advance_quota_config_version
-AFTER INSERT ON config_documents FOR EACH ROW WHEN NEW.kind = 'gateway'
-BEGIN
-    UPDATE quota_config SET version = NEW.version WHERE id = 1 AND version < NEW.version;
-END;
+CREATE TABLE "quota_definitions" (
+    "name" TEXT PRIMARY KEY,
+    "fingerprint" TEXT NOT NULL,
+    "version" INTEGER NOT NULL CHECK ("version" > 0)
+);

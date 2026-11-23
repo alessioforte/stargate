@@ -20,6 +20,10 @@ pub(crate) enum GatewayPreparationError {
     Serialization(String),
     #[error("gateway configuration version exhausted")]
     VersionExhausted,
+    #[error("unable to activate durable quota definitions: {0}")]
+    QuotaActivation(#[source] anyhow::Error),
+    #[error("gateway configuration task failed: {0}")]
+    ActivationTask(#[from] tokio::task::JoinError),
     #[error(
         "process gateway budgets cannot change on reload; restart the process to apply runtime capacities"
     )]
@@ -33,7 +37,9 @@ impl GatewayPreparationError {
             | Self::Core(_)
             | Self::Serialization(_)
             | Self::VersionExhausted
+            | Self::ActivationTask(_)
             | Self::BudgetChange => "error",
+            Self::QuotaActivation(_) => "quota_activation_error",
             Self::InternalContext(_) => "internal_context_error",
             Self::Transport(_) => "transport_error",
         }
@@ -172,8 +178,9 @@ pub(crate) async fn save_gateway_config(
     };
     let outcome = match activation {
         Some(activation) => {
-            gate.publish(activation, document.version)
-                .map_err(invalid_config)?;
+            gate.publish_document(activation, document.version)
+                .await
+                .map_err(ErrorResponse::internal)?;
             crate::obs::telemetry::record_config_reload("gateway_config", "success");
             ConfigActivation::Applied
         }

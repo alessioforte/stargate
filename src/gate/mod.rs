@@ -49,14 +49,8 @@ pub async fn init() -> anyhow::Result<Arc<Gate>> {
     let policies = crate::iam::authz::storage::load_policies_document().await?;
     let policies = crate::iam::authz::rules::compile_policy_snapshot(&policies.content)
         .map_err(|error| anyhow::anyhow!("Unable to load access-control policies: {error}"))?;
-    let gate = Arc::new(Gate::new(
-        Arc::new(use_store().clone()),
-        prepared,
-        policies,
-        Some(Arc::new(limits::SqlQuotaLedger::new(
-            crate::data::db::service(),
-        ))),
-    )?);
+    let gate =
+        Arc::new(Gate::from_document(Arc::new(use_store().clone()), prepared, policies).await?);
     // Shutdown stops it with the gateway's other background work.
     gate.resources.spawn(limits::prune_orphaned_quotas(
         crate::data::db::service(),

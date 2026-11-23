@@ -33,6 +33,10 @@ pub trait RateLimit: Send + Sync {
     }
     fn set_quota_config_version(&mut self, _version: i64) {}
 
+    fn quota_fingerprint(&self) -> Option<&str> {
+        None
+    }
+
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision>;
 }
 

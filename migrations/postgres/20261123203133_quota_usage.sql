@@ -13,23 +13,20 @@ CREATE TABLE "quota_usage" (
     "used" BIGINT NOT NULL DEFAULT 0 CHECK ("used" >= 0)
 );
 
--- A reservation takes a shared lock on this row. A gateway configuration
--- save updates it in the same transaction as the new document version.
+-- Only activation advances this version. It serializes definition changes
+-- and prevents a late activation from restoring retired definitions.
 CREATE TABLE "quota_config" (
     "id" INTEGER PRIMARY KEY CHECK ("id" = 1),
     "version" BIGINT NOT NULL CHECK ("version" >= 0)
 );
 
 INSERT INTO "quota_config" ("id", "version")
-SELECT 1, COALESCE(MAX("version"), 0) FROM "config_documents" WHERE "kind" = 'gateway';
+VALUES (1, 0);
 
-CREATE FUNCTION advance_quota_config_version() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-    UPDATE quota_config SET version = NEW.version WHERE id = 1 AND version < NEW.version;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER advance_quota_config_version
-AFTER INSERT ON config_documents FOR EACH ROW WHEN (NEW.kind = 'gateway')
-EXECUTE FUNCTION advance_quota_config_version();
+-- Reservations take a shared lock on just the definition they use. The
+-- version is the first activated document in its current run.
+CREATE TABLE "quota_definitions" (
+    "name" TEXT PRIMARY KEY,
+    "fingerprint" TEXT NOT NULL,
+    "version" BIGINT NOT NULL CHECK ("version" > 0)
+);

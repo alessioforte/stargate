@@ -1,5 +1,5 @@
 use super::Gate;
-use super::config::{GatewayPreparationError, PreparedConfig};
+use super::config::GatewayPreparationError;
 use crate::obs::telemetry;
 use db::ent::ConfigDocument;
 use std::sync::Arc;
@@ -9,21 +9,26 @@ pub(crate) fn apply_gateway_config(
     gate: &Gate,
     yaml: &str,
 ) -> Result<u64, GatewayPreparationError> {
-    activate(gate, super::config::prepare_gateway_config(yaml))
+    record(super::config::prepare_gateway_config(yaml).and_then(|prepared| gate.activate(prepared)))
 }
 
-pub(super) fn apply_gateway_document(
-    gate: &Gate,
-    document: &ConfigDocument,
+pub(super) async fn apply_gateway_document(
+    gate: &Arc<Gate>,
+    document: ConfigDocument,
 ) -> Result<u64, GatewayPreparationError> {
-    activate(gate, super::config::prepare_gateway_document(document))
+    let version = document.version;
+    let runtime = gate.clone();
+    let prepared = tokio::task::spawn_blocking(move || {
+        runtime.prepare_activation(super::config::prepare_gateway_document(&document)?)
+    })
+    .await?;
+    record(match prepared {
+        Ok(activation) => gate.publish_document(activation, version).await,
+        Err(error) => Err(error),
+    })
 }
 
-fn activate(
-    gate: &Gate,
-    prepared: Result<PreparedConfig, GatewayPreparationError>,
-) -> Result<u64, GatewayPreparationError> {
-    let result = prepared.and_then(|prepared| gate.activate(prepared));
+fn record(result: Result<u64, GatewayPreparationError>) -> Result<u64, GatewayPreparationError> {
     telemetry::record_config_reload(
         "gateway_config",
         result

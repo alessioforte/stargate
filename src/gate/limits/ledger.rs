@@ -39,6 +39,8 @@ impl QuotaLedger for SqlQuotaLedger {
             .reserve_quota(QuotaReservation {
                 owner: owner(request.bucket)?,
                 bucket: request.bucket,
+                name: request.name,
+                fingerprint: request.fingerprint,
                 config_version: request.config_version,
                 now: request.now,
                 window_start: request.window.start,
@@ -58,8 +60,8 @@ impl QuotaLedger for SqlQuotaLedger {
         match reserved {
             QuotaReserved::Granted(value) => Ok(Reservation::Granted(balance(value))),
             QuotaReserved::Refused(value) => Ok(Reservation::Refused(balance(value))),
-            QuotaReserved::StaleConfig => Err(RateLimitError::BackendError(
-                "quota reservation uses a superseded gateway configuration".into(),
+            QuotaReserved::StaleDefinition => Err(RateLimitError::BackendError(
+                "quota reservation uses a superseded quota definition".into(),
             )),
         }
     }

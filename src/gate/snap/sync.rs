@@ -228,21 +228,15 @@ async fn synchronize(
         }
         let revision = document.revision.clone();
         let result = match kind {
-            ConfigKind::Gateway => {
-                let gate = gate.clone();
-                tokio::task::spawn_blocking(move || {
-                    apply_gateway_document(&gate, &document)
-                        .map(|_| ())
-                        .map_err(|error| {
-                            (
-                                matches!(&error, GatewayPreparationError::BudgetChange),
-                                error.reload_outcome(),
-                            )
-                        })
-                })
+            ConfigKind::Gateway => apply_gateway_document(gate, document)
                 .await
-                .unwrap_or(Err((false, "error")))
-            }
+                .map(|_| ())
+                .map_err(|error| {
+                    (
+                        matches!(&error, GatewayPreparationError::BudgetChange),
+                        error.reload_outcome(),
+                    )
+                }),
             ConfigKind::Policies => apply_policy_document(gate, &document.content)
                 .map(|_| ())
                 .map_err(|_| (false, "error")),

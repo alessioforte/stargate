@@ -66,9 +66,10 @@ The update response includes the saved document and `activation: applied` after
 publishing on the receiving replica. An identical save whose revision is already
 active returns `applied` without replacing the generation or restarting probes;
 a replica that is behind still activates the document. A change to process
-capacity budgets is
-saved with `activation: restart_required`: existing routing stays active until
-restart. The Console preserves the draft on a revision conflict and offers Reload or
+capacity budgets is saved with `activation: restart_required`. The replica
+continues to use its existing routing and quota definitions until it restarts.
+Saving the document leaves durable quota reservation permissions in place.
+The Console preserves the draft on a revision conflict and offers Reload or
 Overwrite using the latest document revision. It warns when a restart
 is required. Restart always uses the latest database document.
 
@@ -1281,12 +1282,15 @@ Reserved units count as used as soon as SQL charges them, so replicas can never
 exceed the limit. Each crash or reservation timeout can strand at most one
 batch per bucket. A batch caps out at `max(1, min(limit / 100, 1024))` units
 unless the request itself costs more. Batches belong to the process and can be
-reused by later configurations of the same named quota. Each reservation uses the
-gateway configuration version stored in SQL. Once a new version commits, a
-replica still serving an older snapshot can spend units it already reserved
-until its batch expires. A reservation from that snapshot fails with
-`503 gateway.limiter_unavailable` until the replica applies the current version,
-including when the new configuration requires a restart. Each SQL reservation
+reused by later configurations of the same named quota. SQL authorizes new
+reservations against each quota's activated definition (limit, period, time
+zone and anchor). Snapshots with the same unchanged definition can reserve
+across document versions. The first replica to activate a change retires the
+previous definition. Replicas serving it can spend units they already reserved
+until their batches expire, and new reservations return
+`503 gateway.limiter_unavailable` until the replicas apply the change. A
+configuration saved for restart only changes quota permissions when a replica
+activates it. Each SQL reservation
 attempt has a 5-second timeout, including a retry. If the request runs out of
 traffic budget while a reservation is in flight, its cost is still deducted
 from any batch the reservation returns. When a reservation is refused for lack

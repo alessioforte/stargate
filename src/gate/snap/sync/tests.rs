@@ -173,7 +173,9 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
                 .unwrap(),
         )
         .await;
-        apply_gateway_document(&first, &barrier).unwrap();
+        apply_gateway_document(&first, barrier.clone())
+            .await
+            .unwrap();
         let stop = Arc::new(Notify::new());
         let task = tokio::spawn(with_test_service(
             svc.clone(),

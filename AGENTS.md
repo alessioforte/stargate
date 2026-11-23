@@ -358,10 +358,10 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   subject scope, on a router without an `auth` policy. `lim::DurableQuotas`
   keeps a replica's reserved batches across generations of the same named quota.
   Each bucket retains its charged units and window bounds when its calendar
-  changes. The new calendar starts at the stored end. SQL admits reservations
-  only from the current persisted gateway document version. Superseded
-  snapshots can consume previously reserved units and fail closed on new
-  reservations.
+  changes. The new calendar starts at the stored end. Each named quota's
+  activated definition controls SQL reservations. Saving a configuration for
+  restart leaves the definitions active. A snapshot with a retired definition
+  can consume previously reserved units and fails closed on new reservations.
 - Upstreams: `transport.connect_timeout`, `transport.protocols` (`http1`/`http2`;
   WebSocket needs `http1`), `load_balancer.liveness_probe` and `circuit_breaker`
   (`fail_threshold` 3, `cooldown` 30s), optional `internal_context.audience`.
@@ -985,8 +985,9 @@ Tables: `organizations`, `users`, `super_admins`, `credentials`, `credential_his
 `api_keys`, `admin_keys`, `service_accounts`, `oauth_clients`, `oauth_consents`,
 `user_organizations`, `user_api_keys`, `service_account_api_keys`, `outbox_events`,
 `config_documents` (append-only gateway configuration and ACE policy versions),
-`quota_config` (gateway document version for quota reservations, updated in
-the same transaction as a gateway document save), and `quota_usage`
+`quota_config` (last activated gateway document version),
+`quota_definitions` (active fingerprints and the version from which each can
+reserve), and `quota_usage`
 (durable calendar-window quota balance; replicas reserve batches
 with one conditional upsert; balances of deleted subjects and organizations are
 pruned in batches every ten minutes).

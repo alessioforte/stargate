@@ -64,6 +64,24 @@ pub(crate) struct PreparedActivation {
 }
 
 impl Gate {
+    pub(in crate::gate) async fn from_document(
+        store: Arc<lim::State>,
+        prepared: PreparedConfig,
+        policies: PolicySnapshot,
+    ) -> Result<Self, GatewayPreparationError> {
+        let database = crate::data::db::service();
+        let ledger = crate::gate::limits::SqlQuotaLedger::new(database.clone());
+        let gate = Self::new(store, prepared, policies, Some(Arc::new(ledger)))?;
+        let runtime = gate.snapshot();
+        activate_quotas(
+            &database,
+            runtime.config_document_version,
+            &runtime.core.limiter,
+        )
+        .await?;
+        Ok(gate)
+    }
+
     pub(crate) fn new(
         store: Arc<lim::State>,
         prepared: PreparedConfig,
@@ -104,6 +122,7 @@ impl Gate {
         self.runtime.load_full()
     }
 
+    #[cfg(test)]
     pub(crate) fn activate(
         &self,
         prepared: PreparedConfig,
@@ -123,7 +142,22 @@ impl Gate {
         Ok(PreparedActivation { core, prepared })
     }
 
-    pub(crate) fn publish(
+    pub(super) async fn publish_document(
+        self: &Arc<Self>,
+        activation: PreparedActivation,
+        version: i64,
+    ) -> Result<u64, GatewayPreparationError> {
+        let database = crate::data::db::service();
+        let gate = self.clone();
+        // Once publication starts, finish it even if the admin request ends.
+        tokio::spawn(async move {
+            activate_quotas(&database, version, &activation.core.limiter).await?;
+            gate.publish(activation, version)
+        })
+        .await?
+    }
+
+    fn publish(
         &self,
         activation: PreparedActivation,
         config_document_version: i64,
@@ -164,6 +198,18 @@ impl Gate {
         previous.core.stop_probes();
         Ok(version)
     }
+}
+
+async fn activate_quotas(
+    database: &db::service::Service,
+    version: i64,
+    limiter: &lim::Limiter,
+) -> Result<(), GatewayPreparationError> {
+    let definitions: Vec<_> = limiter.durable_quota_definitions().collect();
+    database
+        .activate_quota_definitions(version, &definitions)
+        .await
+        .map_err(GatewayPreparationError::QuotaActivation)
 }
 
 fn configure_probes(core: &gate::Runtime, transports: &PreparedTransports) {

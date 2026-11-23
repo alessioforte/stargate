@@ -9,7 +9,7 @@
 
 use crate::{
     data::store::use_store,
-    gate::{Gate, prepare_config},
+    gate::Gate,
     iam::{
         auth::jwt as session_jwt,
         sess::{issuance::start_user_session, registry},
@@ -416,15 +416,18 @@ async fn cluster_request_path_workload() {
     crate::data::store::init().await.unwrap();
     crate::data::db::init().await.unwrap();
     let fixtures = Fixtures::create().await;
+    let document = crate::data::db::active_or_seed(db::ent::ConfigKind::Gateway, || async {
+        Ok(config().to_yaml_string()?)
+    })
+    .await
+    .unwrap();
     let gate = Arc::new(
-        Gate::new(
+        Gate::from_document(
             Arc::new(use_store().clone()),
-            prepare_config(config()).unwrap(),
+            crate::gate::snap::prepare_gateway_document(&document).unwrap(),
             PolicySnapshot::default(),
-            Some(Arc::new(crate::gate::limits::SqlQuotaLedger::new(
-                crate::data::db::service(),
-            ))),
         )
+        .await
         .unwrap(),
     );
     let (url, server) = start(gate.clone()).await;

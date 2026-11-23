@@ -81,6 +81,14 @@ impl Service {
         self.quota.reserve(&self.pool, reservation).await
     }
 
+    pub async fn activate_quota_definitions(
+        &self,
+        version: i64,
+        definitions: &[(&str, &str)],
+    ) -> Result<()> {
+        self.quota.activate(&self.pool, version, definitions).await
+    }
+
     /// Delete one batch of durable quota balances whose owner no longer
     /// exists. See [`QuotaRepository::prune_orphaned`].
     pub async fn prune_orphaned_quotas(&self) -> Result<u64> {

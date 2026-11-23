@@ -46,6 +46,7 @@ pub enum WindowError {
 pub struct CalendarWindow {
     period: CalendarPeriod,
     timezone: TimeZone,
+    timezone_name: String,
     /// Day of the month a period starts on, restricted to 1..=28 so every
     /// month has it. Only meaningful for [`CalendarPeriod::Month`].
     anchor_day: Option<u8>,
@@ -71,12 +72,24 @@ impl CalendarWindow {
         Ok(Self {
             period,
             timezone: parsed,
+            timezone_name: timezone.into(),
             anchor_day,
         })
     }
 
     pub fn period(&self) -> CalendarPeriod {
         self.period
+    }
+
+    pub(super) fn fingerprint(&self, limit: u64) -> String {
+        let (period, anchor) = match self.period {
+            CalendarPeriod::Day => ("day", 0),
+            CalendarPeriod::Week => ("week", 0),
+            CalendarPeriod::Month => ("month", self.anchor_day.unwrap_or(1)),
+            CalendarPeriod::Year => ("year", 0),
+        };
+        let timezone = self.timezone.iana_name().unwrap_or(&self.timezone_name);
+        format!("{limit}:{period}:{timezone}:{anchor}")
     }
 
     /// Resolve the window that contains `now_secs`.

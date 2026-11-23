@@ -19,6 +19,8 @@ pub struct QuotaBalance {
 
 pub struct ReservationRequest<'a> {
     pub bucket: &'a str,
+    pub name: &'a str,
+    pub fingerprint: &'a str,
     pub config_version: i64,
     pub now: i64,
     pub window: WindowBounds,
@@ -35,6 +37,6 @@ pub enum Reservation {
 #[async_trait]
 pub trait QuotaLedger: Send + Sync {
     /// Reserve from the persisted active window without exceeding the limit.
-    /// Superseded versions and backend failures are errors.
+    /// Retired definitions and backend failures are errors.
     async fn reserve(&self, request: ReservationRequest<'_>) -> Result<Reservation>;
 }

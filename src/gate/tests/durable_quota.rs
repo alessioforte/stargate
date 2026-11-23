@@ -1,12 +1,10 @@
 //! Durable calendar quotas survive a state-store loss, belong to an
 //! authenticated subject, and a SQL failure can never admit traffic above the
 //! limit.
-#![cfg(all(feature = "memory", feature = "sqlite"))]
-
+#[cfg(feature = "sqlite")]
 use crate::data::db::with_test_database;
 use crate::gate::Gate;
 use crate::gate::authentication::TestAuthenticator;
-use crate::gate::limits::SqlQuotaLedger;
 use crate::gate::snap::prepare_gateway_document;
 use crate::iam::auth::identity::VerifiedIdentity;
 use crate::iam::auth::subject::{Subject, SubjectType};
@@ -14,11 +12,16 @@ use axum::body::Body;
 use db::ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext};
 use gate::cfg::Config;
 use http::{Request, StatusCode};
+#[cfg(feature = "sqlite")]
 use http_body_util::BodyExt;
+#[cfg(feature = "sqlite")]
 use lim::{QuotaBalance, QuotaLedger, Reservation, ReservationRequest};
-use serde_json::{Value, json};
+#[cfg(feature = "sqlite")]
+use serde_json::Value;
+use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
+#[cfg(feature = "sqlite")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const IP: &str = "203.0.113.78:1000";
@@ -52,6 +55,7 @@ fn config(on_store_error: &str) -> Config {
     .unwrap()
 }
 
+#[cfg(feature = "sqlite")]
 fn gate(config: Config, ledger: Arc<dyn QuotaLedger>) -> Arc<Gate> {
     let prepared = crate::gate::prepare_config(config).unwrap();
     Arc::new(
@@ -65,20 +69,21 @@ fn gate(config: Config, ledger: Arc<dyn QuotaLedger>) -> Arc<Gate> {
     )
 }
 
-fn sql_ledger() -> Arc<dyn QuotaLedger> {
-    Arc::new(SqlQuotaLedger::new(crate::data::db::service()))
-}
-
-fn stored_gate(document: &ConfigDocument) -> Arc<Gate> {
+async fn open_gateway(document: &ConfigDocument, store: Arc<lim::State>) -> Arc<Gate> {
     Arc::new(
-        Gate::new(
-            Arc::new(lim::State::new()),
+        Gate::from_document(
+            store,
             prepare_gateway_document(document).unwrap(),
             gate::PolicySnapshot::default(),
-            Some(sql_ledger()),
         )
+        .await
         .unwrap(),
     )
+}
+
+#[cfg(feature = "sqlite")]
+async fn stored_gate(document: &ConfigDocument) -> Arc<Gate> {
+    open_gateway(document, Arc::new(lim::State::new())).await
 }
 
 async fn save_quota(
@@ -101,13 +106,81 @@ async fn save_quota(
     )
     .await
     .unwrap();
-    let ConfigSaveOutcome::Saved(document) = outcome else {
-        panic!("expected a saved quota configuration, got {outcome:?}");
-    };
-    document
+    match outcome {
+        ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => document,
+        other => panic!("expected a saved quota configuration, got {other:?}"),
+    }
 }
 
-fn request(gate: &Arc<Gate>, identity: fn() -> VerifiedIdentity) -> Request<Body> {
+async fn verify_capacity_change(store: Arc<lim::State>) {
+    use crate::data::db;
+    use crate::gate::{ConfigActivation, save_gateway_config};
+    use ::db::ent::{TrustedAdminActor, TrustedAuditRequest};
+
+    let previous = db::get_active_config_document(ConfigKind::Gateway)
+        .await
+        .unwrap();
+    let original = save_quota(6, 3, "day", previous).await;
+    let gate = open_gateway(&original, store).await;
+    let snapshot = gate.snapshot();
+    let id = ulid::Ulid::generate().to_string();
+    let issue = || {
+        crate::gate::service(request(&gate, {
+            let id = id.clone();
+            move || {
+                VerifiedIdentity::test_api_key(Subject::new(id.clone(), SubjectType::ApiKey, None))
+            }
+        }))
+    };
+    let first = issue().await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(first.headers()["x-quota-remaining"], "3");
+
+    let mut config = serde_json::to_value(config("allow")).unwrap();
+    config["runtime"]["primary_concurrency"] = json!(2048);
+    let context = TrustedAuditContext::admin_control_plane(
+        TrustedAdminActor::admin_key(API_KEY_ID),
+        TrustedAuditRequest::from_http("quota-capacity-change", None, None, None),
+    );
+    let (saved, activation) = save_gateway_config(
+        gate.clone(),
+        serde_json::from_value(config).unwrap(),
+        original.revision,
+        context,
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved.version, original.version + 1);
+    assert!(matches!(activation, ConfigActivation::RestartRequired));
+    assert!(Arc::ptr_eq(&snapshot, &gate.snapshot()));
+    // This cost requires a new SQL batch of three units.
+    let next = issue().await.unwrap();
+    assert_eq!(next.status(), StatusCode::OK);
+    assert_eq!(next.headers()["x-quota-remaining"], "0");
+}
+
+#[cfg(feature = "sqlite")]
+#[tokio::test]
+async fn capacity_saved_for_restart_keeps_durable_quota_available() {
+    with_test_database(verify_capacity_change(Arc::new(lim::State::new()))).await;
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL and Redis services"]
+async fn postgres_capacity_saved_for_restart_keeps_durable_quota_available() {
+    let url = std::env::var("TEST_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let database = db::service::init(&url).await.unwrap();
+    database.migrate().await.unwrap();
+    let url = std::env::var("TEST_REDIS_URL").expect("disposable Redis URL");
+    let store = Arc::new(lim::State::new(&url).await.unwrap());
+    crate::data::db::with_test_service(database, verify_capacity_change(store)).await;
+}
+
+fn request(
+    gate: &Arc<Gate>,
+    identity: impl Fn() -> VerifiedIdentity + Send + Sync + 'static,
+) -> Request<Body> {
     let mut request = Request::builder()
         .uri("/quota")
         .body(Body::empty())
@@ -122,6 +195,7 @@ fn request(gate: &Arc<Gate>, identity: fn() -> VerifiedIdentity) -> Request<Body
     request
 }
 
+#[cfg(feature = "sqlite")]
 fn api_key() -> VerifiedIdentity {
     VerifiedIdentity::test_api_key(Subject::new(
         API_KEY_ID.to_string(),
@@ -130,10 +204,12 @@ fn api_key() -> VerifiedIdentity {
     ))
 }
 
+#[cfg(feature = "sqlite")]
 async fn send(gate: &Arc<Gate>) -> axum::response::Response {
     crate::gate::service(request(gate, api_key)).await.unwrap()
 }
 
+#[cfg(feature = "sqlite")]
 async fn code(response: axum::response::Response) -> String {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice::<Value>(&body).unwrap()["code"]
@@ -143,9 +219,11 @@ async fn code(response: axum::response::Response) -> String {
 }
 
 /// Counts reservations and grants them all.
+#[cfg(feature = "sqlite")]
 #[derive(Default)]
 struct CountingLedger(AtomicUsize);
 
+#[cfg(feature = "sqlite")]
 #[async_trait::async_trait]
 impl QuotaLedger for CountingLedger {
     async fn reserve(&self, request: ReservationRequest<'_>) -> lim::Result<Reservation> {
@@ -157,10 +235,12 @@ impl QuotaLedger for CountingLedger {
     }
 }
 
+#[cfg(feature = "sqlite")]
 #[tokio::test]
 async fn a_flushed_state_store_does_not_reset_the_calendar_quota() {
     with_test_database(async {
-        let first = gate(config("deny"), sql_ledger());
+        let document = save_quota(6, 3, "day", None).await;
+        let first = stored_gate(&document).await;
         for remaining in [3, 0] {
             let response = send(&first).await;
             assert_eq!(response.status(), StatusCode::OK);
@@ -172,7 +252,7 @@ async fn a_flushed_state_store_does_not_reset_the_calendar_quota() {
         assert_eq!(send(&first).await.status(), StatusCode::TOO_MANY_REQUESTS);
 
         // A new process with an empty state store: the balance is still in SQL.
-        let restarted = gate(config("deny"), sql_ledger());
+        let restarted = stored_gate(&document).await;
         let denied = send(&restarted).await;
         assert_eq!(denied.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(denied.headers()["x-quota-remaining"], "0");
@@ -181,15 +261,16 @@ async fn a_flushed_state_store_does_not_reset_the_calendar_quota() {
     .await;
 }
 
+#[cfg(feature = "sqlite")]
 #[tokio::test]
 async fn publishing_a_calendar_change_preserves_spend_and_fences_the_old_gateway() {
     with_test_database(async {
         let first = save_quota(10, 5, "day", None).await;
-        let old = stored_gate(&first);
+        let old = stored_gate(&first).await;
         assert_eq!(send(&old).await.status(), StatusCode::OK);
 
         let second = save_quota(10, 5, "month", Some(first)).await;
-        let current = stored_gate(&second);
+        let current = stored_gate(&second).await;
         let stale = send(&old).await;
         assert_eq!(stale.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(code(stale).await, "gateway.limiter_unavailable");
@@ -199,22 +280,26 @@ async fn publishing_a_calendar_change_preserves_spend_and_fences_the_old_gateway
         assert_eq!(last_allowed.headers()["x-quota-remaining"], "0");
         assert_eq!(send(&current).await.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(
-            send(&stored_gate(&second)).await.status(),
+            send(&stored_gate(&second).await).await.status(),
             StatusCode::TOO_MANY_REQUESTS
         );
     })
     .await;
 }
 
+#[cfg(feature = "sqlite")]
 #[tokio::test]
 async fn a_fresh_gateway_reports_the_maximum_balance_as_quota_exhaustion() {
     with_test_database(async {
         const LIMIT: u64 = i64::MAX as u64;
         let first = save_quota(LIMIT, LIMIT, "day", None).await;
-        assert_eq!(send(&stored_gate(&first)).await.status(), StatusCode::OK);
+        assert_eq!(
+            send(&stored_gate(&first).await).await.status(),
+            StatusCode::OK
+        );
 
         let second = save_quota(LIMIT, 1, "day", Some(first)).await;
-        let fresh = stored_gate(&second);
+        let fresh = stored_gate(&second).await;
         let denied = send(&fresh).await;
         assert_eq!(denied.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(denied.headers()["x-quota-remaining"], "0");
@@ -224,6 +309,7 @@ async fn a_fresh_gateway_reports_the_maximum_balance_as_quota_exhaustion() {
     .await;
 }
 
+#[cfg(feature = "sqlite")]
 #[tokio::test]
 async fn a_durable_quota_is_fail_closed_even_when_the_policy_allows_fail_open() {
     with_test_database(async {
@@ -243,6 +329,7 @@ async fn a_durable_quota_is_fail_closed_even_when_the_policy_allows_fail_open() 
     .await;
 }
 
+#[cfg(feature = "sqlite")]
 #[tokio::test]
 async fn an_anonymous_request_never_charges_a_durable_quota() {
     // Compilation rejects a calendar quota on a route without authentication,

@@ -103,6 +103,14 @@ impl Limiter {
         }
     }
 
+    pub fn durable_quota_definitions(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.limits.iter().filter_map(|(name, limit)| {
+            limit
+                .quota_fingerprint()
+                .map(|fingerprint| (name.as_str(), fingerprint))
+        })
+    }
+
     pub fn get_limit(&self, name: &str) -> Option<&dyn RateLimit> {
         self.limits.get(name).map(Box::as_ref)
     }

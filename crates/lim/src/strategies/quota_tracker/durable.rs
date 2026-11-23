@@ -154,6 +154,8 @@ pub struct DurableQuotaTracker {
     clock: Arc<CachedClock>,
     limit: u64,
     window: CalendarWindow,
+    name: Arc<str>,
+    fingerprint: Arc<str>,
     config_version: i64,
 }
 
@@ -180,6 +182,8 @@ impl DurableQuotaTracker {
             leases: quotas.leases(name),
             clock,
             limit,
+            name: name.into(),
+            fingerprint: window.fingerprint(limit).into(),
             window,
             config_version: 0,
         })
@@ -205,6 +209,8 @@ fn lease_units(limit: u64, used: u64, cost: u64) -> Option<u64> {
 struct Reserve {
     ledger: Arc<dyn QuotaLedger>,
     bucket: String,
+    name: Arc<str>,
+    fingerprint: Arc<str>,
     config_version: i64,
     now: i64,
     window: WindowBounds,
@@ -253,6 +259,8 @@ impl Reserve {
             RESERVATION_TIMEOUT,
             self.ledger.reserve(ReservationRequest {
                 bucket: &self.bucket,
+                name: &self.name,
+                fingerprint: &self.fingerprint,
                 config_version: self.config_version,
                 now: self.now,
                 window: self.window,
@@ -281,6 +289,10 @@ impl RateLimit for DurableQuotaTracker {
 
     fn set_quota_config_version(&mut self, version: i64) {
         self.config_version = version;
+    }
+
+    fn quota_fingerprint(&self) -> Option<&str> {
+        Some(&self.fingerprint)
     }
 
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision> {
@@ -326,6 +338,8 @@ impl RateLimit for DurableQuotaTracker {
         let reservation = Reserve {
             ledger: Arc::clone(&self.ledger),
             bucket: key.to_owned(),
+            name: self.name.clone(),
+            fingerprint: self.fingerprint.clone(),
             config_version: self.config_version,
             now,
             window: bounds,

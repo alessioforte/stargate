@@ -112,9 +112,11 @@ fit until the window ends.
 
 The ledger returns the active window and its balance. The tracker uses those
 bounds for the batch, including when a calendar change must wait for the
-stored window to end. Bind the prepared limiter to the persisted configuration
-version with `Limiter::set_quota_config_version` before publishing it. The SQL
-ledger refuses reservations from superseded versions.
+stored window to end. On publication, register the named definitions from
+`Limiter::durable_quota_definitions` in the ledger and bind the limiter to its
+document version with `Limiter::set_quota_config_version`. The SQL ledger
+keeps unchanged definitions open to existing snapshots and refuses new
+reservations for retired definitions.
 
 ```rust
 use lim::DurableQuotas;
