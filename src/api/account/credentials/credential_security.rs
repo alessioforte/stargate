@@ -638,8 +638,9 @@ fn login_request(ip: &str, uri: &str, body: Value) -> Request<Body> {
 }
 
 async fn assert_remembered(user: &User, ip: &str, remembered: bool) {
+    let key = store::keys::account::login_known(&user.id);
     let expires_at = crate::data::store::use_store()
-        .get::<i64>(&store::keys::account::login_known(&user.id, ip))
+        .hget::<i64>(&key, ip)
         .await
         .unwrap();
     assert_eq!(expires_at.is_some(), remembered);
@@ -648,7 +649,7 @@ async fn assert_remembered(user: &User, ip: &str, remembered: bool) {
     }
     assert!(
         !crate::data::store::use_store()
-            .exists(&store::keys::account::login_known(&user.id, "192.0.2.99"))
+            .hexists(&key, "192.0.2.99")
             .await
             .unwrap()
     );
@@ -823,8 +824,9 @@ async fn completed_password_login_suite() {
         StatusCode::OK
     );
     crate::data::store::use_store()
-        .set(
-            &store::keys::account::login_known(&user.id, json_ip),
+        .hset(
+            &store::keys::account::login_known(&user.id),
+            json_ip,
             &0_i64,
             Some(60),
         )
@@ -832,6 +834,85 @@ async fn completed_password_login_suite() {
         .unwrap();
     assert_eq!(
         verify_login_password(json_ip, &user.email, PASSWORD)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AuthLoginRateLimited
+    );
+
+    forgotten_after_credential_change(&user).await;
+}
+
+/// A password change revokes every session through the same call used by both
+/// reset and expired-password completion; revoking every session directly must
+/// have the same effect on recognition.
+async fn forgotten_after_credential_change(user: &User) {
+    use crate::api::account::login::{post_login, verify_login_password};
+    use crate::iam::auth::login_guard;
+
+    let ip = "2001:db8:dddd::1";
+    login_guard::record_success(&user.id, ip).await;
+    login_guard::seed_account_backoff(&user.id).await;
+    assert!(
+        verify_login_password(ip, &user.email, PASSWORD)
+            .await
+            .is_ok()
+    );
+
+    let sid = pwd::reset::issue_change_password_request(&user.email, None)
+        .await
+        .unwrap();
+    let token = jwt_config()
+        .generate_password_reset_token(
+            jwt::Claims::default()
+                .sub_id(user.id.clone())
+                .email(user.email.clone())
+                .sid(sid),
+        )
+        .unwrap();
+    let _ = put_credentials(request(
+        "/account/credentials",
+        json!({"token": token, "password": PASSWORD}),
+    ))
+    .await
+    .unwrap();
+    assert_remembered(user, ip, false).await;
+    assert_eq!(
+        verify_login_password(ip, &user.email, PASSWORD)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::AuthLoginRateLimited
+    );
+
+    // A login completed after the reset registers the address again.
+    crate::data::store::use_store()
+        .delete(&store::keys::account::login_user(&user.id, None))
+        .await
+        .unwrap();
+    assert_eq!(
+        post_login(login_request(
+            ip,
+            "/account/login",
+            json!({"username": user.email.clone(), "password": PASSWORD}),
+        ))
+        .await
+        .unwrap()
+        .status(),
+        StatusCode::OK
+    );
+    assert_remembered(user, ip, true).await;
+
+    login_guard::seed_account_backoff(&user.id).await;
+    assert!(
+        verify_login_password(ip, &user.email, PASSWORD)
+            .await
+            .is_ok()
+    );
+    assert!(registry::revoke_all_sessions(&user.id).await.unwrap() > 0);
+    assert_remembered(user, ip, false).await;
+    assert_eq!(
+        verify_login_password(ip, &user.email, PASSWORD)
             .await
             .unwrap_err()
             .code,

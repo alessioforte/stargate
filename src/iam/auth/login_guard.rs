@@ -17,6 +17,11 @@ struct Bucket {
     policy: Policy,
 }
 
+struct KnownAddress {
+    key: String,
+    field: String,
+}
+
 #[derive(Clone, Copy)]
 enum Policy {
     FixedWindow { limit: u32 },
@@ -25,7 +30,7 @@ enum Policy {
 
 pub(crate) struct LoginThrottle {
     buckets: [Bucket; 3],
-    known_key: Option<String>,
+    known: Option<KnownAddress>,
 }
 
 pub(crate) enum Admission<T> {
@@ -43,7 +48,10 @@ impl LoginThrottle {
         let mut throttle = Self::new(client_ip, |ip| {
             store::keys::account::login_user(user_id, ip)
         });
-        throttle.known_key = Some(store::keys::account::login_known(user_id, client_ip));
+        throttle.known = Some(KnownAddress {
+            key: store::keys::account::login_known(user_id),
+            field: client_ip.to_string(),
+        });
         throttle
     }
 
@@ -55,7 +63,7 @@ impl LoginThrottle {
 
     fn new(client_ip: &str, subject_key: impl Fn(Option<&str>) -> String) -> Self {
         Self {
-            known_key: None,
+            known: None,
             buckets: [
                 Bucket {
                     key: store::keys::account::login_ip(client_ip),
@@ -79,9 +87,9 @@ impl LoginThrottle {
 
     pub(crate) async fn reserve(&self) -> StoreResult<Admission<LoginAttempt<'_>>> {
         let store = use_store();
-        let known_ip = match &self.known_key {
-            Some(key) => store
-                .get::<i64>(key)
+        let known_ip = match &self.known {
+            Some(known) => store
+                .hget::<i64>(&known.key, &known.field)
                 .await?
                 .is_some_and(|expires_at| expires_at > chrono::Utc::now().timestamp()),
             None => false,
@@ -117,14 +125,32 @@ pub(crate) async fn record_success(user_id: &str, client_ip: &str) {
     if client_ip.parse::<std::net::IpAddr>().is_err() {
         return;
     }
-    let key = store::keys::account::login_known(user_id, client_ip);
+    let key = store::keys::account::login_known(user_id);
     let expires_at = chrono::Utc::now().timestamp() + KNOWN_IP_TTL_SECS as i64;
     if let Err(error) = use_store()
-        .set(&key, &expires_at, Some(KNOWN_IP_TTL_SECS))
+        .hset(&key, client_ip, &expires_at, Some(KNOWN_IP_TTL_SECS))
         .await
     {
         tracing::warn!(%error, "failed to remember password login address");
     }
+}
+
+/// Seeds the account-wide bucket at its longest pause so a test does not wait
+/// out the progressive delay.
+#[cfg(test)]
+pub(crate) async fn seed_account_backoff(user_id: &str) {
+    let paused = Attempts {
+        count: 40,
+        ..Attempts::new(chrono::Utc::now().timestamp_millis())
+    };
+    use_store()
+        .set(
+            &store::keys::account::login_user(user_id, None),
+            &paused,
+            Some(300),
+        )
+        .await
+        .unwrap();
 }
 
 impl LoginAttempt<'_> {
@@ -303,30 +329,24 @@ mod tests {
         let user_id = ulid::Ulid::generate().to_string();
         let known_ip = "2001:db8:aaaa::1";
         let throttle = LoginThrottle::for_user(known_ip, &user_id);
-        let now = chrono::Utc::now().timestamp_millis();
         // Seed the account at maximum backoff so the assertions have a stable
         // 30-second pause, independently of Argon2 speed or scheduler load.
-        let paused = Attempts {
-            count: 40,
-            ..Attempts::new(now)
-        };
-        store
-            .set(&throttle.buckets[2].key, &paused, Some(300))
-            .await
-            .unwrap();
+        seed_account_backoff(&user_id).await;
         assert!(matches!(
             throttle.reserve().await.unwrap(),
             Admission::Limited { .. }
         ));
+        let now = chrono::Utc::now().timestamp();
 
         record_success(&user_id, known_ip).await;
+        let known = throttle.known.as_ref().unwrap();
         let expires_at = store
-            .get::<i64>(throttle.known_key.as_ref().unwrap())
+            .hget::<i64>(&known.key, &known.field)
             .await
             .unwrap()
             .unwrap();
         assert!(
-            (now / 1000 + KNOWN_IP_TTL_SECS as i64
+            (now + KNOWN_IP_TTL_SECS as i64
                 ..=chrono::Utc::now().timestamp() + KNOWN_IP_TTL_SECS as i64)
                 .contains(&expires_at)
         );
@@ -342,9 +362,9 @@ mod tests {
         ));
 
         // Expiration is checked against the stored deadline even if backend
-        // cleanup has not yet removed the key.
+        // cleanup has not yet removed the field.
         store
-            .set(throttle.known_key.as_ref().unwrap(), &0_i64, Some(60))
+            .hset(&known.key, &known.field, &0_i64, Some(60))
             .await
             .unwrap();
         assert!(matches!(

@@ -196,9 +196,10 @@ pub mod account {
         login_attempts(&format!("u:{user_id}"), client_ip)
     }
 
-    /// Source address of a completed password login for this account.
-    pub fn login_known(user_id: &str, client_ip: &str) -> String {
-        scoped(&format!("u:{user_id}"), &format!("login-known:{client_ip}"))
+    /// Recognized source addresses of completed password logins for this
+    /// account, as an address → deadline hash.
+    pub fn login_known(user_id: &str) -> String {
+        scoped(&format!("u:{user_id}"), "login-known")
     }
 
     /// Password attempts for an unknown identifier, across all addresses or from one address.
@@ -307,7 +308,7 @@ mod tests {
             account::login_ip("203.0.113.1"),
             account::login_user("01JZ00000000000000000000U1", Some("203.0.113.1")),
             account::login_user("01JZ00000000000000000000U1", None),
-            account::login_known("01JZ00000000000000000000U1", "203.0.113.1"),
+            account::login_known("01JZ00000000000000000000U1"),
             account::login_identifier("alice@example.com", Some("203.0.113.1")),
             account::login_identifier("alice@example.com", None),
             limits::ingress("203.0.113.1"),

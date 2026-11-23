@@ -904,7 +904,8 @@ Metrics: `stargate.iam.password_hashing.active` and `.rejections`, with rejectio
 attribute `stargate.operation=verify|hash|history|rehash_skipped`.
 
 Password reset and expired-password completion consume the pending request before
-writing the new password and revoke all of the user's login sessions. Linked OAuth
+writing the new password and revoke all of the user's login sessions, forgetting
+every address recognized by the login guard. Linked OAuth
 refresh families are rejected and removed when used after the session ends.
 Reset, signup email-verification and signup completion JWTs require separate
 purpose types (`pwd_reset`, `signup_verification`, `signup`); untyped tokens are
@@ -1249,6 +1250,9 @@ A valid password refunds its own reservations. The account-wide bucket uses
 bounded progressive backoff. A completed password login (JSON, OAuth form or MFA
 completion) recognizes the server-resolved account/IP pair for 30 days. This
 skips only the account-wide pause. The per-IP and account/IP limits always apply.
+A password reset or expired-password completion, and any revocation of every
+session, deletes the account's recognized addresses, so none stays exempt from
+the account-wide pause.
 See "Password login guard" in `docs/config-v1.md` for defaults and retry behavior.
 OTP flows have their own throttles.
 
