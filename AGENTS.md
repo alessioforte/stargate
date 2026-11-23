@@ -1137,6 +1137,20 @@ RUSTSEC-2026-0459). Rust sources are unchanged. Details, integrity pins and the
 removal condition are in `vendor/README.md`, `VERSIONS.md` and `versions.json`.
 Keep the vendor directory available in Docker planner/cook/build stages.
 
+### CI Workflows
+
+GitHub Actions checks pull requests; a merge to `main` starts no CI run, so the
+checks on a pull request updated with `main` cover the tree the squash merge
+creates.
+
+| Workflow | Runs |
+|:--|:--|
+| `ci.yml` | Every pull request, and as the reusable test job of `release.yml` (tags and manual release runs). |
+| `oidc-conformance.yml` | Every pull request and manual dispatch. The suite runs only when the changes match `.github/paths/oidc-conformance.txt`; otherwise the required `OIDC conformance` summary job reports success. |
+| `redis-failures.yml` | Every pull request and manual dispatch. The suites run only when the changes match `.github/paths/redis-failures.txt`; otherwise the required `Redis suites` summary job reports success. |
+| `dependency-audit.yml` | Daily at 04:17 UTC and manual dispatch: `cargo audit` and `.github/scripts/check-npm-audit.py` for `apps/auth`, `apps/console` and `apps/mail`. |
+| `release.yml` | Tags `v*.*.*` and manual dispatch. |
+
 ## CLI
 
 ```bash
