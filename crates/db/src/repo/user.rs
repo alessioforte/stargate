@@ -169,6 +169,57 @@ impl UserRepository {
         Ok(rows)
     }
 
+    /// Users in descending id order, strictly before `before`, optionally only
+    /// the members of `org_id`. A keyset page costs the same at any depth.
+    pub async fn page_by_id<'c, E>(
+        &self,
+        ex: E,
+        org_id: Option<&str>,
+        before: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<User>>
+    where
+        E: crate::backend::ReadExecutor<'c>,
+    {
+        let mut parameters = 0;
+        let mut parameter = || {
+            parameters += 1;
+            format!("${parameters}")
+        };
+        let mut conditions = Vec::new();
+        let join = match org_id {
+            Some(_) => {
+                conditions.push(format!("uo.org_id = {}", parameter()));
+                format!(
+                    "INNER JOIN {members} uo ON uo.user_id = u.id",
+                    members = super::USER_ORGANIZATION
+                )
+            }
+            None => String::new(),
+        };
+        if before.is_some() {
+            conditions.push(format!("u.id < {}", parameter()));
+        }
+        let filter = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+        let sql = format!(
+            "SELECT u.* FROM {users} u {join} {filter} ORDER BY u.id DESC LIMIT {limit}",
+            users = USER,
+            limit = parameter()
+        );
+        let mut query = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(sql));
+        if let Some(org_id) = org_id {
+            query = query.bind(org_id);
+        }
+        if let Some(before) = before {
+            query = query.bind(before);
+        }
+        Ok(query.bind(limit).fetch_all(ex).await?)
+    }
+
     pub async fn count<'c, E>(&self, ex: E) -> Result<i64>
     where
         E: crate::backend::ReadExecutor<'c>,
