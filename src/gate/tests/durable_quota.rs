@@ -11,7 +11,7 @@ use axum::body::Body;
 use gate::cfg::Config;
 use http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use lim::QuotaLedger;
+use lim::{QuotaLedger, Reservation};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -121,7 +121,7 @@ async fn a_durable_quota_is_fail_closed_even_when_the_policy_allows_fail_open() 
                 _window_end: i64,
                 _limit: u64,
                 _units: u64,
-            ) -> lim::Result<Option<u64>> {
+            ) -> lim::Result<Reservation> {
                 Err(lim::RateLimitError::BackendError("unavailable".into()))
             }
         }

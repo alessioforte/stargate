@@ -20,7 +20,7 @@ redis = { workspace = true, optional = true, features = [
 serde = { workspace = true }
 store = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
 tracing = { workspace = true }
 
 [features]

@@ -1,6 +1,7 @@
 //! SQL-backed ledger for calendar-window quotas.
 use async_trait::async_trait;
-use lim::{QuotaLedger, RateLimitError};
+use db::repo::{QuotaReservation, QuotaReserved};
+use lim::{QuotaLedger, RateLimitError, Reservation};
 
 pub(crate) struct SqlQuotaLedger {
     service: db::service::Service,
@@ -22,9 +23,10 @@ impl QuotaLedger for SqlQuotaLedger {
         window_end: i64,
         limit: u64,
         units: u64,
-    ) -> lim::Result<Option<u64>> {
-        self.service
-            .reserve_quota(db::repo::QuotaReservation {
+    ) -> lim::Result<Reservation> {
+        let reserved = self
+            .service
+            .reserve_quota(QuotaReservation {
                 bucket,
                 definition,
                 window_start,
@@ -33,6 +35,10 @@ impl QuotaLedger for SqlQuotaLedger {
                 units,
             })
             .await
-            .map_err(|error| RateLimitError::BackendError(format!("quota ledger: {error:#}")))
+            .map_err(|error| RateLimitError::BackendError(format!("quota ledger: {error:#}")))?;
+        Ok(match reserved {
+            QuotaReserved::Granted(used) => Reservation::Granted(used),
+            QuotaReserved::Refused(used) => Reservation::Refused(used),
+        })
     }
 }

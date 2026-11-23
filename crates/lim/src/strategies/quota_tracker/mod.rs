@@ -13,8 +13,8 @@ use core::time::Duration;
 use std::sync::Arc;
 
 pub use calendar::{CalendarPeriod, CalendarWindow, WindowBounds, WindowError};
-pub use durable::DurableQuotaTracker;
-pub use ledger::QuotaLedger;
+pub use durable::{DurableQuotaTracker, DurableQuotas};
+pub use ledger::{QuotaLedger, Reservation};
 pub use time_window::ShortWindow;
 
 // ========================== IN-MEMORY IMPLEMENTATION =========================

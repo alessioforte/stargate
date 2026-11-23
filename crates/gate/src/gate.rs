@@ -107,7 +107,7 @@ impl Drop for Runtime {
 pub struct RuntimeBuilder {
     store: Arc<lim::State>,
     clock: Arc<lim::CachedClock>,
-    quota_ledger: Option<Arc<dyn lim::QuotaLedger>>,
+    durable_quotas: Option<lim::DurableQuotas>,
 }
 
 impl RuntimeBuilder {
@@ -115,14 +115,16 @@ impl RuntimeBuilder {
         Self {
             store,
             clock: lim::CachedClock::new(),
-            quota_ledger: None,
+            durable_quotas: None,
         }
     }
 
     /// Supply the SQL ledger that backs calendar-window quotas. A
-    /// configuration with such a quota cannot be prepared without it.
+    /// configuration with such a quota cannot be prepared without it. The
+    /// batches reserved in it belong to the builder, so every generation it
+    /// prepares keeps spending them.
     pub fn with_quota_ledger(mut self, ledger: Option<Arc<dyn lim::QuotaLedger>>) -> Self {
-        self.quota_ledger = ledger;
+        self.durable_quotas = ledger.map(lim::DurableQuotas::new);
         self
     }
 
@@ -135,7 +137,7 @@ impl RuntimeBuilder {
                 limit.clone().build(
                     self.store.clone(),
                     self.clock.clone(),
-                    self.quota_ledger.clone(),
+                    self.durable_quotas.as_ref(),
                 )?,
             );
         }

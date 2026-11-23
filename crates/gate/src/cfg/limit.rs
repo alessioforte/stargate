@@ -30,12 +30,12 @@ impl Limit {
         self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-        ledger: Option<Arc<dyn lim::QuotaLedger>>,
+        durable: Option<&lim::DurableQuotas>,
     ) -> Result<Box<dyn lim::RateLimit>, super::graph::CompileError> {
         self.spec.validate().map_err(|message| {
             super::graph::CompileError::new(format!("limits.{}", self.name), message)
         })?;
-        self.spec.factory(state, clock, ledger).map_err(|message| {
+        self.spec.factory(state, clock, durable).map_err(|message| {
             super::graph::CompileError::new(format!("limits.{}", self.name), message)
         })
     }
@@ -177,9 +177,9 @@ impl LimitSpec {
         &self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-        ledger: Option<Arc<dyn lim::QuotaLedger>>,
+        durable: Option<&lim::DurableQuotas>,
     ) -> Result<Box<dyn lim::RateLimit>, String> {
-        self.params.factory(state, clock, ledger)
+        self.params.factory(state, clock, durable)
     }
 }
 
@@ -250,7 +250,7 @@ impl Strategy {
         &self,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
-        ledger: Option<Arc<dyn lim::QuotaLedger>>,
+        durable: Option<&lim::DurableQuotas>,
     ) -> Result<Box<dyn lim::RateLimit>, String> {
         match self {
             Strategy::Gcra {
@@ -288,8 +288,8 @@ impl Strategy {
                     state, clock, *limit, window,
                 ))),
                 None => {
-                    let ledger =
-                        ledger.ok_or("calendar quota requires a database-backed quota ledger")?;
+                    let durable =
+                        durable.ok_or("calendar quota requires a database-backed quota ledger")?;
                     let window = lim::strategies::quota_tracker::CalendarWindow::parse(
                         period.calendar_period(),
                         timezone
@@ -299,7 +299,7 @@ impl Strategy {
                     )
                     .map_err(str::to_string)?;
                     lim::strategies::quota_tracker::DurableQuotaTracker::new(
-                        ledger, clock, *limit, window,
+                        durable, clock, *limit, window,
                     )
                     .map(|tracker| Box::new(tracker) as Box<dyn lim::RateLimit>)
                     .map_err(|error| error.to_string())
@@ -357,9 +357,13 @@ mod tests {
             _window_end: i64,
             _limit: u64,
             units: u64,
-        ) -> lim::Result<Option<u64>> {
-            Ok(Some(units))
+        ) -> lim::Result<lim::Reservation> {
+            Ok(lim::Reservation::Granted(units))
         }
+    }
+
+    fn durable() -> lim::DurableQuotas {
+        lim::DurableQuotas::new(Arc::new(NoopLedger))
     }
 
     fn state() -> Arc<lim::State> {
@@ -386,7 +390,7 @@ mod tests {
         assert!(error.to_string().contains("limits.monthly"));
         assert!(
             calendar
-                .build(state(), clock.clone(), Some(Arc::new(NoopLedger)))
+                .build(state(), clock.clone(), Some(&durable()))
                 .is_ok()
         );
 
@@ -407,7 +411,7 @@ mod tests {
         }));
         let clock = lim::CachedClock::new();
         let durable = calendar
-            .build(state(), clock.clone(), Some(Arc::new(NoopLedger)))
+            .build(state(), clock.clone(), Some(&durable()))
             .unwrap();
         assert!(durable.is_durable());
 

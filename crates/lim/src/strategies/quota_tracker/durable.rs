@@ -6,53 +6,146 @@
 //! approaches its limit so a crash cannot strand a large unused allowance.
 //! Reserved units count as used even if the replica crashes before spending
 //! them, so concurrent replicas can never exceed the limit.
+//!
+//! The batches belong to the process, not to one configuration generation:
+//! [`DurableQuotas`] keeps them while a tracker of the same window definition
+//! is alive, so publishing a configuration keeps spending them. A reservation
+//! runs in its own task, so a request cancelled by its deadline cannot strand
+//! a batch the ledger has already charged.
 
 use super::calendar::{CalendarWindow, WindowBounds};
-use super::ledger::QuotaLedger;
+use super::ledger::{QuotaLedger, Reservation};
 use crate::clock::CachedClock;
 use crate::decision::RateLimitDecision;
 use crate::error::{RateLimitError, Result};
 use crate::strategies::RateLimit;
 use async_trait::async_trait;
 use dashmap::DashMap;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 /// Upper bound on one reservation. Larger batches amortize the SQL statement
 /// further but increase the units a crash can strand; at typical request rates
 /// this still costs only a few statements per second per replica.
 const MAX_LEASE_UNITS: u64 = 1024;
 
-/// Leases are bounded per process; stale windows are pruned when the map fills
-/// so an address-keyed fallback with unbounded churn stays bounded too.
-const MAX_TRACKED_LEASES: usize = 8192;
+/// Durable quota state of one process: the ledger and the batches this
+/// replica holds in it, grouped by window definition.
+pub struct DurableQuotas {
+    ledger: Arc<dyn QuotaLedger>,
+    /// A set lives while a tracker of its definition does, so a definition
+    /// that leaves the configuration releases its leases.
+    sets: std::sync::Mutex<HashMap<String, Weak<LeaseSet>>>,
+}
+
+impl DurableQuotas {
+    pub fn new(ledger: Arc<dyn QuotaLedger>) -> Self {
+        Self {
+            ledger,
+            sets: Default::default(),
+        }
+    }
+
+    fn leases(&self, definition: &str) -> Arc<LeaseSet> {
+        let mut sets = self.sets.lock().expect("Lease sets lock poisoned");
+        if let Some(set) = sets.get(definition).and_then(Weak::upgrade) {
+            return set;
+        }
+        sets.retain(|_, set| set.strong_count() > 0);
+        let set = Arc::new(LeaseSet::default());
+        sets.insert(definition.to_owned(), Arc::downgrade(&set));
+        set
+    }
+}
+
+/// The leases of one window definition, by bucket.
+#[derive(Default)]
+struct LeaseSet {
+    leases: DashMap<String, Arc<Mutex<Lease>>>,
+    /// Start of the newest window seen. The first request of a new window
+    /// drops the leases of earlier ones, once.
+    window_start: AtomicI64,
+    #[cfg(test)]
+    prunes: std::sync::atomic::AtomicUsize,
+}
+
+impl LeaseSet {
+    fn lease(&self, bucket: &str, window: WindowBounds) -> Arc<Mutex<Lease>> {
+        if self.window_start.fetch_max(window.start, Ordering::Relaxed) < window.start {
+            self.prune_before(window.start);
+        }
+        if let Some(lease) = self.leases.get(bucket) {
+            return Arc::clone(lease.value());
+        }
+        Arc::clone(
+            self.leases
+                .entry(bucket.to_owned())
+                .or_insert_with(|| Arc::new(Mutex::new(Lease::new(window.start))))
+                .value(),
+        )
+    }
+
+    fn prune_before(&self, window_start: i64) {
+        #[cfg(test)]
+        self.prunes.fetch_add(1, Ordering::Relaxed);
+        // A lease in use stays; the next window drops it.
+        self.leases.retain(|_, lease| {
+            lease
+                .try_lock()
+                .map_or(true, |lease| lease.window_start >= window_start)
+        });
+    }
+}
+
+struct Lease {
+    window_start: i64,
+    /// Units this replica has reserved in the window.
+    granted: u64,
+    /// Units this replica has spent from `granted`.
+    consumed: u64,
+    /// Balance in use the ledger last reported, shared by every replica.
+    global_used: u64,
+}
+
+impl Lease {
+    fn new(window_start: i64) -> Self {
+        Self {
+            window_start,
+            granted: 0,
+            consumed: 0,
+            global_used: 0,
+        }
+    }
+
+    fn unspent(&self) -> u64 {
+        self.granted - self.consumed
+    }
+
+    fn remaining(&self, limit: u64) -> u64 {
+        // `global_used` already counts this replica's unspent units.
+        limit
+            .saturating_sub(self.global_used)
+            .saturating_add(self.unspent())
+            .min(limit)
+    }
+}
 
 pub struct DurableQuotaTracker {
     ledger: Arc<dyn QuotaLedger>,
+    leases: Arc<LeaseSet>,
     clock: Arc<CachedClock>,
     limit: u64,
     window: CalendarWindow,
     /// Identity of the configured window; changing it starts a fresh balance.
-    definition: String,
-    leases: DashMap<String, Arc<Mutex<Lease>>>,
-}
-
-#[derive(Default)]
-struct Lease {
-    window_start: i64,
-    window_end: i64,
-    /// Units this replica has reserved in the current window.
-    granted: u64,
-    /// Units this replica has spent from `granted`.
-    consumed: u64,
-    /// Balance in use after the latest reservation, shared by every replica.
-    global_used: u64,
+    definition: Arc<str>,
 }
 
 impl DurableQuotaTracker {
     pub fn new(
-        ledger: Arc<dyn QuotaLedger>,
+        quotas: &DurableQuotas,
         clock: Arc<CachedClock>,
         limit: u64,
         window: CalendarWindow,
@@ -67,36 +160,15 @@ impl DurableQuotaTracker {
                 "Quota limit must not exceed i64::MAX".into(),
             ));
         }
+        let definition: Arc<str> = window.definition().into();
         Ok(Self {
-            ledger,
+            ledger: Arc::clone(&quotas.ledger),
+            leases: quotas.leases(&definition),
             clock,
             limit,
-            definition: window.definition(),
             window,
-            leases: DashMap::new(),
+            definition,
         })
-    }
-
-    fn remaining(&self, lease: &Lease) -> u64 {
-        // `global_used` already includes this replica's unused lease.
-        self.limit
-            .saturating_sub(lease.global_used)
-            .saturating_add(lease.granted.saturating_sub(lease.consumed))
-            .min(self.limit)
-    }
-
-    fn lease(&self, key: &str, window: WindowBounds) -> Arc<Mutex<Lease>> {
-        if self.leases.len() >= MAX_TRACKED_LEASES {
-            self.leases.retain(|_, lease| {
-                lease
-                    .try_lock()
-                    .map_or(true, |lease| lease.window_end >= window.start)
-            });
-        }
-        self.leases
-            .entry(key.to_string())
-            .or_insert_with(|| Arc::new(Mutex::new(Lease::default())))
-            .clone()
     }
 }
 
@@ -111,6 +183,65 @@ fn lease_units(limit: u64, used: u64, cost: u64) -> Option<u64> {
     let base = (limit / 100).clamp(1, MAX_LEASE_UNITS);
     let near_limit = (headroom / 2).max(1);
     Some(cost.max(base.min(near_limit)).min(headroom))
+}
+
+/// One reservation, completed even when the request that needed it is
+/// cancelled: the ledger may already have charged the batch, so the lease
+/// must record it for the next requests to spend.
+struct Reserve {
+    ledger: Arc<dyn QuotaLedger>,
+    bucket: String,
+    definition: Arc<str>,
+    window: WindowBounds,
+    limit: u64,
+    units: u64,
+    cost: u64,
+}
+
+impl Reserve {
+    /// Charge a batch and spend `cost` from it. Returns the remaining units,
+    /// or `None` when the balance cannot fund the request. A cancelled
+    /// request still spends its cost: the batch cannot tell.
+    async fn run(self, mut lease: OwnedMutexGuard<Lease>) -> Result<Option<u64>> {
+        let mut units = self.units;
+        let mut reservation = self.reserve(units).await?;
+        // The headroom came from a stale balance: another replica may have
+        // reserved it first. Retry with the minimum that admits this request
+        // when the refused balance still has room for it.
+        if let Reservation::Refused(used) = reservation
+            && units > self.cost
+            && self.limit.saturating_sub(used) >= self.cost
+        {
+            units = self.cost;
+            reservation = self.reserve(units).await?;
+        }
+        match reservation {
+            Reservation::Granted(used) => {
+                lease.granted += units;
+                lease.global_used = used;
+                lease.consumed += self.cost;
+                Ok(Some(lease.remaining(self.limit)))
+            }
+            // Later requests are denied in memory until the window changes.
+            Reservation::Refused(used) => {
+                lease.global_used = used;
+                Ok(None)
+            }
+        }
+    }
+
+    async fn reserve(&self, units: u64) -> Result<Reservation> {
+        self.ledger
+            .reserve(
+                &self.bucket,
+                &self.definition,
+                self.window.start,
+                self.window.end,
+                self.limit,
+                units,
+            )
+            .await
+    }
 }
 
 #[async_trait]
@@ -142,67 +273,40 @@ impl RateLimit for DurableQuotaTracker {
             return Ok(RateLimitDecision::allowed(self.limit, self.limit, reset));
         }
 
-        let entry = self.lease(key, bounds);
-        let mut lease = entry.lock().await;
+        let mut lease = self.leases.lease(key, bounds).lock_owned().await;
         if lease.window_start != bounds.start {
-            *lease = Lease {
-                window_start: bounds.start,
-                window_end: bounds.end,
-                ..Lease::default()
-            };
+            *lease = Lease::new(bounds.start);
         }
-
-        if lease.granted.saturating_sub(lease.consumed) >= cost {
+        if lease.unspent() >= cost {
             lease.consumed += cost;
             return Ok(RateLimitDecision::allowed(
                 self.limit,
-                self.remaining(&lease),
+                lease.remaining(self.limit),
                 reset,
             ));
         }
-
-        let Some(mut units) = lease_units(self.limit, lease.global_used, cost) else {
-            return Ok(RateLimitDecision::denied(self.limit, 0, reset, reset));
-        };
-        let mut reserved = self
-            .ledger
-            .reserve(
-                key,
-                &self.definition,
-                bounds.start,
-                bounds.end,
-                self.limit,
-                units,
-            )
-            .await?;
-        // The headroom came from a stale balance: another replica may have
-        // reserved it first. Retry with the minimum that admits this request.
-        if reserved.is_none() && units > cost {
-            units = cost;
-            reserved = self
-                .ledger
-                .reserve(
-                    key,
-                    &self.definition,
-                    bounds.start,
-                    bounds.end,
-                    self.limit,
-                    units,
-                )
-                .await?;
-        }
-        let Some(global_used) = reserved else {
+        let Some(units) = lease_units(self.limit, lease.global_used, cost) else {
             return Ok(RateLimitDecision::denied(self.limit, 0, reset, reset));
         };
 
-        lease.granted += units;
-        lease.global_used = global_used;
-        lease.consumed += cost;
-        Ok(RateLimitDecision::allowed(
-            self.limit,
-            self.remaining(&lease),
-            reset,
-        ))
+        let reservation = Reserve {
+            ledger: Arc::clone(&self.ledger),
+            bucket: key.to_owned(),
+            definition: Arc::clone(&self.definition),
+            window: bounds,
+            limit: self.limit,
+            units,
+            cost,
+        };
+        let remaining = tokio::spawn(reservation.run(lease))
+            .await
+            .map_err(|error| {
+                RateLimitError::BackendError(format!("quota reservation task failed: {error}"))
+            })??;
+        Ok(match remaining {
+            Some(remaining) => RateLimitDecision::allowed(self.limit, remaining, reset),
+            None => RateLimitDecision::denied(self.limit, 0, reset, reset),
+        })
     }
 }
 
@@ -210,13 +314,24 @@ impl RateLimit for DurableQuotaTracker {
 mod tests {
     use super::*;
     use crate::strategies::quota_tracker::calendar::CalendarPeriod;
-    use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
 
+    /// A ledger with the SQL repository's semantics, in memory.
     #[derive(Default)]
     struct TestLedger {
         state: std::sync::Mutex<HashMap<String, (i64, u64)>>,
         reservations: AtomicUsize,
+        delay: Duration,
+    }
+
+    impl TestLedger {
+        fn used(&self, bucket: &str) -> u64 {
+            self.state
+                .lock()
+                .unwrap()
+                .get(bucket)
+                .map_or(0, |entry| entry.1)
+        }
     }
 
     #[async_trait]
@@ -229,29 +344,41 @@ mod tests {
             _window_end: i64,
             limit: u64,
             units: u64,
-        ) -> Result<Option<u64>> {
+        ) -> Result<Reservation> {
             self.reservations.fetch_add(1, Ordering::SeqCst);
-            let mut state = self.state.lock().unwrap();
-            let entry = state.entry(bucket.to_string()).or_insert((window_start, 0));
-            if entry.0 != window_start {
-                *entry = (window_start, 0);
-            }
-            if entry.1 + units > limit {
-                return Ok(None);
-            }
-            entry.1 += units;
-            Ok(Some(entry.1))
+            let reservation = {
+                let mut state = self.state.lock().unwrap();
+                let entry = state.entry(bucket.to_string()).or_insert((window_start, 0));
+                if entry.0 > window_start {
+                    Reservation::Refused(limit)
+                } else {
+                    if entry.0 < window_start {
+                        *entry = (window_start, 0);
+                    }
+                    if entry.1 + units > limit {
+                        Reservation::Refused(entry.1)
+                    } else {
+                        entry.1 += units;
+                        Reservation::Granted(entry.1)
+                    }
+                }
+            };
+            // Like SQL, the charge is applied before the response arrives.
+            tokio::time::sleep(self.delay).await;
+            Ok(reservation)
         }
     }
 
+    fn day() -> CalendarWindow {
+        CalendarWindow::parse(CalendarPeriod::Day, "UTC", None).unwrap()
+    }
+
     fn tracker(ledger: Arc<TestLedger>, limit: u64) -> DurableQuotaTracker {
-        DurableQuotaTracker::new(
-            ledger,
-            CachedClock::new(),
-            limit,
-            CalendarWindow::parse(CalendarPeriod::Day, "UTC", None).unwrap(),
-        )
-        .unwrap()
+        replica(&DurableQuotas::new(ledger), limit)
+    }
+
+    fn replica(quotas: &DurableQuotas, limit: u64) -> DurableQuotaTracker {
+        DurableQuotaTracker::new(quotas, CachedClock::new(), limit, day()).unwrap()
     }
 
     #[tokio::test]
@@ -279,7 +406,7 @@ mod tests {
         }
         assert_eq!(allowed, 100);
         assert_eq!(
-            ledger.state.lock().unwrap().get("bucket").unwrap().1,
+            ledger.used("bucket"),
             100,
             "reserved units must match the limit"
         );
@@ -290,8 +417,8 @@ mod tests {
         let ledger = Arc::new(TestLedger::default());
         let first = tracker(ledger.clone(), 1000);
         assert!(first.check("bucket", 1).await.unwrap().allowed);
-        // Dropping the tracker simulates a process crash mid-batch: the
-        // reservation stays in the ledger, the in-memory lease disappears.
+        // Dropping the tracker and its process state simulates a crash
+        // mid-batch: the reservation stays in the ledger, the lease is gone.
         drop(first);
 
         let second = tracker(ledger.clone(), 1000);
@@ -327,7 +454,137 @@ mod tests {
             allowed += result.unwrap();
         }
         assert_eq!(allowed, 100);
-        assert_eq!(ledger.state.lock().unwrap().get("bucket").unwrap().1, 100);
+        assert_eq!(ledger.used("bucket"), 100);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_replicas_admit_the_limit_and_never_more() {
+        const LIMIT: u64 = 1000;
+        const REPLICAS: usize = 4;
+        let ledger = Arc::new(TestLedger::default());
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..REPLICAS {
+            // Every replica has its own process state over one shared ledger.
+            let tracker = tracker(ledger.clone(), LIMIT);
+            tasks.spawn(async move {
+                let mut allowed = 0u64;
+                while tracker.check("bucket", 1).await.unwrap().allowed {
+                    allowed += 1;
+                }
+                allowed
+            });
+        }
+        let mut allowed = 0;
+        while let Some(result) = tasks.join_next().await {
+            allowed += result.unwrap();
+        }
+        // A replica is denied only once the ledger is full, and the others
+        // spend their own batches before they are: nothing is stranded.
+        let batch = (LIMIT / 100).clamp(1, MAX_LEASE_UNITS);
+        assert!(allowed <= LIMIT, "allowed {allowed}");
+        assert!(
+            allowed >= LIMIT - REPLICAS as u64 * batch,
+            "allowed {allowed}"
+        );
+        assert_eq!(ledger.used("bucket"), LIMIT);
+    }
+
+    #[tokio::test]
+    async fn an_exhausted_quota_is_denied_in_memory_after_one_refusal() {
+        let ledger = Arc::new(TestLedger::default());
+        let first = tracker(ledger.clone(), 100);
+        while first.check("bucket", 1).await.unwrap().allowed {}
+        let reservations = ledger.reservations.load(Ordering::SeqCst);
+
+        // A restarted replica learns the balance from its first refusal.
+        let restarted = tracker(ledger.clone(), 100);
+        for _ in 0..100 {
+            assert!(!restarted.check("bucket", 1).await.unwrap().allowed);
+        }
+        assert_eq!(ledger.reservations.load(Ordering::SeqCst), reservations + 1);
+    }
+
+    #[tokio::test]
+    async fn a_stale_replica_does_not_retry_a_newer_window() {
+        let ledger = Arc::new(TestLedger::default());
+        let tracker = tracker(ledger.clone(), 100);
+        let today = tracker.window.bounds(tracker.clock.now_secs()).unwrap();
+        // Another replica already charged the next window.
+        ledger
+            .state
+            .lock()
+            .unwrap()
+            .insert("bucket".into(), (today.end, 1));
+        for _ in 0..10 {
+            assert!(!tracker.check("bucket", 1).await.unwrap().allowed);
+        }
+        assert_eq!(ledger.reservations.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn republished_trackers_keep_spending_the_same_batch() {
+        const GENERATIONS: u64 = 10;
+        let ledger = Arc::new(TestLedger::default());
+        let quotas = DurableQuotas::new(ledger.clone());
+        let mut active = replica(&quotas, 1000);
+        for _ in 0..GENERATIONS {
+            assert!(active.check("bucket", 1).await.unwrap().allowed);
+            // A new generation is prepared while the active one still runs.
+            active = replica(&quotas, 1000);
+        }
+        // One batch of 10 served every generation: nothing was stranded.
+        assert_eq!(ledger.used("bucket"), 10);
+        assert_eq!(ledger.reservations.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_request_does_not_strand_its_reservation() {
+        let ledger = Arc::new(TestLedger {
+            delay: Duration::from_millis(50),
+            ..TestLedger::default()
+        });
+        let tracker = tracker(ledger.clone(), 1000);
+        let cancelled =
+            tokio::time::timeout(Duration::from_millis(10), tracker.check("bucket", 1)).await;
+        assert!(
+            cancelled.is_err(),
+            "the reservation must outlive the budget"
+        );
+
+        // The next request waits for the reservation and spends its batch.
+        let decision = tracker.check("bucket", 1).await.unwrap();
+        assert!(decision.allowed);
+        assert_eq!(ledger.reservations.load(Ordering::SeqCst), 1);
+        assert_eq!(ledger.used("bucket"), 10);
+        // The cancelled request spent its unit too: 1000 - 10 + (10 - 2).
+        assert_eq!(decision.remaining, 998);
+    }
+
+    #[test]
+    fn existing_leases_are_found_without_pruning() {
+        let leases = LeaseSet::default();
+        let window = WindowBounds {
+            start: 1_000,
+            end: 2_000,
+        };
+        for index in 0..10_000 {
+            leases.lease(&format!("bucket-{index}"), window);
+        }
+        for _ in 0..1_000 {
+            leases.lease("bucket-0", window);
+        }
+        assert_eq!(leases.prunes.load(Ordering::Relaxed), 1);
+        assert_eq!(leases.leases.len(), 10_000);
+
+        // The first request of the next window drops the earlier leases once.
+        let next = WindowBounds {
+            start: 2_000,
+            end: 3_000,
+        };
+        leases.lease("bucket-0", next);
+        leases.lease("bucket-1", next);
+        assert_eq!(leases.prunes.load(Ordering::Relaxed), 2);
+        assert_eq!(leases.leases.len(), 2);
     }
 
     #[tokio::test]

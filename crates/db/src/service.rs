@@ -77,7 +77,7 @@ impl Service {
     pub async fn reserve_quota(
         &self,
         reservation: crate::repo::QuotaReservation<'_>,
-    ) -> Result<Option<u64>> {
+    ) -> Result<crate::repo::QuotaReserved> {
         self.quota.reserve(&self.pool, reservation).await
     }
 
