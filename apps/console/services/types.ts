@@ -152,16 +152,18 @@ export interface AdminOverview {
     targets: number;
     upstreams: number;
   };
+  /** Estimated totals of the last reconciliation; `null` before the first. */
   sessions: {
     activeSessions: number;
     activeUsers: number;
-  };
+    reconciledAt: string;
+  } | null;
 }
 
 export interface AdminSessionUser {
-  email: string | null;
+  email: string;
   id: string;
-  name: string | null;
+  name: string;
 }
 
 export interface AdminSession {
@@ -177,10 +179,20 @@ export interface AdminSession {
   user: AdminSessionUser;
 }
 
-export interface ListAdminSessionsQuery extends PaginationQuery {
+export interface ListAdminSessionsQuery {
   clientId?: string;
+  /** `nextCursor` of the previous page, with the same filters. */
+  cursor?: string;
+  limit?: number;
   organizationId?: string;
   userId?: string;
+}
+
+/** One page of sessions; `nextCursor` is `null` after the last page. */
+export interface AdminSessionPage {
+  data: AdminSession[];
+  limit: number;
+  nextCursor: string | null;
 }
 
 export interface SessionRevocationResponse {

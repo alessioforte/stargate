@@ -54,12 +54,10 @@ export const columns: ColumnDef<AdminSession>[] = [
     cell: ({ row }) => (
       <Stack gap={0}>
         <Text size="sm" fw={500} truncate>
-          {row.original.user.name ??
-            row.original.user.email ??
-            row.original.user.id}
+          {row.original.user.name}
         </Text>
         <Text size="xs" c="dimmed" truncate>
-          {row.original.user.email ?? row.original.user.id}
+          {row.original.user.email}
         </Text>
       </Stack>
     ),

@@ -6,7 +6,7 @@ import type {
   AdminHealth,
   AdminMe,
   AdminOverview,
-  AdminSession,
+  AdminSessionPage,
   AdminKey,
   ApiKey,
   ApiKeyAttrsRequest,
@@ -104,7 +104,7 @@ export default class AdminApiService {
   }
 
   getAdminSessions(query?: ListAdminSessionsQuery) {
-    return this.request<List<AdminSession>>({
+    return this.request<AdminSessionPage>({
       url: "/sessions",
       method: "GET",
       params: query,

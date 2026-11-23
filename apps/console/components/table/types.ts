@@ -41,4 +41,6 @@ export interface TablePaginationOptions {
   pageSize?: number;
   pageCount?: number;
   totalItems?: number;
+  /** For cursor pages without a total: whether a next page exists. */
+  hasNextPage?: boolean;
 }
