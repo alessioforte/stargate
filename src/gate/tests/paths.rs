@@ -56,7 +56,9 @@ struct Scenario {
 
 /// The paths of the baseline: four credentials and the two traffic policies.
 /// Policy rows run anonymously so their figures are the policy's own cost.
-const SCENARIOS: [Scenario; 6] = [
+/// `durable_quota` adds the calendar quota, which needs an authenticated
+/// subject: its figures include the API key path.
+const SCENARIOS: [Scenario; 7] = [
     Scenario {
         name: "anonymous",
         path: "/anonymous",
@@ -86,6 +88,11 @@ const SCENARIOS: [Scenario; 6] = [
         name: "quota",
         path: "/quota",
         credential: Credential::None,
+    },
+    Scenario {
+        name: "durable_quota",
+        path: "/durable-quota",
+        credential: Credential::ApiKey,
     },
 ];
 
@@ -211,7 +218,8 @@ fn config() -> Config {
             "default": generous.clone(),
             "ingress": generous.clone(),
             "rate": generous,
-            "quota": {"strategy": "quota_tracker", "params": {"limit": 1_000_000_000, "period": "day", "timezone": "UTC"}},
+            "quota": {"strategy": "quota_tracker", "params": {"limit": 1_000_000_000, "period": "hour"}},
+            "durable-quota": {"strategy": "quota_tracker", "params": {"limit": 1_000_000_000, "period": "day", "timezone": "UTC"}},
         },
         "http": {
             "services": {"local": {"kind": "direct_response", "status": 200}},
@@ -221,6 +229,7 @@ fn config() -> Config {
                 "oauth": {"kind": "auth", "strategies": ["oauth"], "audience": AUDIENCE},
                 "rate": {"kind": "rate_limit", "limit": "rate"},
                 "quota": {"kind": "quota", "limit": "quota"},
+                "durable-quota": {"kind": "quota", "limit": "durable-quota"},
             },
             "routers": {
                 "anonymous": {"match": {"path": {"exact": "/anonymous"}}, "service": "local"},
@@ -229,6 +238,7 @@ fn config() -> Config {
                 "oauth": {"match": {"path": {"exact": "/oauth"}}, "service": "local", "policies": ["oauth"]},
                 "rate-limit": {"match": {"path": {"exact": "/rate-limit"}}, "service": "local", "policies": ["rate"]},
                 "quota": {"match": {"path": {"exact": "/quota"}}, "service": "local", "policies": ["quota"]},
+                "durable-quota": {"match": {"path": {"exact": "/durable-quota"}}, "service": "local", "policies": ["api-key", "durable-quota"]},
             },
         },
     }))

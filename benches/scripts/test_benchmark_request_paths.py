@@ -5,7 +5,15 @@ import unittest
 
 import benchmark_request_paths as bench
 
-ALL_PATHS = ("anonymous", "rate_limit", "api_key", "quota", "session", "oauth")
+ALL_PATHS = (
+    "anonymous",
+    "rate_limit",
+    "api_key",
+    "quota",
+    "durable_quota",
+    "session",
+    "oauth",
+)
 
 
 def result(name: str, round_trips) -> dict:
