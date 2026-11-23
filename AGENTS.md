@@ -159,7 +159,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   unsupported backend does not block startup. The security-state request budget
   (`REDIS_SECURITY_TIMEOUT_MS`, default 1000) includes ingress and all security
   store waits. Store outages yield `503 auth.state_unavailable` (OAuth keeps its
-  error envelope), with `Retry-After: 10`. Optional replication confirmation
+  error envelope), with `Retry-After: 10`, for session, revocation, API key,
+  OAuth state, OTP/MFA, password-reset and signup state; conflicts and other
+  internal failures stay `500`. Optional replication confirmation
   uses a separate pool connection and a plain pipeline containing the security
   write and `WAIT`. It covers session logout/revocation, token revocation and
   revoked API key cache deletion. The default replica target is zero.

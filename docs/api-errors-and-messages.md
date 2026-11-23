@@ -137,6 +137,22 @@ IAM endpoints share the gateway's per-IP ingress allowance; authenticated
 | `iam.overloaded` | 503 | Foreground password hashing, verification or history admission exceeded 5s; not a failed login attempt. `Retry-After: 10` |
 | `iam.limiter_unavailable` | 503 | The IAM limiter store fails, or the ingress check exceeds `ingress.timeout`; `params.scope` is `ingress` or `subject` |
 
+## Store unavailability
+
+Session, revocation, cached API key, OAuth provider state and account-flow
+state (OTP/MFA challenges and step-up markers, password-reset requests, pending
+signups) are read or written from the shared state store. When it fails or
+exceeds its deadline, those checks fail closed with `503`
+`auth.state_unavailable` and `Retry-After: 10`; the request neither issues a
+session nor completes a check that did not pass. OAuth endpoints keep their
+RFC 6749 error envelope. The total store wait for one request is
+`REDIS_SECURITY_TIMEOUT_MS` (default `1000`), including the ingress check.
+Restoring the store restores the flows without a restart.
+
+| Code | HTTP status | Condition |
+| --- | --- | --- |
+| `auth.state_unavailable` | 503 | The security state store is unavailable or over budget; `Retry-After: 10` |
+
 ## Per-recipient email limits
 
 Unauthenticated requests that send email to an address from the request body

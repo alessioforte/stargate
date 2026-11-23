@@ -72,8 +72,10 @@ Set `on_store_error: deny` on ingress or a route's rate/quota policy to return
 `503` with `Retry-After: 10` when that check fails. Configuration errors stay
 `500`.
 
-Session, token revocation, cached gateway API key and OAuth state checks
-fail closed on store outages. They return `503` with `Retry-After: 10`, with a
+Session, token revocation, cached gateway API key, OAuth state, and account-flow
+state (OTP/MFA challenges and step-up markers, password-reset requests, pending
+signups) fail closed on store outages. They return `503 auth.state_unavailable`
+(OAuth endpoints keep their error envelope) with `Retry-After: 10`, within a
 Redis time budget of one second by default. Set the positive integer
 `REDIS_SECURITY_TIMEOUT_MS` at startup to change it. The preceding ingress
 check counts against this budget. Once Redis becomes reachable, Stargate
