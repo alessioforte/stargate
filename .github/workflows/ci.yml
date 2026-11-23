@@ -2,14 +2,12 @@ name: CI
 
 on:
   workflow_call:
-  push:
-    branches: [main]
   pull_request:
 
-# Keep reusable release checks separate from branch CI and never cancel them.
+# Cancel superseded pull request runs; release runs are never cancelled.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.ref_type != 'tag' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
