@@ -4,41 +4,6 @@ name: Redis
 # when the code they exercise changes, or on demand.
 on:
   pull_request:
-    paths:
-      - '.github/workflows/redis-failures.yml'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'benches/scripts/benchmark_request_paths.py'
-      - 'benches/scripts/redis_failures.py'
-      - 'benches/scripts/redis_fixtures.py'
-      - 'benches/scripts/test_benchmark_request_paths.py'
-      - 'benches/scripts/test_redis_cluster.py'
-      - 'benches/scripts/test_redis_prefix.py'
-      - 'crates/lim/**'
-      - 'crates/store/**'
-      - 'docs/health-probes.md'
-      - 'docs/redis-failure-bench.md'
-      - 'docs/redis-keys.md'
-      - 'src/api/account/**'
-      - 'src/api/signup/**'
-      - 'src/api/admin/health.rs'
-      - 'src/api/middleware/rate_limit.rs'
-      - 'src/api/oidc/**'
-      - 'src/data/store/**'
-      - 'src/gate/limits.rs'
-      - 'src/gate/limits/**'
-      - 'src/gate/policies/**'
-      - 'src/gate/request.rs'
-      - 'src/gate/usage.rs'
-      - 'src/iam/auth/**'
-      - 'src/iam/email_throttle.rs'
-      - 'src/iam/otp/**'
-      - 'src/iam/pwd/**'
-      - 'src/iam/security_store_tests.rs'
-      - 'src/iam/sess/**'
-      - 'src/iam/user/**'
-      - 'src/main.rs'
-      - 'src/srv/health.rs'
   workflow_dispatch:
 
 concurrency:
@@ -51,8 +16,36 @@ env:
   POSTGRES_IMAGE: postgres:17-alpine
 
 jobs:
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matched: ${{ steps.diff.outputs.matched }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Compare changed paths
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "matched=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          matched=$(python3 -I .github/scripts/changed-paths.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA" .github/paths/redis-failures.txt)
+          echo "matched=$matched" >> "$GITHUB_OUTPUT"
+
   redis:
     name: Redis suites and failures
+    needs: changes
+    if: needs.changes.outputs.matched == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -92,3 +85,27 @@ jobs:
           python3 benches/scripts/benchmark_request_paths.py
           --seconds 1 --workers 4 --check-round-trips
           --output "$RUNNER_TEMP/request-path-round-trips.json"
+
+  # The required check: it runs on every pull request and reports the suites'
+  # result, or success when the changed paths did not need them.
+  summary:
+    name: Redis suites
+    needs: [changes, redis]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check the Redis jobs
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          REDIS: ${{ needs.redis.result }}
+        run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "Path detection failed: $CHANGES" >&2
+            exit 1
+          fi
+          case "$REDIS" in
+            success|skipped) echo "Redis suites: $REDIS" ;;
+            *) echo "Redis suites did not pass: $REDIS" >&2; exit 1 ;;
+          esac
