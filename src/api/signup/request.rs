@@ -32,6 +32,7 @@ use tools::Locale;
         (status = 403, description = "The email domain is not in `SIGNUP_ALLOWED_DOMAINS` (`signup.domain_not_allowed`)", body = ErrorResponse),
         (status = 404, description = "Self-registration is disabled (`SIGNUP_MODE` is not `open`, `feature.disabled`)", body = ErrorResponse),
         (status = 429, description = "Too many emails requested for this address", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
@@ -67,17 +68,11 @@ pub async fn post_signup(
         // Resend the pending signup's link rather than refusing: the
         // per-recipient throttle bounds repeats, and a lost email stays
         // recoverable. Its language was chosen when the signup started.
-        match email_verification::check_email_verification_request(&email)
-            .await
-            .map_err(ErrorResponse::internal)?
-        {
+        match email_verification::check_email_verification_request(&email).await? {
             Some(sid) => {
-                email_verification::renew_email_verification_request(&sid, continuation)
-                    .await
-                    .map_err(ErrorResponse::internal)?;
+                email_verification::renew_email_verification_request(&sid, continuation).await?;
                 let locale = email_verification::get_email_verification_request(&sid)
-                    .await
-                    .map_err(ErrorResponse::internal)?
+                    .await?
                     .map(|pending| pending.locale)
                     .unwrap_or_else(|| profile::resolve_email_locale(None, requested, default));
                 (SignupEmail::Verify { sid }, locale)
@@ -88,9 +83,7 @@ pub async fn post_signup(
                     continuation,
                     ..PendingSignupProfile::self_service(email.clone(), locale)
                 };
-                let sid = email_verification::create_email_verification_request(&profile)
-                    .await
-                    .map_err(ErrorResponse::internal)?;
+                let sid = email_verification::create_email_verification_request(&profile).await?;
                 (SignupEmail::Verify { sid }, locale)
             }
         }
@@ -118,16 +111,12 @@ pub(crate) async fn send_invitation(profile: PendingSignupProfile) -> Result<(),
         return Err(ErrorResponse::new(ErrorCode::SignupUserAlreadyExists));
     }
 
-    let pending = email_verification::check_email_verification_request(&profile.email)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let pending = email_verification::check_email_verification_request(&profile.email).await?;
     if pending.is_some() {
         return Err(ErrorResponse::new(ErrorCode::SignupRequestAlreadyExists));
     }
 
-    let sid = email_verification::create_email_verification_request(&profile)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    let sid = email_verification::create_email_verification_request(&profile).await?;
 
     let email = profile.email.clone();
     let delivery_sid = sid.clone();

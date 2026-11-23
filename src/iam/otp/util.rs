@@ -114,11 +114,6 @@ pub(crate) fn email_otp_internal(error: impl std::fmt::Display) -> ErrorResponse
     ErrorResponse::new(ErrorCode::EmailOtpUnavailable)
 }
 
-pub(crate) fn otp_unavailable(error: store::StoreError) -> ErrorResponse {
-    tracing::error!("OTP request guard unavailable: {}", error);
-    ErrorResponse::new(ErrorCode::OtpUnavailable)
-}
-
 fn input_bad_request(error: crate::iam::otp::input::InputError) -> ErrorResponse {
     ErrorResponse::new(ErrorCode::RequestInvalid).with_message(error.to_string())
 }

@@ -17,6 +17,7 @@ use axum::extract::Query;
         (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 403, description = "The email domain is no longer allowed (`signup.domain_not_allowed`)", body = ErrorResponse),
         (status = 404, description = "Not Found, or disabled by `SIGNUP_MODE` (`feature.disabled`)", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
@@ -40,8 +41,7 @@ pub async fn get_signup(
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupTokenInvalid))?;
 
     let request = email_verification::get_email_verification_request(&sid)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupRequestNotFound))?;
 
     if let Some(ref claim_email) = claim.email
@@ -51,14 +51,8 @@ pub async fn get_signup(
     }
     super::ensure_completable(&request)?;
 
-    if signup::get_signup_request(&sid)
-        .await
-        .map_err(ErrorResponse::internal)?
-        .is_none()
-    {
-        signup::store_signup_request(&sid, &request)
-            .await
-            .map_err(ErrorResponse::internal)?;
+    if signup::get_signup_request(&sid).await?.is_none() {
+        signup::store_signup_request(&sid, &request).await?;
     }
 
     let new_claim = jwt::Claims::default()

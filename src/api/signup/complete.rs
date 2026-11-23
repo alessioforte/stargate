@@ -25,6 +25,7 @@ use tracing::error;
         (status = 403, description = "The email domain is no longer allowed (`signup.domain_not_allowed`)", body = ErrorResponse),
         (status = 404, description = "Not Found, or disabled by `SIGNUP_MODE` (`feature.disabled`)", body = ErrorResponse),
         (status = 409, description = "Conflict", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
@@ -54,8 +55,7 @@ pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, E
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupTokenInvalid))?;
 
     let signup = signup::get_signup_request(&sid)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupRequestNotFound))?;
 
     if let Some(ref claim_email) = claim.email
