@@ -35,9 +35,12 @@ impl Limit {
         self.spec.validate().map_err(|message| {
             super::graph::CompileError::new(format!("limits.{}", self.name), message)
         })?;
-        self.spec.factory(state, clock, durable).map_err(|message| {
-            super::graph::CompileError::new(format!("limits.{}", self.name), message)
-        })
+        self.spec
+            .params
+            .factory(&self.name, state, clock, durable)
+            .map_err(|message| {
+                super::graph::CompileError::new(format!("limits.{}", self.name), message)
+            })
     }
 }
 
@@ -178,15 +181,6 @@ impl LimitSpec {
         }
         Ok(())
     }
-
-    fn factory(
-        &self,
-        state: Arc<lim::State>,
-        clock: Arc<lim::CachedClock>,
-        durable: Option<&lim::DurableQuotas>,
-    ) -> Result<Box<dyn lim::RateLimit>, String> {
-        self.params.factory(state, clock, durable)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -254,6 +248,7 @@ enum Strategy {
 impl Strategy {
     pub fn factory(
         &self,
+        name: &str,
         state: Arc<lim::State>,
         clock: Arc<lim::CachedClock>,
         durable: Option<&lim::DurableQuotas>,
@@ -305,7 +300,7 @@ impl Strategy {
                     )
                     .map_err(str::to_string)?;
                     lim::strategies::quota_tracker::DurableQuotaTracker::new(
-                        durable, clock, *limit, window,
+                        durable, name, clock, *limit, window,
                     )
                     .map(|tracker| Box::new(tracker) as Box<dyn lim::RateLimit>)
                     .map_err(|error| error.to_string())
@@ -357,14 +352,12 @@ mod tests {
     impl lim::QuotaLedger for NoopLedger {
         async fn reserve(
             &self,
-            _bucket: &str,
-            _definition: &str,
-            _window_start: i64,
-            _window_end: i64,
-            _limit: u64,
-            units: u64,
+            request: lim::ReservationRequest<'_>,
         ) -> lim::Result<lim::Reservation> {
-            Ok(lim::Reservation::Granted(units))
+            Ok(lim::Reservation::Granted(lim::QuotaBalance {
+                window: request.window,
+                used: request.units,
+            }))
         }
     }
 

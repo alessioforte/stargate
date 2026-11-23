@@ -17,6 +17,7 @@ pub(crate) fn runtime(config: gate::cfg::RuntimeConfig) -> std::sync::Arc<super:
         transports: prepared.transports,
         version: 0,
         config_revision: prepared.config_revision,
+        config_document_version: 0,
     })
 }
 
@@ -46,6 +47,7 @@ pub(crate) fn gate_with_limiter(config: Config, limiter: lim::Limiter) -> super:
         transports: prepared.transports,
         version: 0,
         config_revision: prepared.config_revision,
+        config_document_version: 0,
     });
     gate.runtime.store(runtime.clone());
     runtime.core.start_probes();

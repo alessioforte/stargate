@@ -1,7 +1,8 @@
 //! SQL-backed ledger for calendar-window quotas.
 use async_trait::async_trait;
 use db::repo::{QUOTA_PRUNE_BATCH, QuotaOwner, QuotaReservation, QuotaReserved};
-use lim::{QuotaLedger, RateLimitError, Reservation};
+use lim::strategies::quota_tracker::WindowBounds;
+use lim::{QuotaBalance, QuotaLedger, RateLimitError, Reservation, ReservationRequest};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -32,32 +33,35 @@ fn owner(bucket: &str) -> lim::Result<QuotaOwner<'_>> {
 
 #[async_trait]
 impl QuotaLedger for SqlQuotaLedger {
-    async fn reserve(
-        &self,
-        bucket: &str,
-        definition: &str,
-        window_start: i64,
-        window_end: i64,
-        limit: u64,
-        units: u64,
-    ) -> lim::Result<Reservation> {
+    async fn reserve(&self, request: ReservationRequest<'_>) -> lim::Result<Reservation> {
         let reserved = self
             .service
             .reserve_quota(QuotaReservation {
-                owner: owner(bucket)?,
-                bucket,
-                definition,
-                window_start,
-                window_end,
-                limit,
-                units,
+                owner: owner(request.bucket)?,
+                bucket: request.bucket,
+                config_version: request.config_version,
+                now: request.now,
+                window_start: request.window.start,
+                window_end: request.window.end,
+                limit: request.limit,
+                units: request.units,
             })
             .await
             .map_err(|error| RateLimitError::BackendError(format!("quota ledger: {error:#}")))?;
-        Ok(match reserved {
-            QuotaReserved::Granted(used) => Reservation::Granted(used),
-            QuotaReserved::Refused(used) => Reservation::Refused(used),
-        })
+        let balance = |balance: db::repo::QuotaBalance| QuotaBalance {
+            used: balance.used,
+            window: WindowBounds {
+                start: balance.window_start,
+                end: balance.window_end,
+            },
+        };
+        match reserved {
+            QuotaReserved::Granted(value) => Ok(Reservation::Granted(balance(value))),
+            QuotaReserved::Refused(value) => Ok(Reservation::Refused(balance(value))),
+            QuotaReserved::StaleConfig => Err(RateLimitError::BackendError(
+                "quota reservation uses a superseded gateway configuration".into(),
+            )),
+        }
     }
 }
 

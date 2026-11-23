@@ -1249,8 +1249,13 @@ Calendar periods use local midnight boundaries, so a daylight-saving day can be
 billing month to that day: for example, an organization billed on the 15th
 selects a limit with `anchor_day: 15` through `organizations.attrs.quota`.
 Different organizations can therefore select different named billing limits.
-Changing a window's period, time zone or anchor starts the current balance from
-zero, because the stored boundaries no longer describe the same window.
+Changing the period, time zone or anchor of a named long quota preserves the
+current window and every unit already charged, including reserved units. SQL
+stores the current window's end for each bucket. The new calendar takes effect
+at that end. If a new calendar window overlaps the boundary, its first balance
+covers only the part after the old window. Replicas and restarts keep the same
+stored boundary. A change to the limit applies to new reservations against the
+existing balance.
 
 ```yaml
 limits:
@@ -1275,14 +1280,18 @@ of the limit (at most 1024 units) and halves as the remaining headroom shrinks.
 Reserved units count as used as soon as SQL charges them, so replicas can never
 exceed the limit. Each crash or reservation timeout can strand at most one
 batch per bucket. A batch caps out at `max(1, min(limit / 100, 1024))` units
-unless the request itself costs more. Batches belong to the process and remain
-available across configuration publications. Each SQL reservation attempt has a
-5-second timeout, including a retry. If the request runs out of traffic budget
-while a reservation is in flight, its cost is still deducted from any batch the
-reservation returns. Once a reservation is refused,
-the replica knows the balance in use and denies in memory every request that no
-longer fits until the window ends, so an exhausted quota does not query SQL for
-every request.
+unless the request itself costs more. Batches belong to the process and can be
+reused by later configurations of the same named quota. Each reservation uses the
+gateway configuration version stored in SQL. Once a new version commits, a
+replica still serving an older snapshot can spend units it already reserved
+until its batch expires. A reservation from that snapshot fails with
+`503 gateway.limiter_unavailable` until the replica applies the current version,
+including when the new configuration requires a restart. Each SQL reservation
+attempt has a 5-second timeout, including a retry. If the request runs out of
+traffic budget while a reservation is in flight, its cost is still deducted
+from any batch the reservation returns. When a reservation is refused for lack
+of capacity, the replica caches the balance and denies requests that no longer
+fit until the window ends.
 
 A long quota belongs to an authenticated subject or an organization, never to a
 client address that anyone can change. Compilation rejects a long quota with

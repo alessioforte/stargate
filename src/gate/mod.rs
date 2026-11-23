@@ -40,12 +40,12 @@ use axum::{
     body::Body,
     response::{IntoResponse, Response},
 };
-use snap::{load_gateway_document, prepare_gateway_config};
+use snap::{load_gateway_document, prepare_gateway_document};
 use std::{convert::Infallible, sync::Arc};
 
 pub async fn init() -> anyhow::Result<Arc<Gate>> {
     let document = load_gateway_document().await?;
-    let prepared = prepare_gateway_config(&document.content)?;
+    let prepared = prepare_gateway_document(&document)?;
     let policies = crate::iam::authz::storage::load_policies_document().await?;
     let policies = crate::iam::authz::rules::compile_policy_snapshot(&policies.content)
         .map_err(|error| anyhow::anyhow!("Unable to load access-control policies: {error}"))?;

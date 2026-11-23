@@ -267,12 +267,12 @@ subject rate check (two round trips, both GCRA scripts), and then:
   (one-hour window), whose counter lives in Redis.
 - `durable_quota` adds a calendar quota (one-day window) to the `api_key`
   path, because a long quota needs an authenticated subject. Its balance lives
-  in PostgreSQL and is reserved in batches, so it adds no Redis round trip; its
-  cap is the API key's. It has no latency threshold yet.
+  in PostgreSQL and is reserved in batches, so it adds no Redis round trip.
+  CI enforces a cap of 3 Redis round trips. The latency threshold is pending.
 
-`durable_quota` was recorded 2026-11-23 from `837a78a` with the same machine,
-images and workload (macOS 27.2.1, Rust 1.99.1, median of three five-second runs
-with sixteen clients), next to the two paths it builds on:
+`durable_quota` reference measurements were recorded 2026-11-23 from `837a78a`
+with the same machine, images and workload (macOS 27.2.1, Rust 1.99.1, median
+of three five-second runs with sixteen clients), next to the two paths it builds on:
 
 | Path | Successful requests/s | Body p50 / p95 / p99, ms | Redis round trips per request | Redis commands per request |
 | --- | ---: | --- | ---: | ---: |

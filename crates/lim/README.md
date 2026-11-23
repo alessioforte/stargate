@@ -102,12 +102,19 @@ timeout can strand at most one batch per bucket. `is_durable()` is true, which
 makes the gateway apply a closed failure policy.
 
 `DurableQuotas` holds the ledger and the batches of one process. Build it once
-and pass it to every tracker: trackers of later configuration generations
-with the same window definition keep spending the same batches. A reservation
+and pass it to every tracker: later configurations keep spending the same
+batches for the named quota until the stored window ends. A reservation
 runs in its own task with a 5-second timeout per ledger call. If the request
 expires while a reservation is in flight, the task still spends the request's
-cost from any batch it receives. A refused reservation reports the balance in
-use, and the tracker denies further requests in memory until the window changes.
+cost from any batch it receives. When a reservation is refused for lack of
+capacity, the tracker caches the balance and denies requests that no longer
+fit until the window ends.
+
+The ledger returns the active window and its balance. The tracker uses those
+bounds for the batch, including when a calendar change must wait for the
+stored window to end. Bind the prepared limiter to the persisted configuration
+version with `Limiter::set_quota_config_version` before publishing it. The SQL
+ledger refuses reservations from superseded versions.
 
 ```rust
 use lim::DurableQuotas;
@@ -115,7 +122,7 @@ use lim::strategies::quota_tracker::{CalendarPeriod, CalendarWindow, DurableQuot
 
 let quotas = DurableQuotas::new(ledger);
 let window = CalendarWindow::parse(CalendarPeriod::Month, "Europe/Rome", Some(15))?;
-DurableQuotaTracker::new(&quotas, clock, 500_000, window)?;
+DurableQuotaTracker::new(&quotas, "billing", clock, 500_000, window)?;
 ```
 
 `CalendarWindow::bounds(now_secs)` resolves local-midnight boundaries, including

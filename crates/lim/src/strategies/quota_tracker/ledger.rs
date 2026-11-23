@@ -5,34 +5,36 @@
 //! reserves units ahead of time and consumes them in memory; the ledger only
 //! sees the reservations, never one call per request.
 
+use super::calendar::WindowBounds;
 use crate::error::Result;
 use async_trait::async_trait;
 
-/// Outcome of one reservation, with the balance in use that decided it.
+/// The persisted bounds may differ from the requested calendar while its
+/// previous window is still active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaBalance {
+    pub window: WindowBounds,
+    pub used: u64,
+}
+
+pub struct ReservationRequest<'a> {
+    pub bucket: &'a str,
+    pub config_version: i64,
+    pub now: i64,
+    pub window: WindowBounds,
+    pub limit: u64,
+    pub units: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reservation {
-    /// The units were charged; the balance in use afterwards.
-    Granted(u64),
-    /// The units do not fit in the balance in use. Within one window and
-    /// definition the balance only grows, so the tracker can deny later
-    /// requests in memory instead of asking again. A stored window newer than
-    /// the requested one refuses the whole requested window and reports the
-    /// limit.
-    Refused(u64),
+    Granted(QuotaBalance),
+    Refused(QuotaBalance),
 }
 
 #[async_trait]
 pub trait QuotaLedger: Send + Sync {
-    /// Atomically reserve `units` in `bucket` for the window
-    /// `[window_start, window_end)`, never beyond `limit`. Backend failures
-    /// are errors: a durable quota never fails open.
-    async fn reserve(
-        &self,
-        bucket: &str,
-        definition: &str,
-        window_start: i64,
-        window_end: i64,
-        limit: u64,
-        units: u64,
-    ) -> Result<Reservation>;
+    /// Reserve from the persisted active window without exceeding the limit.
+    /// Superseded versions and backend failures are errors.
+    async fn reserve(&self, request: ReservationRequest<'_>) -> Result<Reservation>;
 }

@@ -65,7 +65,9 @@ pub use state::State;
     all(feature = "memory", not(feature = "redis")),
     all(feature = "redis", not(feature = "memory")),
 ))]
-pub use strategies::quota_tracker::{DurableQuotas, QuotaLedger, Reservation};
+pub use strategies::quota_tracker::{
+    DurableQuotas, QuotaBalance, QuotaLedger, Reservation, ReservationRequest,
+};
 #[cfg(any(
     all(feature = "memory", not(feature = "redis")),
     all(feature = "redis", not(feature = "memory")),

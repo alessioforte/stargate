@@ -11,6 +11,7 @@ pub struct RuntimeSnapshot {
     pub core: gate::Runtime,
     pub version: u64,
     pub config_revision: String,
+    pub(crate) config_document_version: i64,
     pub ingress: gate::cfg::CompiledIngress,
     pub settings: gate::cfg::CompiledRuntimeSettings,
     pub resources: Arc<resources::ProcessResources>,
@@ -70,7 +71,9 @@ impl Gate {
         quota_ledger: Option<Arc<dyn lim::QuotaLedger>>,
     ) -> Result<Self, GatewayPreparationError> {
         let builder = RuntimeBuilder::new(store).with_quota_ledger(quota_ledger);
-        let core = builder.prepare(&prepared.config)?;
+        let mut core = builder.prepare(&prepared.config)?;
+        core.limiter
+            .set_quota_config_version(prepared.config_document_version);
         configure_probes(&core, &prepared.transports);
         let settings = prepared.config.compiled.runtime.clone();
         let resources = resources::ProcessResources::new(settings.budgets);
@@ -84,6 +87,7 @@ impl Gate {
             transports: prepared.transports,
             version: 0,
             config_revision: prepared.config_revision,
+            config_document_version: prepared.config_document_version,
         });
         runtime.core.start_probes();
         Ok(Self {
@@ -104,7 +108,8 @@ impl Gate {
         &self,
         prepared: PreparedConfig,
     ) -> Result<u64, GatewayPreparationError> {
-        self.publish(self.prepare_activation(prepared)?)
+        let version = prepared.config_document_version;
+        self.publish(self.prepare_activation(prepared)?, version)
     }
 
     pub(crate) fn prepare_activation(
@@ -121,17 +126,27 @@ impl Gate {
     pub(crate) fn publish(
         &self,
         activation: PreparedActivation,
+        config_document_version: i64,
     ) -> Result<u64, GatewayPreparationError> {
-        let PreparedActivation { core, mut prepared } = activation;
+        let PreparedActivation {
+            mut core,
+            mut prepared,
+        } = activation;
         // Preparation finishes before touching the active generation or its probes.
         let _activation = self.activation.lock().expect("Activation lock poisoned");
         let active = self.runtime.load();
+        if config_document_version > 0 && active.config_document_version >= config_document_version
+        {
+            return Ok(active.version);
+        }
         let version = active
             .version
             .checked_add(1)
             .ok_or(GatewayPreparationError::VersionExhausted)?;
         // A different generation may have been published since preparation.
         prepared.transports.reuse_from(&active.transports);
+        core.limiter
+            .set_quota_config_version(config_document_version);
         configure_probes(&core, &prepared.transports);
         let runtime = Arc::new(RuntimeSnapshot {
             core,
@@ -142,6 +157,7 @@ impl Gate {
             transports: prepared.transports,
             version,
             config_revision: prepared.config_revision,
+            config_document_version,
         });
         let previous = self.runtime.swap(runtime.clone());
         runtime.core.start_probes();

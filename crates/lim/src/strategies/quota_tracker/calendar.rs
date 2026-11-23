@@ -27,6 +27,12 @@ pub struct WindowBounds {
     pub end: i64,
 }
 
+impl WindowBounds {
+    pub(super) fn contains(self, now: i64) -> bool {
+        self.start <= now && now < self.end
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum WindowError {
     #[error("timestamp is outside the supported calendar range")]
@@ -40,8 +46,6 @@ pub enum WindowError {
 pub struct CalendarWindow {
     period: CalendarPeriod,
     timezone: TimeZone,
-    /// The configured name, kept for definitions that have no IANA name.
-    timezone_name: String,
     /// Day of the month a period starts on, restricted to 1..=28 so every
     /// month has it. Only meaningful for [`CalendarPeriod::Month`].
     anchor_day: Option<u8>,
@@ -67,33 +71,12 @@ impl CalendarWindow {
         Ok(Self {
             period,
             timezone: parsed,
-            timezone_name: timezone.to_string(),
             anchor_day,
         })
     }
 
     pub fn period(&self) -> CalendarPeriod {
         self.period
-    }
-
-    /// Stable identity of the window definition. A configuration change to
-    /// the period, time zone or anchor starts a fresh balance instead of
-    /// reusing a row whose boundaries no longer match.
-    pub fn definition(&self) -> String {
-        let period = match self.period {
-            CalendarPeriod::Day => "day",
-            CalendarPeriod::Week => "week",
-            CalendarPeriod::Month => "month",
-            CalendarPeriod::Year => "year",
-        };
-        let timezone = self
-            .timezone
-            .iana_name()
-            .unwrap_or(self.timezone_name.as_str());
-        match self.anchor_day {
-            Some(day) => format!("{period}:{timezone}:{day}"),
-            None => format!("{period}:{timezone}"),
-        }
     }
 
     /// Resolve the window that contains `now_secs`.
@@ -243,7 +226,6 @@ mod tests {
     #[test]
     fn a_billing_month_uses_its_anchor_day() {
         let window = CalendarWindow::parse(CalendarPeriod::Month, "Europe/Rome", Some(15)).unwrap();
-        assert_eq!(window.definition(), "month:Europe/Rome:15");
         let bounds = window.bounds(at(utc(2026, 11, 21))).unwrap();
         assert_eq!(bounds.start, utc(2026, 11, 15) - 3600);
         assert_eq!(bounds.end, utc(2026, 12, 15) - 3600);

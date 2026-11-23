@@ -96,6 +96,13 @@ impl Limiter {
         self.limits.insert(name, limit);
     }
 
+    /// Bind a prepared limiter to the persisted version before publication.
+    pub fn set_quota_config_version(&mut self, version: i64) {
+        for limit in self.limits.values_mut() {
+            limit.set_quota_config_version(version);
+        }
+    }
+
     pub fn get_limit(&self, name: &str) -> Option<&dyn RateLimit> {
         self.limits.get(name).map(Box::as_ref)
     }

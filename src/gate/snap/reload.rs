@@ -1,14 +1,29 @@
 use super::Gate;
-use super::config::GatewayPreparationError;
+use super::config::{GatewayPreparationError, PreparedConfig};
 use crate::obs::telemetry;
+use db::ent::ConfigDocument;
 use std::sync::Arc;
 
+#[cfg(all(test, feature = "memory"))]
 pub(crate) fn apply_gateway_config(
     gate: &Gate,
     yaml: &str,
 ) -> Result<u64, GatewayPreparationError> {
-    let result =
-        super::config::prepare_gateway_config(yaml).and_then(|prepared| gate.activate(prepared));
+    activate(gate, super::config::prepare_gateway_config(yaml))
+}
+
+pub(super) fn apply_gateway_document(
+    gate: &Gate,
+    document: &ConfigDocument,
+) -> Result<u64, GatewayPreparationError> {
+    activate(gate, super::config::prepare_gateway_document(document))
+}
+
+fn activate(
+    gate: &Gate,
+    prepared: Result<PreparedConfig, GatewayPreparationError>,
+) -> Result<u64, GatewayPreparationError> {
+    let result = prepared.and_then(|prepared| gate.activate(prepared));
     telemetry::record_config_reload(
         "gateway_config",
         result

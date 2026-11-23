@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 pub use calendar::{CalendarPeriod, CalendarWindow, WindowBounds, WindowError};
 pub use durable::{DurableQuotaTracker, DurableQuotas};
-pub use ledger::{QuotaLedger, Reservation};
+pub use ledger::{QuotaBalance, QuotaLedger, Reservation, ReservationRequest};
 pub use time_window::ShortWindow;
 
 // ========================== IN-MEMORY IMPLEMENTATION =========================

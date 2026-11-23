@@ -34,25 +34,25 @@ fn sync_interval_rejects_invalid_or_unrepresentable_values() {
 fn revision_comparison_skips_active_documents_and_applies_changed_documents() {
     let mut state = RevisionState::default();
     for trigger in [Trigger::Notification, Trigger::Tick] {
-        assert!(!state.should_apply("a", "a", trigger));
-        assert!(state.should_apply("a", "b", trigger));
+        assert!(!state.should_apply(true, 1, trigger));
+        assert!(state.should_apply(false, 2, trigger));
     }
     state.applied();
-    assert!(!state.should_apply("b", "b", Trigger::Notification));
+    assert!(!state.should_apply(true, 2, Trigger::Notification));
 }
 
 #[test]
 fn failed_revision_waits_for_a_tick_or_new_revision_and_logs_once() {
     let mut state = RevisionState::default();
-    assert!(state.failed("b"));
-    assert!(!state.should_apply("a", "b", Trigger::Notification));
-    assert!(state.should_apply("a", "b", Trigger::Tick));
-    assert!(!state.failed("b"));
-    assert!(state.should_apply("a", "c", Trigger::Notification));
-    assert!(state.failed("c"));
+    assert!(state.failed(2));
+    assert!(!state.should_apply(false, 2, Trigger::Notification));
+    assert!(state.should_apply(false, 2, Trigger::Tick));
+    assert!(!state.failed(2));
+    assert!(state.should_apply(false, 3, Trigger::Notification));
+    assert!(state.failed(3));
     state.applied();
-    assert!(!state.should_apply("c", "c", Trigger::Tick));
-    assert!(state.should_apply("c", "d", Trigger::Notification));
+    assert!(!state.should_apply(true, 3, Trigger::Tick));
+    assert!(state.should_apply(false, 4, Trigger::Notification));
 }
 
 #[cfg(feature = "postgres")]
@@ -62,7 +62,7 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
     use crate::data::db::{save_config_document, with_test_service};
     use crate::gate::{
         save_gateway_config,
-        snap::{config::prepare_gateway_config, reload::apply_policy_document},
+        snap::{config::prepare_gateway_document, reload::apply_policy_document},
     };
     use ::db::{
         DbStore,
@@ -148,7 +148,7 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
     let first = Arc::new(
         Gate::new(
             store.clone(),
-            prepare_gateway_config(&initial.content).unwrap(),
+            prepare_gateway_document(&initial).unwrap(),
             PolicySnapshot::default(),
             None,
         )
@@ -157,7 +157,7 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
     let second = Arc::new(
         Gate::new(
             store,
-            prepare_gateway_config(&initial.content).unwrap(),
+            prepare_gateway_document(&initial).unwrap(),
             PolicySnapshot::default(),
             None,
         )
@@ -173,7 +173,7 @@ async fn replicas_converge_on_notifications_and_periodic_checks_and_shutdown_cle
                 .unwrap(),
         )
         .await;
-        super::super::reload::apply_gateway_config(&first, &barrier.content).unwrap();
+        apply_gateway_document(&first, &barrier).unwrap();
         let stop = Arc::new(Notify::new());
         let task = tokio::spawn(with_test_service(
             svc.clone(),
@@ -273,7 +273,7 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
     use crate::data::db::with_test_service;
     use ::db::{
         DbStore,
-        ent::{ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext},
+        ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext},
     };
     use gate::cfg::Config;
     use tokio::sync::Notify;
@@ -286,13 +286,12 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
     reader.migrate().await.unwrap();
     let writer = ::db::service::init(&url).await.unwrap();
     let initial = Config::default();
-    let gate = Arc::new(crate::gate::test_support::gate(initial.clone()));
 
     async fn external_write(
         writer: &::db::service::Service,
         kind: ConfigKind,
         content: String,
-    ) -> String {
+    ) -> ConfigDocument {
         let expected = writer
             .get_active_config_document(kind)
             .await
@@ -304,9 +303,7 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
             .await
             .unwrap();
         match saved {
-            ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => {
-                document.revision
-            }
+            ConfigSaveOutcome::Saved(document) | ConfigSaveOutcome::Unchanged(document) => document,
             other => panic!("unexpected external write: {other:?}"),
         }
     }
@@ -328,12 +325,29 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
         .expect("edge must activate external writes on the next tick");
     }
 
+    let initial_yaml = initial.to_yaml_string().unwrap();
+    let original = external_write(&writer, ConfigKind::Gateway, initial_yaml.clone()).await;
+    let gate = Arc::new(
+        Gate::new(
+            Arc::new(lim::State::new()),
+            super::super::config::prepare_gateway_document(&original).unwrap(),
+            gate::PolicySnapshot::default(),
+            None,
+        )
+        .unwrap(),
+    );
+    let mut changed = initial;
+    changed.ingress.timeout = "350ms".into();
     external_write(
         &writer,
         ConfigKind::Gateway,
-        initial.to_yaml_string().unwrap(),
+        changed.to_yaml_string().unwrap(),
     )
     .await;
+    let restored = external_write(&writer, ConfigKind::Gateway, initial_yaml).await;
+    assert_eq!(restored.revision, original.revision);
+    assert!(restored.version > original.version);
+
     external_write(&writer, ConfigKind::Policies, String::new()).await;
     let stop = Arc::new(Notify::new());
     let task = tokio::spawn(with_test_service(
@@ -344,25 +358,32 @@ async fn edge_timer_applies_external_gateway_and_policy_writes_to_the_same_sqlit
             Wakeups::new(Duration::from_millis(30)),
         ),
     ));
-    let mut changed = initial;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while gate.snapshot().config_document_version != restored.version {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("restoring identical content must refresh the gateway version");
+
     for timeout in ["300ms", "400ms"] {
         changed.ingress.timeout = timeout.to_string();
-        let revision = external_write(
+        let document = external_write(
             &writer,
             ConfigKind::Gateway,
             changed.to_yaml_string().unwrap(),
         )
         .await;
-        wait_for(&gate, ConfigKind::Gateway, &revision).await;
+        wait_for(&gate, ConfigKind::Gateway, &document.revision).await;
     }
-    assert_eq!(gate.snapshot().version, 2);
-    let revision = external_write(
+    assert_eq!(gate.snapshot().version, 3);
+    let document = external_write(
         &writer,
         ConfigKind::Policies,
         "ALLOW user FOR \"edge-import:READ\";".to_string(),
     )
     .await;
-    wait_for(&gate, ConfigKind::Policies, &revision).await;
+    wait_for(&gate, ConfigKind::Policies, &document.revision).await;
     stop.notify_one();
     tokio::time::timeout(Duration::from_secs(1), task)
         .await

@@ -31,6 +31,8 @@ pub trait RateLimit: Send + Sync {
     fn is_durable(&self) -> bool {
         false
     }
+    fn set_quota_config_version(&mut self, _version: i64) {}
+
     async fn check(&self, key: &str, cost: u64) -> Result<RateLimitDecision>;
 }
 

@@ -2906,10 +2906,12 @@ mod sqlite_tests {
             vec![
                 ConfigRevision {
                     kind: ConfigKind::Gateway,
+                    version: gateway.version,
                     revision: gateway.revision
                 },
                 ConfigRevision {
                     kind: ConfigKind::Policies,
+                    version: policies.version,
                     revision: policies.revision
                 },
             ]

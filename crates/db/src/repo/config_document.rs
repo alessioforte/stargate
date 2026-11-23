@@ -75,15 +75,15 @@ impl ConfigDocumentRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT kind, revision FROM config_documents
+        let rows: Vec<(String, i64, String)> = sqlx::query_as(
+            "SELECT kind, version, revision FROM config_documents
              WHERE (kind, version) IN (SELECT kind, MAX(version) FROM config_documents GROUP BY kind)
              ORDER BY kind",
         )
         .fetch_all(ex)
         .await?;
         rows.into_iter()
-            .map(|(kind, revision)| parse_revision(&kind, revision))
+            .map(|(kind, version, revision)| parse_revision(&kind, version, revision))
             .collect()
     }
 
@@ -111,10 +111,14 @@ impl ConfigDocumentRepository {
     }
 }
 
-fn parse_revision(kind: &str, revision: String) -> Result<ConfigRevision> {
+fn parse_revision(kind: &str, version: i64, revision: String) -> Result<ConfigRevision> {
     let kind = ConfigKind::parse(kind)
         .ok_or_else(|| anyhow::anyhow!("unknown configuration kind: {kind}"))?;
-    Ok(ConfigRevision { kind, revision })
+    Ok(ConfigRevision {
+        kind,
+        version,
+        revision,
+    })
 }
 
 #[cfg(test)]
@@ -123,14 +127,14 @@ mod tests {
     #[test]
     fn revision_kinds_are_typed_and_unknown_database_kinds_are_errors() {
         assert_eq!(
-            parse_revision("gateway", "r1".into()).unwrap().kind,
+            parse_revision("gateway", 1, "r1".into()).unwrap().kind,
             ConfigKind::Gateway
         );
         assert_eq!(
-            parse_revision("policies", "r2".into()).unwrap().kind,
+            parse_revision("policies", 2, "r2".into()).unwrap().kind,
             ConfigKind::Policies
         );
-        assert!(parse_revision("unknown", "r3".into()).is_err());
+        assert!(parse_revision("unknown", 3, "r3".into()).is_err());
     }
 }
 

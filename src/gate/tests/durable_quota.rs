@@ -7,13 +7,15 @@ use crate::data::db::with_test_database;
 use crate::gate::Gate;
 use crate::gate::authentication::TestAuthenticator;
 use crate::gate::limits::SqlQuotaLedger;
+use crate::gate::snap::prepare_gateway_document;
 use crate::iam::auth::identity::VerifiedIdentity;
 use crate::iam::auth::subject::{Subject, SubjectType};
 use axum::body::Body;
+use db::ent::{ConfigDocument, ConfigKind, ConfigSaveOutcome, ConfigSource, TrustedAuditContext};
 use gate::cfg::Config;
 use http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use lim::{QuotaLedger, Reservation};
+use lim::{QuotaBalance, QuotaLedger, Reservation, ReservationRequest};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -67,6 +69,44 @@ fn sql_ledger() -> Arc<dyn QuotaLedger> {
     Arc::new(SqlQuotaLedger::new(crate::data::db::service()))
 }
 
+fn stored_gate(document: &ConfigDocument) -> Arc<Gate> {
+    Arc::new(
+        Gate::new(
+            Arc::new(lim::State::new()),
+            prepare_gateway_document(document).unwrap(),
+            gate::PolicySnapshot::default(),
+            Some(sql_ledger()),
+        )
+        .unwrap(),
+    )
+}
+
+async fn save_quota(
+    limit: u64,
+    cost: u64,
+    period: &str,
+    previous: Option<ConfigDocument>,
+) -> ConfigDocument {
+    let mut raw = serde_json::to_value(config("allow")).unwrap();
+    raw["limits"]["daily"]["params"]["limit"] = json!(limit);
+    raw["limits"]["daily"]["params"]["period"] = json!(period);
+    raw["http"]["routers"]["quota"]["quota_cost"] = json!(cost);
+    let config: Config = serde_json::from_value(raw).unwrap();
+    let outcome = crate::data::db::save_config_document(
+        ConfigKind::Gateway,
+        config.to_yaml_string().unwrap(),
+        previous.map(|document| document.revision),
+        ConfigSource::CliImport,
+        TrustedAuditContext::system_control_plane(),
+    )
+    .await
+    .unwrap();
+    let ConfigSaveOutcome::Saved(document) = outcome else {
+        panic!("expected a saved quota configuration, got {outcome:?}");
+    };
+    document
+}
+
 fn request(gate: &Arc<Gate>, identity: fn() -> VerifiedIdentity) -> Request<Body> {
     let mut request = Request::builder()
         .uri("/quota")
@@ -108,17 +148,12 @@ struct CountingLedger(AtomicUsize);
 
 #[async_trait::async_trait]
 impl QuotaLedger for CountingLedger {
-    async fn reserve(
-        &self,
-        _bucket: &str,
-        _definition: &str,
-        _window_start: i64,
-        _window_end: i64,
-        _limit: u64,
-        units: u64,
-    ) -> lim::Result<Reservation> {
+    async fn reserve(&self, request: ReservationRequest<'_>) -> lim::Result<Reservation> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(Reservation::Granted(units))
+        Ok(Reservation::Granted(QuotaBalance {
+            used: request.units,
+            window: request.window,
+        }))
     }
 }
 
@@ -147,20 +182,55 @@ async fn a_flushed_state_store_does_not_reset_the_calendar_quota() {
 }
 
 #[tokio::test]
+async fn publishing_a_calendar_change_preserves_spend_and_fences_the_old_gateway() {
+    with_test_database(async {
+        let first = save_quota(10, 5, "day", None).await;
+        let old = stored_gate(&first);
+        assert_eq!(send(&old).await.status(), StatusCode::OK);
+
+        let second = save_quota(10, 5, "month", Some(first)).await;
+        let current = stored_gate(&second);
+        let stale = send(&old).await;
+        assert_eq!(stale.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(code(stale).await, "gateway.limiter_unavailable");
+
+        let last_allowed = send(&current).await;
+        assert_eq!(last_allowed.status(), StatusCode::OK);
+        assert_eq!(last_allowed.headers()["x-quota-remaining"], "0");
+        assert_eq!(send(&current).await.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            send(&stored_gate(&second)).await.status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_fresh_gateway_reports_the_maximum_balance_as_quota_exhaustion() {
+    with_test_database(async {
+        const LIMIT: u64 = i64::MAX as u64;
+        let first = save_quota(LIMIT, LIMIT, "day", None).await;
+        assert_eq!(send(&stored_gate(&first)).await.status(), StatusCode::OK);
+
+        let second = save_quota(LIMIT, 1, "day", Some(first)).await;
+        let fresh = stored_gate(&second);
+        let denied = send(&fresh).await;
+        assert_eq!(denied.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(denied.headers()["x-quota-remaining"], "0");
+        assert_eq!(denied.headers()["x-quota-limit"], LIMIT.to_string());
+        assert_eq!(send(&fresh).await.status(), StatusCode::TOO_MANY_REQUESTS);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn a_durable_quota_is_fail_closed_even_when_the_policy_allows_fail_open() {
     with_test_database(async {
         struct Unavailable;
         #[async_trait::async_trait]
         impl QuotaLedger for Unavailable {
-            async fn reserve(
-                &self,
-                _bucket: &str,
-                _definition: &str,
-                _window_start: i64,
-                _window_end: i64,
-                _limit: u64,
-                _units: u64,
-            ) -> lim::Result<Reservation> {
+            async fn reserve(&self, _: ReservationRequest<'_>) -> lim::Result<Reservation> {
                 Err(lim::RateLimitError::BackendError("unavailable".into()))
             }
         }
@@ -196,6 +266,7 @@ async fn an_anonymous_request_never_charges_a_durable_quota() {
             Box::new(
                 lim::strategies::quota_tracker::DurableQuotaTracker::new(
                     &durable,
+                    "daily",
                     lim::CachedClock::new(),
                     6,
                     lim::strategies::quota_tracker::CalendarWindow::parse(

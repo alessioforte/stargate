@@ -1,16 +1,29 @@
 -- Durable balance of calendar-window quotas. Short quotas and rate limits
 -- stay in the state store; a row here survives a Redis flush or an edge
--- restart. `(bucket, window_start)` is the unit of accounting: a reservation
--- replaces the balance when the window changes, and the conditional upsert in
--- `QuotaRepository::reserve` keeps `used` at or below the limit across
--- replicas. The owner is the subject (a user or an API key) or organization
--- the bucket belongs to; balances of deleted owners are pruned in batches.
+-- restart. Each row keeps the active bounds until the window ends, even
+-- when the configured calendar changes. The conditional upsert enforces
+-- the limit across replicas. Balances of deleted subjects (users or API keys)
+-- and organizations are pruned in batches.
 CREATE TABLE "quota_usage" (
     "bucket" TEXT PRIMARY KEY,
     "owner_kind" TEXT NOT NULL CHECK ("owner_kind" IN ('subject', 'organization')),
     "owner_id" TEXT NOT NULL,
-    "definition" TEXT NOT NULL,
     "window_start" INTEGER NOT NULL,
     "window_end" INTEGER NOT NULL,
     "used" INTEGER NOT NULL DEFAULT 0 CHECK ("used" >= 0)
 );
+
+-- SQLite serializes quota reservations with configuration writes.
+CREATE TABLE "quota_config" (
+    "id" INTEGER PRIMARY KEY CHECK ("id" = 1),
+    "version" INTEGER NOT NULL CHECK ("version" >= 0)
+);
+
+INSERT INTO "quota_config" ("id", "version")
+SELECT 1, COALESCE(MAX("version"), 0) FROM "config_documents" WHERE "kind" = 'gateway';
+
+CREATE TRIGGER advance_quota_config_version
+AFTER INSERT ON config_documents FOR EACH ROW WHEN NEW.kind = 'gateway'
+BEGIN
+    UPDATE quota_config SET version = NEW.version WHERE id = 1 AND version < NEW.version;
+END;
