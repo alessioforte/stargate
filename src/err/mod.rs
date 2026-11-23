@@ -236,4 +236,20 @@ mod tests {
         assert_eq!(json["message"], "Internal server error");
         assert!(!json.to_string().contains("database password leaked"));
     }
+
+    #[test]
+    fn store_failures_distinguish_unavailability_from_conflicts() {
+        let unavailable = ErrorResponse::from(store::StoreError::Timeout(
+            "security state read timed out".to_string(),
+        ));
+        assert_eq!(unavailable.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(unavailable.code, ErrorCode::AuthStateUnavailable);
+
+        // A lost atomic write is retried by its caller; when it still loses,
+        // the failure is internal, not a Redis outage.
+        let conflict =
+            ErrorResponse::from(store::StoreError::Conflict("concurrent writer".to_string()));
+        assert_eq!(conflict.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(conflict.code, ErrorCode::SystemInternal);
+    }
 }

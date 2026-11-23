@@ -17,6 +17,7 @@ use axum::extract::{FromRequest, Path, Request};
     responses(
         (status = 200, description = "OK", body = MfaMethodsResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
@@ -72,6 +73,7 @@ pub async fn post_mfa_challenge(req: Request) -> Result<Json<OtpChallengeRespons
         (status = 404, description = "Not Found", body = ErrorResponse),
         (status = 409, description = "Conflict", body = ErrorResponse),
         (status = 429, description = "Too Many Requests", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]

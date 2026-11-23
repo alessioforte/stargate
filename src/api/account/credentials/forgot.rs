@@ -30,6 +30,7 @@ pub struct ForgotPasswordRequestBody {
     responses(
         (status = 200, description = "OK", body = MessageResponse),
         (status = 429, description = "Too many emails requested for this address", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
@@ -53,9 +54,7 @@ pub async fn post_credentials(
         // Reuse the pending request so a lost or failed email can be resent;
         // the per-recipient throttle bounds the repeats. Issuing the link
         // renews the request, so the two deadlines coincide.
-        let sid = pwd::reset::issue_change_password_request(&user.email, continuation)
-            .await
-            .map_err(ErrorResponse::internal)?;
+        let sid = pwd::reset::issue_change_password_request(&user.email, continuation).await?;
         let locale = user_locale(&user).unwrap_or_else(smtp::default_locale);
         spawn_reset_email(user, sid, locale);
     }

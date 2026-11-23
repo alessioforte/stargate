@@ -54,6 +54,7 @@ pub async fn post_login_email_otp(
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 404, description = "Passwordless login is disabled (`PASSWORDLESS_LOGIN_ENABLED`, `feature.disabled`)", body = ErrorResponse),
         (status = 429, description = "Too Many Requests", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]

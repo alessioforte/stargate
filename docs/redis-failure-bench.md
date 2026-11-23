@@ -13,7 +13,7 @@ key or a user-delegated OAuth access token.
 | --- | --- |
 | `restart` | With AOF enabled, the existing session works once Redis returns. Failed-open requests get `200` without allowance headers. Failed-closed requests get `503` with `Retry-After`. Readiness stays healthy and Redis diagnostics report the outage. |
 | `empty` | With persistence disabled, existing access and refresh tokens get `401` once Redis recovers. A fresh sign-in works. |
-| `partition` | Gateway and IAM traffic follow their failure policies within one shared 250ms budget. Stateful auth requests return `503` with `Retry-After` using the one-second Redis budget. A request already dispatched to its upstream completes, readiness stays healthy and the first recovered request charges its quota once. |
+| `partition` | Gateway and IAM traffic follow their failure policies within one shared 250ms budget. Stateful auth requests and account flows (OTP/MFA, password reset, signup) return `503` with `Retry-After` using the one-second Redis budget; password-reset, signup and passwordless requests work again after recovery. A request already dispatched to its upstream completes, readiness stays healthy and the first recovered request charges its quota once. |
 | `memory-full` | Redis rejects writes under `noeviction`. Session reads and PING work, login fails closed, and the limit store is reported degraded. Writes recover when memory is freed. |
 | `absent-at-startup` | Stargate starts and serves readiness while Redis is down. Admin diagnostics show Redis unhealthy and session access fails closed. The existing process recovers when Redis starts. |
 | `incompatible` | An older Redis without `HEXPIRE` is rejected with a capability diagnostic while Stargate serves readiness. |
@@ -52,8 +52,10 @@ on a disposable 3+3 cluster. Run both with the same image; the key schema is in
 ## CI
 
 `.github/workflows/redis-failures.yml` runs on pull requests that touch
-`crates/store`, `crates/lim`, `src/data/store`, the session and authentication
-code, the gateway limits and policies, startup and readiness (`src/main.rs`,
+`crates/store`, `crates/lim`, `src/data/store`, the session, authentication and
+account-flow code (`src/iam/auth`, `src/iam/sess`, `src/iam/otp`, `src/iam/pwd`,
+`src/iam/user`, `src/iam/email_throttle.rs`, `src/api/account`, `src/api/signup`),
+the gateway limits and policies, startup and readiness (`src/main.rs`,
 `src/srv/health.rs`), the admin health report (`src/api/admin/health.rs`), the
 bench scripts and their fixture or this guide, and on manual dispatch:
 
@@ -78,17 +80,17 @@ inside the fault to complete within their budget.
 
 ## Recorded results
 
-Recorded on 2026-11-21 on an Apple M1 Pro with macOS 27.2.1 and Docker 29.9.3.
+Recorded on 2026-11-23 on an Apple M1 Pro with macOS 27.2.1 and Docker 29.9.3.
 The run used the Redis and PostgreSQL images in [Run locally](#run-locally)
 and wrote the report with `--output`.
 
 | Scenario | Requests | Unexpected | Errors | Disturbance (s) | Recovery (s) | Final state |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `restart` | 207 | 0 | 40 | 1.77 | 0.09 | healthy |
-| `empty` | 212 | 0 | 42 | 1.72 | 0.22 | signed-out then healthy |
-| `partition` | 304 | 0 | 36 | 3.55 | 0.10 | healthy |
-| `memory-full` | 221 | 0 | 10 | 1.10 | 0.21 | healthy |
-| `absent-at-startup` | 0 | 0 | 0 | 0.33 | 0.09 | healthy |
+| `restart` | 210 | 0 | 44 | 1.77 | 0.17 | healthy |
+| `empty` | 210 | 0 | 42 | 1.74 | 0.22 | signed-out then healthy |
+| `partition` | 437 | 0 | 120 | 9.60 | 0.14 | healthy |
+| `memory-full` | 215 | 0 | 10 | 1.02 | 0.24 | healthy |
+| `absent-at-startup` | 0 | 0 | 0 | 0.34 | 0.10 | healthy |
 | `incompatible` | 0 | 0 | 0 | 0.00 | 0.00 | ready, Redis rejected |
 | `replicated-logout` | 0 | 0 | 0 | 0.00 | 0.00 | logout survived promotion |
 
@@ -97,13 +99,14 @@ moment the relay resumed traffic.
 
 | Endpoint | Recovery (ms) |
 | --- | ---: |
-| `public` | 34 |
-| `deny` | 102 |
-| `profile` | 116 |
-| `jwt` | 114 |
-| `api_key` | 113 |
-| `oauth` | 119 |
-| `userinfo` | 118 |
-| `iam_ingress_deny` | 106 |
-| `gateway_ingress_deny` | 109 |
-| `oauth_refresh` | 121 |
+| `public` | 125 |
+| `deny` | 125 |
+| `profile` | 127 |
+| `jwt` | 116 |
+| `api_key` | 116 |
+| `oauth` | 133 |
+| `userinfo` | 134 |
+| `iam_ingress_deny` | 164 |
+| `gateway_ingress_deny` | 166 |
+| `oauth_refresh` | 173 |
+| `account_flows` | 163 |

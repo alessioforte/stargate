@@ -49,11 +49,7 @@ pub async fn check_and_record_email_request(
     let max = flow.max_requests();
 
     // Already exhausted: reject without extending the window.
-    let current = store
-        .get_i64(&key)
-        .await
-        .map_err(ErrorResponse::internal)?
-        .unwrap_or(0);
+    let current = store.get_i64(&key).await?.unwrap_or(0);
     if current >= max {
         return Err(rate_limited());
     }
@@ -61,8 +57,7 @@ pub async fn check_and_record_email_request(
     // Concurrent requests that all passed the read are ordered here.
     let count = store
         .incr_i64(&key, 1, Some(WINDOW_SECS))
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .unwrap_or(i64::MAX);
     if count > max {
         return Err(rate_limited());

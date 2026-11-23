@@ -21,6 +21,7 @@ use tracing::error;
         (status = 400, description = "Bad Request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
@@ -45,8 +46,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
     let token_sid = claims.sid.clone().unwrap_or_default();
 
     let stored = pwd::reset::get_change_password_request(&email)
-        .await
-        .map_err(ErrorResponse::internal)?
+        .await?
         .filter(|request| request.sid == token_sid);
 
     let Some(stored) = stored else {
@@ -75,10 +75,7 @@ pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuatio
 
     // Consume the request before writing: failed or concurrent consumption must
     // never leave a successful password change with a reusable reset link.
-    if !pwd::reset::delete_change_password_request(&email)
-        .await
-        .map_err(ErrorResponse::internal)?
-    {
+    if !pwd::reset::delete_change_password_request(&email).await? {
         return Err(ErrorResponse::new(ErrorCode::PasswordResetRequestInvalid));
     }
 

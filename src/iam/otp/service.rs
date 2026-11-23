@@ -72,8 +72,7 @@ pub(crate) async fn start_passwordless_email_otp(
             &challenge,
             Some(ttl_until(challenge.record.expires_at_unix, now)),
         )
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
 
     spawn_email_otp_delivery(&user, &issued);
 
@@ -190,8 +189,7 @@ async fn start_email_login_mfa(
             &pending,
             Some(ttl_until(pending.expires_at_unix, now)),
         )
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
 
     if let Err(error) = send_email_otp(user, &issued).await {
         let _ = store.delete(&key).await;
@@ -287,8 +285,7 @@ async fn start_email_mfa_challenge(
             &challenge,
             Some(ttl_until(challenge.record.expires_at_unix, now)),
         )
-        .await
-        .map_err(ErrorResponse::internal)?;
+        .await?;
 
     if let Err(error) = send_email_otp(user, &issued).await {
         let _ = store.delete(&key).await;
@@ -323,13 +320,182 @@ pub(crate) async fn complete_mfa_challenge(
     let marker =
         store_mfa_verified_marker(&auth, challenge.method, &challenge.purpose, now).await?;
     // The code is also a factor of the session itself (OIDC `amr` / `acr`).
-    crate::iam::sess::registry::add_otp_factor(&auth.sid, &auth.user.id)
-        .await
-        .map_err(ErrorResponse::internal)?;
+    crate::iam::sess::registry::add_otp_factor(&auth.sid, &auth.user.id).await?;
     Ok(MfaVerificationResponse {
         method: marker.method,
         purpose: marker.purpose,
         verified_at_unix: marker.verified_at_unix,
         expires_at_unix: marker.expires_at_unix,
     })
+}
+
+#[cfg(all(test, feature = "memory", feature = "sqlite"))]
+mod tests {
+    use super::{complete_passwordless_email_otp, start_passwordless_email_otp};
+    use crate::data::db::with_test_database;
+    use crate::err::ErrorCode;
+    use crate::iam::otp::DEFAULT_PASSWORDLESS_PURPOSE;
+    use crate::iam::otp::types::StoredOtpChallenge;
+    use crate::iam::otp::util::{current_unix_time, email_otp_config, passwordless_email_key};
+    use db::ent::{
+        CredentialType, Profile, TrustedAuditActor, TrustedAuditContext, TrustedAuditRequest,
+    };
+    use store::Store;
+
+    const CHILD: &str = "STARGATE_TEST_PASSWORDLESS_ANSWERS";
+
+    async fn create_user(email: &str) {
+        let context = TrustedAuditContext::application(
+            TrustedAuditActor::anonymous(),
+            TrustedAuditRequest::from_http(ulid::Ulid::generate().to_string(), None, None, None),
+        );
+        crate::data::db::create_user(
+            Profile::new(email.to_string(), ulid::Ulid::generate().to_string()),
+            CredentialType::Password,
+            "TEST_PASSWORD_HASH",
+            None,
+            context,
+        )
+        .await
+        .unwrap();
+    }
+
+    fn pepper() -> String {
+        std::env::var("EMAIL_OTP_PEPPER").expect("the child configures the code pepper")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn passwordless_start_answers_generically_and_verification_keeps_its_codes() {
+        if std::env::var_os(CHILD).is_none() {
+            let output = tokio::task::spawn_blocking(|| {
+                crate::conf::child_test::run(
+                    "iam::otp::service::tests::passwordless_start_answers_generically_and_verification_keeps_its_codes",
+                    |command| {
+                        command
+                            .env(CHILD, "1")
+                            .env("EMAIL_OTP_PEPPER", "synthetic-passwordless-answers-pepper");
+                    },
+                )
+            })
+            .await
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        with_test_database(async {
+            let known_email = "known-passwordless@example.com";
+            create_user(known_email).await;
+
+            let known = start_passwordless_email_otp(known_email, "203.0.113.70")
+                .await
+                .unwrap();
+            let unknown =
+                start_passwordless_email_otp("unknown-passwordless@example.com", "203.0.113.71")
+                    .await
+                    .unwrap();
+
+            // The public start answers the same shape whether or not the
+            // address has an account; only the random challenge id differs.
+            assert_eq!(known.method, unknown.method);
+            assert_eq!(known.ttl_seconds, unknown.ttl_seconds);
+            assert_eq!(known.max_attempts, unknown.max_attempts);
+            assert!(
+                known.expires_at_unix.abs_diff(unknown.expires_at_unix) <= 1,
+                "{} and {}",
+                known.expires_at_unix,
+                unknown.expires_at_unix
+            );
+
+            let store = crate::data::store::use_store();
+            let key = passwordless_email_key(&known.challenge_id);
+            let stored = store
+                .get::<StoredOtpChallenge>(&key)
+                .await
+                .unwrap()
+                .expect("the known address has a delivered challenge");
+            assert!(
+                !store
+                    .exists(&passwordless_email_key(&unknown.challenge_id))
+                    .await
+                    .unwrap(),
+                "an unknown address has no stored challenge"
+            );
+
+            // A wrong code keeps the challenge and reports the remaining attempts.
+            let wrong = (0..1000)
+                .map(|number| format!("{number:06}"))
+                .find(|code| {
+                    let mut probe = stored.record.clone();
+                    matches!(
+                        probe.verify(code, pepper().as_bytes(), stored.record.issued_at_unix + 1),
+                        ::otp::MessageOtpVerification::Invalid { .. }
+                    )
+                })
+                .expect("a six-digit code that does not match");
+            let error = complete_passwordless_email_otp(&known.challenge_id, &wrong)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, ErrorCode::OtpCodeInvalid);
+            assert_eq!(error.status, http::StatusCode::UNAUTHORIZED);
+            assert!(store.exists(&key).await.unwrap());
+
+            // An expired record answers the generic expired code and is gone.
+            let mut expired = stored.clone();
+            expired.record.expires_at_unix = 1;
+            store.set(&key, &expired, Some(10)).await.unwrap();
+            let error = complete_passwordless_email_otp(&known.challenge_id, "000000")
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, ErrorCode::OtpCodeInvalidOrExpired);
+            assert!(!store.exists(&key).await.unwrap());
+
+            // Exhausted attempts answer the dedicated rate limit.
+            let mut exhausted = stored.clone();
+            exhausted.record.attempts_used = exhausted.record.max_attempts;
+            exhausted.record.expires_at_unix = u64::MAX;
+            store.set(&key, &exhausted, Some(300)).await.unwrap();
+            let error = complete_passwordless_email_otp(&known.challenge_id, "000000")
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, ErrorCode::OtpAttemptsExceeded);
+            assert_eq!(error.status, http::StatusCode::TOO_MANY_REQUESTS);
+            assert!(!store.exists(&key).await.unwrap());
+
+            // The issued code completes the challenge once.
+            let now = current_unix_time().unwrap();
+            let issued = ::otp::issue_email_otp(
+                known_email.to_string(),
+                DEFAULT_PASSWORDLESS_PURPOSE,
+                pepper().as_bytes(),
+                now,
+                email_otp_config(),
+            )
+            .unwrap();
+            let challenge_id = issued.record.id_hex();
+            store
+                .set(
+                    &passwordless_email_key(&challenge_id),
+                    &StoredOtpChallenge {
+                        user_id: stored.user_id.clone(),
+                        method: known.method,
+                        purpose: DEFAULT_PASSWORDLESS_PURPOSE.to_string(),
+                        record: issued.record,
+                    },
+                    Some(300),
+                )
+                .await
+                .unwrap();
+            let (user, _) = complete_passwordless_email_otp(&challenge_id, &issued.code)
+                .await
+                .unwrap();
+            assert_eq!(user.email, known_email);
+        })
+        .await;
+    }
 }

@@ -22,6 +22,7 @@ use axum::response::{IntoResponse, Response};
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 409, description = "Conflict", body = ErrorResponse),
         (status = 429, description = "Too Many Requests", body = ErrorResponse),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
         (status = 500, description = "Internal Server Error", body = ErrorResponse)
     )
 )]
