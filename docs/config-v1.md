@@ -313,7 +313,10 @@ per-account/IP limits still apply on every attempt, including during a
 distributed attack. New addresses and expired recognition use all three
 buckets. The password and any required MFA are still verified. A store error
 while checking recognition rejects the attempt. A failed recognition write
-is logged and leaves ordinary account backoff in effect.
+is logged and leaves ordinary account backoff in effect. A password reset,
+expired-password completion or revocation of every session deletes the
+account's recognized addresses, so an attacker's address loses the exemption
+and returns to the account-wide pause.
 
 A sustained distributed attack can repeatedly take the next account-wide
 attempt and delay sign-in from a new address. Recognition lets returning users

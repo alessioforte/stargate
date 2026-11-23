@@ -400,6 +400,8 @@ pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
             revoked.push(record);
         }
         store.delete(&index_key(user_id)).await?;
+        confirmations
+            .record(delete_confirmed(&store::keys::account::login_known(user_id)).await)?;
         backchannel_logout::notify(&revoked);
         confirmations.finish(revoked.len())
     })
