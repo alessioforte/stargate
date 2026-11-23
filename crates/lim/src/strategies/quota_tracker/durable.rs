@@ -10,8 +10,8 @@
 //! The batches belong to the process, not to one configuration generation:
 //! [`DurableQuotas`] keeps them while a tracker of the same window definition
 //! is alive, so publishing a configuration keeps spending them. A reservation
-//! runs in its own task, so a request cancelled by its deadline cannot strand
-//! a batch the ledger has already charged.
+//! runs in its own task and can finish after the request's deadline. Each
+//! ledger call has its own deadline so a stalled ledger releases the bucket.
 
 use super::calendar::{CalendarWindow, WindowBounds};
 use super::ledger::{QuotaLedger, Reservation};
@@ -31,6 +31,8 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 /// further but increase the units a crash can strand; at typical request rates
 /// this still costs only a few statements per second per replica.
 const MAX_LEASE_UNITS: u64 = 1024;
+// Keep the bucket lock bounded even after the request's traffic budget expires.
+const RESERVATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Durable quota state of one process: the ledger and the batches this
 /// replica holds in it, grouped by window definition.
@@ -185,9 +187,9 @@ fn lease_units(limit: u64, used: u64, cost: u64) -> Option<u64> {
     Some(cost.max(base.min(near_limit)).min(headroom))
 }
 
-/// One reservation, completed even when the request that needed it is
-/// cancelled: the ledger may already have charged the batch, so the lease
-/// must record it for the next requests to spend.
+/// One reservation, independent of the request's deadline. The ledger may
+/// already have charged the batch, so record it for the next requests to spend
+/// if the ledger responds in time.
 struct Reserve {
     ledger: Arc<dyn QuotaLedger>,
     bucket: String,
@@ -231,16 +233,23 @@ impl Reserve {
     }
 
     async fn reserve(&self, units: u64) -> Result<Reservation> {
-        self.ledger
-            .reserve(
+        tokio::time::timeout(
+            RESERVATION_TIMEOUT,
+            self.ledger.reserve(
                 &self.bucket,
                 &self.definition,
                 self.window.start,
                 self.window.end,
                 self.limit,
                 units,
-            )
-            .await
+            ),
+        )
+        .await
+        .map_err(|_| {
+            RateLimitError::BackendError(format!(
+                "quota reservation timed out after {RESERVATION_TIMEOUT:?}"
+            ))
+        })?
     }
 }
 
@@ -315,6 +324,7 @@ mod tests {
     use super::*;
     use crate::strategies::quota_tracker::calendar::CalendarPeriod;
     use std::sync::atomic::AtomicUsize;
+    use tokio::sync::Notify;
 
     /// A ledger with the SQL repository's semantics, in memory.
     #[derive(Default)]
@@ -322,6 +332,7 @@ mod tests {
         state: std::sync::Mutex<HashMap<String, (i64, u64)>>,
         reservations: AtomicUsize,
         delay: Duration,
+        first_response_stalled: Option<Notify>,
     }
 
     impl TestLedger {
@@ -345,7 +356,7 @@ mod tests {
             limit: u64,
             units: u64,
         ) -> Result<Reservation> {
-            self.reservations.fetch_add(1, Ordering::SeqCst);
+            let attempt = self.reservations.fetch_add(1, Ordering::SeqCst);
             let reservation = {
                 let mut state = self.state.lock().unwrap();
                 let entry = state.entry(bucket.to_string()).or_insert((window_start, 0));
@@ -364,6 +375,12 @@ mod tests {
                 }
             };
             // Like SQL, the charge is applied before the response arrives.
+            if attempt == 0
+                && let Some(stalled) = &self.first_response_stalled
+            {
+                stalled.notify_one();
+                std::future::pending::<()>().await;
+            }
             tokio::time::sleep(self.delay).await;
             Ok(reservation)
         }
@@ -558,6 +575,41 @@ mod tests {
         assert_eq!(ledger.used("bucket"), 10);
         // The cancelled request spent its unit too: 1000 - 10 + (10 - 2).
         assert_eq!(decision.remaining, 998);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_timed_out_reservation_releases_the_bucket() {
+        let ledger = Arc::new(TestLedger {
+            first_response_stalled: Some(Notify::new()),
+            ..TestLedger::default()
+        });
+        let tracker = tracker(ledger.clone(), 1000);
+        let first_check = tokio::time::timeout(
+            RESERVATION_TIMEOUT + Duration::from_secs(1),
+            tracker.check("bucket", 1),
+        );
+        let advance_past_deadline = async {
+            let stalled = ledger.first_response_stalled.as_ref().unwrap();
+            tokio::time::timeout(Duration::from_secs(1), stalled.notified())
+                .await
+                .expect("the first reservation must reach the ledger");
+            tokio::time::advance(RESERVATION_TIMEOUT + Duration::from_millis(1)).await;
+        };
+        let (first, ()) = tokio::join!(first_check, advance_past_deadline);
+        assert!(matches!(
+            first.unwrap(),
+            Err(RateLimitError::BackendError(_))
+        ));
+        assert_eq!(ledger.used("bucket"), 10);
+
+        let decision = tokio::time::timeout(RESERVATION_TIMEOUT, tracker.check("bucket", 1))
+            .await
+            .expect("the timed-out reservation must release the bucket")
+            .unwrap();
+        assert!(decision.allowed);
+        assert_eq!(ledger.reservations.load(Ordering::SeqCst), 2);
+        assert_eq!(ledger.used("bucket"), 20);
+        assert_eq!(decision.remaining, 989);
     }
 
     #[test]

@@ -97,16 +97,17 @@ State is one key: the window marker and the counter are hash fields (`w:<window_
 Calendar-window quota (day, week, month, year) whose balance lives in SQL. The
 application supplies a `QuotaLedger` implementation; each replica reserves a
 batch with one atomic statement and consumes it in memory, so the request path
-has no store round trip. Batches shrink near the limit and a crash strands at
-most the unused part of one batch. `is_durable()` is true, which makes the
-gateway apply a closed failure policy.
+has no store round trip. Batches shrink near the limit. Each crash or reservation
+timeout can strand at most one batch per bucket. `is_durable()` is true, which
+makes the gateway apply a closed failure policy.
 
 `DurableQuotas` holds the ledger and the batches of one process. Build it once
 and pass it to every tracker: trackers of later configuration generations
 with the same window definition keep spending the same batches. A reservation
-runs in its own task, so a cancelled request still records the batch the
-ledger charged. A refused reservation reports the balance in use, and the
-tracker denies further requests in memory until the window changes.
+runs in its own task with a 5-second timeout per ledger call. If the request
+expires while a reservation is in flight, the task still spends the request's
+cost from any batch it receives. A refused reservation reports the balance in
+use, and the tracker denies further requests in memory until the window changes.
 
 ```rust
 use lim::DurableQuotas;

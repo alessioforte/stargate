@@ -1272,11 +1272,14 @@ limits:
 Each replica reserves a batch with one atomic SQL statement and spends it in
 memory, so the request path performs no quota round trip. The batch starts at 1%
 of the limit (at most 1024 units) and halves as the remaining headroom shrinks.
-Reserved units count as used even if the replica crashes before spending them,
-so replicas can never exceed the limit; a crash can strand at most one batch per
-bucket, `max(1, min(limit / 100, 1024))` units. Batches belong to the process:
-publishing a configuration keeps spending them, and a reservation completes even
-when the request that needed it runs out of time. Once a reservation is refused,
+Reserved units count as used as soon as SQL charges them, so replicas can never
+exceed the limit. Each crash or reservation timeout can strand at most one
+batch per bucket. A batch caps out at `max(1, min(limit / 100, 1024))` units
+unless the request itself costs more. Batches belong to the process and remain
+available across configuration publications. Each SQL reservation attempt has a
+5-second timeout, including a retry. If the request runs out of traffic budget
+while a reservation is in flight, its cost is still deducted from any batch the
+reservation returns. Once a reservation is refused,
 the replica knows the balance in use and denies in memory every request that no
 longer fits until the window ends, so an exhausted quota does not query SQL for
 every request.
