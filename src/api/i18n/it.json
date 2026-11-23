@@ -98,7 +98,6 @@
     "otp.request_rate_limited": "Troppe richieste di codici di verifica",
     "email.recipient_rate_limited": "Troppe email richieste per questo indirizzo",
     "otp.challenge_changed": "La verifica è cambiata; riprova",
-    "otp.unavailable": "La verifica OTP non è temporaneamente disponibile",
     "otp.email_unavailable": "La verifica OTP via email non è temporaneamente disponibile",
     "mfa.unavailable": "L'autenticazione a più fattori non è temporaneamente disponibile",
     "mfa.disabled": "L'autenticazione a più fattori è disabilitata",
