@@ -1273,9 +1273,21 @@ Each replica reserves a batch with one atomic SQL statement and spends it in
 memory, so the request path performs no quota round trip. The batch starts at 1%
 of the limit (at most 1024 units) and halves as the remaining headroom shrinks.
 Reserved units count as used even if the replica crashes before spending them,
-so replicas can never exceed the limit; a crash can strand at most one batch,
-`max(1, min(limit / 100, 1024))` units. A denied request does not reserve
-anything.
+so replicas can never exceed the limit; a crash can strand at most one batch per
+bucket, `max(1, min(limit / 100, 1024))` units. Batches belong to the process:
+publishing a configuration keeps spending them, and a reservation completes even
+when the request that needed it runs out of time. Once a reservation is refused,
+the replica knows the balance in use and denies in memory every request that no
+longer fits until the window ends, so an exhausted quota does not query SQL for
+every request.
+
+A long quota belongs to an authenticated subject or an organization, never to a
+client address that anyone can change. Compilation rejects a long quota with
+`on_missing: ip_fallback`, and a subject-scoped long quota on a router without
+an `auth` policy, naming the policy. At runtime, a check keyed by the client
+address never reaches SQL: it returns `500 gateway.limit_configuration_invalid`.
+Each replica removes the balances of deleted users, API keys and organizations
+every ten minutes, in batches of 1000 rows.
 
 Long quotas are always **fail-closed**: a SQL failure or an exhausted traffic
 budget (`ingress.timeout`, shared with the request's other traffic checks)
@@ -1308,6 +1320,9 @@ limits:
       timezone: Europe/Rome
 http:
   policies:
+    api-keys:
+      kind: auth
+      strategies: [api_key]
     api-rate:
       kind: rate_limit
       limit: default
@@ -1317,6 +1332,9 @@ http:
       limit: billing
       on_store_error: deny
 ```
+
+A router that applies `billing-quota` must also list an auth policy such as
+`api-keys`.
 
 `stargate.limits.store_errors` counts every failed traffic store check with bounded
 labels `stargate.point` (`gateway_ingress`, `iam_ingress`, `admin_principal`, `rate_limit`,

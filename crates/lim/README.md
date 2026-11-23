@@ -101,11 +101,20 @@ has no store round trip. Batches shrink near the limit and a crash strands at
 most the unused part of one batch. `is_durable()` is true, which makes the
 gateway apply a closed failure policy.
 
+`DurableQuotas` holds the ledger and the batches of one process. Build it once
+and pass it to every tracker: trackers of later configuration generations
+with the same window definition keep spending the same batches. A reservation
+runs in its own task, so a cancelled request still records the batch the
+ledger charged. A refused reservation reports the balance in use, and the
+tracker denies further requests in memory until the window changes.
+
 ```rust
+use lim::DurableQuotas;
 use lim::strategies::quota_tracker::{CalendarPeriod, CalendarWindow, DurableQuotaTracker};
 
+let quotas = DurableQuotas::new(ledger);
 let window = CalendarWindow::parse(CalendarPeriod::Month, "Europe/Rome", Some(15))?;
-DurableQuotaTracker::new(ledger, clock, 500_000, window)?;
+DurableQuotaTracker::new(&quotas, clock, 500_000, window)?;
 ```
 
 `CalendarWindow::bounds(now_secs)` resolves local-midnight boundaries, including
