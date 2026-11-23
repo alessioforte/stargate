@@ -976,6 +976,79 @@ def timed_unavailable(server, path, expected_code, budget, **kwargs):
     require(elapsed <= budget + HTTP_MARGIN_MS, f"{path}: {elapsed}ms exceeds {budget}ms budget")
 
 
+def account_flows_unavailable(server, token):
+    """OTP/MFA, password reset and signup state closes with the store."""
+    email = f"{server.username}@example.com"
+    for path, method, payload in (
+        ("/account/credentials", "POST", {"email": email}),
+        ("/signup", "POST", {"email": f"new-{secrets.token_hex(4)}@example.com"}),
+        ("/account/login/otp/email", "POST", {"email": email}),
+        (
+            "/account/login/otp/email",
+            "PUT",
+            {"challengeId": "0123456789abcdef0123456789abcdef", "code": "123456"},
+        ),
+        (
+            "/account/login/mfa/challenges/0123456789abcdef0123456789abcdef",
+            "PUT",
+            {"code": "123456"},
+        ),
+    ):
+        timed_unavailable(server, path, "auth.state_unavailable", SECURITY_MS,
+                          method=method, body=payload)
+    timed_unavailable(server, "/account/mfa/methods", "auth.state_unavailable",
+                      SECURITY_MS, token=token)
+
+
+def account_flows_recovered(server, token):
+    """The same account flows answer again once the store is back."""
+    email = f"{server.username}@example.com"
+    status, _, body, _ = request(
+        server.url("/account/credentials"), "POST", {"email": email}
+    )
+    require(
+        status == 200 and (body or {}).get("code") == "password.reset_requested",
+        f"password reset after recovery: {status} {body}",
+    )
+
+    status, _, body, _ = request(
+        server.url("/signup"), "POST",
+        {"email": f"new-{secrets.token_hex(4)}@example.com"},
+    )
+    require(
+        status == 200 and (body or {}).get("code") == "signup.requested",
+        f"signup after recovery: {status} {body}",
+    )
+
+    status, _, body, _ = request(
+        server.url("/account/login/otp/email"), "POST", {"email": email}
+    )
+    require(status == 200 and (body or {}).get("challengeId"),
+            f"passwordless start after recovery: {status} {body}")
+    challenge = body["challengeId"]
+    status, _, body, _ = request(
+        server.url("/account/login/otp/email"), "PUT",
+        {"challengeId": challenge, "code": "0000000"},
+    )
+    require(
+        status == 401 and (body or {}).get("code") == "otp.code_invalid",
+        f"passwordless verification after recovery: {status} {body}",
+    )
+
+    status, _, body, _ = request(server.url("/account/mfa/methods"), token=token)
+    require(status == 200 and (body or {}).get("mode"),
+            f"MFA methods after recovery: {status} {body}")
+    status, _, body, _ = request(
+        server.url("/account/login/mfa/challenges/0123456789abcdef0123456789abcdef"),
+        "PUT",
+        {"code": "123456"},
+    )
+    require(
+        status == 401 and (body or {}).get("code") == "otp.code_invalid_or_expired",
+        f"login MFA verification after recovery: {status} {body}",
+    )
+
+
 def scenario_partition(ctx):
     redis, redis_port = ctx.containers.run(ctx.args.redis_image, 6379)
     wait_redis(redis)
@@ -983,7 +1056,15 @@ def scenario_partition(ctx):
     upstream = HeldUpstream()
     load = None
     try:
-        server = start_server(ctx, "partition", proxy.url, config=upstream.config())
+        account_env = {
+            "SIGNUP_MODE": "open",
+            "PASSWORDLESS_LOGIN_ENABLED": "true",
+            "EMAIL_OTP_PEPPER": secrets.token_urlsafe(32),
+        }
+        server = start_server(
+            ctx, "partition", proxy.url, config=upstream.config(),
+            extra_env=account_env,
+        )
         server.wait_ready()
         token, _ = server.login()
         server.create_admin_key(token)
@@ -1024,6 +1105,7 @@ def scenario_partition(ctx):
             server, "/oauth/token", "server_error", SECURITY_MS,
             method="POST", form=credentials[2],
         )
+        account_flows_unavailable(server, token)
         require(request(deny.url("/readyz"))[0] == 200, "deny readiness followed Redis")
         require(request(server.url("/readyz"))[0] == 200, "allow readiness followed Redis")
         health = server.health()
@@ -1042,6 +1124,9 @@ def scenario_partition(ctx):
         wait_until(settled(server, token), 5, "limits and sessions did not recover")
         recovered = time.monotonic()
         require(all(s.proc.poll() is None for s in (server, deny)), "Stargate exited during partition")
+        account_flows_recovered(server, token)
+        account_recovery = round((time.monotonic() - fault_end) * 1000)
+        require(account_recovery <= 5000, f"account flows recovery exceeded 5s: {account_recovery}ms")
         deny_recovery = {}
         for name, path, needs_allowance in (
             ("iam_ingress_deny", "/account/features", False),
@@ -1083,7 +1168,8 @@ def scenario_partition(ctx):
         fault_end - fault_start, recovered - fault_end, "healthy",
     )
     result["recovery_by_endpoint_ms"] = recovery_by_endpoint(load, fault_end) | deny_recovery | {
-        "oauth_refresh": refresh_recovery
+        "oauth_refresh": refresh_recovery,
+        "account_flows": account_recovery,
     }
     return result
 
