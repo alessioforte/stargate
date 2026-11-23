@@ -9,8 +9,10 @@ certification; certification requires the hosted suite at
 ## What runs in CI
 
 [`.github/workflows/oidc-conformance.yml`](../.github/workflows/oidc-conformance.yml)
-runs on pushes and pull requests that touch the OIDC/JWT/login code, and on
-demand:
+runs the suite on pull requests that touch the OIDC/JWT/login code and on
+demand. The workflow itself runs on every pull request, so its
+`OIDC conformance` check always reports a result: the suite is skipped when the
+changed paths (`.github/paths/oidc-conformance.txt`) do not need it.
 
 1. Creates a test CA and a certificate it signs for the suite's hostname
    (`localhost.emobix.co.uk`), and starts the prebuilt suite images

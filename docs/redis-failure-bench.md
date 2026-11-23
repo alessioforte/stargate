@@ -51,13 +51,16 @@ on a disposable 3+3 cluster. Run both with the same image; the key schema is in
 
 ## CI
 
-`.github/workflows/redis-failures.yml` runs on pull requests that touch
-`crates/store`, `crates/lim`, `src/data/store`, the session, authentication and
-account-flow code (`src/iam/auth`, `src/iam/sess`, `src/iam/otp`, `src/iam/pwd`,
-`src/iam/user`, `src/iam/email_throttle.rs`, `src/api/account`, `src/api/signup`),
-the gateway limits and policies, startup and readiness (`src/main.rs`,
-`src/srv/health.rs`), the admin health report (`src/api/admin/health.rs`), the
-bench scripts and their fixture or this guide, and on manual dispatch:
+`.github/workflows/redis-failures.yml` runs its suites on pull requests that
+touch `crates/store`, `crates/lim`, `src/data/store`, the session,
+authentication and account-flow code (`src/iam/auth`, `src/iam/sess`,
+`src/iam/otp`, `src/iam/pwd`, `src/iam/user`, `src/iam/email_throttle.rs`,
+`src/api/account`, `src/api/signup`), the gateway limits and policies, startup
+and readiness (`src/main.rs`, `src/srv/health.rs`), the admin health report
+(`src/api/admin/health.rs`), the bench scripts and their fixture or this guide,
+and on manual dispatch. The workflow runs on every pull request, so its
+`Redis suites` check always reports a result; the suites are skipped when the
+changed paths (`.github/paths/redis-failures.txt`) do not need them:
 
 ```bash
 gh workflow run redis-failures.yml --ref main
