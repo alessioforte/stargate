@@ -694,3 +694,136 @@ async fn only_a_tls_listener_marks_cookies_secure_and_sends_hsts() {
 
     listeners.stop().await;
 }
+
+#[tokio::test]
+async fn listeners_without_admin_reserve_control_plane_paths_on_iam_hosts() {
+    let upstream = Upstream::start().await;
+    let gate = Arc::new(test_support::gate(config(&upstream.url)));
+    let hosts =
+        IamHosts::parse(Some("identity.example.com"), "https://identity.example.com").unwrap();
+    for planes in ["identity,gateway", "gateway"] {
+        let router = listener_router(
+            PlaneSet::parse(planes).unwrap(),
+            Lifecycle::default(),
+            hosts.clone(),
+        )
+        .layer(Extension(gate.clone()));
+        for path in [
+            "/admin",
+            "/admin/",
+            "/admin/me",
+            "/admin/unknown",
+            "/admin/me/",
+            "/stargate",
+            "/stargate/",
+            "/stargate/users",
+            "/stargate/assets/app.js",
+        ] {
+            for method in [Method::GET, Method::POST, Method::OPTIONS] {
+                let response = router
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(path)
+                            .header("host", "identity.example.com")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::NOT_FOUND, "{planes} {path}");
+            }
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("host", "api.example.com")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "non-IAM host {path}");
+            assert_eq!(text(response).await, format!("GET {path} 0"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn documentation_contains_only_the_listeners_planes() {
+    let gateway = Arc::new(test_support::gate(gate::cfg::Config::default()));
+    for planes in ["identity", "admin", "identity,admin", "admin,gateway"] {
+        let router = listener_router(
+            PlaneSet::parse(planes).unwrap(),
+            Lifecycle::default(),
+            IamHosts::default(),
+        )
+        .layer(Extension(gateway.clone()));
+        let response = router.oneshot(request(Method::GET, "/docs")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let doc: serde_json::Value = serde_json::from_str(&text(response).await).unwrap();
+        let paths = doc["paths"].as_object().unwrap();
+        assert_eq!(paths.contains_key("/admin/me"), planes.contains("admin"));
+        assert_eq!(
+            paths.contains_key("/account/profile"),
+            planes.contains("identity")
+        );
+        assert!(!paths.contains_key("/livez"));
+    }
+}
+
+#[tokio::test]
+async fn the_configured_console_path_is_reserved_on_public_listeners() {
+    const CHILD: &str = "STARGATE_CUSTOM_CONSOLE_BOUNDARY_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let output = crate::conf::child_test::run(
+            "api::plane::tests::the_configured_console_path_is_reserved_on_public_listeners",
+            |command| {
+                command
+                    .env(CHILD, "1")
+                    .env("CONSOLE_APP_BASE_PATH", "/control");
+            },
+        );
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let upstream = Upstream::start().await;
+    let router = listener_router(
+        PlaneSet::parse("identity,gateway").unwrap(),
+        Lifecycle::default(),
+        IamHosts::default(),
+    )
+    .layer(Extension(Arc::new(test_support::gate(config(
+        &upstream.url,
+    )))));
+    for path in [
+        "/control",
+        "/control/",
+        "/control/users",
+        "/control/assets/app.js",
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(Method::GET, path))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+    let response = router
+        .oneshot(request(Method::GET, "/stargate"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(text(response).await, "GET /stargate 0");
+}

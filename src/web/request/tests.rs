@@ -26,9 +26,27 @@ fn token_from_cookie_jwt() {
 }
 
 #[test]
-fn token_from_query_access_token() {
-    let r = req_with(&[], Some("foo=1&access_token=qtok&bar=2"));
-    assert_eq!(r.get_token().as_deref(), Some("qtok"));
+fn only_the_gateway_reads_query_credentials() {
+    for key in super::TOKEN_QUERY_KEYS {
+        let r = req_with(&[], Some(&format!("foo=1&{key}=qtok&bar=2")));
+        assert_eq!(r.get_token(), None);
+        assert_eq!(r.get_bearer_token(), None);
+        assert_eq!(r.get_gateway_token().as_deref(), Some("qtok"));
+    }
+}
+
+#[test]
+fn header_credentials_take_precedence_over_cookies_and_query() {
+    let r = req_with(
+        &[("authorization", "Bearer header"), ("cookie", "jwt=cookie")],
+        Some("token=query"),
+    );
+    assert_eq!(r.get_bearer_token().as_deref(), Some("header"));
+    assert_eq!(r.get_token().as_deref(), Some("header"));
+    assert_eq!(r.get_gateway_token().as_deref(), Some("header"));
+    let r = req_with(&[("cookie", "jwt=cookie")], Some("token=query"));
+    assert_eq!(r.get_bearer_token(), None);
+    assert_eq!(r.get_token().as_deref(), Some("cookie"));
 }
 
 #[test]

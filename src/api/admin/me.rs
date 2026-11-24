@@ -61,6 +61,7 @@ fn timestamp(value: usize) -> Result<String, ErrorResponse> {
     summary = "Current admin",
     description = "Returns the server-validated principal, authentication metadata, and effective permissions for the current admin principal.",
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Authenticated admin", body = AdminMe),
         (status = 401, description = "Invalid or expired token", body = ErrorResponse),
         (status = 403, description = "Authenticated principal is not an admin", body = ErrorResponse),

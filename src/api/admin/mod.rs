@@ -228,7 +228,10 @@ async fn extract_authorization_for(
     next: Next,
     boundary: AuditRouteBoundary,
 ) -> Response {
-    let token = req.get_token();
+    let token = match boundary {
+        AuditRouteBoundary::AdminControlPlane => req.get_bearer_token(),
+        AuditRouteBoundary::Application => req.get_token(),
+    };
     let raw_key = req.get_api_key();
     let resolution = match resolve_authorization(token, raw_key).await {
         Ok(resolution) => resolution,

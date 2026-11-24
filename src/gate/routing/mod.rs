@@ -1,4 +1,6 @@
+mod hosts;
 pub(in crate::gate) mod path;
+pub(super) use hosts::warn_shared_origin;
 
 use self::path::path_matches;
 use crate::web::request::RequestExt;

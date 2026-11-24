@@ -48,7 +48,10 @@ pub fn router() -> axum::Router {
             "/oauth/logout/confirm",
             post(post_logout_confirm).layer(from_fn(crate::web::origin::trusted_origin_middleware)),
         )
-        .route("/oauth/interactions/{interaction_id}", get(get_interaction))
+        .route(
+            "/oauth/interactions/{interaction_id}",
+            get(get_interaction).layer(from_fn(crate::web::origin::trusted_origin_middleware)),
+        )
         .route(
             "/oauth/interactions/{interaction_id}/consent",
             post(post_consent).layer(from_fn(crate::web::origin::trusted_origin_middleware)),

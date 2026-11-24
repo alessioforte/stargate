@@ -1,3 +1,4 @@
+use crate::web::request::RequestExt;
 mod concurrency;
 #[cfg(feature = "redis")]
 mod delayed_publication;
@@ -148,7 +149,7 @@ async fn subject(token: &str) -> Subject {
         .header(header::AUTHORIZATION, bearer(token))
         .body(Body::empty())
         .unwrap();
-    verify_bearer(&req)
+    verify_bearer(req.get_token())
         .await
         .expect("security state available")
         .expect("valid session token")
@@ -283,6 +284,17 @@ async fn suite() {
     )
     .unwrap();
     let router = super::router().layer(Extension(Arc::new(gateway)));
+
+    let response = send(
+        &router,
+        Request::get("/admin/me")
+            .header("x-api-key", &admin_key)
+            .body(Body::empty())
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert!(response["adminKeyId"].is_string());
 
     let user = create_user().await;
     let (sid, native, native_refresh, oauth) = start_session(&user, None).await;

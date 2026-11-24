@@ -20,11 +20,6 @@ pub struct SignupCompleteRequestBody {
     pub phone_number: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SignupVerificationParams {
-    pub token: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SignupRequestBody {

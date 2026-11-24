@@ -68,6 +68,7 @@ pub struct UpdateConfigurationResponse {
     tags = ["Admin", "Configurations"],
     params(ConfigFormatQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Gateway configuration document", body = ConfigurationDocument),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -100,6 +101,7 @@ pub async fn get_configurations(req: Request) -> Result<Response, ErrorResponse>
     tags = ["Admin", "Configurations"],
     request_body = UpdateConfigurationRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Configuration saved", body = UpdateConfigurationResponse),
         (status = 400, description = "Invalid configuration", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),

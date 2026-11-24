@@ -113,7 +113,7 @@ export default class AuthService {
     const response = await this.http.request<SignupVerificationResponse>({
       method: "GET",
       url: `${this.baseURL}/signup`,
-      params: { token },
+      headers: { Authorization: `Bearer ${token}` },
     });
     return response;
   }

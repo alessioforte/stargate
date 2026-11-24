@@ -108,6 +108,7 @@ fn user_name(user: &db::ent::User) -> String {
     description = "Returns active login sessions ordered by most recent token refresh. Results can be filtered by user, organization, or OAuth client.",
     params(ListSessionsQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Active sessions retrieved", body = PaginatedAdminSessions),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -194,6 +195,7 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
     description = "Immediately revokes one stable login session, including native refresh and Stargate-validated user OAuth tokens linked to it.",
     params(("session_id" = String, Path, description = "Stable session ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Session revoked", body = SessionRevocationResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -247,6 +249,7 @@ pub async fn delete_session(
     description = "Immediately revokes every active login session belonging to one user.",
     params(("user_id" = String, Path, description = "User ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User sessions revoked", body = UserSessionsRevocationResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

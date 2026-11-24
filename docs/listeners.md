@@ -65,6 +65,12 @@ states its own values.
 
 ### Planes
 
+On IAM hosts, listeners without `admin` reserve `/admin` and the configured
+Console path (including descendants) with `404`; a gateway catch-all cannot
+forward them. Other hosts keep gateway routing. Identity and admin listeners
+serve `/docs`, containing only the planes that listener serves. Admin API
+credentials must use `Authorization: Bearer` or `x-api-key` headers.
+
 | Plane        | Routes                                                                 |
 | ------------ | ---------------------------------------------------------------------- |
 | `management` | `/livez`, `/readyz`                                                    |
