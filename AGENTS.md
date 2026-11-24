@@ -1154,6 +1154,28 @@ RUSTSEC-2026-0459). Rust sources are unchanged. Details, integrity pins and the
 removal condition are in `vendor/README.md`, `VERSIONS.md` and `versions.json`.
 Keep the vendor directory available in Docker planner/cook/build stages.
 
+### CI Workflows
+
+GitHub Actions checks pull requests; a merge to `main` starts no CI run, so the
+checks on a pull request updated with `main` cover the tree the squash merge
+creates.
+
+| Workflow | Runs |
+|:--|:--|
+| `ci.yml` | Every pull request, weekly on `main` (Monday at 03:43 UTC), and as the reusable test job of `release.yml` (tags and manual release runs). |
+| `oidc-conformance.yml` | Every pull request and manual dispatch. The suite runs only when the changes match `.github/paths/oidc-conformance.txt`; otherwise the required `OIDC conformance` summary job reports success. |
+| `redis-failures.yml` | Every pull request and manual dispatch. The suites run only when the changes match `.github/paths/redis-failures.txt`; otherwise the required `Redis suites` summary job reports success. |
+| `dependency-audit.yml` | Daily at 04:17 UTC and manual dispatch: `cargo audit` and `.github/scripts/check-npm-audit.py` for `apps/auth`, `apps/console` and `apps/mail`. |
+| `release.yml` | Tags `v*.*.*` and manual dispatch. |
+
+Rust and npm audits run on every pull request, independently of application
+lint and build checks. Their required `Dependency audits` summary enforces the
+results only when paths match `.github/paths/dependency-audit.txt`: Cargo and npm
+manifests or lockfiles, `.cargo/audit.toml`, and
+`.github/npm-audit-exceptions.toml`. On other pull requests audit failures remain
+visible and informational; application lint and build checks stay required.
+Weekly and release runs always enforce the audits.
+
 ## CLI
 
 ```bash

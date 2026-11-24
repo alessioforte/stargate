@@ -1,0 +1,25 @@
+# Files that require the conformance suite, using GitHub Actions path globs.
+src/main.rs
+src/api/mod.rs
+src/api/plane.rs
+src/api/dispatch.rs
+crates/jwt/**
+crates/oidc/**
+src/api/oidc/**
+src/iam/auth/**
+src/iam/authz/evaluation.rs
+src/iam/pwd/hash.rs
+src/iam/sess/registry.rs
+src/iam/oidc/**
+src/api/admin/oauth_clients.rs
+src/api/account/login.rs
+src/api/account/logout.rs
+src/api/account/session.rs
+src/web/cookies.rs
+src/api/apps/auth.rs
+apps/auth/**
+migrations/**
+Cargo.lock
+.github/oidc-conformance/**
+.github/workflows/oidc-conformance.yml
+.github/paths/oidc-conformance.txt

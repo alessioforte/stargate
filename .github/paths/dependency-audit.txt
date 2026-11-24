@@ -1,0 +1,7 @@
+# Dependency and audit-exception changes make audit results blocking.
+**/Cargo.toml
+**/Cargo.lock
+.cargo/audit.toml
+**/package.json
+**/package-lock.json
+.github/npm-audit-exceptions.toml

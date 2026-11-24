@@ -1,0 +1,53 @@
+name: Dependency audit
+
+# Advisory databases change between pushes. This workflow reports new Rust and
+# npm advisories without waiting for a pull request; run it by hand with:
+#   gh workflow run dependency-audit.yml --ref main
+
+on:
+  schedule:
+    # Daily at 04:17 UTC, away from the top of the hour.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: dependency-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rust:
+    name: Rust audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master (2026-10-01; no versioned releases)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: audit
+      - run: cargo install cargo-audit --locked
+      # Ignored advisories and their reasons live in .cargo/audit.toml.
+      - run: cargo audit
+
+  npm:
+    name: npm audit (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [auth, console, mail]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.23.4
+      # The script reads the lockfile, so node_modules is not needed, and high
+      # or critical advisories fail unless .github/npm-audit-exceptions.toml
+      # documents an exception. Do not enable setup-node's npm caching here: it
+      # shares the app jobs' key and would save almost nothing usable.
+      - run: python3 -I .github/scripts/check-npm-audit.py apps/${{ matrix.app }}
