@@ -677,6 +677,7 @@ fn require_client_mutation(
     tags = ["Admin", "OAuth Clients"],
     params(ListOAuthClientsQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth clients retrieved successfully", body = PaginatedResponse<OAuthClientSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -727,6 +728,7 @@ pub async fn get_oauth_clients(req: Request) -> Result<Response, ErrorResponse> 
     tags = ["Admin", "OAuth Clients"],
     params(("client_id" = String, Path, description = "OAuth client ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth client retrieved successfully", body = OAuthClientSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -748,6 +750,7 @@ pub async fn get_oauth_client(mut req: Request) -> Result<Response, ErrorRespons
     tags = ["Admin", "OAuth Clients"],
     request_body = CreateOAuthClientRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 201, description = "OAuth client created successfully", body = CreateOAuthClientResponse),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -817,6 +820,7 @@ pub async fn create_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     params(("client_id" = String, Path, description = "OAuth client ID")),
     request_body = UpdateOAuthClientRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth client updated successfully", body = OAuthClientSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -853,6 +857,7 @@ pub async fn update_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     params(("client_id" = String, Path, description = "OAuth client ID")),
     request_body = PatchOAuthClientRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth client patched successfully", body = OAuthClientSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -888,6 +893,7 @@ pub async fn patch_oauth_client(mut req: Request) -> Result<Response, ErrorRespo
     tags = ["Admin", "OAuth Clients"],
     params(("client_id" = String, Path, description = "OAuth client ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth client disabled successfully", body = OAuthClientSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -914,6 +920,7 @@ pub async fn disable_oauth_client(mut req: Request) -> Result<Response, ErrorRes
     tags = ["Admin", "OAuth Clients"],
     params(("client_id" = String, Path, description = "OAuth client ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth client enabled successfully", body = OAuthClientSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -940,6 +947,7 @@ pub async fn enable_oauth_client(mut req: Request) -> Result<Response, ErrorResp
     tags = ["Admin", "OAuth Clients"],
     params(("client_id" = String, Path, description = "OAuth client ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth client secret rotated successfully", body = RotateOAuthClientSecretResponse),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -982,6 +990,7 @@ pub async fn rotate_oauth_client_secret(mut req: Request) -> Result<Response, Er
     tags = ["Admin", "OAuth Clients"],
     params(("client_id" = String, Path, description = "OAuth client ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "OAuth client deleted successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

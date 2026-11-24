@@ -69,6 +69,7 @@ pub struct UpdateOrganizationRequest {
     tags = ["Admin", "Organizations"],
     params(ListOrganizationsQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "List of organizations retrieved successfully", body = PaginatedResponse<OrganizationSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -118,6 +119,7 @@ pub async fn get_organizations(req: Request) -> Result<Response, ErrorResponse> 
     tags = ["Admin", "Organizations"],
     params(("id" = String, Path, description = "Organization ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Organization retrieved successfully", body = OrganizationSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -146,6 +148,7 @@ pub async fn get_organization(mut req: Request) -> Result<Response, ErrorRespons
     tags = ["Admin", "Organizations"],
     request_body = CreateOrganizationRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 201, description = "Organization created successfully", body = OrganizationSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -186,6 +189,7 @@ pub async fn create_organization(mut req: Request) -> Result<Response, ErrorResp
     params(("id" = String, Path, description = "Organization ID")),
     request_body = UpdateOrganizationRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Organization updated successfully", body = OrganizationSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -246,6 +250,7 @@ pub async fn update_organization(mut req: Request) -> Result<Response, ErrorResp
     tags = ["Admin", "Organizations"],
     params(("id" = String, Path, description = "Organization ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 204, description = "Organization deleted successfully"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),

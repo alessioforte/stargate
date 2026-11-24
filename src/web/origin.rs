@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 const TRUSTED_ORIGINS_ENV: &str = "TRUSTED_ORIGINS";
 
-static TRUSTED_ORIGINS: OnceLock<Option<TrustedOrigins>> = OnceLock::new();
+static TRUSTED_ORIGINS: OnceLock<TrustedOrigins> = OnceLock::new();
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Origin {
@@ -90,12 +90,8 @@ impl Origin {
 }
 
 impl TrustedOrigins {
-    fn parse(raw: &str) -> Result<Option<Self>, String> {
+    fn parse(raw: &str) -> Result<Self, String> {
         let raw = raw.trim();
-        if raw.is_empty() {
-            return Ok(None);
-        }
-
         let mut origins = HashSet::new();
         for entry in raw
             .split(',')
@@ -108,11 +104,7 @@ impl TrustedOrigins {
             origins.insert(Origin::parse(entry)?);
         }
 
-        if origins.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(Self { origins }))
-        }
+        Ok(Self { origins })
     }
 
     fn allows_header_origin(&self, raw: &str) -> bool {
@@ -122,38 +114,35 @@ impl TrustedOrigins {
     }
 }
 
-/// Reads and validates `TRUSTED_ORIGINS`; the server calls it once at startup,
-/// so an invalid value stops it instead of failing every sensitive request.
+fn settings() -> Result<TrustedOrigins, String> {
+    let mut trusted =
+        TrustedOrigins::parse(&std::env::var(TRUSTED_ORIGINS_ENV).unwrap_or_default())
+            .map_err(|error| format!("{TRUSTED_ORIGINS_ENV}: {error}"))?;
+    let public_url = url::Url::parse(&crate::conf::public_base_url())
+        .map_err(|error| format!("Invalid public base URL for browser origin checks: {error}"))?;
+    trusted
+        .origins
+        .insert(Origin::parse(&public_url.origin().ascii_serialization())?);
+    Ok(trusted)
+}
+
+/// The public origin is always trusted; configuration adds explicit browser origins.
 pub(crate) fn init() -> Result<(), String> {
-    let raw = std::env::var(TRUSTED_ORIGINS_ENV).unwrap_or_default();
-    let trusted =
-        TrustedOrigins::parse(&raw).map_err(|error| format!("{TRUSTED_ORIGINS_ENV}: {error}"))?;
-    if let Some(trusted) = &trusted {
-        tracing::info!(
-            "Trusted browser origins configured: {} entries from {TRUSTED_ORIGINS_ENV}",
-            trusted.origins.len()
-        );
-    }
-    let _ = TRUSTED_ORIGINS.set(trusted);
+    let _ = TRUSTED_ORIGINS.set(settings()?);
     Ok(())
 }
 
-/// The validated origins. Outside the server (tests) they are read on first use.
-fn trusted_origins() -> Option<&'static TrustedOrigins> {
-    TRUSTED_ORIGINS
-        .get_or_init(|| {
-            TrustedOrigins::parse(&std::env::var(TRUSTED_ORIGINS_ENV).unwrap_or_default())
-                .expect("TRUSTED_ORIGINS is validated at startup")
-        })
-        .as_ref()
+fn trusted_origins() -> &'static TrustedOrigins {
+    TRUSTED_ORIGINS.get_or_init(|| settings().expect("browser origins are validated at startup"))
 }
 
-/// The trusted origins as browser-serialized URLs, for destinations that must
-/// stay on this deployment (the social sign-in `return_to`).
+/// Browser-serialized URLs for deployment-bound destinations (social sign-in).
 pub(crate) fn configured_origin_urls() -> Vec<String> {
     trusted_origins()
-        .map(|trusted| trusted.origins.iter().map(Origin::to_url).collect())
-        .unwrap_or_default()
+        .origins
+        .iter()
+        .map(Origin::to_url)
+        .collect()
 }
 
 fn origin_decision(
@@ -167,7 +156,17 @@ fn origin_decision(
 
     let mut values = headers.get_all(ORIGIN).iter();
     let Some(value) = values.next() else {
-        return OriginDecision::Allowed;
+        // Fetch Metadata §2.3: same-site includes sibling origins, which are
+        // not trusted implicitly. An explicit trusted Origin above can permit
+        // a hosted app on another origin. Unknown values are ignored per §2.3.
+        // https://www.w3.org/TR/fetch-metadata/#sec-fetch-site-header
+        return match headers
+            .get("sec-fetch-site")
+            .and_then(|value| value.to_str().ok())
+        {
+            Some("same-site" | "cross-site") => OriginDecision::Denied,
+            _ => OriginDecision::Allowed,
+        };
     };
     if values.next().is_some() {
         return OriginDecision::Denied;
@@ -185,16 +184,18 @@ fn origin_decision(
 }
 
 pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
-    let Some(trusted) = trusted_origins() else {
-        return next.run(req).await;
-    };
-
-    match origin_decision(req.method(), req.headers(), trusted) {
+    let mut response = match origin_decision(req.method(), req.headers(), trusted_origins()) {
         OriginDecision::Allowed => next.run(req).await,
         OriginDecision::Denied => {
             ErrorResponse::new(ErrorCode::AuthUntrustedOrigin).into_response()
         }
-    }
+    };
+    // Fetch Metadata §5.1: caches must not reuse a decision for another initiator.
+    response.headers_mut().append(
+        http::header::VARY,
+        HeaderValue::from_static("Origin, Sec-Fetch-Site"),
+    );
+    response
 }
 
 #[cfg(test)]
@@ -202,7 +203,7 @@ mod tests {
     use super::*;
 
     fn trusted(raw: &str) -> TrustedOrigins {
-        TrustedOrigins::parse(raw).unwrap().unwrap()
+        TrustedOrigins::parse(raw).unwrap()
     }
 
     fn decision(origin: Option<&str>, trusted: &TrustedOrigins) -> OriginDecision {
@@ -214,9 +215,9 @@ mod tests {
     }
 
     #[test]
-    fn empty_config_disables_guard() {
-        assert!(TrustedOrigins::parse("").unwrap().is_none());
-        assert!(TrustedOrigins::parse(" , ").unwrap().is_none());
+    fn empty_config_adds_no_extra_trusted_origins() {
+        assert!(TrustedOrigins::parse("").unwrap().origins.is_empty());
+        assert!(TrustedOrigins::parse(" , ").unwrap().origins.is_empty());
     }
 
     #[test]
@@ -275,6 +276,77 @@ mod tests {
         assert!(TrustedOrigins::parse("https://*.example.com").is_err());
         assert!(TrustedOrigins::parse("https://app.example.com/login").is_err());
         assert!(TrustedOrigins::parse("ftp://app.example.com").is_err());
+    }
+
+    #[test]
+    fn fetch_metadata_rejects_sibling_and_cross_site_requests_without_origin() {
+        let trusted = trusted("https://identity.example.com,https://auth.example.com");
+        for site in ["same-site", "cross-site"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("sec-fetch-site", site.parse().unwrap());
+            assert_eq!(
+                origin_decision(&Method::GET, &headers, &trusted),
+                OriginDecision::Denied
+            );
+            headers.insert(ORIGIN, "https://auth.example.com".parse().unwrap());
+            assert_eq!(
+                origin_decision(&Method::POST, &headers, &trusted),
+                OriginDecision::Allowed
+            );
+        }
+        for site in ["same-origin", "none", "future-value"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("sec-fetch-site", site.parse().unwrap());
+            assert_eq!(
+                origin_decision(&Method::POST, &headers, &trusted),
+                OriginDecision::Allowed
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_origins_are_not_trusted() {
+        let trusted = trusted("https://identity.example.com");
+        let mut headers = HeaderMap::new();
+        headers.append(ORIGIN, "https://identity.example.com".parse().unwrap());
+        headers.append(ORIGIN, "https://identity.example.com".parse().unwrap());
+        assert_eq!(
+            origin_decision(&Method::POST, &headers, &trusted),
+            OriginDecision::Denied
+        );
+    }
+
+    #[test]
+    fn the_public_origin_guard_is_enabled_without_extra_configuration() {
+        const CHILD: &str = "STARGATE_ORIGIN_GUARD_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = crate::conf::child_test::run(
+                "web::origin::tests::the_public_origin_guard_is_enabled_without_extra_configuration",
+                |command| {
+                    command
+                        .env(CHILD, "1")
+                        .env_remove("TRUSTED_ORIGINS")
+                        .env("OAUTH_BASE_URL", "https://identity.example.com/identity");
+                },
+            );
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        init().unwrap();
+        let trusted = trusted_origins();
+        assert_eq!(
+            decision(Some("https://identity.example.com"), trusted),
+            OriginDecision::Allowed
+        );
+        assert_eq!(
+            decision(Some("https://evil.example.com"), trusted),
+            OriginDecision::Denied
+        );
     }
 
     #[test]

@@ -106,7 +106,7 @@ pub struct AdminHealth {
     description = "Returns detailed status of Stargate and its dependencies. Requires super_admin.",
     responses(
         (status = 200, description = "Diagnostics available (inspect dependency and limit statuses)", body = AdminHealth),
-        (status = 503, description = "Database unhealthy", body = AdminHealth),
+        (status = 503, description = "Database unhealthy or security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = AdminHealthUnavailable, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
     )
 )]
 pub async fn get_admin_health(req: Request) -> Result<Response, ErrorResponse> {
@@ -430,4 +430,13 @@ mod fail_open_tests {
         })
         .await;
     }
+}
+
+/// Readiness diagnostics and authentication failures have distinct envelopes.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum AdminHealthUnavailable {
+    Health(Box<AdminHealth>),
+    State(ErrorResponse),
 }

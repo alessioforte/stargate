@@ -81,7 +81,15 @@ pub fn router() -> axum::Router {
             "/account/credentials",
             post(credentials::forgot::post_credentials).put(credentials::reset::put_credentials),
         )
-        .route("/account/profile", put(profile::put_profile))
+        .route(
+            "/account/profile",
+            get(profile::get_profile).put(profile::put_profile),
+        )
+        .route("/account/consents", get(consents::get_consents))
+        .route(
+            "/account/organizations",
+            get(organizations::get_account_organizations),
+        )
         .route(
             "/account/consents/{client_id}",
             delete(consents::delete_consent),
@@ -91,12 +99,6 @@ pub fn router() -> axum::Router {
     axum::Router::new()
         .merge(sensitive)
         .route("/account/features", get(features::get_features))
-        .route("/account/profile", get(profile::get_profile))
-        .route("/account/consents", get(consents::get_consents))
-        .route(
-            "/account/organizations",
-            get(organizations::get_account_organizations),
-        )
         .route(
             "/account/password-policy",
             get(password_policy::get_password_policy),

@@ -286,11 +286,13 @@ async fn account_flows_stay_closed_on_store_errors() {
         )
         .unwrap();
     assert_unavailable(
-        crate::api::signup::verification::get_signup(axum::extract::Query(
-            crate::api::signup::SignupVerificationParams {
-                token: verification,
-            },
-        ))
+        crate::api::signup::verification::get_signup(
+            http::Request::builder()
+                .uri("/signup")
+                .header("authorization", format!("Bearer {}", verification))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap_err(),
     );

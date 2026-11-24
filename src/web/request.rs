@@ -6,6 +6,8 @@ use tools::Locale;
 pub(crate) const TOKEN_QUERY_KEYS: &[&str] = &["token", "access_token", "jwt"];
 
 pub trait RequestExt {
+    fn get_bearer_token(&self) -> Option<String>;
+    fn get_gateway_token(&self) -> Option<String>;
     fn get_token(&self) -> Option<String>;
     fn get_api_key(&self) -> Option<String>;
     fn get_protocol(&self) -> &'static str;
@@ -162,14 +164,19 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 }
 
 impl<B> RequestExt for Request<B> {
+    fn get_bearer_token(&self) -> Option<String> {
+        token_from_authorization(self.headers())
+    }
+
+    /// Gateway credential extraction is separate from the IAM API contract.
+    fn get_gateway_token(&self) -> Option<String> {
+        self.get_token()
+            .or_else(|| token_from_query(self.uri().query()))
+    }
+
     fn get_token(&self) -> Option<String> {
-        if let Some(t) = token_from_authorization(self.headers()) {
-            return Some(t);
-        }
-        if let Some(t) = token_from_cookie(self.headers()) {
-            return Some(t);
-        }
-        token_from_query(self.uri().query())
+        self.get_bearer_token()
+            .or_else(|| token_from_cookie(self.headers()))
     }
 
     fn get_api_key(&self) -> Option<String> {

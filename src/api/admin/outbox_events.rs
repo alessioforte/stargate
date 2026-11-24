@@ -109,6 +109,7 @@ pub struct PaginatedOutboxEventsResponse {
     description = "Returns audit outbox rows without claiming, locking, publishing, or otherwise changing them. Requires super_admin.",
     params(ListOutboxEventsQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Outbox events retrieved successfully", body = PaginatedOutboxEventsResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -152,6 +153,7 @@ pub async fn get_outbox_events(req: Request) -> Result<Response, ErrorResponse> 
     description = "Returns one audit outbox row without changing its delivery state. Requires super_admin.",
     params(("event_id" = String, Path, description = "Audit event ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Outbox event retrieved successfully", body = OutboxEventSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

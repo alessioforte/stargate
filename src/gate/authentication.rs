@@ -1,5 +1,6 @@
 use crate::err::ErrorResponse;
 use crate::iam::auth::{identity::VerifiedIdentity, verification};
+use crate::web::request::RequestExt;
 use axum::body::Body;
 use http::Request;
 
@@ -11,7 +12,7 @@ pub(super) async fn authenticate(auth_req: Request<()>) -> Result<VerifiedIdenti
     if let Some(identity) = verification::verify_api_key(&auth_req).await? {
         return Ok(identity);
     }
-    Ok(verification::verify_bearer(&auth_req)
+    Ok(verification::verify_bearer(auth_req.get_gateway_token())
         .await?
         .unwrap_or_else(VerifiedIdentity::anonymous))
 }

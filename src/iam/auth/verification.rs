@@ -149,10 +149,10 @@ async fn verify_oauth_claims(
 
 /// Verify a native session JWT or a user-delegated OAuth access token and bind
 /// it to the current subject loaded from trusted session state.
-pub async fn verify_bearer<R: RequestExt + ?Sized>(
-    req: &R,
+pub async fn verify_bearer(
+    token: Option<String>,
 ) -> Result<Option<VerifiedIdentity>, ErrorResponse> {
-    let Some(token) = req.get_token() else {
+    let Some(token) = token else {
         return Ok(None);
     };
 
@@ -214,7 +214,10 @@ mod tests {
                     .set(&key, &PublishedSubject::from(subject), Some(60))
                     .await
                     .unwrap();
-                assert_eq!(verify_bearer(&req).await.unwrap().is_some(), accepted);
+                assert_eq!(
+                    verify_bearer(req.get_token()).await.unwrap().is_some(),
+                    accepted
+                );
             }
         });
     }

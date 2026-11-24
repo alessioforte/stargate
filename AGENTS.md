@@ -1224,7 +1224,7 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
   remain usable. `/admin/health` returns `200` with healthy SQL even when Redis is
   unhealthy and exposes `limits.storeDegraded`. Login guard, OTP/email throttles,
   sessions/JWT revocation and OAuth state remain fail-closed. See `docs/health-probes.md`.
-- `GET /docs` (OpenAPI JSON), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
+- `GET /docs` (OpenAPI JSON for the receiving listener’s planes; served with identity/admin), `GET /docs/errors` (error catalog), `GET /i18n/{locale}` (`en`, `it`)
 - `/.well-known/*`: OAuth/OIDC metadata, JWKS, `stargate-context-jwks.json`
 - `/account/*`: login, logout, profile, refresh, credentials, organizations, consents, OTP/MFA,
   `features` (public: available sign-in options)
@@ -1240,6 +1240,10 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
 - `/signup/*`: registration + email verification
 - `/admin/*`: users (+ invitations), orgs, API/admin keys, OAuth clients, service accounts,
   config, access-control rules, sessions, outbox events, `me`, `overview`, `health`.
+  Admin credentials come only from `Authorization: Bearer` or `x-api-key`, including
+  admin privileges on `/oauth/introspect` and `/oauth/revoke`. Session cookies and
+  query parameters grant no admin privileges on any of these routes. Every admin
+  endpoint documents `503 auth.state_unavailable` with `Retry-After: 10`.
   Super-admin users bypass capability checks; admin keys need exact `<resource>:<action>`
   permissions (`src/api/admin/authorization.rs`).
   Capabilities never permit mutations of super-admin accounts: profile/attrs,
@@ -1273,6 +1277,25 @@ limit still applies. Path normalization, CORS, and compression belong to the
 planes Stargate answers itself: a trailing slash is trimmed before those routes
 match and the gateway plane restores the client's URI, so an upstream receives
 the path the client sent and owns its own preflights and content encoding.
+Listeners without the admin plane reserve `/admin` and the configured Console
+base path (including their descendants) on IAM hosts with `404`, even with a
+catch-all gateway router. Other hosts keep gateway routing. `/docs` is served on
+identity and admin listeners and includes only the planes that listener serves.
+IAM APIs never authenticate session/access tokens from query parameters. Signup
+verification (`GET /signup`) takes its purpose token in `Authorization: Bearer`;
+the auth app extracts it from the emailed page URL before making that API call.
+OAuth/OIDC protocol parameters such as `code`, `state`, and `id_token_hint` retain
+their specified transport; UserInfo POST still accepts form `access_token`.
+
+The origin guard is active by default on sensitive account and signup routes, social state,
+OIDC login/consent, interaction reads and logout confirmation. It trusts the public
+base URL's origin plus explicit `TRUSTED_ORIGINS`; neither request Host nor CORS
+adds trust. An untrusted/opaque/duplicate Origin is rejected; without Origin,
+`Sec-Fetch-Site: same-site|cross-site` is rejected too. Requests without either
+header remain usable by non-browser clients; OPTIONS passes to CORS. OIDC
+`/oauth/authorize` and `/oauth/logout` retain cross-origin browser entry for their
+specified RP flows. The server warns at startup when `IAM_HOSTS` is empty and a
+gateway router can match without a positive host constraint.
 `main.rs` adds security headers and tracing to every listener's router.
 
 IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's

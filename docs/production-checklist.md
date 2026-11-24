@@ -43,6 +43,26 @@ example hostname, CIDR, Secret name and image tag.
 - [ ] **Internal context** (if backends verify `stargate-context`): signing key Secret from
       `stargate internal-context generate-key`; backends fetch the JWKS through the public
       identity host, never the Stargate Service.
+- [ ] **Plane separation**: configure named `LISTENERS` with `identity,gateway` on
+      the public listener and `admin` on restricted listener(s). On IAM hosts,
+      public `/admin` and the configured Console path must return Stargate `404`;
+      `/docs` on that listener must not list admin operations. The chart overlays
+      still require their own listener/Service configuration; the application
+      does not infer separation from an ingress allow-list.
+- [ ] **Origin isolation**: set `IAM_HOSTS` to dedicated identity/admin hostnames and
+      constrain gateway routers to API hosts. Resolve the startup warning about
+      unrestricted IAM hosts and hostless gateway routers. An upstream sharing the
+      IAM origin can make same-origin requests despite browser origin checks.
+- [ ] **Browser origins**: the origin guard trusts the public URL by default. Add
+      hosted app origins explicitly to `TRUSTED_ORIGINS` and configure CORS
+      separately. Missing `Origin` with `Sec-Fetch-Site: same-site` or `cross-site`
+      is denied on sensitive IAM routes; non-browser calls without those headers
+      remain supported. Test any reverse proxy preserves both headers.
+- [ ] **Admin credentials**: use bearer tokens or `x-api-key` headers. Cookies and
+      query credentials cannot authenticate `/admin`; IAM access tokens in query
+      parameters are ignored. `GET /signup` verification uses a bearer purpose
+      token too. OAuth/OIDC `code`, `state`, `id_token_hint` and UserInfo POST form
+      `access_token` keep their protocol-defined roles.
 - [ ] **Admin access**: `traefik.adminAllowList.sourceRange` contains only operator
       networks (VPN or office egress).
 - [ ] **Email**: an authenticated SMTP relay with SPF and DKIM for the sender domain;
