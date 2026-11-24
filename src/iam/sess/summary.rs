@@ -262,15 +262,34 @@ mod tests {
         );
     }
 
+    /// The totals live in one process-wide key, so this test owns a process.
     #[cfg(feature = "sqlite")]
-    #[tokio::test]
-    async fn reconciled_totals_follow_live_sessions_with_their_freshness() {
+    #[test]
+    fn reconciled_totals_follow_live_sessions_with_their_freshness() {
         use crate::data::db::with_test_database;
         use crate::iam::sess::test_support::{
             corrupt_subject, create_user, expire_record, new_sid, seed_session,
         };
 
-        with_test_database(async {
+        const CHILD: &str = "STARGATE_SESSION_SUMMARY_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = crate::conf::child_test::run(
+                "iam::sess::summary::tests::reconciled_totals_follow_live_sessions_with_their_freshness",
+                |command| {
+                    command.env(CHILD, "1");
+                },
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(with_test_database(async {
             let [alice, bob, carol, _idle] = [
                 create_user().await,
                 create_user().await,
@@ -310,7 +329,6 @@ mod tests {
             assert_eq!(observed(reconcile().await.unwrap()), totals(2, 2));
             expire_record(&a_live).await;
             assert_eq!(observed(reconcile().await.unwrap()), totals(1, 1));
-        })
-        .await;
+        }));
     }
 }
