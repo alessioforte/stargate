@@ -40,7 +40,7 @@ subjects never appear in a key or a tag.
 | `{s:<sid>}:session` | Session record: owner, org, times, linked clients, `amr` | refresh-token TTL |
 | `{u:<user_id>}:sessions` | The user's session index (sid → org, expiry) | per-field TTL |
 | `{sessions}:summary` | Estimated session totals and their reconciliation time | none, replaced by each reconciliation |
-| `{sessions}:reconciliation` | Lease of the replica due to reconcile the totals | 60 s |
+| `{sessions}:reconciliation` | Lease of the replica reconciling the totals | 60 s, renewed after each batch and after publishing |
 | `{j:<jti>}:revoked` | A revoked JWT `jti` | token expiry |
 | `{k:<key hash>}:subject` | Cached API-key subject | 300 s |
 | `{c:<code hash>}:code` | Pending or redeemed authorization code | code TTL |
@@ -89,8 +89,8 @@ share its `{s:<sid>}` tag, and the user's index names the user's sessions.
 Listings and the reconciliation of the estimated totals enumerate users from
 SQL and read their indexes, one entity per command, so they work unchanged on
 Redis Cluster. Opening or ending a session never writes `{sessions}:summary`:
-only a completed reconciliation replaces it, about once a minute across all
-replicas.
+only a completed reconciliation replaces it. The lease lets one replica walk at
+a time, and the next walk starts a minute after the previous one ends.
 
 The [password login guard](config-v1.md#password-login-guard) reserves each
 bucket with a single-key atomic update. The source and account keys can occupy

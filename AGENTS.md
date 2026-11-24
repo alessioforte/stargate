@@ -488,10 +488,11 @@ page examines at most 1000 users, so it can be short while `nextCursor` is set.
 The overview's session totals are estimates (`iam/sess/summary.rs`): opening or
 ending a session updates no counter. A reconciliation walks the users in batches
 of 500, counts the live sessions and their distinct users, and publishes both
-with its completion time under `{sessions}:summary`. The replica that takes the
-`{sessions}:reconciliation` lease (60 s, checked every 10 s) walks, so totals lag
-by about one interval plus one walk; a failed walk keeps the previous totals and
-time. `/admin/overview` returns `sessions: null` before the first walk, and the
+with its completion time under `{sessions}:summary`. A replica walks when it
+takes the `{sessions}:reconciliation` lease (checked every 10 s) and renews its
+60 s TTL after each batch and after publishing, so one walk runs at a time and
+the next starts 60 s after it ends. Totals lag by about one interval and one tick
+plus up to two walks; a failed walk keeps the previous totals and time. `/admin/overview` returns `sessions: null` before the first walk, and the
 Console shows the totals as an estimate with the reconciliation age.
 
 After an attribute, profile, or membership write commits, IAM rebuilds each active

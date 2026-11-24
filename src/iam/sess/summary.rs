@@ -7,10 +7,11 @@
 //!
 //! Totals change only when a walk completes. A new, expired or revoked session,
 //! or one whose subject became unreadable, is reflected by the next walk: the
-//! published totals lag behind by at most the reconciliation interval plus the
-//! length of one walk, and a failed walk leaves the previous totals and their
-//! older time in place. Replicas share the totals and take turns through a
-//! lease, so one walk runs per interval.
+//! published totals lag behind by about one interval and one tick plus up to
+//! two walks, and a failed walk leaves the previous totals and their older time
+//! in place. Replicas share the totals and take turns through a lease: the
+//! walking replica renews it after each batch and after publishing, so one walk
+//! runs at a time and the next starts an interval after it ends.
 
 use super::listing::{CONCURRENCY, indexed_sids};
 use super::registry::{get_active_session, now_unix};
@@ -27,7 +28,8 @@ use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
-/// Time between the starts of two walks, across replicas.
+/// Time from the end of a walk to the start of the next, across replicas: the
+/// lease's lifetime, renewed while a walk runs.
 const INTERVAL: Duration = Duration::from_secs(60);
 /// How often a replica checks whether a walk is due.
 const TICK: Duration = Duration::from_secs(10);
@@ -60,15 +62,28 @@ pub async fn reconcile() -> anyhow::Result<SessionSummary> {
         let mut walk = Walk::default();
         while let Some(batch) = count_batch(walk.after.clone()).await? {
             walk.apply(batch);
+            renew_lease().await;
             tokio::time::sleep(PAUSE).await;
         }
         let summary = walk.finish(now_unix());
         use_store()
             .set(&store::keys::session::summary(), &summary, None)
             .await?;
+        renew_lease().await;
         Ok(summary)
     })
     .await
+}
+
+/// Keep the lease for another interval, so no replica starts a walk while this
+/// one runs. Without a lease there is nothing to renew.
+async fn renew_lease() {
+    if let Err(error) = use_store()
+        .expire(&store::keys::session::reconciliation(), INTERVAL.as_secs())
+        .await
+    {
+        tracing::debug!(%error, "Session reconciliation lease not renewed");
+    }
 }
 
 /// The progress of one walk: the last user counted and the running totals.
@@ -211,7 +226,8 @@ async fn run(stop: Arc<Notify>) {
     tracing::info!("Session reconciliation stopped");
 }
 
-/// Walk when this replica takes the lease, which expires one interval later.
+/// Walk when this replica takes the lease. It expires an interval after the
+/// walk's last renewal.
 async fn reconcile_when_due() {
     let lease = use_store()
         .set_if_absent(
@@ -327,8 +343,18 @@ mod tests {
             corrupt_subject(&c1).await;
             assert_eq!(summary().await.unwrap().map(observed), Some(totals(3, 2)));
             assert_eq!(observed(reconcile().await.unwrap()), totals(2, 2));
+            // A walk keeps the lease for an interval after it ends.
+            let lease = store::keys::session::reconciliation();
+            assert!(
+                use_store()
+                    .set_if_absent(&lease, &now_unix(), Some(1))
+                    .await
+                    .unwrap()
+            );
             expire_record(&a_live).await;
             assert_eq!(observed(reconcile().await.unwrap()), totals(1, 1));
+            tokio::time::sleep(Duration::from_millis(1_500)).await;
+            assert!(use_store().exists(&lease).await.unwrap());
         }));
     }
 }
