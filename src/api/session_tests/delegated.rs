@@ -120,6 +120,58 @@ async fn verify_credential_sources(router: &Router, native: &str, oauth: &str) {
         .await;
         assert_eq!(response["code"], "auth.untrusted_origin");
     }
+
+    let form = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("token", oauth)
+        .finish();
+    let token_request = |path| {
+        Request::post(path)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(header::ORIGIN, "https://client.example.com")
+    };
+    for path in ["/oauth/introspect", "/oauth/revoke"] {
+        let response = send(
+            router,
+            token_request(path)
+                .header(header::COOKIE, format!("jwt={native}"))
+                .body(Body::from(form.clone()))
+                .unwrap(),
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+        assert_eq!(response["error"], "insufficient_scope");
+    }
+    let response = send(
+        router,
+        token_request("/oauth/introspect")
+            .header(header::AUTHORIZATION, bearer(native))
+            .body(Body::from(form.clone()))
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(response["active"], true);
+    let response = router
+        .clone()
+        .oneshot(
+            token_request("/oauth/revoke")
+                .header(header::AUTHORIZATION, bearer(native))
+                .body(Body::from(form.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = send(
+        router,
+        token_request("/oauth/introspect")
+            .header(header::AUTHORIZATION, bearer(native))
+            .body(Body::from(form))
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(response["active"], false);
 }
 
 pub(super) async fn verify_subjects(router: &Router) {
@@ -134,7 +186,8 @@ pub(super) async fn verify_subjects(router: &Router) {
         .await
         .unwrap();
     let (sid, native, _, oauth) = start_session(&user, None).await;
-    verify_credential_sources(router, &native, &oauth).await;
+    let revocable_oauth = delegated_token(&user, Some(&sid));
+    verify_credential_sources(router, &native, &revocable_oauth).await;
     let key = store::keys::session::subject(&sid);
     let store = use_store();
     let current = store.get::<PublishedSubject>(&key).await.unwrap().unwrap();

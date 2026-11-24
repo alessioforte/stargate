@@ -1240,8 +1240,9 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
 - `/signup/*`: registration + email verification
 - `/admin/*`: users (+ invitations), orgs, API/admin keys, OAuth clients, service accounts,
   config, access-control rules, sessions, outbox events, `me`, `overview`, `health`.
-  Admin credentials come only from `Authorization: Bearer` or `x-api-key`; session
-  cookies and query parameters cannot authenticate the admin API. Every admin
+  Admin credentials come only from `Authorization: Bearer` or `x-api-key`, including
+  admin privileges on `/oauth/introspect` and `/oauth/revoke`. Session cookies and
+  query parameters grant no admin privileges on any of these routes. Every admin
   endpoint documents `503 auth.state_unavailable` with `Retry-After: 10`.
   Super-admin users bypass capability checks; admin keys need exact `<resource>:<action>`
   permissions (`src/api/admin/authorization.rs`).
