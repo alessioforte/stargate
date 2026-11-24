@@ -174,7 +174,7 @@ async fn revise_session(sid: &str, revise: impl FnOnce(&mut registry::SessionRec
     let mut session = registry::get_session(sid).await.unwrap().unwrap();
     revise(&mut session);
     use_store()
-        .hset(&store::keys::session::directory(), sid, &session, Some(60))
+        .set(&store::keys::session::record(sid), &session, Some(60))
         .await
         .unwrap();
 }
@@ -269,6 +269,8 @@ async fn suite() {
             "memberships:create",
             "memberships:update",
             "memberships:delete",
+            "sessions:read",
+            "overview:read",
         ]
         .map(str::to_string)
         .to_vec(),
@@ -442,6 +444,59 @@ async fn suite() {
     registry::revoke_session(&sid).await.unwrap();
     delegated::verify_subjects(&router).await;
     concurrency::run(&router, admin).await;
+    session_views(&router, admin).await;
+}
+
+/// The admin listing pages through a user's sessions and the overview serves
+/// the reconciled totals with their time.
+async fn session_views(router: &Router, admin: (&str, &str)) {
+    let get = |path: String| {
+        Request::get(path)
+            .header(admin.0, admin.1)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let user = create_user().await;
+    let mut sids = vec![
+        start_session(&user, None).await.0,
+        start_session(&user, None).await.0,
+    ];
+    sids.sort_unstable_by(|left, right| right.cmp(left));
+
+    let path = format!("/admin/sessions?userId={}&limit=1", user.id);
+    let mut listed = Vec::new();
+    let mut page = send(router, get(path.clone()), StatusCode::OK).await;
+    loop {
+        let data = page["data"].as_array().unwrap();
+        assert!(data.len() <= 1);
+        listed.extend(data.iter().map(|session| session["id"].clone()));
+        let Some(cursor) = page["nextCursor"].as_str() else {
+            break;
+        };
+        page = send(
+            router,
+            get(format!("{path}&cursor={cursor}")),
+            StatusCode::OK,
+        )
+        .await;
+    }
+    assert_eq!(listed, sids);
+    send(
+        router,
+        get(format!("{path}&cursor=malformed")),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    let started = chrono::Utc::now() - chrono::Duration::seconds(1);
+    crate::iam::sess::summary::reconcile().await.unwrap();
+    let sessions = &send(router, get("/admin/overview".into()), StatusCode::OK).await["sessions"];
+    assert!(sessions["activeSessions"].as_u64().unwrap() >= 2);
+    assert!(sessions["activeUsers"].as_u64().unwrap() >= 1);
+    let reconciled_at = sessions["reconciledAt"].as_str().unwrap();
+    assert!(chrono::DateTime::parse_from_rfc3339(reconciled_at).unwrap() >= started);
+
+    registry::revoke_all_sessions(&user.id).await.unwrap();
 }
 
 #[tokio::test]

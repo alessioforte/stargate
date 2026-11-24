@@ -150,6 +150,7 @@ async fn serve() -> std::io::Result<()> {
 
     let gate = gate::init().await.map_err(std::io::Error::other)?;
     gate::spawn_config_sync(gate.clone())?;
+    iam::sess::summary::spawn()?;
     let lifecycle = srv::health::Lifecycle::default();
 
     // One router per listener: each serves only the planes it declares, with the
@@ -203,6 +204,7 @@ async fn serve() -> std::io::Result<()> {
     )
     .await;
     gate::shutdown_config_sync().await;
+    iam::sess::summary::shutdown().await;
     aud::shutdown().await;
     store::save().await;
     info!("Shutdown complete");

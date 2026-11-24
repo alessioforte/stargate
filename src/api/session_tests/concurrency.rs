@@ -1,5 +1,6 @@
 use super::*;
 use crate::err::ErrorCode;
+use crate::iam::sess::listing::{self, SessionFilter};
 use crate::iam::sess::test_support::{Pause, Stage};
 use std::time::Duration;
 
@@ -78,12 +79,16 @@ async fn registration_races(router: &Router, admin: (&str, &str)) {
         Ok(_) => panic!("issued a session for the removed membership"),
     }
     assert_eq!(use_store().hlen(&index).await.unwrap(), 0);
+    let filter = SessionFilter {
+        user_id: Some(&user.id),
+        ..SessionFilter::default()
+    };
     assert!(
-        !registry::list_sessions()
+        listing::list_sessions(&filter, None, 100)
             .await
             .unwrap()
-            .iter()
-            .any(|session| session.user_id == user.id)
+            .sessions
+            .is_empty()
     );
 }
 

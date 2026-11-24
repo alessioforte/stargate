@@ -4,6 +4,7 @@ use super::{
     extract_path, extract_query,
 };
 use crate::err::{ErrorCode, ErrorResponse};
+use crate::iam::sess::listing::{self, SessionCursor, SessionFilter};
 use axum::Json;
 use axum::extract::Request;
 use chrono::{DateTime, Utc};
@@ -18,8 +19,9 @@ const MAX_LIMIT: usize = 100;
 pub struct ListSessionsQuery {
     #[serde(default)]
     limit: Option<usize>,
+    /// `nextCursor` of the previous page, with the same filters.
     #[serde(default)]
-    offset: Option<usize>,
+    cursor: Option<String>,
     #[serde(default)]
     user_id: Option<String>,
     #[serde(default)]
@@ -32,8 +34,8 @@ pub struct ListSessionsQuery {
 #[serde(rename_all = "camelCase")]
 pub struct AdminSessionUser {
     id: String,
-    email: Option<String>,
-    name: Option<String>,
+    email: String,
+    name: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -53,11 +55,11 @@ pub struct AdminSession {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PaginatedAdminSessions {
+pub struct AdminSessionPage {
     data: Vec<AdminSession>,
-    total: usize,
     limit: usize,
-    offset: usize,
+    /// Pass as `cursor` for the next page; `null` after the last one.
+    next_cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -105,22 +107,30 @@ fn user_name(user: &db::ent::User) -> String {
     path = "/admin/sessions",
     tags = ["Admin", "Sessions"],
     summary = "List active sessions",
-    description = "Returns active login sessions ordered by most recent token refresh. Results can be filtered by user, organization, or OAuth client.",
+    description = "Returns one page of active login sessions, grouped by user from the newest user and newest session first. Results can be filtered by user, organization, or OAuth client. A page examines a bounded number of users, so it can hold fewer than `limit` sessions while `nextCursor` is set.",
     params(ListSessionsQuery),
     responses(
         (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
-        (status = 200, description = "Active sessions retrieved", body = PaginatedAdminSessions),
+        (status = 200, description = "Active sessions retrieved", body = AdminSessionPage),
+        (status = 400, description = "Invalid query or cursor", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
-pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, ErrorResponse> {
+pub async fn get_sessions(req: Request) -> Result<Json<AdminSessionPage>, ErrorResponse> {
     authorization::require(&req, Permission::SessionsRead)?;
 
     let query: ListSessionsQuery = extract_query(&req)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    let offset = query.offset.unwrap_or(0);
+    let cursor = normalized(query.cursor)
+        .map(|value| {
+            SessionCursor::decode(&value).ok_or_else(|| {
+                ErrorResponse::new(ErrorCode::RequestInvalidQuery)
+                    .with_message("Invalid session cursor")
+            })
+        })
+        .transpose()?;
     let user_id = normalized(query.user_id);
     let organization_id = normalized(query.organization_id);
     let client_id = normalized(query.client_id);
@@ -131,59 +141,38 @@ pub async fn get_sessions(req: Request) -> Result<Json<PaginatedAdminSessions>, 
         .and_then(|claims| claims.sid.as_deref())
         .map(str::to_string);
 
-    let mut sessions = crate::iam::sess::registry::list_sessions().await?;
-    sessions.retain(|session| {
-        user_id
-            .as_deref()
-            .is_none_or(|user_id| session.user_id == user_id)
-            && organization_id
-                .as_deref()
-                .is_none_or(|organization_id| session.org_id.as_deref() == Some(organization_id))
-            && client_id.as_deref().is_none_or(|client_id| {
-                session
-                    .client_ids
-                    .iter()
-                    .any(|candidate| candidate == client_id)
+    let filter = SessionFilter {
+        user_id: user_id.as_deref(),
+        organization_id: organization_id.as_deref(),
+        client_id: client_id.as_deref(),
+    };
+    let page = listing::list_sessions(&filter, cursor.as_ref(), limit).await?;
+    let data = page
+        .sessions
+        .into_iter()
+        .map(|listing::ListedSession { user, record }| {
+            Ok(AdminSession {
+                current: current_session_id.as_deref() == Some(record.id.as_str()),
+                user: AdminSessionUser {
+                    name: user_name(&user),
+                    id: user.id,
+                    email: user.email,
+                },
+                id: record.id,
+                organization_id: record.org_id,
+                authenticated_at: timestamp(record.authenticated_at_unix)?,
+                last_seen_at: timestamp(record.last_seen_at_unix)?,
+                expires_at: timestamp(record.expires_at_unix)?,
+                client_ids: record.client_ids,
+                authentication_methods: record.amr,
             })
-    });
+        })
+        .collect::<Result<_, ErrorResponse>>()?;
 
-    let total = sessions.len();
-    let selected = sessions.into_iter().skip(offset).take(limit);
-    let mut data = Vec::new();
-    for session in selected {
-        let user = crate::data::db::get_user_by_id(&session.user_id)
-            .await
-            .map_err(ErrorResponse::internal)?;
-        let user = match user {
-            Some(user) => AdminSessionUser {
-                id: session.user_id.clone(),
-                email: Some(user.email.clone()),
-                name: Some(user_name(&user)),
-            },
-            None => AdminSessionUser {
-                id: session.user_id.clone(),
-                email: None,
-                name: None,
-            },
-        };
-        data.push(AdminSession {
-            current: current_session_id.as_deref() == Some(session.id.as_str()),
-            id: session.id,
-            user,
-            organization_id: session.org_id,
-            authenticated_at: timestamp(session.authenticated_at_unix)?,
-            last_seen_at: timestamp(session.last_seen_at_unix)?,
-            expires_at: timestamp(session.expires_at_unix)?,
-            client_ids: session.client_ids,
-            authentication_methods: session.amr,
-        });
-    }
-
-    Ok(Json(PaginatedAdminSessions {
+    Ok(Json(AdminSessionPage {
         data,
-        total,
         limit,
-        offset,
+        next_cursor: page.next.as_ref().map(SessionCursor::encode),
     }))
 }
 

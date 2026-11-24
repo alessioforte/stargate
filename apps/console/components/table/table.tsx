@@ -347,8 +347,10 @@ const Table = <T, V>({
                 </ActionIcon>
                 <ActionIcon
                   disabled={
-                    data.length === 0 ||
-                    data.length < table.getState().pagination.pageSize
+                    paginationOptions?.hasNextPage === undefined
+                      ? data.length === 0 ||
+                        data.length < table.getState().pagination.pageSize
+                      : !paginationOptions.hasNextPage
                   }
                   size={26}
                   variant="default"

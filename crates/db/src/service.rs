@@ -166,6 +166,19 @@ impl Service {
         .await?)
     }
 
+    /// A keyset page of users in descending id order, strictly before
+    /// `before`, optionally only the members of `org_id`.
+    pub async fn users_before(
+        &self,
+        org_id: Option<&str>,
+        before: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<User>> {
+        self.user
+            .page_by_id(&self.pool, org_id, before, limit)
+            .await
+    }
+
     /// Lightweight connectivity check — executes `SELECT 1`.
     pub async fn ping(&self) -> Result<()> {
         sqlx::query("SELECT 1").execute(&self.pool).await?;
@@ -3275,6 +3288,55 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
+    async fn user_pages_walk_ids_backwards_with_an_optional_organization() {
+        let svc = test_service().await;
+        let mut users = Vec::new();
+        for tag in ["alice", "bob", "carol", "dave"] {
+            users.push(create_test_user(&svc, tag).await.id);
+        }
+        users.sort_unstable_by(|left, right| right.cmp(left));
+        let acme = create_test_org(&svc, "acme").await;
+        for member in [&users[0], &users[2], &users[3]] {
+            svc.add_user_to_organization(
+                member,
+                &acme.id,
+                "member",
+                OrganizationMembershipMutation::Create,
+                trusted_ctx(),
+            )
+            .await
+            .unwrap();
+        }
+        let ids = |page: Vec<User>| page.into_iter().map(|user| user.id).collect::<Vec<_>>();
+
+        assert_eq!(
+            ids(svc.users_before(None, None, 3).await.unwrap()),
+            users[..3]
+        );
+        assert_eq!(
+            ids(svc.users_before(None, Some(&users[2]), 3).await.unwrap()),
+            users[3..]
+        );
+        assert_eq!(
+            ids(svc.users_before(Some(&acme.id), None, 2).await.unwrap()),
+            [users[0].clone(), users[2].clone()]
+        );
+        assert_eq!(
+            ids(svc
+                .users_before(Some(&acme.id), Some(&users[0]), 5)
+                .await
+                .unwrap()),
+            users[2..]
+        );
+        assert!(
+            svc.users_before(Some("missing"), None, 5)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn user_api_key_org_binding_flows_to_auth_lookup() {
         let svc = test_service().await;
         let user = create_test_user(&svc, "alice").await;
@@ -4929,6 +4991,58 @@ mod tests {
             admin_context(ulid::Ulid::generate().to_string()),
         )
         .await
+    }
+
+    #[tokio::test]
+    #[ignore = "requires postgres (run with: cargo test -p db --features postgres -- --ignored)"]
+    async fn user_pages_walk_ids_backwards_with_an_optional_organization() {
+        let svc = test_service().await;
+        let mut members = Vec::new();
+        for _ in 0..3 {
+            members.push(
+                create_identity(&svc, &unique_email(), &unique_nick())
+                    .await
+                    .unwrap()
+                    .id,
+            );
+        }
+        members.sort_unstable_by(|left, right| right.cmp(left));
+        let org = svc
+            .create_organization(
+                &format!("keyset-{}", ulid::Ulid::generate()),
+                None,
+                None,
+                admin_context(ulid::Ulid::generate().to_string()),
+            )
+            .await
+            .unwrap();
+        for member in &members {
+            svc.add_user_to_organization(
+                member,
+                &org.id,
+                "member",
+                OrganizationMembershipMutation::Create,
+                admin_context(ulid::Ulid::generate().to_string()),
+            )
+            .await
+            .unwrap();
+        }
+        let ids = |page: Vec<User>| page.into_iter().map(|user| user.id).collect::<Vec<_>>();
+
+        assert_eq!(
+            ids(svc.users_before(Some(&org.id), None, 2).await.unwrap()),
+            members[..2]
+        );
+        assert_eq!(
+            ids(svc
+                .users_before(Some(&org.id), Some(&members[1]), 2)
+                .await
+                .unwrap()),
+            members[2..]
+        );
+        let page = ids(svc.users_before(None, Some(&members[0]), 20).await.unwrap());
+        assert!(page.windows(2).all(|pair| pair[0] > pair[1]));
+        assert!(page.iter().all(|id| id < &members[0]));
     }
 
     #[tokio::test]

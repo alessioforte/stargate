@@ -1,9 +1,10 @@
 use super::authorization::{self, Permission};
 use crate::err::ErrorResponse;
 use crate::gate::Gate;
+use crate::iam::sess::summary::SessionSummary;
 use axum::Json;
 use axum::extract::Request;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -49,11 +50,29 @@ pub struct AuditOverview {
     oldest_pending_at: Option<String>,
 }
 
+/// Estimated totals from the last completed reconciliation of the session
+/// indexes. They lag behind sessions opened or ended since `reconciledAt`.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionOverview {
-    active_sessions: usize,
-    active_users: usize,
+    active_sessions: u64,
+    active_users: u64,
+    /// When the reconciliation that produced these totals completed.
+    reconciled_at: String,
+}
+
+impl SessionOverview {
+    fn from_summary(summary: SessionSummary) -> Result<Self, ErrorResponse> {
+        let reconciled_at = i64::try_from(summary.reconciled_at_unix)
+            .ok()
+            .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0))
+            .ok_or_else(|| ErrorResponse::internal("invalid session reconciliation time"))?;
+        Ok(Self {
+            active_sessions: summary.active_sessions,
+            active_users: summary.active_users,
+            reconciled_at: reconciled_at.to_rfc3339(),
+        })
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -72,7 +91,8 @@ pub struct GatewayOverview {
 pub struct AdminOverview {
     generated_at: String,
     resources: AdminResourceOverview,
-    sessions: SessionOverview,
+    /// `null` until the first reconciliation completes.
+    sessions: Option<SessionOverview>,
     audit: AuditOverview,
     gateway: GatewayOverview,
 }
@@ -90,7 +110,7 @@ fn revocable(total: i64, revoked: i64) -> RevocableResourceCount {
     path = "/admin/overview",
     tags = ["Admin"],
     summary = "Admin overview",
-    description = "Returns a compact snapshot of resource and active-session counts, audit delivery backlog, and the active gateway graph.",
+    description = "Returns a compact snapshot of resource counts, estimated active-session totals with the time of their last reconciliation, audit delivery backlog, and the active gateway graph.",
     responses(
         (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Overview retrieved successfully", body = AdminOverview),
@@ -110,7 +130,10 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
     let stats = crate::data::db::get_admin_overview_stats()
         .await
         .map_err(ErrorResponse::internal)?;
-    let session_summary = crate::iam::sess::registry::session_summary().await?;
+    let sessions = crate::iam::sess::summary::summary()
+        .await?
+        .map(SessionOverview::from_summary)
+        .transpose()?;
     let runtime = req
         .extensions()
         .get::<Arc<crate::gate::RuntimeSnapshot>>()
@@ -141,10 +164,7 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
             api_keys: revocable(stats.api_keys_total, stats.api_keys_revoked),
             admin_keys: revocable(stats.admin_keys_total, stats.admin_keys_revoked),
         },
-        sessions: SessionOverview {
-            active_sessions: session_summary.active_sessions,
-            active_users: session_summary.active_users,
-        },
+        sessions,
         audit: AuditOverview {
             mode: crate::aud::delivery_mode(),
             pending: stats.audit_pending,
@@ -169,7 +189,25 @@ pub async fn get_admin_overview(req: Request) -> Result<Json<AdminOverview>, Err
 
 #[cfg(test)]
 mod tests {
-    use super::revocable;
+    use super::{SessionOverview, SessionSummary, revocable};
+
+    #[test]
+    fn session_totals_carry_their_reconciliation_time() {
+        let overview = SessionOverview::from_summary(SessionSummary {
+            active_sessions: 3,
+            active_users: 2,
+            reconciled_at_unix: 1_800_000_000,
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(overview).unwrap(),
+            serde_json::json!({
+                "activeSessions": 3,
+                "activeUsers": 2,
+                "reconciledAt": "2027-01-15T08:00:00+00:00",
+            })
+        );
+    }
 
     #[test]
     fn revocable_counts_active_resources() {

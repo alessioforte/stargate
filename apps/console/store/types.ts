@@ -5,7 +5,7 @@ import type {
   AdminKey,
   AdminMe,
   AdminOverview,
-  AdminSession,
+  AdminSessionPage,
   ApiKey,
   ApiKeyQuery,
   Configuration,
@@ -90,7 +90,7 @@ export interface State {
   adminHealth: StoreItem<AdminHealth>;
   adminMe: AdminMe | null;
   adminOverview: StoreItem<AdminOverview>;
-  adminSessions: StoreItem<List<AdminSession>>;
+  adminSessions: StoreItem<AdminSessionPage>;
   adminSessionsQuery: ListAdminSessionsQuery;
   adminStatus: AdminStatus | null;
   message: AppMessage | null;

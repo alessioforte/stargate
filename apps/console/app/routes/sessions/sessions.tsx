@@ -19,34 +19,16 @@ export default function SessionsPage() {
   const t = useTranslations();
   const { confirm, confirmModal } = useConfirmModal();
   const [filters, setFilters] = useState<ListAdminSessionsQuery>({});
-  const [pagination, setPagination] = useState({
-    pageIndex: 0,
-    pageSize: DEFAULT_PAGE_SIZE,
-  });
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  // The cursor of every page visited so far; the first page has none.
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const pageIndex = cursors.length - 1;
+  const cursor = cursors[pageIndex];
+  const nextCursor = adminSessions.data?.nextCursor ?? null;
 
   useEffect(() => {
-    void getAdminSessions({
-      ...filters,
-      limit: pagination.pageSize,
-      offset: pagination.pageIndex * pagination.pageSize,
-    });
-  }, [filters, getAdminSessions, pagination.pageIndex, pagination.pageSize]);
-
-  useEffect(() => {
-    const total = adminSessions.data?.total;
-    if (total === undefined) return;
-
-    const lastPageIndex = Math.max(
-      0,
-      Math.ceil(total / pagination.pageSize) - 1,
-    );
-    if (pagination.pageIndex > lastPageIndex) {
-      setPagination((current) => ({
-        ...current,
-        pageIndex: lastPageIndex,
-      }));
-    }
-  }, [adminSessions.data?.total, pagination.pageIndex, pagination.pageSize]);
+    void getAdminSessions({ ...filters, limit: pageSize, cursor });
+  }, [cursor, filters, getAdminSessions, pageSize]);
 
   const updateFilter = (
     name: "clientId" | "organizationId" | "userId",
@@ -56,7 +38,18 @@ export default function SessionsPage() {
       ...current,
       [name]: value.trim() || undefined,
     }));
-    setPagination((current) => ({ ...current, pageIndex: 0 }));
+    setCursors([undefined]);
+  };
+
+  const changePage = (next: { pageIndex: number; pageSize: number }) => {
+    if (next.pageSize !== pageSize) {
+      setPageSize(next.pageSize);
+      setCursors([undefined]);
+    } else if (next.pageIndex > pageIndex && nextCursor) {
+      setCursors((current) => [...current, nextCursor]);
+    } else if (next.pageIndex < pageIndex) {
+      setCursors((current) => current.slice(0, next.pageIndex + 1));
+    }
   };
 
   const confirmSessionRevocation = async (session: AdminSession) => {
@@ -65,9 +58,7 @@ export default function SessionsPage() {
       confirmLabel: t("revoke"),
       message: session.current
         ? t("confirmRevokeCurrentSession")
-        : t("confirmRevokeSession", {
-            user: session.user.name ?? session.user.email ?? session.user.id,
-          }),
+        : t("confirmRevokeSession", { user: session.user.name }),
     });
     if (confirmed) {
       await revokeAdminSession(session.id);
@@ -78,9 +69,7 @@ export default function SessionsPage() {
     const confirmed = await confirm({
       title: t("revokeAllUserSessions"),
       confirmLabel: t("revokeAll"),
-      message: t("confirmRevokeAllUserSessions", {
-        user: session.user.name ?? session.user.email ?? session.user.id,
-      }),
+      message: t("confirmRevokeAllUserSessions", { user: session.user.name }),
     });
     if (confirmed) {
       await revokeUserSessions(session.user.id);
@@ -88,11 +77,7 @@ export default function SessionsPage() {
   };
 
   const refresh = () => {
-    void getAdminSessions({
-      ...filters,
-      limit: pagination.pageSize,
-      offset: pagination.pageIndex * pagination.pageSize,
-    });
+    void getAdminSessions({ ...filters, limit: pageSize, cursor });
   };
 
   usePolling(refresh, { interval: 5000 });
@@ -129,13 +114,11 @@ export default function SessionsPage() {
           pagination
           paginationOptions={{
             defaultPageSize: DEFAULT_PAGE_SIZE,
-            pageIndex: pagination.pageIndex,
-            pageSize: pagination.pageSize,
-            totalItems: adminSessions.data?.total,
+            pageIndex,
+            pageSize,
+            hasNextPage: nextCursor !== null,
           }}
-          onPaginationChange={({ pageIndex, pageSize }) => {
-            setPagination({ pageIndex, pageSize });
-          }}
+          onPaginationChange={changePage}
           columns={columns}
           data={adminSessions.data?.data ?? []}
           empty={adminSessions.data?.data?.length === 0}
