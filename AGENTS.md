@@ -1351,7 +1351,7 @@ SIGTERM/SIGINT -> readiness off -> wait `SERVER_DRAIN_DELAY_SECS` -> gateway adm
 closes and active work is cancelled (WebSockets send Close `1001`, `gateway shutting down`,
 to both peers in parallel) -> every listener stops accepting and its connections drain
 (`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop configuration synchronization -> stop
-audit relay -> save in-memory store -> flush telemetry.
+session reconciliation -> stop audit relay -> save in-memory store -> flush telemetry.
 
 WebSocket Close exchanges have a fixed 5s limit, shortened by the remaining server
 shutdown budget, and retain admission until they finish. Idle expiry sends `1001`
