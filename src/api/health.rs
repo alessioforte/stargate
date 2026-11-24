@@ -85,7 +85,6 @@ mod tests {
     use http_body_util::BodyExt;
     use serde_json::json;
     use tower::ServiceExt;
-    use utoipa::OpenApi;
 
     async fn request(app: Router, method: Method, path: &str) -> Response {
         app.oneshot(
@@ -177,7 +176,8 @@ mod tests {
 
     #[test]
     fn openapi_publishes_probe_contracts() {
-        let doc = serde_json::to_value(crate::api::ApiDoc::openapi()).unwrap();
+        let doc = serde_json::to_value(crate::api::docs::openapi(crate::api::plane::PlaneSet::ALL))
+            .unwrap();
         assert!(doc["paths"]["/livez"]["get"]["responses"]["200"].is_object());
         for status in ["200", "503"] {
             assert!(doc["paths"]["/readyz"]["get"]["responses"][status].is_object());

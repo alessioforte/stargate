@@ -115,6 +115,7 @@ fn admin_key_schema(key: db::ent::AdminKey) -> AdminKeySchema {
     tags = ["Admin", "Admin Keys"],
     params(ListAdminKeysQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "List of admin keys retrieved successfully", body = PaginatedResponse<AdminKeySchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -153,6 +154,7 @@ pub async fn get_admin_keys(req: Request) -> Result<Response, ErrorResponse> {
     tags = ["Admin", "Admin Keys"],
     params(("id" = String, Path, description = "Admin Key ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Admin key retrieved successfully", body = AdminKeySchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -181,6 +183,7 @@ pub async fn get_admin_key(mut req: Request) -> Result<Response, ErrorResponse> 
     tags = ["Admin", "Admin Keys"],
     request_body = CreateAdminKeyRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 201, description = "Admin key created successfully", body = CreateAdminKeyResponse),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -229,6 +232,7 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
     params(("id" = String, Path, description = "Admin Key ID")),
     request_body = UpdateAdminKeyPermissionsRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Admin key permissions updated successfully", body = AdminKeySchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -273,6 +277,7 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
     tags = ["Admin", "Admin Keys"],
     params(("id" = String, Path, description = "Admin Key ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Admin key revoked successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -310,6 +315,7 @@ pub async fn revoke_admin_key(mut req: Request) -> Result<Response, ErrorRespons
     tags = ["Admin", "Admin Keys"],
     params(("id" = String, Path, description = "Admin Key ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Admin key deleted successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

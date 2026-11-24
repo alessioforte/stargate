@@ -380,11 +380,13 @@ async fn tokens_are_bound_to_their_flow() {
         assert_eq!(error.code, ErrorCode::PasswordResetTokenInvalid);
     }
     let reset = jwt_config().generate_password_reset_token(claims).unwrap();
-    let error = crate::api::signup::verification::get_signup(axum::extract::Query(
-        crate::api::signup::SignupVerificationParams {
-            token: reset.clone(),
-        },
-    ))
+    let error = crate::api::signup::verification::get_signup(
+        http::Request::builder()
+            .uri("/signup")
+            .header("authorization", format!("Bearer {}", reset.clone()))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
     .await
     .unwrap_err();
     assert_eq!(error.code, ErrorCode::SignupTokenInvalid);
@@ -420,11 +422,22 @@ async fn uniqueness_conflicts_are_conflicts() {
                 .email(email),
         )
         .unwrap();
-    let verified = crate::api::signup::verification::get_signup(axum::extract::Query(
-        crate::api::signup::SignupVerificationParams {
-            token: verification,
-        },
-    ))
+    let error = crate::api::signup::verification::get_signup(
+        http::Request::builder()
+            .uri(format!("/signup?token={verification}"))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::SignupTokenInvalid);
+    let verified = crate::api::signup::verification::get_signup(
+        http::Request::builder()
+            .uri("/signup")
+            .header("authorization", format!("Bearer {}", verification))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
     .await
     .unwrap()
     .0;

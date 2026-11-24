@@ -19,16 +19,26 @@ pub use plane::listener_router;
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
+#[openapi(paths(crate::api::docs::get_api_doc, crate::api::docs::get_error_catalog))]
+pub(super) struct DocumentationApiDoc;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(crate::api::health::get_livez, crate::api::health::get_readyz,),
+    info(
+        title = "Stargate APIs ✨",
+        description = "APIs for user authentication and management in Stargate."
+    )
+)]
+pub(super) struct ManagementApiDoc;
+
+#[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::api::health::get_livez,
-        crate::api::health::get_readyz,
         crate::api::internal_context::get_internal_context_jwks,
         crate::api::oidc::well_known::get_jwks,
         crate::api::oidc::well_known::get_oauth_metadata,
         crate::api::oidc::well_known::get_openid_configuration,
-        crate::api::docs::get_api_doc,
-        crate::api::docs::get_error_catalog,
         crate::api::i18n::get_api_messages,
         crate::api::signup::request::post_signup,
         crate::api::signup::verification::get_signup,
@@ -70,6 +80,17 @@ use utoipa::OpenApi;
         crate::api::account::refresh_token::put_refresh_token,
         crate::api::account::credentials::forgot::post_credentials,
         crate::api::account::credentials::reset::put_credentials,
+    ),
+    info(
+        title = "Stargate APIs ✨",
+        description = "APIs for user authentication and management in Stargate."
+    )
+)]
+pub(super) struct IdentityApiDoc;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
         crate::api::admin::health::get_admin_health,
         crate::api::admin::me::get_admin_me,
         crate::api::admin::overview::get_admin_overview,
@@ -134,10 +155,10 @@ use utoipa::OpenApi;
     ),
     info(
         title = "Stargate APIs ✨",
-        description = "APIs for user authentication and management in Stargate.",
+        description = "APIs for user authentication and management in Stargate."
     )
 )]
-pub struct ApiDoc;
+pub(super) struct AdminApiDoc;
 
 /// The implicit listener's router: every plane on one address, for tests of
 /// the composition and the handlers.
@@ -154,7 +175,9 @@ pub fn server_router(
 /// IAM routes without the plane layers, for tests of the handlers themselves.
 #[cfg(test)]
 fn router() -> axum::Router {
-    plane::identity_routes().merge(plane::admin_routes())
+    plane::identity_routes()
+        .merge(plane::admin_routes())
+        .merge(docs::router(plane::PlaneSet::ALL))
 }
 
 #[cfg(test)]
@@ -685,6 +708,17 @@ mod tests {
         )
         .await;
         assert_eq!(feature_disabled(state).await, "social");
+    }
+
+    #[tokio::test]
+    async fn public_features_do_not_require_a_trusted_browser_origin() {
+        let req = Request::get("/account/features")
+            .header("origin", "https://app.example.com")
+            .header("sec-fetch-site", "cross-site")
+            .body(Body::empty())
+            .unwrap();
+        let resp = send_req(req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]

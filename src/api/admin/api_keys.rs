@@ -91,6 +91,7 @@ pub struct ApiKeyAttrsRequest {
     tags = ["Admin", "API Keys"],
     params(ListApiKeysQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "List of API keys retrieved successfully", body = PaginatedResponse<ApiKeySchema>),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -179,6 +180,7 @@ pub async fn get_api_keys(req: Request) -> Result<Response, ErrorResponse> {
     tags = ["Admin", "API Keys"],
     params(("id" = String, Path, description = "API Key ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "API key retrieved successfully", body = ApiKeySchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -207,6 +209,7 @@ pub async fn get_api_key(mut req: Request) -> Result<Response, ErrorResponse> {
     tags = ["Admin", "API Keys"],
     request_body = CreateApiKeyRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 201, description = "API key created successfully", body = CreateApiKeyResponse),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -294,6 +297,7 @@ pub async fn create_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     tags = ["Admin", "API Keys"],
     params(("id" = String, Path, description = "API Key ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "API key deleted successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -332,6 +336,7 @@ pub async fn delete_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     tags = ["Admin", "API Keys"],
     params(("id" = String, Path, description = "API Key ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "API key revoked successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -377,6 +382,7 @@ pub async fn revoke_api_key(mut req: Request) -> Result<Response, ErrorResponse>
     params(("id" = String, Path, description = "API Key ID")),
     request_body = ApiKeyAttrsRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "API key attrs updated successfully", body = ApiKeySchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -424,6 +430,7 @@ pub async fn update_api_key_attrs(mut req: Request) -> Result<Response, ErrorRes
     params(("id" = String, Path, description = "API Key ID")),
     request_body = ApiKeyAttrsRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "API key attrs patched successfully", body = ApiKeySchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),

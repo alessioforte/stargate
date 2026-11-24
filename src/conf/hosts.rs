@@ -38,6 +38,10 @@ impl IamHosts {
         Ok(Self { names })
     }
 
+    pub(crate) fn is_unrestricted(&self) -> bool {
+        self.names.is_empty()
+    }
+
     /// An empty list preserves IAM routing on every host, including hostless requests.
     pub(crate) fn allows(&self, host: Option<&str>) -> bool {
         self.names.is_empty() || host.is_some_and(|host| self.names.iter().any(|name| name == host))

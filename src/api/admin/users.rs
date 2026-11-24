@@ -313,6 +313,7 @@ pub struct UserAttrsRequest {
     tags = ["Admin", "Users"],
     params(ListUsersQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "List of users retrieved successfully", body = PaginatedResponse<UserSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -361,6 +362,7 @@ pub async fn get_users(req: Request) -> Result<Response, ErrorResponse> {
     path = "/admin/users/super-admins",
     tags = ["Admin", "Users"],
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Super admin users retrieved successfully", body = Vec<UserSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -383,6 +385,7 @@ pub async fn get_super_admin_users(req: Request) -> Result<Response, ErrorRespon
     tags = ["Admin", "Users"],
     params(("id" = String, Path, description = "User ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User retrieved successfully", body = UserSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -409,6 +412,7 @@ pub async fn get_user(mut req: Request) -> Result<Response, ErrorResponse> {
     tags = ["Admin", "Users"],
     request_body = CreateUserRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 201, description = "User created successfully", body = UserSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -480,6 +484,7 @@ pub async fn create_user(mut req: Request) -> Result<Response, ErrorResponse> {
     tags = ["Admin", "Users"],
     request_body = CreateUserInvitationRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 202, description = "User invitation sent", body = MessageResponse),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -554,6 +559,7 @@ pub async fn create_user_invitation(req: Request) -> Result<Response, ErrorRespo
     params(("id" = String, Path, description = "User ID")),
     request_body = UpdateUserRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User updated successfully", body = UserSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -616,6 +622,7 @@ pub async fn update_user(mut req: Request) -> Result<Response, ErrorResponse> {
     params(("id" = String, Path, description = "User ID")),
     request_body = PatchUserRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User patched successfully", body = UserSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -678,6 +685,7 @@ pub async fn patch_user(mut req: Request) -> Result<Response, ErrorResponse> {
     params(("id" = String, Path, description = "User ID")),
     request_body = UserAttrsRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User attrs updated successfully", body = UserSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -717,6 +725,7 @@ pub async fn update_user_attrs(mut req: Request) -> Result<Response, ErrorRespon
     params(("id" = String, Path, description = "User ID")),
     request_body = UserAttrsRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User attrs patched successfully", body = UserSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -765,6 +774,7 @@ pub async fn patch_user_attrs(mut req: Request) -> Result<Response, ErrorRespons
     tags = ["Admin", "Users"],
     params(("id" = String, Path, description = "User ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User deleted successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -812,6 +822,7 @@ pub async fn delete_user(mut req: Request) -> Result<Response, ErrorResponse> {
     tags = ["Admin", "Users"],
     params(("id" = String, Path, description = "User ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User organizations retrieved successfully", body = Vec<UserOrganizationSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -847,6 +858,7 @@ pub async fn get_user_organizations(mut req: Request) -> Result<Response, ErrorR
         ListUsersQuery
     ),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Organization users retrieved successfully", body = PaginatedResponse<OrganizationUserSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -899,6 +911,7 @@ pub async fn get_organization_users(mut req: Request) -> Result<Response, ErrorR
     ),
     request_body(content = OrganizationMembershipRequest, description = "Optional membership settings; omit for the default role", content_type = "application/json"),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User added to organization successfully", body = MessageResponse),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -967,6 +980,7 @@ pub async fn add_user_to_organization(mut req: Request) -> Result<Response, Erro
         ("org_id" = String, Path, description = "Organization ID")
     ),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "User removed from organization successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

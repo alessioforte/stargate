@@ -96,11 +96,15 @@ enum TokenOperationCaller {
     )
 )]
 pub async fn post_introspect(req: Request) -> OAuthResult<Json<IntrospectionResponse>> {
-    let basic = extract_basic_client_credentials(&req)?;
     let has_admin_grant = has_token_operation_permission(
         &req,
         crate::api::admin::authorization::Permission::OAuthTokensIntrospect,
     );
+    let basic = if has_admin_grant {
+        None
+    } else {
+        extract_basic_client_credentials(&req)?
+    };
     let form = extract_token_form(req).await?;
     let _ = form.token_type_hint.as_deref();
     let caller =
@@ -141,11 +145,15 @@ pub async fn post_introspect(req: Request) -> OAuthResult<Json<IntrospectionResp
     )
 )]
 pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
-    let basic = extract_basic_client_credentials(&req)?;
     let has_admin_grant = has_token_operation_permission(
         &req,
         crate::api::admin::authorization::Permission::OAuthTokensRevoke,
     );
+    let basic = if has_admin_grant {
+        None
+    } else {
+        extract_basic_client_credentials(&req)?
+    };
     let audit_request = audit_request_from(req.extensions());
     let authenticated_admin_actor = take_trusted_audit_context_from(req.extensions_mut())
         .map(|context| context.actor().clone());

@@ -112,6 +112,7 @@ fn revocable(total: i64, revoked: i64) -> RevocableResourceCount {
     summary = "Admin overview",
     description = "Returns a compact snapshot of resource counts, estimated active-session totals with the time of their last reconciliation, audit delivery backlog, and the active gateway graph.",
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Overview retrieved successfully", body = AdminOverview),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

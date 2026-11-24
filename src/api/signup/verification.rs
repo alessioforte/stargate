@@ -1,17 +1,18 @@
-use super::{EmailVerificationResponse, SignupVerificationParams};
+use super::EmailVerificationResponse;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::{
     auth::jwt::jwt_config,
     user::{email_verification, signup},
 };
+use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::Query;
+use axum::extract::Request;
 
 #[utoipa::path(
     get,
     path = "/signup",
     tags = ["Signup"],
-    params(("token" = String, Query, description = "Signup verification token")),
+    params(("Authorization" = String, Header, description = "Bearer signup verification token")),
     responses(
         (status = 200, description = "OK", body = EmailVerificationResponse),
         (status = 400, description = "Bad Request", body = ErrorResponse),
@@ -21,12 +22,13 @@ use axum::extract::Query;
         (status = 500, description = "Internal Server Error", body = ErrorResponse),
     )
 )]
-pub async fn get_signup(
-    Query(query): Query<SignupVerificationParams>,
-) -> Result<Json<EmailVerificationResponse>, ErrorResponse> {
+pub async fn get_signup(req: Request) -> Result<Json<EmailVerificationResponse>, ErrorResponse> {
+    let token = req
+        .get_bearer_token()
+        .ok_or_else(|| ErrorResponse::new(ErrorCode::SignupTokenInvalid))?;
     let jwt_cfg = jwt_config();
     let claim = jwt_cfg
-        .validate_signup_verification_token(&query.token)
+        .validate_signup_verification_token(&token)
         .map_err(|error| {
             ErrorResponse::new(ErrorCode::SignupTokenInvalid).with_message(error.to_string())
         })?;

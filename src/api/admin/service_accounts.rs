@@ -68,6 +68,7 @@ pub struct UpdateServiceAccountRequest {
     tags = ["Admin", "Service Accounts"],
     params(ListServiceAccountsQuery),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "List of service accounts retrieved successfully", body = PaginatedResponse<ServiceAccountSchema>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -117,6 +118,7 @@ pub async fn get_service_accounts(req: Request) -> Result<Response, ErrorRespons
     tags = ["Admin", "Service Accounts"],
     params(("id" = String, Path, description = "Service Account ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Service account retrieved successfully", body = ServiceAccountSchema),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -145,6 +147,7 @@ pub async fn get_service_account(mut req: Request) -> Result<Response, ErrorResp
     tags = ["Admin", "Service Accounts"],
     request_body = CreateServiceAccountRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 201, description = "Service account created successfully", body = ServiceAccountSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -181,6 +184,7 @@ pub async fn create_service_account(mut req: Request) -> Result<Response, ErrorR
     params(("id" = String, Path, description = "Service Account ID")),
     request_body = UpdateServiceAccountRequest,
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Service account updated successfully", body = ServiceAccountSchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -228,6 +232,7 @@ pub async fn update_service_account(mut req: Request) -> Result<Response, ErrorR
     tags = ["Admin", "Service Accounts"],
     params(("id" = String, Path, description = "Service Account ID")),
     responses(
+        (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
         (status = 200, description = "Service account deleted successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),

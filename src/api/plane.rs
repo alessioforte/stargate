@@ -21,7 +21,8 @@ pub enum Plane {
     /// `/livez` and `/readyz`; mounted outside host dispatch and the ingress limit.
     Management,
     /// OAuth/OIDC provider endpoints, accounts, sign-up, social sign-in, the
-    /// hosted auth app, the OpenAPI documents, and the internal-context JWKS.
+    /// hosted auth app and the internal-context JWKS. Documentation is shared
+    /// with the admin plane and describes the listener’s selected planes.
     Identity,
     /// `/admin/*` and the Console.
     Admin,
@@ -156,16 +157,25 @@ pub fn listener_router(planes: PlaneSet, lifecycle: Lifecycle, hosts: IamHosts) 
 
 /// The IAM routes a listener serves, with the layers of each plane.
 fn iam_planes(planes: PlaneSet, lifecycle: &Lifecycle) -> Option<Router> {
-    let identity = planes
-        .contains(Plane::Identity)
-        .then(|| Plane::Identity.router(lifecycle.clone()));
-    let admin = planes
-        .contains(Plane::Admin)
-        .then(|| Plane::Admin.router(lifecycle.clone()));
-    match (identity, admin) {
-        (Some(identity), Some(admin)) => Some(identity.merge(admin)),
-        (identity, admin) => identity.or(admin),
+    let mut iam = Router::new();
+    let mut serves_iam = false;
+    for plane in [Plane::Identity, Plane::Admin] {
+        if planes.contains(plane) {
+            iam = iam.merge(plane.router(lifecycle.clone()));
+            serves_iam = true;
+        }
     }
+    // Reserve control-plane paths on IAM hosts even on a gateway-only listener.
+    // They must never reach an upstream through the gateway fallback.
+    if !planes.contains(Plane::Admin) {
+        iam = iam
+            .nest_service("/admin", Router::new())
+            .nest_service(&crate::conf::apps::console_app_base_path(), Router::new());
+    }
+    if serves_iam {
+        iam = iam.merge(iam_layers(crate::api::docs::router(planes)));
+    }
+    (serves_iam || planes.contains(Plane::Gateway)).then_some(iam)
 }
 
 /// Layers shared by the IAM planes: the per-IP ingress allowance, the matched
@@ -181,7 +191,7 @@ fn iam_layers(router: Router) -> Router {
 
 /// Identity plane: the provider's public API and the hosted auth app.
 pub(super) fn identity_routes() -> Router {
-    use crate::api::{account, apps, docs, i18n, internal_context, oidc, signup, social};
+    use crate::api::{account, apps, i18n, internal_context, oidc, signup, social};
     use axum::routing::get;
 
     Router::new()
@@ -189,8 +199,6 @@ pub(super) fn identity_routes() -> Router {
             "/.well-known/stargate-context-jwks.json",
             get(internal_context::get_internal_context_jwks),
         )
-        .route("/docs", get(docs::get_api_doc))
-        .route("/docs/errors", get(docs::get_error_catalog))
         .route("/i18n/{locale}", get(i18n::get_api_messages))
         .merge(signup::router())
         .merge(oidc::router())

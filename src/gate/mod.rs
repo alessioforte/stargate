@@ -56,6 +56,7 @@ pub async fn init() -> anyhow::Result<Arc<Gate>> {
         crate::data::db::service(),
         gate.resources.shutdown.clone(),
     ));
+    routing::warn_shared_origin(&gate.snapshot().core.graph, crate::conf::iam_hosts());
     metrics::register(&gate);
     Ok(gate)
 }
