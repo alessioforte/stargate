@@ -66,6 +66,28 @@ class WorkflowPathTests(unittest.TestCase):
         self.assertFalse(module.matches('apps/auth/package.json', filtered))
         self.assertFalse(module.matches('README.md', filtered))
 
+    def test_dependency_audit_paths(self):
+        filtered = patterns('dependency-audit.txt')
+        for path in (
+            'Cargo.toml', 'Cargo.lock', 'crates/store/Cargo.toml',
+            'tools/example/Cargo.lock', '.cargo/audit.toml',
+            'package.json', 'package-lock.json',
+            'apps/auth/package.json', 'apps/auth/package-lock.json',
+            'apps/console/package.json', 'apps/console/package-lock.json',
+            'apps/mail/package.json', 'apps/mail/package-lock.json',
+            '.github/npm-audit-exceptions.toml',
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(module.matches(path, filtered))
+        for path in (
+            'src/main.rs', 'crates/store/src/lib.rs',
+            'apps/auth/app/routes/login.tsx', 'README.md', 'AGENTS.md',
+            '.github/workflows/ci.yml', '.github/scripts/check-npm-audit.py',
+            'apps/mail/package.json.bak',
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(module.matches(path, filtered))
+
 
 if __name__ == '__main__':
     unittest.main()

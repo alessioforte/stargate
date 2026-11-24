@@ -3,6 +3,9 @@ name: CI
 on:
   workflow_call:
   pull_request:
+  schedule:
+    # Keep the shared main-branch caches warm and catch new stable-toolchain lints.
+    - cron: "43 3 * * 1"
 
 # Cancel superseded pull request runs; release runs are never cancelled.
 concurrency:
@@ -13,6 +16,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    name: Detect dependency changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matched: ${{ steps.diff.outputs.matched }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Compare dependency paths
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "matched=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          matched=$(python3 -I .github/scripts/changed-paths.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA" .github/paths/dependency-audit.txt)
+          echo "matched=$matched" >> "$GITHUB_OUTPUT"
+
   release-tests:
     name: Release verification tests
     runs-on: ubuntu-latest
@@ -131,12 +160,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
       - run: npm ci
-      # High and critical advisories fail the build; lower ones are reviewed by
-      # hand. Ignored advisories and their reasons live in
-      # .github/npm-audit-exceptions.toml.
-      - name: Audit dependencies
-        working-directory: ${{ github.workspace }}
-        run: python3 -I .github/scripts/check-npm-audit.py apps/${{ matrix.app }}
+      # Audits run separately so advisories cannot hide lint or build failures.
       - name: Lint
         if: matrix.app != 'mail'
         run: npm run lint
@@ -197,3 +221,53 @@ jobs:
       - run: cargo install cargo-audit --locked
       # Ignored advisories and their reasons live in .cargo/audit.toml.
       - run: cargo audit
+
+  npm-audit:
+    name: npm dependency audit (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [auth, console, mail]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.23.4
+      # Like the daily audit, this reads only the lockfile and must not save an
+      # empty npm cache under the app jobs' key.
+      - run: python3 -I .github/scripts/check-npm-audit.py apps/${{ matrix.app }}
+
+  audit-summary:
+    name: Dependency audits
+    needs: [changes, audit, npm-audit]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check dependency audits
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          ENFORCE: ${{ needs.changes.outputs.matched }}
+          RUST: ${{ needs.audit.result }}
+          NPM: ${{ needs.npm-audit.result }}
+        run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "Dependency path detection failed: $CHANGES" >&2
+            exit 1
+          fi
+          case "$ENFORCE" in
+            false)
+              echo "Audits are informational for this pull request (Rust: $RUST, npm: $NPM)."
+              exit 0 ;;
+            true) ;;
+            *) echo "Invalid dependency path result: $ENFORCE" >&2; exit 1 ;;
+          esac
+          if [ "$RUST" != "success" ] || [ "$NPM" != "success" ]; then
+            echo "Dependency audits did not pass (Rust: $RUST, npm: $NPM)." >&2
+            exit 1
+          fi
+          echo "Dependency audits passed."

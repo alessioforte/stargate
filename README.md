@@ -6,7 +6,7 @@ network hop to an auth service.
 
 [![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#project-status)
 [![CI](https://github.com/alessioforte/stargate/actions/workflows/ci.yml/badge.svg)](https://github.com/alessioforte/stargate/actions/workflows/ci.yml)
-[![OIDC conformance](https://github.com/alessioforte/stargate/actions/workflows/oidc-conformance.yml/badge.svg)](docs/oidc-conformance.md)
+[![Dependency audit](https://github.com/alessioforte/stargate/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/alessioforte/stargate/actions/workflows/dependency-audit.yml)
 [![License: ELv2](https://img.shields.io/badge/license-ELv2%20(free%20to%20self--host)-blue)](#license)
 
 <table>
