@@ -7,7 +7,15 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 fn context() -> db::ent::TrustedAuditContext {
-    db::ent::TrustedAuditContext::system_control_plane()
+    db::ent::TrustedAuditContext::admin_control_plane(
+        db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
+        db::ent::TrustedAuditRequest::from_http(
+            ulid::Ulid::generate().to_string(),
+            None,
+            None,
+            None,
+        ),
+    )
 }
 
 async fn body(response: Response) -> Value {
@@ -174,7 +182,7 @@ async fn super_admin_can_create_read_and_replace_key_settings() {
     crate::data::db::with_test_database(async {
         // Management requires the existing super-admin authorization and audit context.
         let auth = AdminAuthorization::super_admin_user(
-            "operator".into(),
+            "01JZ000000000000000000000A".into(),
             AdminAuthenticationKind::Session,
             Box::default(),
         );
