@@ -475,6 +475,15 @@ linked user OAuth/OIDC tokens. A session's state shares the `{s:<sid>}` tag
 `jti` (`:refresh`) and the record (`:session`: owner, org, times, linked OAuth
 client ids, `amr`). The per-user index `{u:<user_id>}:sessions` (sid → org,
 expiry) names a user's sessions; no key lists every session.
+Registration, native renewal (refresh `jti`, record times and subject TTL),
+record updates (`touch_session`, `register_session_client`, `add_otp_factor`),
+subject publication and revocation each change the session's keys in one
+`store::Transaction`, and every write after registration requires the state it
+read: a concurrent revocation always wins, nothing stops halfway. The index
+changes in its own command: a session is indexed before its tokens exist,
+renewal extends the entry first and revocation removes it last, so an entry may
+outlive its session but a usable session is always indexed. `revoke_claims`
+ends a refresh token's (or `jti`-less token's) session through the registry.
 User-delegated OAuth access tokens need a `sid` for a live session owned by the
 token's `sub_id` on the admin API, profile, UserInfo, introspection, and gateway.
 The record must be unexpired and the versioned subject under the same `sid` must

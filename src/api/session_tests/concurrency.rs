@@ -180,7 +180,13 @@ async fn publication_races(router: &Router, admin: (&str, &str)) {
 async fn renewed_during_publication(router: &Router, admin: (&str, &str)) {
     let user = create_user().await;
     let (sid, native, refresh, oauth) = start_session(&user, None).await;
-    assert!(registry::renew_session(&user.id, &sid, 3).await.unwrap());
+    // Shorten the session; renewing to the same jti keeps the token valid.
+    let jti = refresh_jti(&refresh);
+    assert!(
+        registry::renew_session(&user.id, &sid, &jti, &jti, 3)
+            .await
+            .unwrap()
+    );
     let original_expiry = registry::get_session(&sid)
         .await
         .unwrap()
@@ -223,12 +229,114 @@ async fn renewed_during_publication(router: &Router, admin: (&str, &str)) {
     registry::revoke_session(&sid).await.unwrap();
 }
 
+async fn assert_session_gone(user: &User, sid: &str) {
+    use store::keys::session;
+    for key in [
+        session::subject(sid),
+        session::refresh(sid),
+        session::record(sid),
+    ] {
+        assert!(!use_store().exists(&key).await.unwrap(), "{key}");
+    }
+    assert!(
+        !use_store()
+            .hexists(&session::index(&user.id), sid)
+            .await
+            .unwrap()
+    );
+}
+
+/// Run `work` until it pauses at `stage`, revoke `sid` meanwhile, and let it
+/// finish.
+async fn revoke_while_paused<T>(stage: Stage, sid: &str, work: impl Future<Output = T>) -> T {
+    let pause = Pause::new(stage);
+    let revoke = async {
+        pause.wait().await;
+        registry::revoke_session(sid).await.unwrap();
+        pause.resume();
+    };
+    tokio::join!(pause.scope(work), revoke).0
+}
+
+/// A revocation between a refresh's read and its write wins: the refresh is
+/// rejected and leaves nothing of the session behind.
+async fn revocation_during_refresh(router: &Router) {
+    let user = create_user().await;
+    let (sid, native, refresh, oauth) = start_session(&user, None).await;
+    revise_session(&sid, |record| record.client_ids.clear()).await;
+    let request = Request::put("/account/refresh-token")
+        .header(header::AUTHORIZATION, bearer(&native))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"refresh_token": refresh}).to_string()))
+        .unwrap();
+    let renewal = send(router, request, StatusCode::UNAUTHORIZED);
+    revoke_while_paused(Stage::RecordWrite, &sid, renewal).await;
+    assert_session_gone(&user, &sid).await;
+    userinfo(router, &oauth, StatusCode::UNAUTHORIZED).await;
+
+    let (sid, _, _, oauth) = start_session(&user, None).await;
+    revise_session(&sid, |record| record.client_ids.clear()).await;
+    let refresh_token = refresh_family(&user, &sid).await;
+    let fields = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token.as_str()),
+    ];
+    let rotation = send(
+        router,
+        oauth_request("/oauth/token", &fields),
+        StatusCode::BAD_REQUEST,
+    );
+    revoke_while_paused(Stage::RecordWrite, &sid, rotation).await;
+    assert_session_gone(&user, &sid).await;
+    userinfo(router, &oauth, StatusCode::UNAUTHORIZED).await;
+}
+
+/// A subject publication that read the session before its revocation does
+/// not write the subject back.
+async fn revocation_during_publication(router: &Router, admin: (&str, &str)) {
+    let user = create_user().await;
+    let (sid, _, _, oauth) = start_session(&user, None).await;
+    revise_session(&sid, |record| record.client_ids.clear()).await;
+    let publication = set_grants(router, admin, &user, &["read"]);
+    revoke_while_paused(Stage::SubjectWrite, &sid, publication).await;
+    assert_session_gone(&user, &sid).await;
+    userinfo(router, &oauth, StatusCode::UNAUTHORIZED).await;
+}
+
+/// A session is indexed before its tokens exist: revoking every session of
+/// the user meanwhile finds it, and the login fails.
+async fn revocation_during_registration() {
+    let user = create_user().await;
+    let pause = Pause::new(Stage::Indexed);
+    let login = pause.scope(issuance::start_user_session(
+        user.clone(),
+        chrono::Utc::now().timestamp() as usize,
+        None,
+        vec!["pwd".into()],
+    ));
+    let revoke = async {
+        pause.wait().await;
+        assert_eq!(registry::revoke_all_sessions(&user.id).await.unwrap(), 1);
+        pause.resume();
+    };
+    let (result, ()) = tokio::join!(login, revoke);
+    match result {
+        Err(error) => assert_eq!(error.code, ErrorCode::AuthTokenInvalid),
+        Ok(_) => panic!("issued tokens for a revoked session"),
+    }
+    let index = store::keys::session::index(&user.id);
+    assert_eq!(use_store().hlen(&index).await.unwrap(), 0);
+}
+
 pub(super) async fn run(router: &Router, admin: (&str, &str)) {
     tokio::time::timeout(Duration::from_secs(20), async {
         registration_races(router, admin).await;
         readmission_during_revocation(router, admin).await;
         publication_races(router, admin).await;
         renewed_during_publication(router, admin).await;
+        revocation_during_refresh(router).await;
+        revocation_during_publication(router, admin).await;
+        revocation_during_registration().await;
         #[cfg(feature = "redis")]
         super::delayed_publication::run(router, admin).await;
     })

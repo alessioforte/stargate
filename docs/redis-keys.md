@@ -83,9 +83,16 @@ IP addresses may be IPv6 (`{ip:2001:db8::1}:ingress`): the colons belong to the
 tag and do not change slot selection.
 
 No key lists every session. A session's subject, refresh rotation and record
-share its `{s:<sid>}` tag, and the user's index names the user's sessions.
-Listings enumerate users from SQL and read their indexes, one entity per
-command, so they work unchanged on Redis Cluster.
+share its `{s:<sid>}` tag and change together: registration, renewal, record
+updates, subject publication and revocation are each one Lua script in that
+slot, and every write after registration requires the state it read, so a
+revoked session never reappears. The user's index names the user's sessions
+under `{u:<user_id>}`, another slot, and changes in its own command: a session
+is indexed before any token names it, renewal extends the entry before the
+session, and revocation removes the entry last. An entry can outlive its
+session; a usable session always has one. Listings enumerate users from SQL
+and read their indexes, one entity per command, so they work unchanged on Redis
+Cluster.
 
 The [password login guard](config-v1.md#password-login-guard) reserves each
 bucket with a single-key atomic update. The source and account keys can occupy

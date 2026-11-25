@@ -83,7 +83,11 @@ pub(super) async fn run(router: &Router, admin: (&str, &str)) {
     registry::revoke_session(&sid).await.unwrap();
     assert!(
         !delayed
-            .replace_if_equal(&key, &current, &previous)
+            .commit(
+                &store::Transaction::new()
+                    .swap(&key, &current, &previous)
+                    .unwrap()
+            )
             .await
             .unwrap()
     );

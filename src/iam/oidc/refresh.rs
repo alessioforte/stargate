@@ -65,19 +65,10 @@ mod tests {
     async fn refresh_token_rotates_once_and_replay_revokes_family() {
         let sid = ulid::Ulid::generate().to_string();
         use crate::iam::auth::subject::{Subject, SubjectType};
-        use crate::iam::sess::subjects::PublishedSubject;
-        use store::Store;
-        let subject =
-            PublishedSubject::from(Subject::new("user-1".into(), SubjectType::User, None));
-        crate::data::store::use_store()
-            .set(&store::keys::session::subject(&sid), &subject, Some(60))
-            .await
-            .unwrap();
         crate::iam::sess::registry::register_session(
             crate::iam::sess::registry::NewSession {
-                user_id: "user-1",
                 sid: &sid,
-                org_id: None,
+                subject: Subject::new("user-1".into(), SubjectType::User, None),
                 authenticated_at_unix: Utc::now().timestamp() as u64,
                 amr: vec!["pwd".to_string()],
             },

@@ -144,6 +144,14 @@ async fn start_session(user: &User, org_id: Option<&str>) -> (String, String, St
     (sid, native.access_token, native.refresh_token, oauth)
 }
 
+fn refresh_jti(refresh_token: &str) -> String {
+    jwt_config()
+        .validate_session_refresh_token(refresh_token)
+        .unwrap()
+        .jti
+        .unwrap()
+}
+
 async fn subject(token: &str) -> Subject {
     let req = Request::builder()
         .header(header::AUTHORIZATION, bearer(token))
@@ -391,7 +399,11 @@ async fn suite() {
     published.subject.attrs = json!({"locale": "it", "publication": "new"});
     assert!(
         use_store()
-            .replace_if_equal(&key, &current, &published)
+            .commit(
+                &store::Transaction::new()
+                    .swap(&key, &current, &published)
+                    .unwrap()
+            )
             .await
             .unwrap()
     );

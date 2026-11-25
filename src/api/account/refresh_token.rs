@@ -100,13 +100,7 @@ pub async fn put_refresh_token(req: Request) -> Result<Response, ErrorResponse> 
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
     let cttl: i64 = access_exp.as_seconds_f64() as i64;
 
-    let rotated =
-        registry::rotate_refresh_token(sid, presented_jti, &tokens.refresh_jti, sttl).await?;
-    if !rotated {
-        return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
-    }
-
-    if !registry::renew_session(user_id, sid, sttl).await? {
+    if !registry::renew_session(user_id, sid, presented_jti, &tokens.refresh_jti, sttl).await? {
         return Err(ErrorResponse::new(ErrorCode::AuthTokenInvalid));
     }
 

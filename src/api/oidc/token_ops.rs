@@ -5,7 +5,7 @@ use super::client_auth::{
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::oauth::oauth_bad_request;
 use crate::err::{OAuthErrorResponse, OAuthResult};
-use crate::iam::auth::revocation::{RevocationConfirmations, revoke_claims};
+use crate::iam::auth::revocation::revoke_claims;
 use axum::Json;
 use axum::extract::{Form, FromRequest, Request};
 use axum::http::StatusCode;
@@ -181,16 +181,7 @@ pub async fn post_revoke(mut req: Request) -> OAuthResult<StatusCode> {
 
     match validate_revocable_jwt(&form.token) {
         Ok(claims) => {
-            let mut confirmations = RevocationConfirmations::default();
-            confirmations.record(revoke_claims(&claims).await)?;
-            if claims.typ.as_deref() == Some("refresh")
-                && let (Some(user_id), Some(sid)) =
-                    (claims.sub_id.as_deref(), claims.sid.as_deref())
-            {
-                confirmations
-                    .record(crate::iam::sess::registry::end_session(user_id, sid).await)?;
-            }
-            confirmations.finish(())?;
+            revoke_claims(&claims).await?;
         }
         Err(_) => {
             revoke_api_key_token(
