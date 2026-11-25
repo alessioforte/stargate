@@ -152,12 +152,6 @@ export interface AdminOverview {
     targets: number;
     upstreams: number;
   };
-  /** Estimated totals of the last reconciliation; `null` before the first. */
-  sessions: {
-    activeSessions: number;
-    activeUsers: number;
-    reconciledAt: string;
-  } | null;
 }
 
 export interface AdminSessionUser {
