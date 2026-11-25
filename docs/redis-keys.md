@@ -102,6 +102,8 @@ in one command, with no `SCAN` or per-address index.
 - Lua scripts declare **all** keys they touch in `KEYS`; the token bucket
   receives both of its keys, and the short quota tracker derives no key inside the
   script.
+- A store transaction (`store::Transaction`) runs as one Lua script; one that
+  spans two tags is rejected before it is sent.
 - Batch store operations split their work by tag and send one pipeline per
   slot. `RedisStore::batch_get`, `batch_set`, `batch_delete` and `batch_exists`
   remain one round trip when their keys belong to one entity.
@@ -128,5 +130,6 @@ support. When replica confirmation is enabled, the ACL must also allow
 `benches/scripts/test_redis_prefix.py` runs the store and limiter suites, the
 gateway smoke test and the audit relay on a single instance under this ACL.
 `benches/scripts/test_redis_cluster.py` runs the same store and limiter tests on
-a disposable 3+3 cluster, plus raw cross-slot `MGET`/`EVAL` negative controls.
+a disposable 3+3 cluster, including session-shaped transactions confirmed by a
+replica, plus raw cross-slot `MGET`/`EVAL` negative controls.
 The Redis CI workflow runs both.

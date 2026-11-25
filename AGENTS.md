@@ -154,6 +154,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `stargate:v1:{<entity>}:<name>[:<qualifier>...]`. The version is part of the
   root, every key carries one entity hash tag (co-accessed keys share it), and
   batch operations split by tag so a Redis Cluster slot never mixes entities.
+  `store::Transaction` writes keys of one tag together while its requirements
+  hold (one Lua script; the memory store applies transactions one at a time and
+  its transaction keys are written only by transactions); one across tags is
+  rejected before it is sent.
   The pool opens connections on demand and requires `COMMAND INFO HEXPIRE`
   to succeed on every socket (Redis 7.4+ or Valkey 9.0+). An unavailable or
   unsupported backend does not block startup. The security-state request budget

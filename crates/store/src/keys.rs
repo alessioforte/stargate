@@ -49,6 +49,19 @@ pub fn entity(key: &str) -> Option<(&str, &str)> {
     tag.split_once(':')
 }
 
+/// The Redis Cluster slot unit of a key: the text between the first `{` and the
+/// following `}`. Keys without a hash tag are their own slot unit.
+pub(crate) fn slot(key: &str) -> &str {
+    let Some(open) = key.find('{') else {
+        return key;
+    };
+    let rest = &key[open + 1..];
+    match rest.find('}') {
+        Some(close) if close > 0 => &rest[..close],
+        _ => key,
+    }
+}
+
 fn digest(value: &str) -> String {
     let hash = Sha256::digest(value.as_bytes());
     hash.iter().map(|byte| format!("{byte:02x}")).collect()

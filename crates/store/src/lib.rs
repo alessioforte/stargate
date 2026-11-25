@@ -1,11 +1,13 @@
 mod error;
 mod store;
+mod transaction;
 
 pub mod keys;
 pub mod observe;
 
 pub use error::{StoreError, StoreResult};
 pub use store::{AtomicStore, DeserializeValue, SerializeValue, Store};
+pub use transaction::Transaction;
 
 #[cfg(feature = "memory")]
 pub mod memory;

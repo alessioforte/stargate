@@ -31,6 +31,7 @@ crates/store/
 │   ├── lib.rs              # Public re-exports (feature-gated)
 │   ├── keys.rs             # Canonical state-key schema shared by every crate
 │   ├── store.rs            # Store + AtomicStore traits
+│   ├── transaction.rs      # Transaction: conditional writes on one hash tag
 │   ├── error.rs            # StoreError enum + StoreResult<T>
 │   ├── memory/
 │   │   ├── memory.rs       # MemoryStore impl (DashMap)
@@ -39,7 +40,7 @@ crates/store/
 │   │   └── stats.rs        # AtomicOperationStats, StorageStats, metrics
 │   └── redis/
 │       ├── redis.rs        # RedisStore impl (connection pool)
-│       └── scripts.rs      # Lua scripts: CAS, INCR, DECR, CAS_I64
+│       └── scripts.rs      # Lua scripts: CAS, INCR, DECR, CAS_I64, transactions
 ```
 
 ### Trait hierarchy
@@ -107,10 +108,36 @@ pub trait Store: Send + Sync {
     // Optimistic concurrency — compares the *serialized* representation of
     // `expected`, so types must serialize deterministically (avoid HashMap fields)
     async fn compare_and_swap<T: SerializeValue>(&self, key: &str, expected: &T, new: &T, ttl: Option<u64>) -> StoreResult<bool>;
+
+    // Several keys of one hash tag, written together while requirements hold
+    async fn commit(&self, transaction: &Transaction) -> StoreResult<bool>;
 }
 ```
 
 `ttl` is always in **seconds**. `None` = no expiry. `Some(0)` = error.
+
+### Transactions
+
+A `Transaction` collects requirements (`require`: the key exists;
+`require_equal`: it holds a value, compared serialized) and writes (`set` with a
+TTL, `swap` keeping the TTL, `expire`, `delete`). `commit` applies every write
+only when every requirement holds and returns whether it did:
+
+```rust
+let renewal = Transaction::new()
+    .require(&subject)
+    .require_equal(&refresh, &presented)?
+    .set(&refresh, &next, ttl)?
+    .swap(&record, &current, &renewed)?
+    .expire(&subject, ttl);
+let renewed = store.commit(&renewal).await?;
+```
+
+All keys must share one hash tag: Redis runs the transaction as one Lua script
+in that slot, and a transaction across tags fails with `InvalidInput` before it
+is sent. The memory store applies transactions one at a time, so a key that
+transactions write must be written only by transactions.
+`RedisStore::commit_confirmed` also waits for the configured replicas.
 
 ## AtomicStore trait
 
@@ -286,6 +313,7 @@ Atomic operations that Redis does not provide natively are implemented as Lua sc
 | `INCR_SCRIPT`  | INCRBY + optional EXPIRE (used when TTL is supplied) |
 | `DECR_SCRIPT`  | DECRBY + optional EXPIRE (used when TTL is supplied) |
 | `HSET_WITH_TTL_SCRIPT` | HSET + HEXPIRE (used when `hset` TTL is supplied; Redis >= 7.4) |
+| `TRANSACTION_SCRIPT` | Check every requirement, then apply every write of a `Transaction` |
 
 `incr_i64` / `decr_i64` use native `INCRBY` / `DECRBY` when no TTL is needed (avoids Lua overhead). `hset` without TTL uses plain `HSET`. In both backends `hset` returns `true` only when the field was newly created.
 

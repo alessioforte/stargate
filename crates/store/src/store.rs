@@ -1,4 +1,5 @@
 use crate::error::StoreResult;
+use crate::transaction::Transaction;
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
@@ -107,6 +108,10 @@ pub trait Store: Send + Sync {
         new: &T,
         ttl: Option<u64>,
     ) -> StoreResult<bool>;
+
+    /// Apply every write of `transaction` when all its requirements hold.
+    /// Returns whether it was applied.
+    async fn commit(&self, transaction: &Transaction) -> StoreResult<bool>;
 }
 
 /// Atomic integer operations.

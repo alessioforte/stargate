@@ -76,3 +76,43 @@ pub static CAS_I64_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
         "#,
     )
 });
+
+/// A [`crate::Transaction`]. KEYS holds the requirement keys, then the write
+/// keys. ARGV[1] counts the requirements; then come two arguments per
+/// requirement (kind, value) and three per write (kind, value, TTL).
+///
+/// A deletion that finds nothing still writes, so the WAIT of a confirmed
+/// retry covers an earlier deletion that reached only the primary.
+pub const TRANSACTION_LUA: &str = r#"
+local requirements = tonumber(ARGV[1])
+local arg = 2
+for i = 1, requirements do
+    local kind, value = ARGV[arg], ARGV[arg + 1]
+    arg = arg + 2
+    if kind == "exists" then
+        if redis.call("EXISTS", KEYS[i]) == 0 then
+            return 0
+        end
+    elseif redis.call("GET", KEYS[i]) ~= value then
+        return 0
+    end
+end
+for i = requirements + 1, #KEYS do
+    local kind, value, ttl = ARGV[arg], ARGV[arg + 1], ARGV[arg + 2]
+    arg = arg + 3
+    if kind == "set" then
+        redis.call("SET", KEYS[i], value, "EX", ttl)
+    elseif kind == "replace" then
+        redis.call("SET", KEYS[i], value, "KEEPTTL")
+    elseif kind == "expire" then
+        redis.call("EXPIRE", KEYS[i], ttl)
+    elseif redis.call("DEL", KEYS[i]) == 0 then
+        redis.call("SET", KEYS[i], "")
+        redis.call("DEL", KEYS[i])
+    end
+end
+return 1
+"#;
+
+pub static TRANSACTION_SCRIPT: LazyLock<redis::Script> =
+    LazyLock::new(|| redis::Script::new(TRANSACTION_LUA));

@@ -1,8 +1,12 @@
 use super::pool::{RedisConnection, RedisPool, RedisPoolConfig};
 use super::replication::{RedisReplicationConfig, Replication};
-use super::scripts::{CAS_I64_SCRIPT, CAS_SCRIPT, DECR_SCRIPT, HSET_WITH_TTL_SCRIPT, INCR_SCRIPT};
+use super::scripts::{
+    CAS_I64_SCRIPT, CAS_SCRIPT, DECR_SCRIPT, HSET_WITH_TTL_SCRIPT, INCR_SCRIPT, TRANSACTION_LUA,
+    TRANSACTION_SCRIPT,
+};
 use crate::error::{StoreError, StoreResult};
 use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
+use crate::transaction::{Requirement, Transaction, Write};
 use async_trait::async_trait;
 use redis::AsyncCommands;
 use std::borrow::Cow;
@@ -283,6 +287,60 @@ impl RedisStore {
             .confirm::<i32>(writes)
             .await
             .map(|deleted| deleted > 0)
+    }
+
+    /// Commit a transaction and wait for the configured replicas, like
+    /// [`Self::set_confirmed`].
+    pub async fn commit_confirmed(&self, transaction: &Transaction) -> StoreResult<bool> {
+        let Some(replication) = &self.replication else {
+            return self.commit(transaction).await;
+        };
+        let (keys, args) = self.transaction_call(transaction)?;
+        let mut writes = redis::pipe();
+        writes
+            .cmd("EVAL")
+            .arg(TRANSACTION_LUA)
+            .arg(keys.len())
+            .arg(&keys)
+            .arg(&args);
+        replication
+            .confirm::<i32>(writes)
+            .await
+            .map(|applied| applied == 1)
+    }
+
+    /// The physical keys and the arguments of [`TRANSACTION_LUA`].
+    fn transaction_call(
+        &self,
+        transaction: &Transaction,
+    ) -> StoreResult<(Vec<String>, Vec<Vec<u8>>)> {
+        transaction.validate()?;
+        let encode = |value: &[u8]| self.compression.compress(value.to_vec());
+        let mut keys = Vec::new();
+        let mut args = vec![transaction.requirements.len().to_string().into_bytes()];
+        for requirement in &transaction.requirements {
+            keys.push(self.prefixed_key(requirement.key()).into_owned());
+            let (kind, value) = match requirement {
+                Requirement::Exists(_) => ("exists", Vec::new()),
+                Requirement::Equals(_, value) => ("equals", encode(value)?),
+            };
+            args.extend([kind.as_bytes().to_vec(), value]);
+        }
+        for write in &transaction.writes {
+            keys.push(self.prefixed_key(write.key()).into_owned());
+            let (kind, value, ttl) = match write {
+                Write::Set(_, value, ttl) => ("set", encode(value)?, *ttl),
+                Write::Replace(_, value) => ("replace", encode(value)?, 0),
+                Write::Expire(_, ttl) => ("expire", Vec::new(), *ttl),
+                Write::Delete(_) => ("delete", Vec::new(), 0),
+            };
+            args.extend([
+                kind.as_bytes().to_vec(),
+                value,
+                ttl.to_string().into_bytes(),
+            ]);
+        }
+        Ok((keys, args))
     }
 
     /// Set the operator prefix for state keys (empty by default). It is
@@ -786,6 +844,23 @@ impl Store for RedisStore {
         let expiry = ttl.map_or_else(|| "nil".to_owned(), |secs| secs.to_string());
         self.swap_serialized(key, expected, new, &expiry).await
     }
+
+    async fn commit(&self, transaction: &Transaction) -> StoreResult<bool> {
+        let (keys, args) = self.transaction_call(transaction)?;
+        let mut invocation = TRANSACTION_SCRIPT.prepare_invoke();
+        for key in &keys {
+            invocation.key(key);
+        }
+        for arg in &args {
+            invocation.arg(arg.as_slice());
+        }
+        let mut con = self.pool.get();
+        let applied: i32 = invocation
+            .invoke_async(&mut con)
+            .await
+            .map_err(StoreError::from)?;
+        Ok(applied == 1)
+    }
 }
 
 // =============================================================================
@@ -862,7 +937,7 @@ impl RedisStore {
             let serialized = self.serialize(value)?;
             let physical = self.prefixed_key(key).into_owned();
             groups
-                .entry(slot_key(&physical).to_string())
+                .entry(crate::keys::slot(&physical).to_string())
                 .or_default()
                 .push((physical, serialized, ttl));
         }
@@ -946,26 +1021,13 @@ impl RedisStore {
     }
 }
 
-/// The Redis Cluster slot unit of a key: the text between the first `{` and the
-/// following `}`. Keys without a hash tag are their own slot unit.
-fn slot_key(key: &str) -> &str {
-    let Some(open) = key.find('{') else {
-        return key;
-    };
-    let rest = &key[open + 1..];
-    match rest.find('}') {
-        Some(close) if close > 0 => &rest[..close],
-        _ => key,
-    }
-}
-
 /// Indices of `keys` grouped by slot, preserving the caller's order inside
 /// each group. One group means one command, as for keys of a single entity.
 fn group_by_slot<'a>(keys: &'a [Cow<'a, str>]) -> BTreeMap<&'a str, Vec<usize>> {
     let mut groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (index, key) in keys.iter().enumerate() {
         groups
-            .entry(slot_key(key.as_ref()))
+            .entry(crate::keys::slot(key.as_ref()))
             .or_default()
             .push(index);
     }
