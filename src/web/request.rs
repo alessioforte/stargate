@@ -175,8 +175,14 @@ impl<B> RequestExt for Request<B> {
     }
 
     fn get_token(&self) -> Option<String> {
-        self.get_bearer_token()
-            .or_else(|| token_from_cookie(self.headers()))
+        // An Authorization header is the credential whenever it is present:
+        // a malformed one does not fall back to the session cookie, so a
+        // header-authenticated request never authenticates with the cookie
+        // too. `get_bearer_token` still ignores non-bearer schemes.
+        if self.headers().contains_key(AUTHORIZATION) {
+            return self.get_bearer_token();
+        }
+        token_from_cookie(self.headers())
     }
 
     fn get_api_key(&self) -> Option<String> {

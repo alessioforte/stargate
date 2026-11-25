@@ -1,7 +1,10 @@
 import { appPath } from "@/lib/base-path";
 
 export interface ConsoleAppConfig {
+  /** Origin of the admin API (`/admin/*`). */
   apiUrl: string;
+  /** OAuth/OIDC issuer: authorize, token, revoke, and logout. */
+  issuerUrl: string;
   authUrl: string;
   oauthClientId: string;
   oauthRedirectUri: string;
@@ -37,10 +40,16 @@ function requiredEnv(key: string, value: string | undefined) {
 
 export function getConsoleAppConfig(): ConsoleAppConfig {
   const origin = browserOrigin();
+  // Without an explicit admin API the Console calls its own origin; without
+  // an explicit issuer OAuth stays there too, which is the single-origin
+  // deployment both apps have always served.
+  const apiUrl = cleanUrl(import.meta.env.VITE_API_URL) ?? origin;
+  const issuerUrl = cleanUrl(import.meta.env.VITE_ISSUER_URL) ?? apiUrl;
 
   return {
-    apiUrl: cleanUrl(import.meta.env.VITE_API_URL) ?? origin,
-    authUrl: cleanUrl(import.meta.env.VITE_AUTH_URL) ?? `${origin}/auth`,
+    apiUrl,
+    issuerUrl,
+    authUrl: cleanUrl(import.meta.env.VITE_AUTH_URL) ?? `${issuerUrl}/auth`,
     oauthClientId: requiredEnv(
       "VITE_OAUTH_CLIENT_ID",
       import.meta.env.VITE_OAUTH_CLIENT_ID,

@@ -56,9 +56,11 @@ import type {
 
 export default class AdminApiService {
   private readonly http: Http;
+  private readonly issuerHttp: Http;
 
-  constructor(http: Http) {
+  constructor(http: Http, issuerHttp: Http) {
     this.http = http;
+    this.issuerHttp = issuerHttp;
   }
 
   private request<T>(config: AxiosRequestConfig): Promise<HttpResponse<T>> {
@@ -66,7 +68,7 @@ export default class AdminApiService {
   }
 
   getApiMessages(locale: string) {
-    return this.http.request<ApiMessageCatalog>({
+    return this.issuerHttp.request<ApiMessageCatalog>({
       url: `/i18n/${encodeURIComponent(locale)}`,
       method: "GET",
     });
@@ -74,7 +76,7 @@ export default class AdminApiService {
 
   /** Persist the signed-in user's language in `users.attrs.locale`. */
   updateProfile(locale: string) {
-    return this.http.authRequest<unknown>({
+    return this.issuerHttp.authRequest<unknown>({
       url: "/account/profile",
       method: "PUT",
       data: { locale },

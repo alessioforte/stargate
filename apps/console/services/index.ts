@@ -15,8 +15,10 @@ const services = {
         window.location.href = appPath("/");
       });
 
+      const config = getConsoleAppConfig();
       admin = new AdminApiService(
-        new Http(getConsoleAppConfig().apiUrl, tokenManager),
+        new Http(config.apiUrl, tokenManager),
+        new Http(config.issuerUrl, tokenManager),
       );
     }
 

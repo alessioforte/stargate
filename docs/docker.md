@@ -54,7 +54,8 @@ The main build arguments are:
 | `CONSOLE_APP_BASE_PATH`   | `/stargate`                                     | Build and runtime path for the Console                       |
 | `AUTH_APP_BASE_PATH`      | `/auth`                                         | Build and runtime path for the auth UI                       |
 | `VITE_API_URL`            | same browser origin                             | Public API URL embedded in both web apps                     |
-| `VITE_AUTH_URL`           | `<origin>/auth`                                 | Public auth-app URL embedded in the Console                  |
+| `VITE_ISSUER_URL`         | `VITE_API_URL` or the browser origin            | OAuth provider URL embedded in the Console                   |
+| `VITE_AUTH_URL`           | `<issuer>/auth`                                 | Public auth-app URL embedded in the Console                  |
 | `VITE_OAUTH_CLIENT_ID`    | `stargate_console`                              | OAuth client used by the Console and instance bootstrap      |
 | `VITE_OAUTH_REDIRECT_URI` | `<origin><CONSOLE_APP_BASE_PATH>/auth/callback` | Console OAuth callback used by the UI and instance bootstrap |
 
@@ -64,11 +65,22 @@ For a deployment with explicit public URLs:
 docker build \
   --build-arg STARGATE_PROFILE=cluster \
   --build-arg VITE_API_URL=https://identity.example.com \
+  --build-arg VITE_ISSUER_URL=https://identity.example.com \
   --build-arg VITE_AUTH_URL=https://identity.example.com/auth \
   --build-arg VITE_OAUTH_CLIENT_ID=stargate_console \
   --build-arg VITE_OAUTH_REDIRECT_URI=https://identity.example.com/stargate/auth/callback \
   -t stargate:cluster .
 ```
+
+To serve the Console from the admin origin and the provider from the identity
+origin, set `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI` to the admin origin
+(for example `https://admin.example.com`) and `VITE_ISSUER_URL` plus
+`VITE_AUTH_URL` to the identity origin. At runtime, set `CONSOLE_PUBLIC_URL` to
+the admin origin as well: the identity plane admits that origin on
+`/oauth/token` and `/oauth/revoke`, and `admin bootstrap` registers the Console
+callback from it. The Console's message catalog and saved profile language
+also call the identity origin: add the Console origin to `CORS_ORIGINS` when
+those must work from another origin.
 
 `CONSOLE_APP_BASE_PATH` and `AUTH_APP_BASE_PATH` are also written into the image's
 runtime environment, keeping the Vite asset paths and Rust routes synchronized.

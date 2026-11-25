@@ -68,7 +68,9 @@ function limitSummary(value: JsonValue) {
     ]
       .filter(Boolean)
       .join(" ");
-    return [`limit ${numberValue(params.limit) ?? "-"}`, windowLabel].join(", ");
+    return [`limit ${numberValue(params.limit) ?? "-"}`, windowLabel].join(
+      ", ",
+    );
   }
 
   return "";

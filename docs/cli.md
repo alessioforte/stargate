@@ -208,8 +208,10 @@ In the container image the binary is `/bin/server`, for example
 - `--oauth-client-id` defaults to `CONSOLE_OAUTH_CLIENT_ID`, then
   `stargate_console`.
 - `--oauth-redirect-uri` defaults to `CONSOLE_OAUTH_REDIRECT_URI`. When it is
-  unset, Stargate derives the callback from `CONSOLE_PUBLIC_URL`,
-  `OAUTH_BASE_URL`, or `JWT_ISSUER`, plus `CONSOLE_APP_BASE_PATH`.
+  unset, Stargate derives the callback from `CONSOLE_PUBLIC_URL` (the Console's
+  origin when it is served by another listener), `OAUTH_BASE_URL`, or
+  `JWT_ISSUER`, plus `CONSOLE_APP_BASE_PATH`. The `post_logout_redirect_uri`
+  is the Console root, the callback without `/auth/callback`.
 - Production redirect URIs must use HTTPS. HTTP is accepted only for loopback
   hosts such as `localhost`.
 - Re-running the command leaves matching resources unchanged.

@@ -14,6 +14,17 @@ pub fn console_app_base_path() -> String {
     base_path("CONSOLE_APP_BASE_PATH", DEFAULT_CONSOLE_APP_BASE_PATH)
 }
 
+/// Public URL of the Console (`CONSOLE_PUBLIC_URL`), else the public base URL.
+/// `admin bootstrap` derives the client's redirect URIs from it, and the
+/// identity plane admits its origin on the token and revocation endpoints.
+pub fn console_public_url() -> String {
+    std::env::var("CONSOLE_PUBLIC_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(crate::conf::public_base_url)
+}
+
 fn base_path(name: &str, default: &str) -> String {
     normalize_base_path(std::env::var(name).ok().as_deref(), default)
 }

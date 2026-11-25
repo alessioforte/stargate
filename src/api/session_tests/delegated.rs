@@ -93,6 +93,51 @@ async fn verify_credential_sources(router: &Router, native: &str, oauth: &str) {
     )
     .await;
     assert!(response["id"].is_string());
+
+    // A header credential is not CSRF-able: the origin guard leaves it alone
+    // even when the origin and the Fetch Metadata are untrusted.
+    let response = send(
+        router,
+        Request::get("/account/profile")
+            .header(header::AUTHORIZATION, bearer(native))
+            .header(header::ORIGIN, "https://evil.example.com")
+            .header("sec-fetch-site", "cross-site")
+            .body(Body::empty())
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert!(response["id"].is_string());
+
+    // A malformed Authorization header never falls back to the cookie, even
+    // though the cookie alone would authenticate.
+    for value in ["Bearer", "Basic dXNlcjpwYXNz"] {
+        let response = send(
+            router,
+            Request::get("/account/profile")
+                .header(header::AUTHORIZATION, value)
+                .header(header::COOKIE, format!("jwt={native}"))
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+        )
+        .await;
+        assert_eq!(response["code"], "auth.token_missing", "{value}");
+    }
+
+    // Routes that carry no credential stay behind the guard.
+    let response = send(
+        router,
+        Request::post("/account/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ORIGIN, "https://evil.example.com")
+            .body(Body::from(r#"{"username":"x","password":"y"}"#))
+            .unwrap(),
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+    assert_eq!(response["code"], "auth.untrusted_origin");
+
     for site in ["same-site", "cross-site"] {
         let response = send(
             router,

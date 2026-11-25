@@ -4,6 +4,8 @@ use db::ent::{OAuthClient, Profile, TrustedAuditContext};
 use tracing::info;
 use url::Url;
 
+use crate::conf::apps::console_public_url;
+
 pub const DEFAULT_CONSOLE_OAUTH_CLIENT_ID: &str = "stargate_console";
 
 pub async fn super_admin_exists() -> Result<bool> {
@@ -126,11 +128,9 @@ fn nonempty_env(key: &str) -> Option<String> {
 }
 
 fn default_console_oauth_redirect_uri() -> String {
-    let public_url =
-        nonempty_env("CONSOLE_PUBLIC_URL").unwrap_or_else(crate::conf::public_base_url);
     format!(
         "{}{}/auth/callback",
-        public_url.trim_end_matches('/'),
+        console_public_url().trim_end_matches('/'),
         crate::conf::apps::console_app_base_path()
     )
 }
@@ -166,6 +166,73 @@ mod tests {
         assert_eq!(
             console_post_logout_redirect_uri("https://id.example.com/callback"),
             None
+        );
+    }
+
+    #[test]
+    fn the_console_origin_decides_the_registered_uris() {
+        const CHILD: &str = "STARGATE_CONSOLE_ORIGIN_BOOTSTRAP_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = crate::conf::child_test::run(
+                "iam::boot::tests::the_console_origin_decides_the_registered_uris",
+                |command| {
+                    command
+                        .env(CHILD, "1")
+                        .env_remove("CONSOLE_OAUTH_REDIRECT_URI")
+                        .env_remove("CONSOLE_APP_BASE_PATH")
+                        .env("CONSOLE_PUBLIC_URL", "https://console.example.com");
+                },
+            );
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let redirect = resolve_console_oauth_redirect_uri(None).unwrap();
+        assert_eq!(
+            redirect,
+            "https://console.example.com/stargate/auth/callback"
+        );
+        assert_eq!(
+            console_post_logout_redirect_uri(&redirect).as_deref(),
+            Some("https://console.example.com/stargate/")
+        );
+    }
+
+    #[test]
+    fn a_single_origin_keeps_the_issuer_callback() {
+        const CHILD: &str = "STARGATE_SINGLE_ORIGIN_BOOTSTRAP_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = crate::conf::child_test::run(
+                "iam::boot::tests::a_single_origin_keeps_the_issuer_callback",
+                |command| {
+                    command
+                        .env(CHILD, "1")
+                        .env_remove("CONSOLE_OAUTH_REDIRECT_URI")
+                        .env_remove("CONSOLE_APP_BASE_PATH")
+                        .env_remove("CONSOLE_PUBLIC_URL")
+                        .env("OAUTH_BASE_URL", "https://identity.example.com");
+                },
+            );
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let redirect = resolve_console_oauth_redirect_uri(None).unwrap();
+        assert_eq!(
+            redirect,
+            "https://identity.example.com/stargate/auth/callback"
+        );
+        assert_eq!(
+            console_post_logout_redirect_uri(&redirect).as_deref(),
+            Some("https://identity.example.com/stargate/")
         );
     }
 

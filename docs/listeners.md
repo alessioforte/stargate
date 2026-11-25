@@ -80,8 +80,13 @@ credentials must use `Authorization: Bearer` or `x-api-key` headers.
 
 A plane may appear on more than one listener; each listener mounts only the
 planes it declares. On a listener with IAM planes the shared ingress allowance
-and CORS/compression apply as on the single port. The gateway plane owns its
-paths, preflights, and encoding.
+and CORS/compression apply as on the single port. The identity plane also
+admits the Console's public origin (`CONSOLE_PUBLIC_URL`) on `/oauth/token` and
+`/oauth/revoke` only, so a Console served by the admin listener can exchange
+codes and refresh tokens against the issuer; `/admin` stays on the Console's
+own origin. The browser origin guard covers the session cookie only: a request
+carrying `Authorization` skips it, and the cookie is never used alongside such
+a header. The gateway plane owns its paths, preflights, and encoding.
 
 Host selection (`IAM_HOSTS`) still applies per request. On a listener that
 serves both IAM planes and the gateway, a request on an IAM host falls through
