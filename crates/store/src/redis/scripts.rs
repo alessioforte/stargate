@@ -5,9 +5,7 @@ pub static CAS_SCRIPT: LazyLock<redis::Script> = LazyLock::new(|| {
         r#"
         local current = redis.call("GET", KEYS[1])
         if current == ARGV[1] then
-            if ARGV[3] == "keep" then
-                redis.call("SET", KEYS[1], ARGV[2], "KEEPTTL")
-            elseif ARGV[3] ~= "nil" then
+            if ARGV[3] ~= "nil" then
                 redis.call("SET", KEYS[1], ARGV[2], "EX", tonumber(ARGV[3]))
             else
                 redis.call("SET", KEYS[1], ARGV[2])
