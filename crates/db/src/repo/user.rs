@@ -181,35 +181,7 @@ impl UserRepository {
     where
         E: crate::backend::ReadExecutor<'c>,
     {
-        let mut parameters = 0;
-        let mut parameter = || {
-            parameters += 1;
-            format!("${parameters}")
-        };
-        let mut conditions = Vec::new();
-        let join = match org_id {
-            Some(_) => {
-                conditions.push(format!("uo.org_id = {}", parameter()));
-                format!(
-                    "INNER JOIN {members} uo ON uo.user_id = u.id",
-                    members = super::USER_ORGANIZATION
-                )
-            }
-            None => String::new(),
-        };
-        if before.is_some() {
-            conditions.push(format!("u.id < {}", parameter()));
-        }
-        let filter = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
-        };
-        let sql = format!(
-            "SELECT u.* FROM {users} u {join} {filter} ORDER BY u.id DESC LIMIT {limit}",
-            users = USER,
-            limit = parameter()
-        );
+        let sql = Self::page_by_id_sql(org_id.is_some(), before.is_some());
         let mut query = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(sql));
         if let Some(org_id) = org_id {
             query = query.bind(org_id);
@@ -218,6 +190,42 @@ impl UserRepository {
             query = query.bind(before);
         }
         Ok(query.bind(limit).fetch_all(ex).await?)
+    }
+
+    /// The query of `page_by_id`, binding the organization, the cursor and the
+    /// limit in that order, each only when present.
+    pub(crate) fn page_by_id_sql(by_org: bool, before: bool) -> String {
+        let mut parameters = 0;
+        let mut parameter = || {
+            parameters += 1;
+            format!("${parameters}")
+        };
+        let mut conditions = Vec::new();
+        // Members are keyed by `uo.user_id`, equal to `u.id`, so the
+        // `(org_id, user_id)` index yields them in page order.
+        let (join, key) = if by_org {
+            conditions.push(format!("uo.org_id = {}", parameter()));
+            let join = format!(
+                "INNER JOIN {members} uo ON uo.user_id = u.id",
+                members = super::USER_ORGANIZATION
+            );
+            (join, "uo.user_id")
+        } else {
+            (String::new(), "u.id")
+        };
+        if before {
+            conditions.push(format!("{key} < {}", parameter()));
+        }
+        let filter = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+        format!(
+            "SELECT u.* FROM {users} u {join} {filter} ORDER BY {key} DESC LIMIT {limit}",
+            users = USER,
+            limit = parameter()
+        )
     }
 
     pub async fn count<'c, E>(&self, ex: E) -> Result<i64>

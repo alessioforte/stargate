@@ -3337,6 +3337,50 @@ mod sqlite_tests {
     }
 
     #[tokio::test]
+    async fn member_pages_read_the_organization_index_in_order() {
+        use sqlx::Row;
+
+        let svc = test_service().await;
+        let indexes = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'user_organizations'",
+        )
+        .fetch_all(&svc.pool)
+        .await
+        .unwrap();
+        assert!(
+            indexes
+                .iter()
+                .any(|name| name == "idx_user_organizations_org_user")
+        );
+        assert!(
+            !indexes
+                .iter()
+                .any(|name| name == "idx_user_organizations_org_id")
+        );
+
+        let sql = UserRepository::page_by_id_sql(true, true);
+        let plan = sqlx::query(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}")))
+            .bind("org")
+            .bind("user")
+            .bind(10_i64)
+            .fetch_all(&svc.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect::<Vec<_>>();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("idx_user_organizations_org_user")),
+            "{plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.contains("TEMP B-TREE")),
+            "{plan:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn user_api_key_org_binding_flows_to_auth_lookup() {
         let svc = test_service().await;
         let user = create_test_user(&svc, "alice").await;

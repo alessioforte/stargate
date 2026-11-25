@@ -415,6 +415,9 @@ mod tests {
         assert!(json["paths"]["/admin/health"].is_object());
         assert!(json["paths"]["/admin/me"].is_object());
         assert!(json["paths"]["/admin/overview"].is_object());
+        let overview = &json["components"]["schemas"]["AdminOverview"]["properties"];
+        assert!(overview["resources"].is_object());
+        assert_eq!(overview.get("sessions"), None);
         assert!(json["paths"]["/admin/sessions"].is_object());
         assert!(json["paths"]["/admin/sessions/{session_id}"].is_object());
         assert!(json["paths"]["/admin/users/{user_id}/sessions"].is_object());

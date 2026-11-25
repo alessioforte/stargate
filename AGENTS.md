@@ -485,15 +485,6 @@ replay revokes the entire session.
 from SQL in descending id order (only members with `organizationId`), sessions
 from each user's index newest first, each checked like `load_active_session`. A
 page examines at most 1000 users, so it can be short while `nextCursor` is set.
-The overview's session totals are estimates (`iam/sess/summary.rs`): opening or
-ending a session updates no counter. A reconciliation walks the users in batches
-of 500, counts the live sessions and their distinct users, and publishes both
-with its completion time under `{sessions}:summary`. A replica walks when it
-takes the `{sessions}:reconciliation` lease (checked every 10 s) and renews its
-60 s TTL after each batch and after publishing, so one walk runs at a time and
-the next starts 60 s after it ends. Totals lag by about one interval and one tick
-plus up to two walks; a failed walk keeps the previous totals and time. `/admin/overview` returns `sessions: null` before the first walk, and the
-Console shows the totals as an estimate with the reconciliation age.
 
 After an attribute, profile, or membership write commits, IAM rebuilds each active
 session's stored `Subject` from SQL, keeping its org and reading the current role.
@@ -1374,7 +1365,7 @@ SIGTERM/SIGINT -> readiness off -> wait `SERVER_DRAIN_DELAY_SECS` -> gateway adm
 closes and active work is cancelled (WebSockets send Close `1001`, `gateway shutting down`,
 to both peers in parallel) -> every listener stops accepting and its connections drain
 (`SERVER_SHUTDOWN_TIMEOUT_SECS`) -> tracked mirror/WebSocket tasks drain -> stop configuration synchronization -> stop
-session reconciliation -> stop audit relay -> save in-memory store -> flush telemetry.
+audit relay -> save in-memory store -> flush telemetry.
 
 WebSocket Close exchanges have a fixed 5s limit, shortened by the remaining server
 shutdown budget, and retain admission until they finish. Idle expiry sends `1001`

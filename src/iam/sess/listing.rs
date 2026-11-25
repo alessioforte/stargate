@@ -19,7 +19,7 @@ const USER_BATCH: i64 = 100;
 /// Users a page may examine before it returns, full or not.
 const USER_BUDGET: usize = 1_000;
 /// Store reads in flight at once.
-pub(super) const CONCURRENCY: usize = 32;
+const CONCURRENCY: usize = 32;
 
 /// Which sessions to list. Filters combine.
 #[derive(Debug, Default)]
@@ -142,7 +142,7 @@ async fn find_user(user_id: &str) -> Result<Option<User>, ErrorResponse> {
         .map_err(ErrorResponse::internal)
 }
 
-pub(super) async fn indexed_sids(user_id: &str) -> Result<Vec<String>, StoreError> {
+async fn indexed_sids(user_id: &str) -> Result<Vec<String>, StoreError> {
     use_store()
         .hkeys(&store::keys::session::index(user_id))
         .await

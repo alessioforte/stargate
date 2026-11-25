@@ -1,4 +1,4 @@
-import { format, formatDistanceToNow } from "date-fns";
+import { format } from "date-fns";
 import type { Locale } from "date-fns";
 import { enUS, it } from "date-fns/locale";
 
@@ -10,13 +10,6 @@ const locales: Record<string, Locale> = {
 
 const localeOf = (lang?: string) =>
   locales[lang === "en-US" ? "enUS" : (lang ?? "it")] ?? enUS;
-
-/** How long ago `date` was, such as "2 minutes ago". */
-export const formatAge = (date: Date | string | number, lang?: string) =>
-  formatDistanceToNow(new Date(date), {
-    addSuffix: true,
-    locale: localeOf(lang),
-  });
 
 export const formatDate = (
   date: Date | string | number,

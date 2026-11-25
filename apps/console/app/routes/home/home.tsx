@@ -15,15 +15,13 @@ import {
   LuBot,
   LuBuilding2,
   LuKeyRound,
-  LuMonitorSmartphone,
   LuShieldCheck,
-  LuUserCheck,
   LuUsers,
 } from "react-icons/lu";
 import { Page, Panel } from "@/components";
 import useStore from "@/store";
 import type { JsonValue, OutboxEvent } from "@/services/types";
-import { formatAge, formatDate } from "@/lib/format-date";
+import { formatDate } from "@/lib/format-date";
 import { useTranslations } from "@/i18n";
 import { usePolling } from "@/hooks";
 import MetricCard from "./metric-card";
@@ -75,12 +73,6 @@ export default function AdminHomePage() {
   const stateStatus =
     health?.redis?.status ?? (health?.store ? "healthy" : "unknown");
   const features = health?.features;
-  const sessionTotals = overview?.sessions;
-  const sessionTotalsDetail = sessionTotals
-    ? t("sessionTotalsEstimated", {
-        age: formatAge(sessionTotals.reconciledAt, language),
-      })
-    : t("sessionTotalsPending");
   const signupModeColor = { open: "teal", invite: "blue", closed: "gray" };
   const stateLatency = health?.redis
     ? `${health.redis.latencyMs.toFixed(1)} ms`
@@ -115,22 +107,6 @@ export default function AdminHomePage() {
           detail={t("managedOrganizations")}
           loading={loadingOverview}
           icon={<LuBuilding2 size={ICON_SIZE} />}
-        />
-        <MetricCard
-          to="/sessions"
-          label={t("activeSessions")}
-          value={sessionTotals?.activeSessions}
-          detail={sessionTotalsDetail}
-          loading={loadingOverview}
-          icon={<LuMonitorSmartphone size={ICON_SIZE} />}
-        />
-        <MetricCard
-          to="/sessions"
-          label={t("activeUsers")}
-          value={sessionTotals?.activeUsers}
-          detail={sessionTotalsDetail}
-          loading={loadingOverview}
-          icon={<LuUserCheck size={ICON_SIZE} />}
         />
         <MetricCard
           to="/service-accounts"
