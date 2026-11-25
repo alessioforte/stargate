@@ -242,7 +242,7 @@ fn declared(
     Ok(listeners)
 }
 
-fn validate_name(name: &str) -> Result<(), SettingsError> {
+pub(crate) fn validate_name(name: &str) -> Result<(), SettingsError> {
     let mut chars = name.chars();
     let valid = name.len() <= MAX_NAME_LENGTH
         && chars

@@ -44,7 +44,7 @@ import type {
   CreateServiceAccountRequest,
   CreateUserRequest,
   CreateUserInvitationRequest,
-  UpdateAdminKeyPermissionsRequest,
+  UpdateAdminKeyRequest,
   RotateOAuthClientSecretResponse,
   UpdateOAuthClientRequest,
   UpdateOrganizationRequest,
@@ -603,16 +603,13 @@ const store: StateCreator<State & Actions> = (set, get) => ({
     return data;
   },
 
-  updateAdminKeyPermissions: async (
-    id: string,
-    adminKey: UpdateAdminKeyPermissionsRequest,
-  ) => {
+  updateAdminKey: async (id: string, adminKey: UpdateAdminKeyRequest) => {
     const adminKeys = get().adminKeys;
     set({ adminKeys: adminKeys.setLoading() });
 
     const { error, message } = await localizedApiResponse(
       get().language,
-      services.admin.updateAdminKeyPermissions(id, adminKey),
+      services.admin.updateAdminKey(id, adminKey),
     );
 
     if (error) {
@@ -621,8 +618,7 @@ const store: StateCreator<State & Actions> = (set, get) => ({
       showStoreNotification(
         get().language,
         "error",
-        message ??
-          notificationText(get().language, "adminKeyPermissionsUpdateFailed"),
+        message ?? notificationText(get().language, "adminKeyUpdateFailed"),
       );
       return;
     }
@@ -630,7 +626,7 @@ const store: StateCreator<State & Actions> = (set, get) => ({
     showStoreNotification(
       get().language,
       "success",
-      notificationText(get().language, "adminKeyPermissionsUpdated"),
+      notificationText(get().language, "adminKeyUpdated"),
     );
 
     get().getAdminKeys();

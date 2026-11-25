@@ -1,4 +1,6 @@
 {
+  "allowedListeners": "Listener ammessi",
+  "allowedListenersDescription": "Lascia vuoto per consentire tutti i listener. Inserisci i nomi dei listener, ad esempio internal.",
   "onStoreErrorDeny": "Rifiuta con 503",
   "onStoreErrorAllow": "Consenti il traffico (predefinito)",
   "ingressOnStoreErrorDescription": "Vale per ingresso gateway, ingresso IAM e limite del principal admin.",
@@ -332,8 +334,8 @@
     "userSessionsRevoked": "Revocate {{count}} sessioni utente",
     "adminKeyCreateFailed": "Impossibile creare la chiave admin",
     "adminKeyCreated": "Chiave admin creata",
-    "adminKeyPermissionsUpdateFailed": "Impossibile aggiornare i permessi della chiave admin",
-    "adminKeyPermissionsUpdated": "Permessi della chiave admin aggiornati",
+    "adminKeyUpdateFailed": "Impossibile aggiornare la chiave admin",
+    "adminKeyUpdated": "Chiave admin aggiornata correttamente",
     "adminKeyRevokeFailed": "Impossibile revocare la chiave admin",
     "adminKeyRevoked": "Chiave admin revocata",
     "apiKeyCreateFailed": "Impossibile creare la chiave API",

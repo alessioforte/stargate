@@ -40,7 +40,7 @@ import type {
   SessionRevocationResponse,
   ServiceAccount,
   UpdateAccessControlRulesRequest,
-  UpdateAdminKeyPermissionsRequest,
+  UpdateAdminKeyRequest,
   UpdateOAuthClientRequest,
   OrganizationMembershipRequest,
   UpdateOrganizationRequest,
@@ -199,12 +199,9 @@ export default class AdminApiService {
     });
   }
 
-  updateAdminKeyPermissions(
-    id: string,
-    body: UpdateAdminKeyPermissionsRequest,
-  ) {
+  updateAdminKey(id: string, body: UpdateAdminKeyRequest) {
     return this.request<AdminKey>({
-      url: `/admin-keys/${encodeURIComponent(id)}/permissions`,
+      url: `/admin-keys/${encodeURIComponent(id)}`,
       method: "PUT",
       data: body,
     });

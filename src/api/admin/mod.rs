@@ -15,6 +15,8 @@ pub mod sessions;
 pub mod users;
 
 #[cfg(all(test, feature = "sqlite", feature = "memory"))]
+mod listener_tests;
+#[cfg(all(test, feature = "sqlite", feature = "memory"))]
 mod protection_tests;
 
 use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
@@ -120,6 +122,7 @@ struct AuthorizationResolution {
 async fn resolve_authorization(
     token: Option<String>,
     raw_key: Option<String>,
+    listener: Option<&str>,
 ) -> Result<AuthorizationResolution, ErrorResponse> {
     let credential_present = token.is_some() || raw_key.is_some();
     let mut authenticated = false;
@@ -174,6 +177,11 @@ async fn resolve_authorization(
         if let Ok(Some(key)) = crate::data::db::get_admin_key_by_hash(&hash).await
             && !key.revoked
         {
+            if let Some(names) = &key.allowed_listeners
+                && !listener.is_some_and(|listener| names.iter().any(|name| name == listener))
+            {
+                return Err(ErrorResponse::new(ErrorCode::AdminKeyListenerForbidden));
+            }
             authenticated = true;
             let key_id = key.id.clone();
             actor = Some(db::ent::TrustedAdminActor::admin_key(&key_id));
@@ -230,7 +238,13 @@ async fn extract_authorization_for(
 ) -> Response {
     let token = req.get_bearer_token();
     let raw_key = req.get_api_key();
-    let resolution = match resolve_authorization(token, raw_key).await {
+    let resolution = match resolve_authorization(
+        token,
+        raw_key,
+        crate::srv::ConnectionInfo::of(&req).map(|connection| connection.listener.name.as_str()),
+    )
+    .await
+    {
         Ok(resolution) => resolution,
         Err(error) if matches!(boundary, AuditRouteBoundary::Application) => {
             return crate::err::OAuthErrorResponse::from(error).into_response();
@@ -436,15 +450,13 @@ pub fn router() -> axum::Router {
         )
         .route(
             "/admin/admin-keys/{id}",
-            get(admin_keys::get_admin_key).delete(admin_keys::delete_admin_key),
+            get(admin_keys::get_admin_key)
+                .put(admin_keys::update_admin_key)
+                .delete(admin_keys::delete_admin_key),
         )
         .route(
             "/admin/admin-keys/{id}/revoke",
             put(admin_keys::revoke_admin_key),
-        )
-        .route(
-            "/admin/admin-keys/{id}/permissions",
-            put(admin_keys::update_admin_key_permissions),
         )
         .route(
             "/admin/oauth/clients",

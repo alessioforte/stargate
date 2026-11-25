@@ -187,6 +187,7 @@ impl Fixture {
                 .iter()
                 .map(|p| p.as_str().to_owned())
                 .collect(),
+            None,
             context(&actor.id),
         )
         .await
@@ -217,7 +218,7 @@ impl Fixture {
                 Box::default(),
             )
         } else {
-            let resolution = resolve_authorization(None, Some(self.admin_secret.clone()))
+            let resolution = resolve_authorization(None, Some(self.admin_secret.clone()), None)
                 .await
                 .unwrap();
             assert!(resolution.authentication.authenticated);
@@ -505,7 +506,7 @@ async fn creation_invitation_and_login_identifiers_cannot_replace_a_super_admin(
 async fn even_a_super_admin_owned_user_api_key_is_not_an_admin_credential() {
     crate::data::db::with_test_database(async {
         let f = Fixture::new(true).await;
-        let resolution = resolve_authorization(None, Some(f.user_secret.clone()))
+        let resolution = resolve_authorization(None, Some(f.user_secret.clone()), None)
             .await
             .unwrap();
         assert!(resolution.authorization.is_none());

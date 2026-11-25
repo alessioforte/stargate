@@ -1,4 +1,6 @@
 {
+  "allowedListeners": "Allowed listeners",
+  "allowedListenersDescription": "Leave empty to allow every listener. Enter listener names, for example internal.",
   "onStoreErrorDeny": "Deny with 503",
   "onStoreErrorAllow": "Allow traffic (default)",
   "ingressOnStoreErrorDescription": "Shared by gateway ingress, IAM ingress and the admin principal limit.",
@@ -332,8 +334,8 @@
     "userSessionsRevoked": "Revoked {{count}} user sessions",
     "adminKeyCreateFailed": "Failed to create admin key",
     "adminKeyCreated": "Admin key created successfully",
-    "adminKeyPermissionsUpdateFailed": "Failed to update admin key permissions",
-    "adminKeyPermissionsUpdated": "Admin key permissions updated successfully",
+    "adminKeyUpdateFailed": "Failed to update admin key",
+    "adminKeyUpdated": "Admin key updated successfully",
     "adminKeyRevokeFailed": "Failed to revoke admin key",
     "adminKeyRevoked": "Admin key revoked successfully",
     "apiKeyCreateFailed": "Failed to create API key",

@@ -339,6 +339,7 @@ impl<'a> From<&'a ApiKeyAuditRecord> for ApiKeyAuditSnapshot<'a> {
 struct AdminKeyAuditSnapshot<'a> {
     label: Option<&'a str>,
     permissions: &'a [String],
+    allowed_listeners: Option<&'a [String]>,
     revoked: bool,
 }
 
@@ -347,6 +348,7 @@ impl<'a> From<&'a AdminKey> for AdminKeyAuditSnapshot<'a> {
         Self {
             label: admin_key.label.as_deref(),
             permissions: admin_key.permissions.as_slice(),
+            allowed_listeners: admin_key.allowed_listeners.as_deref().map(Vec::as_slice),
             revoked: admin_key.revoked,
         }
     }
@@ -2003,13 +2005,14 @@ impl DbStore for Service {
         key_hash: &str,
         label: Option<String>,
         permissions: Vec<String>,
+        allowed_listeners: Option<Vec<String>>,
         context: TrustedAuditContext,
     ) -> Result<AdminKey> {
         ensure_admin_control_plane(&context)?;
         let mut tx = self.pool.begin().await?;
         let admin_key = self
             .admin_key
-            .create(&mut tx, key_hash, label, permissions)
+            .create(&mut tx, key_hash, label, permissions, allowed_listeners)
             .await?;
         let event = build_outbox_event(
             &context,
@@ -2055,16 +2058,23 @@ impl DbStore for Service {
             .await?
             .context("admin key not found")?;
         let updated = self.admin_key.update(&mut tx, admin_key).await?;
+        let mut changed_fields = Vec::new();
+        if before.permissions != updated.permissions {
+            changed_fields.push("permissions");
+        }
+        if before.allowed_listeners != updated.allowed_listeners {
+            changed_fields.push("allowed_listeners");
+        }
         let event = build_outbox_event(
             &context,
             Utc::now(),
             AuditResource::new("admin_key", &updated.id),
-            "admin_key.permissions_updated",
+            "admin_key.updated",
             AuditOperation::Update,
             Some(snapshot(AdminKeyAuditSnapshot::from(&before))?),
             Some(snapshot(AdminKeyAuditSnapshot::from(&updated))?),
             serde_json::json!({
-                "changed_fields": ["permissions"],
+                "changed_fields": changed_fields,
                 "source": "admin_api",
             }),
         )?;
@@ -4516,12 +4526,14 @@ mod sqlite_tests {
                 admin_hash,
                 Some("operations".to_string()),
                 vec!["users".to_string()],
+                Some(vec!["internal".into()]),
                 trusted_ctx(),
             )
             .await
             .expect("create admin key");
         let mut permissions_update = admin_key.clone();
         permissions_update.set_permissions(vec!["users".to_string(), "api_keys".to_string()]);
+        permissions_update.allowed_listeners = None;
         svc.update_admin_key(permissions_update, trusted_ctx())
             .await
             .expect("update admin-key permissions");
@@ -4572,7 +4584,20 @@ mod sqlite_tests {
             admin_events[0]["after"]["permissions"],
             serde_json::json!(["users"])
         );
-        assert_eq!(admin_events[1]["action"], "admin_key.permissions_updated");
+        assert_eq!(
+            admin_events[0]["after"]["allowed_listeners"],
+            serde_json::json!(["internal"])
+        );
+        assert_eq!(
+            admin_events[1]["before"]["allowed_listeners"],
+            serde_json::json!(["internal"])
+        );
+        assert!(admin_events[1]["after"]["allowed_listeners"].is_null());
+        assert_eq!(
+            admin_events[1]["metadata"]["changed_fields"],
+            serde_json::json!(["permissions", "allowed_listeners"])
+        );
+        assert_eq!(admin_events[1]["action"], "admin_key.updated");
         assert_eq!(
             admin_events[1]["after"]["permissions"],
             serde_json::json!(["users", "api_keys"])
@@ -4672,6 +4697,7 @@ mod sqlite_tests {
                 "ROLLBACK_ADMIN_KEY_HASH_SECRET",
                 None,
                 vec!["users".to_string()],
+                None,
                 invalid_context(),
             )
             .await
@@ -4738,6 +4764,7 @@ mod sqlite_tests {
             "A6_ADMIN_KEY_HASH_SECRET",
             Some("a6-admin-key".to_string()),
             vec!["users".to_string()],
+            None,
             trusted_ctx(),
         )
         .await
@@ -5630,12 +5657,14 @@ mod tests {
                 &admin_hash,
                 Some("postgres-admin".to_string()),
                 vec!["users".to_string()],
+                Some(vec!["internal".into()]),
                 context.clone(),
             )
             .await
             .expect("create admin key");
         let mut changed_admin_key = admin_key.clone();
         changed_admin_key.set_permissions(vec!["users".to_string(), "api_keys".to_string()]);
+        changed_admin_key.allowed_listeners = None;
         svc.update_admin_key(changed_admin_key, context.clone())
             .await
             .expect("update admin key");
@@ -5674,6 +5703,19 @@ mod tests {
             .iter()
             .map(|payload| serde_json::from_str(payload).expect("valid A5 payload"))
             .collect();
+        let admin_events = events
+            .iter()
+            .filter(|event| event["resource"]["id"] == admin_key.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            admin_events[0]["after"]["allowed_listeners"],
+            serde_json::json!(["internal"])
+        );
+        assert!(admin_events[1]["after"]["allowed_listeners"].is_null());
+        assert_eq!(
+            admin_events[1]["metadata"]["changed_fields"],
+            serde_json::json!(["permissions", "allowed_listeners"])
+        );
         for action in [
             "oauth_client.created",
             "oauth_client.updated",
@@ -5683,7 +5725,7 @@ mod tests {
             "api_key.updated",
             "api_key.revoked",
             "admin_key.created",
-            "admin_key.permissions_updated",
+            "admin_key.updated",
             "admin_key.revoked",
             "service_account.created",
             "service_account.updated",

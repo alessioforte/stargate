@@ -117,6 +117,9 @@ impl std::error::Error for OAuthErrorResponse {}
 
 impl From<ErrorResponse> for OAuthErrorResponse {
     fn from(error: ErrorResponse) -> Self {
+        if error.code == ErrorCode::AdminKeyListenerForbidden {
+            return Self::insufficient_scope(error.message);
+        }
         if error.code != ErrorCode::AuthStateUnavailable {
             return Self::internal(error);
         }

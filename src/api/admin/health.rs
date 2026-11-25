@@ -363,6 +363,7 @@ mod fail_open_tests {
                 &pw::hash_api_key(raw_key),
                 None,
                 vec!["health:read".into()],
+                None,
                 ::db::ent::TrustedAuditContext::admin_control_plane(
                     ::db::ent::TrustedAdminActor::admin("01JZ000000000000000000000A"),
                     ::db::ent::TrustedAuditRequest::from_http(

@@ -463,10 +463,11 @@ pub async fn create_admin_key(
     key_hash: &str,
     label: Option<String>,
     permissions: Vec<String>,
+    allowed_listeners: Option<Vec<String>>,
     ctx: TrustedAuditContext,
 ) -> Result<AdminKey> {
     service()
-        .create_admin_key(key_hash, label, permissions, ctx)
+        .create_admin_key(key_hash, label, permissions, allowed_listeners, ctx)
         .await
         .inspect_err(|e| tracing::error!("Error creating admin key: {:?}", e))
 }

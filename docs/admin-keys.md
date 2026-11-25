@@ -6,6 +6,45 @@ organization ID in a request selects a resource, rather than narrowing the key's
 scope. Grant only the capabilities an integration needs. Creating and managing
 admin keys itself requires an authenticated super-admin user.
 
+## Allowed listeners
+
+An admin key can optionally restrict where it grants authority. Create it with
+`POST /admin/admin-keys`, or replace its permissions and listener restrictions
+with `PUT /admin/admin-keys/{id}`:
+
+```json
+{
+  "permissions": ["users:read", "memberships:create"],
+  "allowedListeners": ["internal"]
+}
+```
+
+`allowedListeners: null` (or an omitted field) allows every listener. An empty
+array is rejected, as are invalid names. Names use the listener configuration's
+syntax (1–32 ASCII letters or digits, starting with a letter); whitespace is
+trimmed, case is normalized to lowercase, and duplicates are removed. The
+implicit listener is named `default`.
+
+Creation and updates validate syntax without checking this process's listener
+configuration, so a key can be provisioned before a listener is deployed or on a
+replica with different listeners. At use, only the actual receiving listener's
+name can match; names absent from that process never grant access. A renamed or
+removed listener immediately stops matching the key. Matching uses connection
+metadata, never request headers, host names, or forwarding headers.
+
+A restricted key on any other listener returns
+`403 admin_key.listener_forbidden` before principal rate limiting, capability
+checks, or handler operations. The restriction also applies to admin privileges
+on `/oauth/introspect` and `/oauth/revoke`, which retain the OAuth error envelope
+(`403 insufficient_scope`). Missing connection metadata fails closed for a
+restricted key. Super-admin user credentials retain their existing behavior.
+
+The Console's create and edit drawers accept listener names; leaving the field
+empty sends `null`. List, detail, create and update responses include
+`allowedListeners`. Creation and changes record the restriction in safe audit
+snapshots; updates use `admin_key.updated` with `changed_fields` listing
+`permissions` and/or `allowed_listeners` as applicable.
+
 ## Protected accounts
 
 Even a key with every capability cannot modify, take control of, or disable a

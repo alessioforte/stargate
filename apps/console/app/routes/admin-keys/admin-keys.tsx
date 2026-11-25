@@ -15,7 +15,7 @@ const AdminKeysPage = () => {
     adminKeys,
     getAdminKeys,
     createAdminKey,
-    updateAdminKeyPermissions,
+    updateAdminKey,
     revokeAdminKey,
   } = useStore();
   const t = useTranslations();
@@ -98,7 +98,7 @@ const AdminKeysPage = () => {
           setSelectedAdminKey(null);
           close();
         }}
-        onSave={updateAdminKeyPermissions}
+        onSave={updateAdminKey}
         onRevoke={revokeAdminKey}
       />
     </Page>

@@ -24,7 +24,7 @@ import type {
   CreateOrganizationRequest,
   UpdateOrganizationRequest,
   OutboxEvent,
-  UpdateAdminKeyPermissionsRequest,
+  UpdateAdminKeyRequest,
   RotateOAuthClientSecretResponse,
   ServiceAccount,
   CreateServiceAccountRequest,
@@ -138,9 +138,9 @@ export interface Actions {
   createAdminKey: (
     adminKey: CreateAdminKeyRequest,
   ) => Promise<CreateAdminKeyResponse | null>;
-  updateAdminKeyPermissions: (
+  updateAdminKey: (
     id: string,
-    adminKey: UpdateAdminKeyPermissionsRequest,
+    adminKey: UpdateAdminKeyRequest,
   ) => Promise<void>;
   revokeAdminKey: (id: string) => Promise<void>;
 

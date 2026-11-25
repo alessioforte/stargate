@@ -39,6 +39,8 @@
     "api_key.already_revoked": "La chiave API è già stata revocata",
     "admin_key.not_found": "Chiave amministrativa non trovata",
     "admin_key.permissions_required": "È obbligatorio almeno un permesso per la chiave amministrativa",
+    "admin_key.listeners_invalid": "I listener ammessi devono essere un elenco non vuoto di nomi validi",
+    "admin_key.listener_forbidden": "La chiave amministrativa non è ammessa su questo listener",
     "admin_key.permission_invalid": "Il permesso della chiave amministrativa non è valido",
     "admin_key.revoked": "La chiave amministrativa è revocata",
     "admin_key.already_revoked": "La chiave amministrativa è già stata revocata",

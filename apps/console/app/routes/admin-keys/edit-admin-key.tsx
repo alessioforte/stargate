@@ -7,13 +7,14 @@ import {
   Group,
   Stack,
   TextInput,
+  TagsInput,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useTranslations } from "@/i18n";
 import type {
   AdminKey,
   AdminKeyPermission,
-  UpdateAdminKeyPermissionsRequest,
+  UpdateAdminKeyRequest,
 } from "@/services/types";
 import {
   EditActionControls,
@@ -27,13 +28,14 @@ interface FormValues {
   id: string;
   label: string;
   permissions: AdminKeyPermission[];
+  allowedListeners: string[];
 }
 
 interface Props {
   adminKey?: AdminKey | null;
   opened: boolean;
   onClose: () => void;
-  onSave: (id: string, adminKey: UpdateAdminKeyPermissionsRequest) => void;
+  onSave: (id: string, adminKey: UpdateAdminKeyRequest) => void;
   onRevoke: (id: string) => void;
 }
 
@@ -41,6 +43,7 @@ const emptyFormValues: FormValues = {
   id: "",
   label: "",
   permissions: [],
+  allowedListeners: [],
 };
 
 function adminKeyToFormValues(adminKey?: AdminKey | null): FormValues {
@@ -50,6 +53,7 @@ function adminKeyToFormValues(adminKey?: AdminKey | null): FormValues {
     id: adminKey.id,
     label: adminKey.label ?? "",
     permissions: adminKey.permissions.filter(isAdminKeyPermission),
+    allowedListeners: adminKey.allowedListeners ?? [],
   };
 }
 
@@ -58,7 +62,7 @@ function EditAdminKeyForm({
   onSave,
 }: {
   adminKey?: AdminKey | null;
-  onSave: (id: string, adminKey: UpdateAdminKeyPermissionsRequest) => void;
+  onSave: (id: string, adminKey: UpdateAdminKeyRequest) => void;
 }) {
   const t = useTranslations();
   const [edit, setEdit] = useState(false);
@@ -76,6 +80,9 @@ function EditAdminKeyForm({
 
     onSave(adminKey.id, {
       permissions: values.permissions,
+      allowedListeners: values.allowedListeners.length
+        ? values.allowedListeners
+        : null,
     });
   };
 
@@ -108,6 +115,13 @@ function EditAdminKeyForm({
             variant="filled"
             label={t("label")}
             {...form.getInputProps("label")}
+          />
+          <TagsInput
+            label={t("allowedListeners")}
+            description={t("allowedListenersDescription")}
+            variant="filled"
+            disabled={!edit || adminKey?.revoked}
+            {...form.getInputProps("allowedListeners")}
           />
           <AdminKeyPermissionsInput
             disabled={!edit || adminKey?.revoked}

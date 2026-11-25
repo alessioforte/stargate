@@ -8,6 +8,7 @@ import {
   Stack,
   Text,
   TextInput,
+  TagsInput,
   Tooltip,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
@@ -26,6 +27,7 @@ import AdminKeyPermissionsInput from "./permissions-input";
 interface FormValues {
   label: string;
   permissions: AdminKeyPermission[];
+  allowedListeners: string[];
 }
 
 interface Props {
@@ -37,6 +39,7 @@ interface Props {
 const emptyFormValues: FormValues = {
   label: "",
   permissions: [],
+  allowedListeners: [],
 };
 
 const CreateAdminKey: React.FC<Props> = ({ onSave }) => {
@@ -59,6 +62,9 @@ const CreateAdminKey: React.FC<Props> = ({ onSave }) => {
     const payload: CreateAdminKeyRequest = {
       label: values.label.trim() || null,
       permissions: values.permissions,
+      allowedListeners: values.allowedListeners.length
+        ? values.allowedListeners
+        : null,
     };
 
     const adminKey = await onSave(payload);
@@ -109,6 +115,12 @@ const CreateAdminKey: React.FC<Props> = ({ onSave }) => {
               variant="filled"
               label={t("label")}
               {...form.getInputProps("label")}
+            />
+            <TagsInput
+              label={t("allowedListeners")}
+              description={t("allowedListenersDescription")}
+              variant="filled"
+              {...form.getInputProps("allowedListeners")}
             />
             <AdminKeyPermissionsInput
               value={form.values.permissions}

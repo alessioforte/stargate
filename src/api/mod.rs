@@ -128,7 +128,7 @@ pub(super) struct IdentityApiDoc;
         crate::api::admin::admin_keys::get_admin_keys,
         crate::api::admin::admin_keys::get_admin_key,
         crate::api::admin::admin_keys::create_admin_key,
-        crate::api::admin::admin_keys::update_admin_key_permissions,
+        crate::api::admin::admin_keys::update_admin_key,
         crate::api::admin::admin_keys::revoke_admin_key,
         crate::api::admin::admin_keys::delete_admin_key,
         crate::api::admin::oauth_clients::get_oauth_clients,
@@ -440,7 +440,7 @@ mod tests {
         assert!(json["paths"]["/admin/admin-keys"].is_object());
         assert!(json["paths"]["/admin/admin-keys/{id}"].is_object());
         assert!(json["paths"]["/admin/admin-keys/{id}/revoke"].is_object());
-        assert!(json["paths"]["/admin/admin-keys/{id}/permissions"].is_object());
+        assert!(json["paths"]["/admin/admin-keys/{id}"].is_object());
         assert!(json["paths"]["/admin/oauth/clients"].is_object());
         assert!(json["paths"]["/admin/oauth/clients/{client_id}"].is_object());
         assert!(json["paths"]["/admin/oauth/clients/{client_id}/disable"].is_object());
