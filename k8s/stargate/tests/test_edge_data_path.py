@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify DATA_PATH follows the edge data mount and seeds stay read-only."""
+"""Verify DATA_PATH follows the edge data mount, stays clear of the read-only mounts, and seeds stay read-only."""
 
 import json
 import subprocess
@@ -95,6 +95,37 @@ class EdgeDataPath(unittest.TestCase):
                 result = render(overrides)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"{path}.DATA_PATH is chart-managed", result.stderr)
+
+    def test_data_mount_must_not_overlap_the_seed_mount(self):
+        for mount in ["/etc/stargate", "/etc/stargate/data", "/etc"]:
+            with self.subTest(mount=mount):
+                result = render({"persistence": {"mountPath": mount}})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    f'persistence.mountPath "{mount}" must not be equal to, nested in, or a parent of '
+                    'gatewayConfig.mountPath "/etc/stargate"',
+                    result.stderr,
+                )
+
+    def test_data_mount_must_not_overlap_the_internal_context_mount(self):
+        for mount in ["/run/internal-context", "/run/internal-context/data", "/run"]:
+            with self.subTest(mount=mount):
+                result = render({
+                    "internalContext": {
+                        "enabled": True,
+                        "existingSecret": "internal-context",
+                        "mountPath": "/run/internal-context",
+                        "issuer": "https://stargate.internal",
+                        "kid": "stargate-internal-current",
+                    },
+                    "persistence": {"mountPath": mount},
+                })
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    f'persistence.mountPath "{mount}" must not be equal to, nested in, or a parent of '
+                    'internalContext.mountPath "/run/internal-context"',
+                    result.stderr,
+                )
 
 
 if __name__ == "__main__":

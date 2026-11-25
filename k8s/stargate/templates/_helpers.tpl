@@ -247,6 +247,14 @@ Cross-field validation that JSON Schema cannot express.
   {{- if not .Values.persistence.enabled -}}
     {{- fail "deployment.mode=edge requires persistence.enabled=true for SQLite, local state, and signing keys" -}}
   {{- end -}}
+  {{- $dataPath := .Values.persistence.mountPath -}}
+  {{- $dataMount := trimSuffix "/" $dataPath -}}
+  {{- range $setting, $mount := dict "gatewayConfig.mountPath" .Values.gatewayConfig.mountPath "internalContext.mountPath" .Values.internalContext.mountPath -}}
+    {{- $seedMount := trimSuffix "/" $mount -}}
+    {{- if and $dataMount (or (eq $dataMount $seedMount) (hasPrefix (printf "%s/" $dataMount) $seedMount) (hasPrefix (printf "%s/" $seedMount) $dataMount)) -}}
+      {{- fail (printf "persistence.mountPath %q must not be equal to, nested in, or a parent of %s %q" $dataPath $setting $mount) -}}
+    {{- end -}}
+  {{- end -}}
 {{- else if eq $mode "cluster" -}}
   {{- if .Values.persistence.enabled -}}
     {{- fail "deployment.mode=cluster requires persistence.enabled=false; shared state belongs in PostgreSQL and Redis" -}}
