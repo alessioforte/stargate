@@ -1,5 +1,9 @@
 use crate::{
-    api::{listener_router, plane::PlaneSet, server_router},
+    api::{
+        listener_router,
+        plane::{Plane, PlaneSet},
+        server_router,
+    },
     conf::hosts::IamHosts,
     ctx::RequestContext,
     gate::test_support,
@@ -175,6 +179,118 @@ async fn a_listener_serves_only_the_planes_it_declares() {
     identity.stop().await;
     api.stop().await;
     probes.stop().await;
+}
+
+/// The bodies `/livez` and `/readyz` answer with on a listener that serves the
+/// probes. The lifecycle starts unready, so readiness fails without SQL I/O.
+const PROBE_BODIES: [&str; 2] = [r#"{"status":"alive"}"#, r#"{"status":"not_ready"}"#];
+
+async fn probe_bodies(address: SocketAddr) -> [String; 2] {
+    [
+        body(address, "/livez").await,
+        body(address, "/readyz").await,
+    ]
+}
+
+/// A listener dedicated to the management plane answers the probes; the public
+/// listener leaves the paths to its gateway, so no probe answers there.
+#[tokio::test]
+async fn a_dedicated_management_listener_takes_the_probes_off_the_other_listeners() {
+    let upstream = Upstream::start().await;
+    let gate = Arc::new(test_support::gate(config(&upstream.url)));
+    let listeners = settings::assign_management_plane(vec![
+        listener_settings(
+            "public",
+            PlaneSet::parse("identity,gateway").unwrap(),
+            false,
+            Default::default(),
+        ),
+        listener_settings(
+            "management",
+            PlaneSet::of(Plane::Management),
+            false,
+            Default::default(),
+        ),
+    ]);
+    let routers = listeners
+        .into_iter()
+        .map(|settings| {
+            let router =
+                listener_router(settings.planes, Lifecycle::default(), IamHosts::default())
+                    .layer(Extension(gate.clone()));
+            (settings, router)
+        })
+        .collect();
+    let running = spawn_listeners(routers, None).await;
+
+    assert_eq!(probe_bodies(running.addresses[1]).await, PROBE_BODIES);
+    assert_eq!(
+        probe_bodies(running.addresses[0]).await,
+        ["GET /livez 0", "GET /readyz 0"]
+    );
+
+    running.stop().await;
+}
+
+/// Without a listener dedicated to the management plane, every listener keeps
+/// the probes: splitting the planes never leaves the process without liveness
+/// and readiness.
+#[tokio::test]
+async fn the_probes_stay_on_every_listener_without_a_dedicated_one() {
+    let upstream = Upstream::start().await;
+    let gate = Arc::new(test_support::gate(config(&upstream.url)));
+    let listeners = settings::assign_management_plane(vec![
+        listener_settings(
+            "public",
+            PlaneSet::parse("identity,gateway").unwrap(),
+            false,
+            Default::default(),
+        ),
+        listener_settings(
+            "admin",
+            PlaneSet::parse("admin").unwrap(),
+            false,
+            Default::default(),
+        ),
+    ]);
+    let routers = listeners
+        .into_iter()
+        .map(|settings| {
+            let router =
+                listener_router(settings.planes, Lifecycle::default(), IamHosts::default())
+                    .layer(Extension(gate.clone()));
+            (settings, router)
+        })
+        .collect();
+    let running = spawn_listeners(routers, None).await;
+
+    for address in &running.addresses {
+        assert_eq!(probe_bodies(*address).await, PROBE_BODIES);
+    }
+
+    running.stop().await;
+}
+
+/// The implicit listener serves every plane already, probes included, and the
+/// management rule leaves it unchanged.
+#[tokio::test]
+async fn the_implicit_listener_keeps_serving_the_probes() {
+    let upstream = Upstream::start().await;
+    let gate = Arc::new(test_support::gate(config(&upstream.url)));
+    let implicit = PlaneSet::ALL;
+    let listeners = spawn_listeners(
+        vec![(
+            listener_settings("default", implicit, false, Default::default()),
+            listener_router(implicit, Lifecycle::default(), IamHosts::default())
+                .layer(Extension(gate)),
+        )],
+        None,
+    )
+    .await;
+
+    assert_eq!(probe_bodies(listeners.addresses[0]).await, PROBE_BODIES);
+
+    listeners.stop().await;
 }
 
 #[tokio::test]

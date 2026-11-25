@@ -249,7 +249,9 @@ a declared configuration without `JWT_ISSUER` all stop it.
 Without `LISTENERS` the implicit listener is `0.0.0.0:$PORT` with every plane,
 `TLS_ENABLED`, `MAX_CONNECTIONS`, and its own `TRUSTED_PROXIES`. Names are 1–32
 ASCII letters or digits starting with a letter; addresses are literal IPs with a
-port, IPv6 included.
+port, IPv6 included. Every declared listener serves the probes unless one
+declares only the `management` plane: that listener, always without TLS, then
+answers `/livez` and `/readyz` alone and the other listeners stop serving them.
 
 Proxy trust is per listener and empty by default: only a peer in
 `LISTENER_<NAME>_TRUSTED_PROXIES` (the implicit listener: `TRUSTED_PROXIES`) may set
@@ -1295,12 +1297,13 @@ port, and must include the host of `conf::public_base_url()` (`OAUTH_BASE_URL`, 
 the issuer). Schemes, ports, paths, and wildcards in entries stop startup.
 
 `api::listener_router(planes, lifecycle, hosts)` composes the router a listener
-serves from the planes it declares (`api::plane::PlaneSet`): management (`/livez`,
-`/readyz`), identity (well-known metadata, OIDC, accounts, sign-up, social
-sign-in, the hosted auth app, docs, i18n, the internal-context JWKS), admin
-(`/admin/*` and the Console), and the gateway. `api::server_router` is the same
-composition with every plane, for tests. Probes are mounted on every host,
-including pod IPs and hostless requests. `dispatch::HostDispatch` sends allowed
+serves from its planes (`api::plane::PlaneSet`): management (`/livez`, `/readyz`),
+identity (well-known metadata, OIDC, accounts, sign-up, social sign-in, the
+hosted auth app, docs, i18n, the internal-context JWKS), admin (`/admin/*` and
+the Console), and the gateway. `api::server_router` is the same composition with
+every plane, for tests. Probes are mounted on every host, including pod IPs and
+hostless requests, and on every listener until one declares only the management
+plane. `dispatch::HostDispatch` sends allowed
 hosts through the IAM planes and their shared ingress limit; the gateway is their
 fallback only when the listener serves it. Other hosts and hostless requests go
 directly to the gateway when `IAM_HOSTS` is configured, where the gateway ingress
