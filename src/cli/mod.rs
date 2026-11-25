@@ -134,7 +134,7 @@ pub async fn run_cli_command(command: Command) -> io::Result<()> {
 async fn run_bootstrap(args: BootstrapArgs) -> io::Result<()> {
     db::init()
         .await
-        .map_err(|error| io::Error::other(format!("database initialization failed: {error}")))?;
+        .map_err(|error| io::Error::other(format!("database initialization failed: {error:#}")))?;
 
     let super_admin_exists = crate::iam::boot::super_admin_exists()
         .await
