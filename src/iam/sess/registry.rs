@@ -3,9 +3,9 @@
 //! Each login has one stable standard JWT `sid`. Refresh-token replay
 //! protection is tracked separately through a rotating JWT `jti`. A session
 //! keeps its record, subject and refresh rotation under its own key tag; the
-//! per-user index names the user's sessions for targeted cleanup, listing and
-//! reconciliation. Every key and index field expires with the session. No key
-//! lists the sessions of every user.
+//! per-user index names the user's sessions for targeted cleanup and listing.
+//! Every key and index field expires with the session. No key lists the
+//! sessions of every user.
 //!
 //! Deleting a `sid` record kills the session completely: the gateway and
 //! account endpoints resolve subjects from the store by sid, and the

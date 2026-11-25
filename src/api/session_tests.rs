@@ -447,8 +447,8 @@ async fn suite() {
     session_views(&router, admin).await;
 }
 
-/// The admin listing pages through a user's sessions and the overview serves
-/// the reconciled totals with their time.
+/// The admin listing pages through a user's sessions, which the overview does
+/// not count.
 async fn session_views(router: &Router, admin: (&str, &str)) {
     let get = |path: String| {
         Request::get(path)
@@ -488,13 +488,9 @@ async fn session_views(router: &Router, admin: (&str, &str)) {
     )
     .await;
 
-    let started = chrono::Utc::now() - chrono::Duration::seconds(1);
-    crate::iam::sess::summary::reconcile().await.unwrap();
-    let sessions = &send(router, get("/admin/overview".into()), StatusCode::OK).await["sessions"];
-    assert!(sessions["activeSessions"].as_u64().unwrap() >= 2);
-    assert!(sessions["activeUsers"].as_u64().unwrap() >= 1);
-    let reconciled_at = sessions["reconciledAt"].as_str().unwrap();
-    assert!(chrono::DateTime::parse_from_rfc3339(reconciled_at).unwrap() >= started);
+    let overview = send(router, get("/admin/overview".into()), StatusCode::OK).await;
+    assert!(overview["resources"]["users"]["total"].as_i64().unwrap() >= 1);
+    assert_eq!(overview.get("sessions"), None);
 
     registry::revoke_all_sessions(&user.id).await.unwrap();
 }

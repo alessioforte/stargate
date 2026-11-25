@@ -2,7 +2,6 @@ pub mod issuance;
 pub mod listing;
 pub mod registry;
 pub(crate) mod subjects;
-pub mod summary;
 pub mod tokens;
 
 #[cfg(test)]

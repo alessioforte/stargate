@@ -78,16 +78,6 @@ pub mod session {
         scoped(&format!("u:{user_id}"), "sessions")
     }
 
-    /// The estimated session totals of the last completed reconciliation.
-    pub fn summary() -> String {
-        scoped("sessions", "summary")
-    }
-
-    /// The lease a replica holds while it is due to reconcile the totals.
-    pub fn reconciliation() -> String {
-        scoped("sessions", "reconciliation")
-    }
-
     /// A revoked JWT `jti`, until its expiry.
     pub fn revoked_jti(jti: &str) -> String {
         scoped(&format!("j:{jti}"), "revoked")
@@ -309,7 +299,7 @@ mod tests {
             entity(&limits::org_ip_quota("2001:db8::1")),
             Some(("ip", "2001:db8::1"))
         );
-        assert_eq!(entity(&session::summary()), None);
+        assert_eq!(entity(&scoped("untyped", "name")), None);
         assert_eq!(entity("other:{sub:1}:quota"), None);
     }
 
@@ -321,8 +311,6 @@ mod tests {
             session::refresh(sid),
             session::record(sid),
             session::index("01JZ00000000000000000000U1"),
-            session::summary(),
-            session::reconciliation(),
             session::revoked_jti("jti"),
             api_key::subject("hash"),
             oauth::authorization_code("hash"),
