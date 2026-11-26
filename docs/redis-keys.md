@@ -64,7 +64,7 @@ subjects never appear in a key or a tag.
 | `{u:<user_id>}:login-known` | Recognized addresses of completed password logins (address → deadline) | per-field TTL, 30 days renewed on completed password login |
 | `{u:<user_id>}:login-attempts` | Account-wide password attempts and backoff timestamp | 5 min from the last reservation |
 | `{id:<identifier hash>}:login-attempts` | Password attempts and backoff for an unknown identifier across addresses | 5 min from the last reservation |
-| `{ip:<ip>}:ingress` | Per-address ingress allowance | limiter |
+| `{ip:<ip>}:ingress:<plane>` | Ingress allowance of an address on one plane (`gateway`, `identity`, `admin`) | limiter |
 | `{sub:<subject>}:rate` / `:quota` | Subject rate limit and short quota buckets (second, minute, hour) | limiter |
 | `{org:<org_id>}:rate` / `:quota` | Organization rate limit and short quota buckets | limiter |
 | `{ip:<ip>}:org-rate` / `:org-quota` | Organization limits charged to the address | limiter |
@@ -79,7 +79,7 @@ tracker keeps the window marker and the counter as fields of one hash key.
 Calendar-window quotas (day and longer) keep their balance in SQL instead and
 never touch a Redis key.
 
-IP addresses may be IPv6 (`{ip:2001:db8::1}:ingress`): the colons belong to the
+IP addresses may be IPv6 (`{ip:2001:db8::1}:ingress:gateway`): the colons belong to the
 tag and do not change slot selection.
 
 No key lists every session. A session's subject, refresh rotation and record

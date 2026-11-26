@@ -286,8 +286,9 @@ exercise forwarding headers). Guide: `docs/listeners.md`.
 1. Pin the active `RuntimeSnapshot` (graph, balancers, limiter, prepared clients,
    version) and the independent `PolicySnapshot` (ACE engine + revision); acquire
    process admission (`503 gateway.overloaded` when exhausted).
-2. Charge the mandatory `ingress.limit` IP bucket with the client address the
-   server resolved once at ingress, bounded by `ingress.timeout` (default 250ms):
+2. Charge the mandatory `ingress.limit` to the gateway plane's bucket
+   (`{ip:<ip>}:ingress:gateway`) of the client address the server resolved once
+   at ingress, bounded by `ingress.timeout` (default 250ms):
    `429` on denial; store errors/timeouts pass by default (`on_store_error: allow`),
    or return `503` with `deny`, before any credential check or route match.
    The listener already removed `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*`
@@ -345,7 +346,7 @@ limits:
       replenish_1_per: 100ms
 ```
 
-Top-level objects: `ingress` (mandatory per-IP admission), `limits` (named
+Top-level objects: `ingress` (mandatory per-IP, per-plane admission), `limits` (named
 `gcra` / `token_bucket` / `quota_tracker` specs; `default` is required),
 `runtime` (budgets/deadlines), optional `mtls` (upstream CA + client identity),
 and `http.{upstreams,services,middlewares,policies,routers}`.
@@ -1304,7 +1305,7 @@ sign-in, the hosted auth app, docs, i18n, the internal-context JWKS), admin
 composition with every plane, for tests. Probes are mounted on every host,
 including pod IPs and hostless requests, and only on a listener that declares
 the management plane. `dispatch::HostDispatch` sends allowed
-hosts through the IAM planes and their shared ingress limit; the gateway is their
+hosts through the IAM planes and their per-plane ingress limit; the gateway is their
 fallback only when the listener serves it. Other hosts and hostless requests go
 directly to the gateway when `IAM_HOSTS` is configured, where the gateway ingress
 limit still applies. Path normalization, CORS, and compression belong to the
@@ -1340,9 +1341,11 @@ cross-origin browser entry for their specified RP flows. The server warns at sta
 gateway router can match without a positive host constraint.
 `main.rs` adds security headers and tracing to every listener's router.
 
-IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the client IP's
-ingress allowance, the same `{ip:<ip>}:ingress` bucket as the gateway, before
-credentials are read (`429 iam.ingress_rate_limit_exceeded`). Authenticated
+IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the same
+`ingress.limit` as the gateway to its own plane's bucket for the client IP,
+`{ip:<ip>}:ingress:identity` or `:ingress:admin` (`/docs`: identity, else admin),
+before credentials are read (`429 iam.ingress_rate_limit_exceeded`), so a gateway
+flood never spends a client's sign-in allowance. Authenticated
 `/admin/*` principals then charge their own `default` bucket, keyed
 `{admin:user:<id>}:requests` / `{admin:key:<id>}:requests` in
 `extract_admin_authorization`

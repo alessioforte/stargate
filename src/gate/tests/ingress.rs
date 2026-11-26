@@ -324,7 +324,7 @@ impl lim::RateLimit for AdmissionBackend {
     }
 
     async fn check(&self, key: &str, cost: u64) -> lim::Result<lim::RateLimitDecision> {
-        assert_eq!(key, "stargate:v1:{ip:203.0.113.8}:ingress:ingress");
+        assert_eq!(key, "stargate:v1:{ip:203.0.113.8}:ingress:gateway:ingress");
         assert_eq!(cost, 1);
         let _pending = PendingCheck(self.dropped.clone());
         self.entered.store(true, Ordering::SeqCst);
@@ -500,36 +500,27 @@ async fn requests_pin_the_ingress_binding_and_reload_preserves_existing_allowanc
 }
 
 #[tokio::test]
-async fn probes_are_exempt_and_iam_shares_the_client_ingress_allowance() {
-    // Gateway and IAM routes draw from one per-IP ingress allowance. IAM
-    // traffic never charges the gateway's `default` resource bucket.
+async fn probes_are_exempt_and_each_plane_charges_its_own_ingress_allowance() {
+    // The gateway and each IAM plane draw `ingress.limit` from a bucket of
+    // their own. IAM traffic never charges the gateway's `default` resource
+    // bucket.
     let gate = Arc::new(test_support::gate(config(3)));
     let calls = Arc::new(AuthenticationCalls::default());
     let auth = calls.boundary(VerifiedIdentity::anonymous());
     let app =
         crate::api::server_router(crate::srv::health::Lifecycle::default(), Default::default());
     let peer = "203.0.113.9:1000";
-    assert_eq!(
-        app.clone()
-            .oneshot(request(&gate, &auth, "/open", peer))
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::OK
-    );
-    let response = app
-        .clone()
-        .oneshot(request(&gate, &auth, "/docs/errors", peer))
-        .await
-        .unwrap();
+    let send = |path: &'static str, peer: &'static str| {
+        let app = app.clone();
+        let request = request(&gate, &auth, path, peer);
+        async move { app.oneshot(request).await.unwrap() }
+    };
+    assert_eq!(send("/open", peer).await.status(), StatusCode::OK);
+    let response = send("/docs/errors", peer).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert!(!response.headers().contains_key("x-ratelimit-limit"));
     // Without an authenticated principal there is no principal bucket.
-    let response = app
-        .clone()
-        .oneshot(request(&gate, &auth, "/admin/configurations", peer))
-        .await
-        .unwrap();
+    let response = send("/admin/configurations", peer).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert!(!response.headers().contains_key("x-ratelimit-limit"));
     let occupied = gate.resources.admit_primary().unwrap();
@@ -550,33 +541,36 @@ async fn probes_are_exempt_and_iam_shares_the_client_ingress_allowance() {
         }
     }
     drop(occupied);
-    let response = app
-        .clone()
-        .oneshot(request(&gate, &auth, "/docs/errors", peer))
-        .await
-        .unwrap();
+    for _ in 0..2 {
+        assert_eq!(send("/docs/errors", peer).await.status(), StatusCode::OK);
+    }
+    let response = send("/docs/errors", peer).await;
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.headers()["x-ratelimit-scope"], "ingress");
     assert_eq!(
         error_code(response).await,
         "iam.ingress_rate_limit_exceeded"
     );
-    let response = app
-        .clone()
-        .oneshot(request(&gate, &auth, "/open", peer))
-        .await
-        .unwrap();
+    // The exhausted identity allowance leaves the admin and gateway ones.
+    assert_eq!(
+        send("/admin/configurations", peer).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    for _ in 0..2 {
+        assert_eq!(send("/open", peer).await.status(), StatusCode::OK);
+    }
+    let response = send("/open", peer).await;
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(
         error_code(response).await,
         "gateway.ingress_rate_limit_exceeded"
     );
-    let response = app
-        .oneshot(request(&gate, &auth, "/docs/errors", "203.0.113.10:1000"))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    // Only the anonymous gateway request charged the address's resource bucket.
+    assert_eq!(
+        send("/docs/errors", "203.0.113.10:1000").await.status(),
+        StatusCode::OK
+    );
+    // Only the three admitted gateway requests charged the address's resource
+    // bucket.
     let resource = gate
         .snapshot()
         .core
@@ -588,6 +582,6 @@ async fn probes_are_exempt_and_iam_shares_the_client_ingress_allowance() {
         )
         .await
         .unwrap();
-    assert_eq!(resource.remaining, 98);
-    assert_eq!(calls.counts(), (1, 0));
+    assert_eq!(resource.remaining, 96);
+    assert_eq!(calls.counts(), (3, 0));
 }

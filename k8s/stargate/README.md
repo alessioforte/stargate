@@ -577,8 +577,9 @@ gatewayConfig:
   policies: ""
 ```
 
-Gateway and IAM requests share the per-IP ingress allowance before authentication
-and routing; authenticated admin principals also charge their own default bucket.
+Gateway, identity and admin requests each charge the per-IP ingress allowance to
+a bucket of their plane before authentication and routing; authenticated admin
+principals also charge their own default bucket.
 Probes remain exempt. Set `TRUSTED_PROXIES` to the actual ingress/load-balancer peer
 CIDRs so clients behind a trusted proxy retain independent IP allowances.
 

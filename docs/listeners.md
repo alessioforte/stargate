@@ -81,8 +81,14 @@ credentials must use `Authorization: Bearer` or `x-api-key` headers.
 A plane may appear on more than one listener; each listener mounts only the
 planes it declares. Nothing adds a plane a listener does not declare, so
 `LISTENERS` without a listener for the management plane answers `/livez` and
-`/readyz` nowhere and logs a warning at startup. On a listener with IAM planes
-the shared ingress allowance and CORS/compression apply as on the single port.
+`/readyz` nowhere and logs a warning at startup. Each plane charges the
+configuration's `ingress.limit` to a bucket of its own for the client address: a
+flood on the gateway does not spend the same client's sign-in allowance, and the
+identity and admin planes do not spend each other's. The OpenAPI document
+charges the identity plane, or the admin plane on a listener without identity.
+The buckets belong to the plane, not the listener: a plane served by two
+listeners shares one bucket per client address. On a listener with IAM planes
+CORS/compression apply as on the single port.
 The identity plane also admits the Console's public origin (`CONSOLE_PUBLIC_URL`)
 on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
 `GET`/`PUT /account/profile` only, so a Console served by the admin listener can

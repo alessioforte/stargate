@@ -67,8 +67,8 @@ WebSockets open concurrently: the failing stage measures handshake pressure as
 well as active sessions; it is not a hard steady-connection limit.
 
 Discovery performs two HTTP calls per operation; OAuth performs three. Their
-high-rate ceilings include the shared per-IP ingress allowance, and the short
-OAuth stages can consume burst capacity. Do not project the 400-flow/s sample to
+high-rate ceilings include the identity plane's per-IP ingress allowance, and
+the short OAuth stages can consume burst capacity. Do not project the 400-flow/s sample to
 an indefinite single-IP rate. Likewise, no conclusion about unlimited public
 endpoint throughput follows from a rate-limited result.
 
@@ -168,7 +168,7 @@ utilization, admission errors and p95/p99 while tuning.
 ## Ingress, NAT and the independent limiter
 
 Stargate's example ingress allowance is shared across replicas: burst 100 and
-10 HTTP requests/s **per client IP**. Many users behind one corporate/mobile NAT
+10 HTTP requests/s **per client IP and plane**. Many users behind one corporate/mobile NAT
 share it. Raise it for a known workload together with its backstop and resource
 budget; account for the several requests in an OAuth or login-page flow.
 Configure `trustedProxies` for the actual Traefik peer networks so Stargate sees

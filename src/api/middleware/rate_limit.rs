@@ -1,11 +1,13 @@
 //! IAM/admin request limits.
 //!
-//! Every IAM route first charges the client IP's ingress allowance, the same
-//! bucket the gateway uses, before any credential is read. Authenticated
-//! `/admin/*` principals then charge a bucket of their own
-//! ([`charge_admin_principal`]), so one principal's automation never drains
-//! the budget of another principal behind the same address.
+//! Every IAM route first charges its plane's ingress allowance for the client,
+//! the same `ingress.limit` the gateway charges to its own bucket, before any
+//! credential is read. Authenticated `/admin/*` principals then charge a
+//! bucket of their own ([`charge_admin_principal`]), so one principal's
+//! automation never drains the budget of another principal behind the same
+//! address.
 
+use crate::api::plane::Plane;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::{Gate, RuntimeSnapshot, retain_runtime};
 use crate::web::request::RequestExt;
@@ -15,7 +17,7 @@ use crate::{
     },
     web::limits::{insert_limit_headers, limited_response},
 };
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::HeaderMap;
@@ -25,7 +27,12 @@ use std::sync::Arc;
 /// Named limit charged per authenticated admin principal.
 const ADMIN_PRINCIPAL_LIMIT: &str = "default";
 
-pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response {
+/// Charges `plane`'s ingress bucket; mount it with `from_fn_with_state`.
+pub async fn ingress_limit_middleware(
+    State(plane): State<Plane>,
+    mut req: Request,
+    next: Next,
+) -> Response {
     let gate = req
         .extensions()
         .get::<Arc<Gate>>()
@@ -37,7 +44,7 @@ pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response 
     with_traffic_budget(runtime.ingress.timeout, async move {
         let client_ip = req.get_client_ip();
         let ingress_started = tokio::time::Instant::now();
-        if let Err(error) = check_ingress(&runtime, &client_ip).await {
+        if let Err(error) = check_ingress(&runtime, plane, &client_ip).await {
             return error.into_response();
         }
         crate::data::store::with_security_budget(ingress_started.elapsed(), next.run(req))
@@ -47,9 +54,13 @@ pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response 
     .await
 }
 
-async fn check_ingress(runtime: &RuntimeSnapshot, client_ip: &str) -> Result<(), ErrorResponse> {
+async fn check_ingress(
+    runtime: &RuntimeSnapshot,
+    plane: Plane,
+    client_ip: &str,
+) -> Result<(), ErrorResponse> {
     let ingress = &runtime.ingress;
-    let key = ingress_key(client_ip);
+    let key = ingress_key(plane.name(), client_ip);
     let Some(decision) = check_traffic_limit(
         runtime,
         LimitPoint::IamIngress,
@@ -115,8 +126,9 @@ pub fn insert_principal_limit_headers(headers: &mut HeaderMap, decision: &RateLi
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::{charge_admin_principal, ingress_limit_middleware};
+    use crate::api::plane::Plane;
     use crate::gate::{RuntimeSnapshot, prepare_config, test_support};
-    use axum::{Extension, Router, body::Body, middleware::from_fn, routing::get};
+    use axum::{Extension, Router, body::Body, middleware::from_fn_with_state, routing::get};
     use http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use std::sync::Arc;
@@ -138,7 +150,10 @@ mod tests {
     fn app(gate: Arc<crate::gate::Gate>) -> Router {
         Router::new()
             .route("/", get(|| async { "ok" }))
-            .layer(from_fn(ingress_limit_middleware))
+            .layer(from_fn_with_state(
+                Plane::Identity,
+                ingress_limit_middleware,
+            ))
             .layer(Extension(gate))
     }
 
@@ -242,7 +257,10 @@ mod tests {
                     }
                 }),
             )
-            .layer(from_fn(ingress_limit_middleware))
+            .layer(from_fn_with_state(
+                Plane::Identity,
+                ingress_limit_middleware,
+            ))
             .layer(Extension(gate.clone()));
         let pending = tokio::spawn(
             app.clone().oneshot(
@@ -345,7 +363,7 @@ mod tests {
             .limiter
             .check(
                 "ingress",
-                &crate::gate::limits::ingress_key("127.0.0.1"),
+                &crate::gate::limits::ingress_key("identity", "127.0.0.1"),
                 None,
             )
             .await

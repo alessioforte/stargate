@@ -404,7 +404,8 @@ mod fail_open_tests {
                     }),
                 )
                 .layer(from_fn(super::super::extract_admin_authorization))
-                .layer(from_fn(
+                .layer(axum::middleware::from_fn_with_state(
+                    crate::api::plane::Plane::Admin,
                     crate::api::middleware::rate_limit::ingress_limit_middleware,
                 ))
                 .layer(Extension(gate));

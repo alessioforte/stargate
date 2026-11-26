@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use axum::{
     Extension, Router,
     body::Body,
-    middleware::from_fn,
+    middleware::from_fn_with_state,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -143,7 +143,10 @@ async fn iam_ingress_and_principal_denials_emit_integer_retry_after_and_keep_rat
     for (duration, expected) in retry_cases() {
         let app = Router::new()
             .route("/", get(denied_handler))
-            .layer(from_fn(ingress_limit_middleware))
+            .layer(from_fn_with_state(
+                crate::api::plane::Plane::Identity,
+                ingress_limit_middleware,
+            ))
             .layer(Extension(gate("ingress", duration)));
         let response = app.oneshot(Request::new(Body::empty())).await.unwrap();
         assert_eq!(response.headers()["x-ratelimit-scope"], "ingress");

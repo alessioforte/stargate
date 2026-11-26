@@ -126,13 +126,14 @@ ordinary mutations return the first result. See [replay eligibility](config-v1.m
 
 ## IAM limit errors
 
-IAM endpoints share the gateway's per-IP ingress allowance; authenticated
-`/admin/*` principals also have a bucket of their own. See
+IAM endpoints charge the same `ingress.limit` as the gateway, to a per-IP bucket
+of their plane; authenticated `/admin/*` principals also have a bucket of their
+own. See
 [IAM and admin limits](config-v1.md#iam-and-admin-limits).
 
 | Code | HTTP status | Condition |
 | --- | --- | --- |
-| `iam.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its ingress allowance on an IAM endpoint, before authentication (`X-RateLimit-Scope: ingress`) |
+| `iam.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its ingress allowance on the endpoint's plane (identity or admin), before authentication (`X-RateLimit-Scope: ingress`) |
 | `iam.rate_limit_exceeded` | 429 | An authenticated admin user or admin key exhausted its own `/admin/*` budget (`X-RateLimit-Scope: subject`) |
 | `iam.overloaded` | 503 | Foreground password hashing, verification or history admission exceeded 5s; not a failed login attempt. `Retry-After: 10` |
 | `iam.limiter_unavailable` | 503 | The IAM limiter store fails, or the ingress check exceeds `ingress.timeout`; `params.scope` is `ingress` or `subject` |

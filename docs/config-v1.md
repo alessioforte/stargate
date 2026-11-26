@@ -203,10 +203,11 @@ through connection acquisition and Redis responses. An exhausted check follows
 its own `on_store_error` policy immediately. Time spent on other request work
 does not consume the budget. Generated configs and the Helm defaults use
 burst 100 with one request replenished every `100ms` (10/s); tune these values
-for the gateway and IAM traffic sharing each client IP (NAT, VPN, office egress).
+for the traffic one plane receives from a client IP (NAT, VPN, office egress).
 
-Gateway requests first acquire process admission, then consume the ingress
-allowance of the client address the listener resolved once at ingress, before
+Gateway requests first acquire process admission, then consume the gateway
+plane's ingress allowance of the client address the listener resolved once at
+ingress, before
 credential verification, database lookup, or route matching. Invalid API
 keys/bearer tokens, rejected auth/access policies, and nonexistent routes all
 consume allowance. Keys use the resolved IP only; changing credentials or client
@@ -217,12 +218,15 @@ is keyed by its socket address and its forwarding headers are removed. Without a
 peer address, requests share the conservative `unknown` bucket. Keep
 trusted-proxy entries restricted to the deployment's actual proxy peers. Behind
 a load balancer or ingress controller, trust the proxy on that listener:
-otherwise every client resolves to the proxy's address and shares one allowance,
-so a single client can exhaust it for everyone, IAM logins included. See
+otherwise every client resolves to the proxy's address and shares one allowance
+per plane, so a single client can exhaust it for everyone. See
 `docs/listeners.md`.
 
 Ingress uses its own key namespace, distinct from resource subject/org rate and
-quota buckets even when both reference the same named limit. After admission,
+quota buckets even when both reference the same named limit. Each plane
+(gateway, identity, admin) has its own bucket per client address with the same
+`ingress.limit`: a flood on the gateway does not consume the sign-in allowance of
+the same client. After admission,
 authentication and selected resource policies still enforce their own limits
 and `quota_cost`. Ingress allowances persist through reloads of the same named
 limit because generations share limiter state; each request pins its ingress
@@ -247,8 +251,12 @@ These settings belong to the configuration document and apply on reload.
 
 IAM endpoints (`/account/*`, `/oauth/*`, `/signup/*`, `/admin/*`, `/docs`,
 `/i18n`, `/.well-known/*`, and the hosted `/auth` and `/stargate` apps) consume
-the same per-IP ingress allowance as the gateway, with the same key and before
-any credential is read: one allowance per client address for the whole process.
+the same `ingress.limit` as the gateway, before any credential is read, from the
+bucket of their plane: identity endpoints and the hosted auth app charge the
+identity plane, `/admin/*` and the Console the admin plane, and `/docs` the
+identity plane (the admin plane on a listener without identity). Each plane has
+one allowance per client address for the whole process, separate from the
+gateway's.
 IAM denials return `429 iam.ingress_rate_limit_exceeded` with
 `X-RateLimit-Scope: ingress`. `ingress.on_store_error` also governs IAM ingress
 and the admin principal check below: store failures/timeouts pass by default,

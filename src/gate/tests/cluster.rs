@@ -227,7 +227,7 @@ async fn cluster_gateway_redis_integration() {
         state
             .get_i64(&format!(
                 "{}:{namespace}",
-                store::keys::limits::ingress("203.0.113.40")
+                store::keys::limits::ingress("gateway", "203.0.113.40")
             ))
             .await
             .unwrap()
@@ -237,7 +237,7 @@ async fn cluster_gateway_redis_integration() {
     // A real Redis type error fails closed; restoring the key restores service.
     let corrupt = format!(
         "{}:{namespace}",
-        store::keys::limits::ingress("203.0.113.50")
+        store::keys::limits::ingress("gateway", "203.0.113.50")
     );
     let mut connection = state.get_connection();
     redis::cmd("LPUSH")

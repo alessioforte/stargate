@@ -8,7 +8,7 @@ use crate::srv::health::Lifecycle;
 use axum::{
     Router,
     extract::Request,
-    middleware::{Next, from_fn},
+    middleware::{Next, from_fn, from_fn_with_state},
     response::Response,
 };
 use std::fmt;
@@ -51,8 +51,8 @@ impl Plane {
     pub fn router(self, lifecycle: Lifecycle) -> Router {
         match self {
             Self::Management => crate::api::health::router(lifecycle),
-            Self::Identity => iam_layers(identity_routes()),
-            Self::Admin => iam_layers(admin_routes()),
+            Self::Identity => iam_layers(self, identity_routes()),
+            Self::Admin => iam_layers(self, admin_routes()),
             Self::Gateway => Router::new().fallback_service(service_fn(|request| async {
                 crate::gate::service(restore_client_uri(request)).await
             })),
@@ -173,17 +173,24 @@ fn iam_planes(planes: PlaneSet, lifecycle: &Lifecycle) -> Option<Router> {
             .nest_service(&crate::conf::apps::console_app_base_path(), Router::new());
     }
     if serves_iam {
-        iam = iam.merge(iam_layers(crate::api::docs::router(planes)));
+        // The documentation describes both IAM planes; it charges the identity
+        // allowance where the listener serves that plane.
+        let docs_plane = if planes.contains(Plane::Identity) {
+            Plane::Identity
+        } else {
+            Plane::Admin
+        };
+        iam = iam.merge(iam_layers(docs_plane, crate::api::docs::router(planes)));
     }
     (serves_iam || planes.contains(Plane::Gateway)).then_some(iam)
 }
 
-/// Layers shared by the IAM planes: the per-IP ingress allowance, the matched
-/// route for telemetry, and the CORS and compression the hosted API and apps
-/// expect. The gateway plane deliberately has none of them.
-fn iam_layers(router: Router) -> Router {
+/// Layers shared by the IAM planes: the plane's own ingress allowance, the
+/// matched route for telemetry, and the CORS and compression the hosted API
+/// and apps expect. The gateway plane deliberately has none of them.
+fn iam_layers(plane: Plane, router: Router) -> Router {
     router
-        .layer(from_fn(ingress_limit_middleware))
+        .layer(from_fn_with_state(plane, ingress_limit_middleware))
         .layer(from_fn(record_route))
         .layer(crate::web::cors::hyper_configure())
         .layer(CompressionLayer::new())

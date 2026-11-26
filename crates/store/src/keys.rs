@@ -241,9 +241,10 @@ pub mod account {
 pub mod limits {
     use super::scoped;
 
-    /// The per-address ingress allowance shared by gateway and IAM.
-    pub fn ingress(client_ip: &str) -> String {
-        scoped(&format!("ip:{client_ip}"), "ingress")
+    /// A client's ingress allowance on one serving plane: a flood on one
+    /// plane never spends another plane's allowance.
+    pub fn ingress(plane: &str, client: &str) -> String {
+        scoped(&format!("ip:{client}"), &format!("ingress:{plane}"))
     }
 
     /// A subject's rate limit bucket.
@@ -349,7 +350,8 @@ mod tests {
             account::login_known("01JZ00000000000000000000U1"),
             account::login_identifier("alice@example.com", Some("203.0.113.1")),
             account::login_identifier("alice@example.com", None),
-            limits::ingress("203.0.113.1"),
+            limits::ingress("gateway", "203.0.113.1"),
+            limits::ingress("identity", "2001:db8::1"),
             limits::subject_rate("01JZ00000000000000000000U1"),
             limits::subject_quota("01JZ00000000000000000000U1"),
             limits::org_rate("01JZ00000000000000000000O1"),
@@ -416,8 +418,8 @@ mod tests {
         assert_eq!(api_key::subject("abc"), "stargate:v1:{k:abc}:subject");
         assert_eq!(oauth::authorization_code("abc"), "stargate:v1:{c:abc}:code");
         assert_eq!(
-            limits::ingress("203.0.113.8"),
-            "stargate:v1:{ip:203.0.113.8}:ingress"
+            limits::ingress("gateway", "203.0.113.8"),
+            "stargate:v1:{ip:203.0.113.8}:ingress:gateway"
         );
         assert_eq!(
             limits::admin_principal("key:01JZ00000000000000000000K1"),
