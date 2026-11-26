@@ -1,5 +1,6 @@
 use crate::web::request::RequestExt;
 mod concurrency;
+mod console_flow;
 #[cfg(feature = "redis")]
 mod delayed_publication;
 mod delegated;
@@ -455,6 +456,7 @@ async fn suite() {
     revise_session(&sid, |session| session.client_ids.clear()).await;
     registry::revoke_session(&sid).await.unwrap();
     delegated::verify_subjects(&router).await;
+    console_flow::run(&router).await;
     concurrency::run(&router, admin).await;
     session_views(&router, admin).await;
 }

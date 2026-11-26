@@ -50,6 +50,18 @@ fn header_credentials_take_precedence_over_cookies_and_query() {
 }
 
 #[test]
+fn an_authorization_header_is_never_replaced_by_the_session_cookie() {
+    for value in ["Bearer ", "Basic dXNlcjpwYXNz", "not-a-scheme"] {
+        let r = req_with(&[("authorization", value), ("cookie", "jwt=cookie")], None);
+        assert_eq!(r.get_bearer_token(), None, "{value}");
+        assert_eq!(r.get_token(), None, "{value}");
+    }
+
+    let r = req_with(&[("cookie", "jwt=cookie")], None);
+    assert_eq!(r.get_token().as_deref(), Some("cookie"));
+}
+
+#[test]
 fn api_key_header() {
     let r = req_with(&[("x-api-key", "ak_123")], None);
     assert_eq!(r.get_api_key().as_deref(), Some("ak_123"));

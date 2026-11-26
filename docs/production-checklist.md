@@ -19,8 +19,16 @@ example hostname, CIDR, Secret name and image tag.
 - [ ] **Image**: a released tag (or digest) built by `release.yml`, not a local build.
 - [ ] **Hostnames and TLS**: DNS for the identity and API hosts; a certificate covering
       both, in `traefik.tls.secretName` or through `traefik.tls.certResolver`.
-- [ ] **Issuer**: `JWT_ISSUER`, `OAUTH_BASE_URL` and `CONSOLE_PUBLIC_URL` use the public
-      `https://` identity URL. It decides `Secure` cookies and HSTS behind Traefik.
+- [ ] **Issuer**: `JWT_ISSUER` and `OAUTH_BASE_URL` use the public `https://`
+      identity URL. It decides `Secure` cookies and HSTS behind Traefik.
+- [ ] **Console origin**: with the Console served by the admin listener,
+      `CONSOLE_PUBLIC_URL` is its public `https://` origin. The identity plane admits
+      that origin on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
+      `GET`/`PUT /account/profile` only, and `admin bootstrap` registers the Console
+      callback and `post_logout_redirect_uri` from it. Build the image with
+      `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI` on the Console origin, and
+      `VITE_ISSUER_URL` and `VITE_AUTH_URL` on the identity origin. With one origin,
+      `CONSOLE_PUBLIC_URL` may stay on the identity URL.
 - [ ] **Trusted proxies**: `trustedProxies` lists only Traefik's pod network.
 - [ ] Recalculate SQL connections for replicas, rollout surge and overlapping Job
       pools; the notification listener is already inside each server pool. See
@@ -53,11 +61,15 @@ example hostname, CIDR, Secret name and image tag.
       constrain gateway routers to API hosts. Resolve the startup warning about
       unrestricted IAM hosts and hostless gateway routers. An upstream sharing the
       IAM origin can make same-origin requests despite browser origin checks.
-- [ ] **Browser origins**: the origin guard trusts the public URL by default. Add
-      hosted app origins explicitly to `TRUSTED_ORIGINS` and configure CORS
-      separately. Missing `Origin` with `Sec-Fetch-Site: same-site` or `cross-site`
-      is denied on sensitive IAM routes; non-browser calls without those headers
-      remain supported. Test any reverse proxy preserves both headers.
+- [ ] **Browser origins**: the origin guard trusts the public URL's origin and
+      `AUTH_PUBLIC_BASE_URL`'s origin, plus explicit `TRUSTED_ORIGINS`; configure CORS
+      separately. On routes whose credential is the session token, requests carrying
+      `Authorization` skip the guard; login, OTP/MFA login, refresh token, sign-up,
+      reset, consent, and logout confirmation stay guarded even with that header.
+      Missing `Origin` with `Sec-Fetch-Site: same-site` or `cross-site` is denied on
+      sensitive IAM routes;
+      non-browser calls without those headers remain supported. Test any reverse proxy
+      preserves both headers.
 - [ ] **Admin credentials**: use bearer tokens or `x-api-key` headers. Cookies and
       query credentials cannot authenticate `/admin`; IAM access tokens in query
       parameters are ignored. `GET /signup` verification uses a bearer purpose

@@ -1,7 +1,7 @@
 import { getConsoleAppConfig } from "@/lib/env";
 
 export interface OAuthConfig {
-  apiUrl: string;
+  issuerUrl: string;
   authUrl: string;
   clientId: string;
   redirectUri: string;
@@ -74,7 +74,7 @@ export function getOAuthConfig(): OAuthConfig {
   const config = getConsoleAppConfig();
 
   return {
-    apiUrl: config.apiUrl,
+    issuerUrl: config.issuerUrl,
     authUrl: config.authUrl,
     clientId: config.oauthClientId,
     redirectUri: config.oauthRedirectUri,
@@ -139,7 +139,7 @@ export async function buildAuthorizeUrl(returnPath: string) {
     code_challenge_method: "S256",
   });
 
-  return `${config.apiUrl}/oauth/authorize?${params.toString()}`;
+  return `${config.issuerUrl}/oauth/authorize?${params.toString()}`;
 }
 
 function authAppUrl(authUrl: string, path: string) {
@@ -159,7 +159,7 @@ async function postTokenRequest(
   config: OAuthConfig,
   body: URLSearchParams,
 ): Promise<OAuthTokenResponse> {
-  const response = await fetch(`${config.apiUrl}/oauth/token`, {
+  const response = await fetch(`${config.issuerUrl}/oauth/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -221,7 +221,7 @@ export async function revokeToken(token: string, tokenTypeHint?: string) {
     body.set("token_type_hint", tokenTypeHint);
   }
 
-  const response = await fetch(`${config.apiUrl}/oauth/revoke`, {
+  const response = await fetch(`${config.issuerUrl}/oauth/revoke`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -266,7 +266,7 @@ export function buildEndSessionUrl(idToken: string) {
   if (postLogout) {
     params.set("post_logout_redirect_uri", postLogout);
   }
-  return `${config.apiUrl}/oauth/logout?${params.toString()}`;
+  return `${config.issuerUrl}/oauth/logout?${params.toString()}`;
 }
 
 export async function logoutAndRedirect(returnPath = "/") {

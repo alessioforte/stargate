@@ -46,10 +46,43 @@ pub fn router() -> axum::Router {
     use axum::middleware::{from_fn, from_fn_with_state};
     use axum::routing::{delete, get, post, put};
 
-    let sensitive = axum::Router::new()
-        .route("/account/login", post(login::post_login))
+    // Routes whose credential comes from `RequestExt::get_token`: an
+    // Authorization header is the credential there, so the cookie guard steps
+    // aside and the header is never replaced by the session cookie.
+    let cookie_authenticated = axum::Router::new()
         .route("/account/logout", delete(logout::delete_logout))
         .route("/account/logout/all", post(logout::post_logout_all))
+        .route("/account/mfa/methods", get(otp::get_mfa_methods))
+        .route("/account/mfa/challenges", post(otp::post_mfa_challenge))
+        .route(
+            "/account/mfa/challenges/{challenge_id}",
+            put(otp::put_mfa_challenge),
+        )
+        .route(
+            "/account/session/organization",
+            put(organizations::put_session_organization),
+        )
+        .route(
+            "/account/profile",
+            get(profile::get_profile).put(profile::put_profile),
+        )
+        .route("/account/consents", get(consents::get_consents))
+        .route(
+            "/account/consents/{client_id}",
+            delete(consents::delete_consent),
+        )
+        .route(
+            "/account/organizations",
+            get(organizations::get_account_organizations),
+        )
+        .layer(from_fn(
+            crate::web::origin::session_cookie_origin_middleware,
+        ));
+
+    // Routes that read no credential from the request before setting one:
+    // login, OTP/MFA login, password reset, and the refresh token in the body.
+    let credentialless = axum::Router::new()
+        .route("/account/login", post(login::post_login))
         .route(
             "/account/login/otp/email",
             post(otp::post_login_email_otp)
@@ -63,41 +96,19 @@ pub fn router() -> axum::Router {
             "/account/login/mfa/challenges/{challenge_id}",
             put(otp::put_login_mfa_challenge),
         )
-        .route("/account/mfa/methods", get(otp::get_mfa_methods))
-        .route("/account/mfa/challenges", post(otp::post_mfa_challenge))
-        .route(
-            "/account/mfa/challenges/{challenge_id}",
-            put(otp::put_mfa_challenge),
-        )
         .route(
             "/account/refresh-token",
             put(refresh_token::put_refresh_token),
         )
         .route(
-            "/account/session/organization",
-            put(organizations::put_session_organization),
-        )
-        .route(
             "/account/credentials",
             post(credentials::forgot::post_credentials).put(credentials::reset::put_credentials),
-        )
-        .route(
-            "/account/profile",
-            get(profile::get_profile).put(profile::put_profile),
-        )
-        .route("/account/consents", get(consents::get_consents))
-        .route(
-            "/account/organizations",
-            get(organizations::get_account_organizations),
-        )
-        .route(
-            "/account/consents/{client_id}",
-            delete(consents::delete_consent),
         )
         .layer(from_fn(crate::web::origin::trusted_origin_middleware));
 
     axum::Router::new()
-        .merge(sensitive)
+        .merge(cookie_authenticated)
+        .merge(credentialless)
         .route("/account/features", get(features::get_features))
         .route(
             "/account/password-policy",

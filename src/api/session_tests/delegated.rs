@@ -93,6 +93,107 @@ async fn verify_credential_sources(router: &Router, native: &str, oauth: &str) {
     )
     .await;
     assert!(response["id"].is_string());
+
+    // A header credential is not CSRF-able: the origin guard leaves it alone
+    // even when the origin and the Fetch Metadata are untrusted.
+    let response = send(
+        router,
+        Request::get("/account/profile")
+            .header(header::AUTHORIZATION, bearer(native))
+            .header(header::ORIGIN, "https://evil.example.com")
+            .header("sec-fetch-site", "cross-site")
+            .body(Body::empty())
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert!(response["id"].is_string());
+
+    // A malformed Authorization header never falls back to the cookie, even
+    // though the cookie alone would authenticate.
+    for value in ["Bearer", "Basic dXNlcjpwYXNz"] {
+        let response = send(
+            router,
+            Request::get("/account/profile")
+                .header(header::AUTHORIZATION, value)
+                .header(header::COOKIE, format!("jwt={native}"))
+                .body(Body::empty())
+                .unwrap(),
+            StatusCode::UNAUTHORIZED,
+        )
+        .await;
+        assert_eq!(response["code"], "auth.token_missing", "{value}");
+    }
+
+    // Routes without a header credential stay behind the full guard even when
+    // they carry an Authorization header: there the header authenticates
+    // nothing, so it cannot turn the guard off.
+    let valid_bearer = bearer(native);
+    for authorization in ["x", valid_bearer.as_str()] {
+        for (method, path, content_type, body) in [
+            (
+                "POST",
+                "/account/login",
+                "application/json",
+                r#"{"username":"x","password":"y"}"#,
+            ),
+            (
+                "POST",
+                "/account/login/otp/email",
+                "application/json",
+                r#"{"email":"x@example.test"}"#,
+            ),
+            (
+                "POST",
+                "/oauth/login",
+                "application/x-www-form-urlencoded",
+                "username=x&password=y",
+            ),
+            (
+                "POST",
+                "/account/credentials",
+                "application/json",
+                r#"{"email":"x@example.test"}"#,
+            ),
+            (
+                "PUT",
+                "/account/refresh-token",
+                "application/json",
+                r#"{"refresh_token":"x"}"#,
+            ),
+            (
+                "POST",
+                "/signup",
+                "application/json",
+                r#"{"email":"x@example.test"}"#,
+            ),
+            (
+                "POST",
+                "/oauth/interactions/01JZ0000000000000000000000/consent",
+                "application/json",
+                r#"{"approve":true}"#,
+            ),
+        ] {
+            let response = send(
+                router,
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(header::CONTENT_TYPE, content_type)
+                    .header(header::ORIGIN, "https://evil.example.com")
+                    .header(header::AUTHORIZATION, authorization)
+                    .body(Body::from(body))
+                    .unwrap(),
+                StatusCode::FORBIDDEN,
+            )
+            .await;
+            assert_eq!(
+                response["code"], "auth.untrusted_origin",
+                "{method} {path} with {authorization}"
+            );
+        }
+    }
+
     for site in ["same-site", "cross-site"] {
         let response = send(
             router,

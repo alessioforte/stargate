@@ -137,6 +137,19 @@ Details:
 (`/admin/*`) and the Console's OAuth client stay, so a Console hosted
 elsewhere (`CONSOLE_PUBLIC_URL`) keeps working.
 
+The Console may be served from a different origin than the OAuth provider.
+Authorize, token, revocation, logout, the API message catalog, and the profile
+language preference stay on the issuer, where the session cookie lives; `/admin`
+is called on the Console's origin. `CONSOLE_PUBLIC_URL`
+is the Console's public origin: it derives the callback and
+`post_logout_redirect_uri` registered by `admin bootstrap`, and the identity
+plane admits it on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
+`GET`/`PUT /account/profile` only. Build the Console with `VITE_API_URL` and
+`VITE_OAUTH_REDIRECT_URI` on the Console origin, and `VITE_ISSUER_URL` and
+`VITE_AUTH_URL` on the identity origin. With one origin, leave the split values
+unset: the built URLs and the runtime origin default to the same deployment as
+before.
+
 ## What is not switchable
 
 OpenID Connect provider capabilities (`response_mode=form_post`,

@@ -215,7 +215,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   URL scheme (read once). It drives the `Secure` cookie attribute, HSTS, the request's
   own origin scheme, and the span scheme; `tls::over_https` is the pure test helper.
 - `web/`: request extraction (`request.rs`), origins/CORS (`origin.rs`
-  trusted-origin middleware, `cors.rs`; both read and validated once at startup),
+  trusted-origin middleware, `cors.rs`; both read and validated once at startup;
+  the CORS layer also admits the Console's `CONSOLE_PUBLIC_URL` origin, and only
+  that origin, on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
+  `GET`/`PUT /account/profile`),
   security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
   (`limits.rs`), message envelopes.
@@ -1113,8 +1116,8 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_OUTBOX_RETENTION` | 30d | Cluster published-row retention (duration or `none`); never prunes pending rows |
 | `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | TLS of the implicit listener (`TLS_ENABLED` stops startup with `LISTENERS`); the certificate is shared. With listener TLS off, an `https://` public base URL still marks the deployment HTTPS |
 | `TRUSTED_PROXIES`                                                                      | -                                      | Implicit listener's proxy sources; refused with `LISTENERS` (use `LISTENER_<NAME>_TRUSTED_PROXIES`)                                  |
-| `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins (or `*` alone); invalid entries stop startup                                                                   |
-| `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints (no wildcard); invalid entries stop startup                                     |
+| `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins (or `*` alone); the Console origin is additionally admitted on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and `GET`/`PUT /account/profile`; invalid entries stop startup |
+| `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints (no wildcard); the public URL and `AUTH_PUBLIC_BASE_URL` origins are always trusted; invalid entries stop startup |
 | `GEOIP_DB_PATH`                                                                        | -                                      | MaxMind GeoLite2                                                                                                                    |
 | `SERVER_DRAIN_DELAY_SECS`                                                              | 5                                      | Readiness-off delay before listeners close                                                                                          |
 | `SERVER_SHUTDOWN_TIMEOUT_SECS`                                                         | 25                                     | Connection drain deadline                                                                                                           |
@@ -1125,7 +1128,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `PASSWORDLESS_LOGIN_ENABLED`                                                           | false                                  | Passwordless email-code login (needs `EMAIL_OTP_PEPPER`; not with `MFA_MODE=required`)                                              |
 | `CONSOLE_ENABLED`                                                                      | true                                   | Serve the Console app (`false`: its path answers `404 feature.disabled`)                                                            |
 | `CONSOLE_OAUTH_CLIENT_ID`                                                              | stargate_console                       | Reserved Console OAuth client                                                                                                       |
-| `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL`                                     | derived                                | Console callback / origin                                                                                                           |
+| `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL`                                     | derived                                | Console callback / public origin: derives the callback, the `post_logout_redirect_uri`, and the origin admitted by identity CORS on token, revocation, the message catalog, and the profile |
 | `EMAIL_OTP_PEPPER`, `EMAIL_OTP_LENGTH`, `EMAIL_OTP_TTL_SECS`, `EMAIL_OTP_MAX_ATTEMPTS` | -, 6, 300, 5                           | Email OTP                                                                                                                           |
 | `MFA_MODE`                                                                             | optional                               | `off`, `optional`, `required`                                                                                                       |
 | `MFA_METHODS` / `MFA_DEFAULT_METHOD` / `MFA_EMAIL_ENABLED`                             | email / email / true                   | MFA methods                                                                                                                         |
@@ -1309,13 +1312,21 @@ OAuth/OIDC protocol parameters such as `code`, `state`, and `id_token_hint` reta
 their specified transport; UserInfo POST still accepts form `access_token`.
 
 The origin guard is active by default on sensitive account and signup routes, social state,
-OIDC login/consent, interaction reads and logout confirmation. It trusts the public
-base URL's origin plus explicit `TRUSTED_ORIGINS`; neither request Host nor CORS
-adds trust. An untrusted/opaque/duplicate Origin is rejected; without Origin,
-`Sec-Fetch-Site: same-site|cross-site` is rejected too. Requests without either
-header remain usable by non-browser clients; OPTIONS passes to CORS. OIDC
-`/oauth/authorize` and `/oauth/logout` retain cross-origin browser entry for their
-specified RP flows. The server warns at startup when `IAM_HOSTS` is empty and a
+OIDC login/consent, interaction reads and logout confirmation. It has two
+variants. On the routes whose credential comes from `get_token` (profile, logout,
+authenticated MFA, organization switch, consents, organizations) a request carrying
+`Authorization` skips it: the header is the credential, is not exposed to
+CSRF, and is never replaced by the cookie, even when it is malformed. Every
+other guarded route (login, OTP/MFA login, password reset, refresh token,
+sign-up, social state, `/oauth/login`, interaction reads, consent, logout
+confirmation) keeps the full check even with `Authorization`, because the
+header authenticates nothing there. The guard trusts the public base URL's
+origin and the `AUTH_PUBLIC_BASE_URL` origin plus explicit `TRUSTED_ORIGINS`;
+neither request Host nor CORS adds trust. An untrusted/opaque/duplicate Origin
+is rejected; without Origin, `Sec-Fetch-Site: same-site|cross-site` is rejected
+too. Requests without either header remain usable by non-browser clients;
+OPTIONS passes to CORS. OIDC `/oauth/authorize` and `/oauth/logout` retain
+cross-origin browser entry for their specified RP flows. The server warns at startup when `IAM_HOSTS` is empty and a
 gateway router can match without a positive host constraint.
 `main.rs` adds security headers and tracing to every listener's router.
 
@@ -1418,7 +1429,11 @@ Stack (console/auth): React 19, Vite, TypeScript, Mantine v9
 (`@mantine/core|form|hooks|notifications`), Zustand v5, react-router v7, axios,
 react-icons (console also `@tanstack/react-table`). Path alias `@/*` maps to the
 app root (`@/services`, `@/store`, `@/components`, `@/i18n`, `@/lib`). Build-time
-API base URL comes from `VITE_API_URL` (empty = same origin).
+API base URL comes from `VITE_API_URL` (empty = same origin); the Console's
+identity-plane calls (OAuth endpoints, `/i18n`, `/account/profile`) use
+`VITE_ISSUER_URL` (default: the same URL), so they stay on the issuer while
+`/admin` is called on the Console's own origin. `CONSOLE_PUBLIC_URL` matches
+the Console's origin.
 
 Commands (inside `apps/console` or `apps/auth`): `npm run dev`, `npm run build`,
 `npm run lint` (oxlint), `npm run format` (prettier). The auth build also runs

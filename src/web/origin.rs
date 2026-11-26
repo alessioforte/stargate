@@ -2,12 +2,13 @@ use crate::err::{ErrorCode, ErrorResponse};
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use http::header::ORIGIN;
+use http::header::{AUTHORIZATION, ORIGIN};
 use http::{HeaderMap, HeaderValue, Method};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 const TRUSTED_ORIGINS_ENV: &str = "TRUSTED_ORIGINS";
+const AUTH_PUBLIC_BASE_URL_ENV: &str = "AUTH_PUBLIC_BASE_URL";
 
 static TRUSTED_ORIGINS: OnceLock<TrustedOrigins> = OnceLock::new();
 
@@ -118,15 +119,39 @@ fn settings() -> Result<TrustedOrigins, String> {
     let mut trusted =
         TrustedOrigins::parse(&std::env::var(TRUSTED_ORIGINS_ENV).unwrap_or_default())
             .map_err(|error| format!("{TRUSTED_ORIGINS_ENV}: {error}"))?;
-    let public_url = url::Url::parse(&crate::conf::public_base_url())
-        .map_err(|error| format!("Invalid public base URL for browser origin checks: {error}"))?;
-    trusted
-        .origins
-        .insert(Origin::parse(&public_url.origin().ascii_serialization())?);
+    trusted.origins.insert(
+        origin_of_url(&crate::conf::public_base_url()).map_err(|error| {
+            format!("Invalid public base URL for browser origin checks: {error}")
+        })?,
+    );
+    if let Some(auth_app) = nonempty_env(AUTH_PUBLIC_BASE_URL_ENV) {
+        trusted.origins.insert(
+            origin_of_url(&auth_app)
+                .map_err(|error| format!("{AUTH_PUBLIC_BASE_URL_ENV}: {error}"))?,
+        );
+    }
     Ok(trusted)
 }
 
-/// The public origin is always trusted; configuration adds explicit browser origins.
+fn nonempty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// The browser origin of an absolute deployment URL, which may carry a path
+/// prefix in front of the routes.
+pub(crate) fn origin_of_url(url: &str) -> Result<Origin, String> {
+    let parsed = url::Url::parse(url).map_err(|error| format!("invalid URL `{url}`: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("URL `{url}` must use http or https"));
+    }
+    Origin::parse(&parsed.origin().ascii_serialization())
+}
+
+/// The public origin is always trusted, and so is the auth app's when
+/// `AUTH_PUBLIC_BASE_URL` is set; configuration adds explicit browser origins.
 pub(crate) fn init() -> Result<(), String> {
     let _ = TRUSTED_ORIGINS.set(settings()?);
     Ok(())
@@ -145,6 +170,9 @@ pub(crate) fn configured_origin_urls() -> Vec<String> {
         .collect()
 }
 
+/// The full guard: `Origin` and `Sec-Fetch-Site` decide for every request but
+/// a preflight. Mounted on the routes that never read a credential from
+/// `Authorization`, where the header cannot authenticate anything.
 fn origin_decision(
     method: &Method,
     headers: &HeaderMap,
@@ -183,8 +211,23 @@ fn origin_decision(
     }
 }
 
-pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
-    let mut response = match origin_decision(req.method(), req.headers(), trusted_origins()) {
+/// The cookie guard: an `Authorization` header is the credential whenever it
+/// is present, is not exposed to CSRF, and `RequestExt::get_token` never falls
+/// back to the session cookie. Mounted only on the routes that read their
+/// credential from `get_token`, where the header can authenticate a request.
+fn session_cookie_origin_decision(
+    method: &Method,
+    headers: &HeaderMap,
+    trusted: &TrustedOrigins,
+) -> OriginDecision {
+    if headers.contains_key(AUTHORIZATION) {
+        return OriginDecision::Allowed;
+    }
+    origin_decision(method, headers, trusted)
+}
+
+async fn guarded(req: Request, next: Next, decision: OriginDecision) -> Response {
+    let mut response = match decision {
         OriginDecision::Allowed => next.run(req).await,
         OriginDecision::Denied => {
             ErrorResponse::new(ErrorCode::AuthUntrustedOrigin).into_response()
@@ -196,6 +239,20 @@ pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
         HeaderValue::from_static("Origin, Sec-Fetch-Site"),
     );
     response
+}
+
+/// Full guard for routes without a header credential: login, sign-up, reset,
+/// social state, consent, and logout confirmation.
+pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
+    let decision = origin_decision(req.method(), req.headers(), trusted_origins());
+    guarded(req, next, decision).await
+}
+
+/// Guard for routes whose credential `RequestExt::get_token` reads: an
+/// `Authorization` request skips it and never uses the cookie.
+pub async fn session_cookie_origin_middleware(req: Request, next: Next) -> Response {
+    let decision = session_cookie_origin_decision(req.method(), req.headers(), trusted_origins());
+    guarded(req, next, decision).await
 }
 
 #[cfg(test)]
@@ -317,6 +374,47 @@ mod tests {
     }
 
     #[test]
+    fn session_cookie_requests_skip_the_origin_check() {
+        let trusted = trusted("https://identity.example.com");
+        for value in [
+            "Bearer a-token",
+            "Bearer ",
+            "Basic dXNlcjpwYXNz",
+            "not-a-scheme",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(ORIGIN, "https://evil.example.com".parse().unwrap());
+            headers.insert("sec-fetch-site", "cross-site".parse().unwrap());
+            headers.insert(AUTHORIZATION, value.parse().unwrap());
+            assert_eq!(
+                session_cookie_origin_decision(&Method::POST, &headers, &trusted),
+                OriginDecision::Allowed,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn authorization_headers_do_not_bypass_the_full_guard() {
+        let trusted = trusted("https://identity.example.com");
+        for value in [
+            "Bearer a-token",
+            "Bearer",
+            "Basic dXNlcjpwYXNz",
+            "not-a-scheme",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(ORIGIN, "https://evil.example.com".parse().unwrap());
+            headers.insert(AUTHORIZATION, value.parse().unwrap());
+            assert_eq!(
+                origin_decision(&Method::POST, &headers, &trusted),
+                OriginDecision::Denied,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
     fn the_public_origin_guard_is_enabled_without_extra_configuration() {
         const CHILD: &str = "STARGATE_ORIGIN_GUARD_TEST";
         if std::env::var_os(CHILD).is_none() {
@@ -339,6 +437,44 @@ mod tests {
         }
         init().unwrap();
         let trusted = trusted_origins();
+        assert_eq!(
+            decision(Some("https://identity.example.com"), trusted),
+            OriginDecision::Allowed
+        );
+        assert_eq!(
+            decision(Some("https://evil.example.com"), trusted),
+            OriginDecision::Denied
+        );
+    }
+
+    #[test]
+    fn the_auth_app_origin_is_trusted_too() {
+        const CHILD: &str = "STARGATE_AUTH_ORIGIN_GUARD_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = crate::conf::child_test::run(
+                "web::origin::tests::the_auth_app_origin_is_trusted_too",
+                |command| {
+                    command
+                        .env(CHILD, "1")
+                        .env_remove("TRUSTED_ORIGINS")
+                        .env("OAUTH_BASE_URL", "https://identity.example.com")
+                        .env("AUTH_PUBLIC_BASE_URL", "https://auth.example.com/login");
+                },
+            );
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        init().unwrap();
+        let trusted = trusted_origins();
+        assert_eq!(
+            decision(Some("https://auth.example.com"), trusted),
+            OriginDecision::Allowed
+        );
         assert_eq!(
             decision(Some("https://identity.example.com"), trusted),
             OriginDecision::Allowed

@@ -21,6 +21,16 @@ VITE_OAUTH_CLIENT_ID=stargate_console
 VITE_OAUTH_REDIRECT_URI=http://localhost:3011/auth/callback
 ```
 
+`VITE_ISSUER_URL` defaults to `VITE_API_URL` (or the page origin when that is
+unset). Set it when the Console is served from a different origin than the
+identity plane: authorize, token, revocation, logout, the API message catalog,
+and the profile preference then stay on the issuer, where the session cookie
+lives, while `/admin` calls go to `VITE_API_URL`. With one origin, leave it
+unset and nothing changes.
+
+The identity plane admits the Console origin on `/oauth/token`, `/oauth/revoke`,
+`GET /i18n/{locale}`, and `GET`/`PUT /account/profile` automatically.
+
 Provision the client together with the first administrator:
 
 ```bash
@@ -54,8 +64,9 @@ When opening the console from another device, serve it over HTTPS. Browsers
 expose `crypto.subtle` only in secure contexts, and the PKCE flow needs
 SHA-256. `http://localhost` works for local development, but
 `http://<raspberry-pi-ip>` is not treated as secure. For a device-accessible
-build, point `VITE_API_URL`, `VITE_AUTH_URL`, and `VITE_OAUTH_REDIRECT_URI` at
-the HTTPS Pi hostname, or omit the URL values to use the current origin.
+build, point `VITE_API_URL`, `VITE_ISSUER_URL`, `VITE_AUTH_URL`, and
+`VITE_OAUTH_REDIRECT_URI` at the HTTPS Pi hostname, or omit the URL values to
+use the current origin.
 
 ## Checks
 
