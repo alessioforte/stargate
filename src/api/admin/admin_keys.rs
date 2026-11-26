@@ -23,6 +23,7 @@ pub struct AdminKeySchema {
     pub id: String,
     pub label: Option<String>,
     pub permissions: Vec<Permission>,
+    pub allowed_listeners: Option<Vec<String>>,
     pub revoked: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -34,6 +35,7 @@ pub struct CreateAdminKeyResponse {
     pub id: String,
     pub label: Option<String>,
     pub permissions: Vec<Permission>,
+    pub allowed_listeners: Option<Vec<String>>,
     pub revoked: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -65,13 +67,19 @@ pub struct CreateAdminKeyRequest {
     pub label: Option<String>,
     #[schema(value_type = Vec<Permission>)]
     pub permissions: Vec<String>,
+    /// Allowed listener names; null or omitted allows every listener.
+    pub allowed_listeners: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateAdminKeyPermissionsRequest {
+pub struct UpdateAdminKeyRequest {
     #[schema(value_type = Vec<Permission>)]
     pub permissions: Vec<String>,
+    /// Allowed listener names; explicit null allows every listener.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(required = true)]
+    pub allowed_listeners: Option<Vec<String>>,
 }
 
 fn validate_admin_key_permissions(
@@ -93,6 +101,28 @@ fn validate_admin_key_permissions(
     Ok(canonical_permissions(permissions))
 }
 
+fn validate_allowed_listeners(
+    names: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, ErrorResponse> {
+    let Some(names) = names else {
+        return Ok(None);
+    };
+    if names.is_empty() {
+        return Err(ErrorResponse::new(ErrorCode::AdminKeyListenersInvalid));
+    }
+    let mut names = names
+        .into_iter()
+        .map(|name| name.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    for name in &names {
+        crate::srv::settings::validate_name(name)
+            .map_err(|_| ErrorResponse::new(ErrorCode::AdminKeyListenersInvalid))?;
+    }
+    names.sort();
+    names.dedup();
+    Ok(Some(names))
+}
+
 fn admin_key_permissions(key: &db::ent::AdminKey) -> Vec<Permission> {
     canonical_permissions(parse_stored_permissions(&key.id, key.permissions.iter()))
 }
@@ -103,6 +133,7 @@ fn admin_key_schema(key: db::ent::AdminKey) -> AdminKeySchema {
         id: key.id,
         label: key.label,
         permissions,
+        allowed_listeners: key.allowed_listeners.map(|names| names.0),
         revoked: key.revoked,
         created_at: key.created_at.to_rfc3339(),
         updated_at: key.updated_at.to_rfc3339(),
@@ -200,6 +231,8 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
     let permissions = validate_admin_key_permissions(&payload.permissions)?;
     let stored_permissions = canonical_permission_strings(permissions.iter().copied());
 
+    let allowed_listeners = validate_allowed_listeners(payload.allowed_listeners)?;
+
     let secret = pw::generate_admin_key();
     let key_hash = pw::hash_api_key(&secret);
 
@@ -207,6 +240,7 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         &key_hash,
         payload.label.clone(),
         stored_permissions,
+        allowed_listeners,
         ctx,
     )
     .await
@@ -216,6 +250,7 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         id: admin_key.id,
         label: admin_key.label,
         permissions,
+        allowed_listeners: admin_key.allowed_listeners.map(|names| names.0),
         revoked: admin_key.revoked,
         created_at: admin_key.created_at.to_rfc3339(),
         updated_at: admin_key.updated_at.to_rfc3339(),
@@ -227,13 +262,13 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
 
 #[utoipa::path(
     put,
-    path = "/admin/admin-keys/{id}/permissions",
+    path = "/admin/admin-keys/{id}",
     tags = ["Admin", "Admin Keys"],
     params(("id" = String, Path, description = "Admin Key ID")),
-    request_body = UpdateAdminKeyPermissionsRequest,
+    request_body = UpdateAdminKeyRequest,
     responses(
         (status = 503, description = "Security state unavailable (`auth.state_unavailable`); retry after 10 seconds", body = ErrorResponse, headers(("Retry-After" = String, description = "10 seconds for auth.state_unavailable"))),
-        (status = 200, description = "Admin key permissions updated successfully", body = AdminKeySchema),
+        (status = 200, description = "Admin key updated successfully", body = AdminKeySchema),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
@@ -241,12 +276,12 @@ pub async fn create_admin_key(mut req: Request) -> Result<Response, ErrorRespons
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
-pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, ErrorResponse> {
+pub async fn update_admin_key(mut req: Request) -> Result<Response, ErrorResponse> {
     authorization::require_super_admin(&req)?;
 
     let ctx = take_admin_audit_context(req.extensions_mut())?;
     let id: String = extract_path(&mut req).await?;
-    let payload: UpdateAdminKeyPermissionsRequest = extract_json(req).await?;
+    let payload: UpdateAdminKeyRequest = extract_json(req).await?;
 
     let permissions =
         canonical_permission_strings(validate_admin_key_permissions(&payload.permissions)?);
@@ -263,6 +298,7 @@ pub async fn update_admin_key_permissions(mut req: Request) -> Result<Response, 
     }
 
     existing.set_permissions(permissions);
+    existing.set_allowed_listeners(validate_allowed_listeners(payload.allowed_listeners)?);
 
     let updated = crate::data::db::update_admin_key(existing, ctx)
         .await
@@ -418,7 +454,7 @@ mod tests {
 
     #[test]
     fn unknown_stored_permissions_grant_nothing() {
-        let key = db::ent::AdminKey::new("hash".to_string(), None, vec!["users".to_string()]);
+        let key = db::ent::AdminKey::new("hash".to_string(), None, vec!["users".to_string()], None);
 
         assert!(admin_key_permissions(&key).is_empty());
     }

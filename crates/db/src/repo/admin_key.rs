@@ -26,12 +26,13 @@ impl AdminKeyRepository {
         key_hash: &str,
         label: Option<String>,
         permissions: Vec<String>,
+        allowed_listeners: Option<Vec<String>>,
     ) -> Result<AdminKey> {
-        let admin_key = AdminKey::new(key_hash.to_string(), label, permissions);
+        let admin_key = AdminKey::new(key_hash.to_string(), label, permissions, allowed_listeners);
         let row = sqlx::query_as::<_, AdminKey>(sqlx::AssertSqlSafe(format!(
             "
-            INSERT INTO {admin_keys} (id, key_hash, label, permissions, revoked, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO {admin_keys} (id, key_hash, label, permissions, revoked, created_at, updated_at, allowed_listeners)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         ",
             admin_keys = ADMIN_KEY
@@ -43,6 +44,7 @@ impl AdminKeyRepository {
         .bind(admin_key.revoked)
         .bind(admin_key.created_at)
         .bind(admin_key.updated_at)
+        .bind(&admin_key.allowed_listeners)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -143,7 +145,7 @@ impl AdminKeyRepository {
         let row = sqlx::query_as::<_, AdminKey>(sqlx::AssertSqlSafe(format!(
             "
             UPDATE {admin_keys}
-            SET label = $2, permissions = $3, updated_at = $4
+            SET label = $2, permissions = $3, updated_at = $4, allowed_listeners = $5
             WHERE id = $1
             RETURNING *
         ",
@@ -153,6 +155,7 @@ impl AdminKeyRepository {
         .bind(&admin_key.label)
         .bind(&admin_key.permissions)
         .bind(updated_at)
+        .bind(&admin_key.allowed_listeners)
         .fetch_one(&mut **tx)
         .await?;
 

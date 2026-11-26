@@ -48,7 +48,7 @@ const ALLOWED_RESOURCE_TYPES: &[&str] = &[
 const ALLOWED_ACTIONS: &[(&str, &str)] = &[
     ("admin_key.created", "create"),
     ("admin_key.deleted", "delete"),
-    ("admin_key.permissions_updated", "update"),
+    ("admin_key.updated", "update"),
     ("admin_key.revoked", "update"),
     ("api_key.created", "create"),
     ("api_key.deleted", "delete"),

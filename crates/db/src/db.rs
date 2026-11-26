@@ -236,6 +236,7 @@ pub trait DbStore {
         key_hash: &str,
         label: Option<String>,
         permissions: Vec<String>,
+        allowed_listeners: Option<Vec<String>>,
         ctx: TrustedAuditContext,
     ) -> Result<AdminKey>;
     async fn get_admin_key_by_hash(&self, key_hash: &str) -> Result<Option<AdminKey>>;

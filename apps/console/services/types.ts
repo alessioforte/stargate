@@ -376,6 +376,7 @@ export interface AdminKey {
   id: string;
   label?: string | null;
   permissions: AdminKeyPermission[];
+  allowedListeners?: string[] | null;
   revoked: boolean;
   updatedAt: string;
 }
@@ -383,14 +384,16 @@ export interface AdminKey {
 export interface CreateAdminKeyRequest {
   label?: string | null;
   permissions: AdminKeyPermission[];
+  allowedListeners?: string[] | null;
 }
 
 export interface CreateAdminKeyResponse extends AdminKey {
   apiKey: string;
 }
 
-export interface UpdateAdminKeyPermissionsRequest {
+export interface UpdateAdminKeyRequest {
   permissions: AdminKeyPermission[];
+  allowedListeners: string[] | null;
 }
 
 export type ApiKeyOwnerType = "user" | "service_account";
