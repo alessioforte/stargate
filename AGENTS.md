@@ -1311,16 +1311,21 @@ OAuth/OIDC protocol parameters such as `code`, `state`, and `id_token_hint` reta
 their specified transport; UserInfo POST still accepts form `access_token`.
 
 The origin guard is active by default on sensitive account and signup routes, social state,
-OIDC login/consent, interaction reads and logout confirmation. It covers the
-session cookie only: a request carrying `Authorization` skips it (the header is
-not exposed to CSRF), and such a header is never replaced by the cookie, even
-when it is malformed. It trusts the public base URL's origin and the
-`AUTH_PUBLIC_BASE_URL` origin plus explicit `TRUSTED_ORIGINS`; neither request
-Host nor CORS adds trust. An untrusted/opaque/duplicate Origin is rejected;
-without Origin, `Sec-Fetch-Site: same-site|cross-site` is rejected too. Requests
-without either header remain usable by non-browser clients; OPTIONS passes to
-CORS. OIDC `/oauth/authorize` and `/oauth/logout` retain cross-origin browser
-entry for their specified RP flows. The server warns at startup when `IAM_HOSTS` is empty and a
+OIDC login/consent, interaction reads and logout confirmation. It has two
+variants. On the routes whose credential comes from `get_token` (profile, logout,
+authenticated MFA, organization switch, consents, organizations) a request carrying
+`Authorization` skips it: the header is the credential, is not exposed to
+CSRF, and is never replaced by the cookie, even when it is malformed. Every
+other guarded route (login, OTP/MFA login, password reset, refresh token,
+sign-up, social state, `/oauth/login`, interaction reads, consent, logout
+confirmation) keeps the full check even with `Authorization`, because the
+header authenticates nothing there. The guard trusts the public base URL's
+origin and the `AUTH_PUBLIC_BASE_URL` origin plus explicit `TRUSTED_ORIGINS`;
+neither request Host nor CORS adds trust. An untrusted/opaque/duplicate Origin
+is rejected; without Origin, `Sec-Fetch-Site: same-site|cross-site` is rejected
+too. Requests without either header remain usable by non-browser clients;
+OPTIONS passes to CORS. OIDC `/oauth/authorize` and `/oauth/logout` retain
+cross-origin browser entry for their specified RP flows. The server warns at startup when `IAM_HOSTS` is empty and a
 gateway router can match without a positive host constraint.
 `main.rs` adds security headers and tracing to every listener's router.
 

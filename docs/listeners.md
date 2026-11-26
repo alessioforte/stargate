@@ -84,9 +84,14 @@ and CORS/compression apply as on the single port. The identity plane also
 admits the Console's public origin (`CONSOLE_PUBLIC_URL`) on `/oauth/token` and
 `/oauth/revoke` only, so a Console served by the admin listener can exchange
 codes and refresh tokens against the issuer; `/admin` stays on the Console's
-own origin. The browser origin guard covers the session cookie only: a request
-carrying `Authorization` skips it, and the cookie is never used alongside such
-a header. The gateway plane owns its paths, preflights, and encoding.
+own origin. On the routes whose credential comes from the session token
+(profile, logout, authenticated MFA, organization switch, consents,
+organizations), a request carrying `Authorization` skips the browser origin
+guard and the cookie is never used alongside such a header. Routes without a
+header credential (login, OTP/MFA login, reset, refresh token, sign-up, social
+state, `/oauth/login`, interaction reads, consent, logout confirmation) keep
+the full guard even with `Authorization`. The gateway plane owns its paths,
+preflights, and encoding.
 
 Host selection (`IAM_HOSTS`) still applies per request. On a listener that
 serves both IAM planes and the gateway, a request on an IAM host falls through

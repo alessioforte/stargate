@@ -26,11 +26,10 @@ example hostname, CIDR, Secret name and image tag.
       that origin on `/oauth/token` and `/oauth/revoke` only, and `admin bootstrap`
       registers the Console callback and `post_logout_redirect_uri` from it. Build the
       image with `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI` on the Console origin,
-      and `VITE_ISSUER_URL` and `VITE_AUTH_URL` on the identity origin. The identity
-      plane admits the Console origin on `/oauth/token` and `/oauth/revoke`; add it
-      to `CORS_ORIGINS` if the message catalog and the saved profile language must
-      also work cross-origin. With one origin, `CONSOLE_PUBLIC_URL` may stay on the
-      identity URL.
+      and `VITE_ISSUER_URL` and `VITE_AUTH_URL` on the identity origin. Add the
+      Console origin to `CORS_ORIGINS` if the message catalog and the saved profile
+      language must also work cross-origin. With one origin, `CONSOLE_PUBLIC_URL` may
+      stay on the identity URL.
 - [ ] **Trusted proxies**: `trustedProxies` lists only Traefik's pod network.
 - [ ] Recalculate SQL connections for replicas, rollout surge and overlapping Job
       pools; the notification listener is already inside each server pool. See
@@ -65,10 +64,13 @@ example hostname, CIDR, Secret name and image tag.
       IAM origin can make same-origin requests despite browser origin checks.
 - [ ] **Browser origins**: the origin guard trusts the public URL's origin and
       `AUTH_PUBLIC_BASE_URL`'s origin, plus explicit `TRUSTED_ORIGINS`; configure CORS
-      separately. Requests carrying `Authorization` skip the guard. Missing `Origin`
-      with `Sec-Fetch-Site: same-site` or `cross-site` is denied on sensitive IAM
-      routes; non-browser calls without those headers remain supported. Test any
-      reverse proxy preserves both headers.
+      separately. On routes whose credential is the session token, requests carrying
+      `Authorization` skip the guard; login, OTP/MFA login, refresh token, sign-up,
+      reset, consent, and logout confirmation stay guarded even with that header.
+      Missing `Origin` with `Sec-Fetch-Site: same-site` or `cross-site` is denied on
+      sensitive IAM routes;
+      non-browser calls without those headers remain supported. Test any reverse proxy
+      preserves both headers.
 - [ ] **Admin credentials**: use bearer tokens or `x-api-key` headers. Cookies and
       query credentials cannot authenticate `/admin`; IAM access tokens in query
       parameters are ignored. `GET /signup` verification uses a bearer purpose

@@ -170,15 +170,15 @@ pub(crate) fn configured_origin_urls() -> Vec<String> {
         .collect()
 }
 
-/// The guard covers cookie-only requests: a request that carries an
-/// `Authorization` header is authenticated by it, is not exposed to CSRF, and
-/// never reads the session cookie (`RequestExt::get_token`).
+/// The full guard: `Origin` and `Sec-Fetch-Site` decide for every request but
+/// a preflight. Mounted on the routes that never read a credential from
+/// `Authorization`, where the header cannot authenticate anything.
 fn origin_decision(
     method: &Method,
     headers: &HeaderMap,
     trusted: &TrustedOrigins,
 ) -> OriginDecision {
-    if method == Method::OPTIONS || headers.contains_key(AUTHORIZATION) {
+    if method == Method::OPTIONS {
         return OriginDecision::Allowed;
     }
 
@@ -211,8 +211,23 @@ fn origin_decision(
     }
 }
 
-pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
-    let mut response = match origin_decision(req.method(), req.headers(), trusted_origins()) {
+/// The cookie guard: an `Authorization` header is the credential whenever it
+/// is present, is not exposed to CSRF, and `RequestExt::get_token` never falls
+/// back to the session cookie. Mounted only on the routes that read their
+/// credential from `get_token`, where the header can authenticate a request.
+fn session_cookie_origin_decision(
+    method: &Method,
+    headers: &HeaderMap,
+    trusted: &TrustedOrigins,
+) -> OriginDecision {
+    if headers.contains_key(AUTHORIZATION) {
+        return OriginDecision::Allowed;
+    }
+    origin_decision(method, headers, trusted)
+}
+
+async fn guarded(req: Request, next: Next, decision: OriginDecision) -> Response {
+    let mut response = match decision {
         OriginDecision::Allowed => next.run(req).await,
         OriginDecision::Denied => {
             ErrorResponse::new(ErrorCode::AuthUntrustedOrigin).into_response()
@@ -224,6 +239,20 @@ pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
         HeaderValue::from_static("Origin, Sec-Fetch-Site"),
     );
     response
+}
+
+/// Full guard for routes without a header credential: login, sign-up, reset,
+/// social state, consent, and logout confirmation.
+pub async fn trusted_origin_middleware(req: Request, next: Next) -> Response {
+    let decision = origin_decision(req.method(), req.headers(), trusted_origins());
+    guarded(req, next, decision).await
+}
+
+/// Guard for routes whose credential `RequestExt::get_token` reads: an
+/// `Authorization` request skips it and never uses the cookie.
+pub async fn session_cookie_origin_middleware(req: Request, next: Next) -> Response {
+    let decision = session_cookie_origin_decision(req.method(), req.headers(), trusted_origins());
+    guarded(req, next, decision).await
 }
 
 #[cfg(test)]
@@ -345,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn authorization_requests_skip_the_origin_check() {
+    fn session_cookie_requests_skip_the_origin_check() {
         let trusted = trusted("https://identity.example.com");
         for value in [
             "Bearer a-token",
@@ -358,8 +387,28 @@ mod tests {
             headers.insert("sec-fetch-site", "cross-site".parse().unwrap());
             headers.insert(AUTHORIZATION, value.parse().unwrap());
             assert_eq!(
-                origin_decision(&Method::POST, &headers, &trusted),
+                session_cookie_origin_decision(&Method::POST, &headers, &trusted),
                 OriginDecision::Allowed,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn authorization_headers_do_not_bypass_the_full_guard() {
+        let trusted = trusted("https://identity.example.com");
+        for value in [
+            "Bearer a-token",
+            "Bearer",
+            "Basic dXNlcjpwYXNz",
+            "not-a-scheme",
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(ORIGIN, "https://evil.example.com".parse().unwrap());
+            headers.insert(AUTHORIZATION, value.parse().unwrap());
+            assert_eq!(
+                origin_decision(&Method::POST, &headers, &trusted),
+                OriginDecision::Denied,
                 "{value}"
             );
         }

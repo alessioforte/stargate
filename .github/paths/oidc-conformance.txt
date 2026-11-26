@@ -16,6 +16,8 @@ src/api/account/login.rs
 src/api/account/logout.rs
 src/api/account/session.rs
 src/web/cookies.rs
+src/web/origin.rs
+src/web/request.rs
 src/api/apps/auth.rs
 apps/auth/**
 migrations/**
