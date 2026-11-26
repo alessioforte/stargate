@@ -11,6 +11,9 @@ const DEFAULT_MEMORY_BACKUP_INTERVAL_SECS: u64 = 30;
 const DEFAULT_MEMORY_BACKUP_WRITE_THRESHOLD: u64 = 100;
 const MEMORY_BACKUP_CHECK_INTERVAL_SECS: u64 = 1;
 const DEFAULT_MAX_MEMORY_MB: usize = 100;
+/// How often expired entries free their memory: a full store accepts new
+/// entries again within this delay of their expiry.
+const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 static RESTORE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 static BACKUP_TASK_STARTED: AtomicBool = AtomicBool::new(false);
@@ -23,7 +26,7 @@ pub static STORE: Lazy<MemoryStore> = Lazy::new(|| {
         ..MemoryStoreConfig::default()
     };
     let store = MemoryStore::with_config(config);
-    store.run_adaptive_cleaner(60);
+    store.run_sweeper(SWEEP_INTERVAL);
     store
 });
 

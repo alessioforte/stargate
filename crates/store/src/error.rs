@@ -40,6 +40,9 @@ pub enum StoreError {
 
     /// Type mismatch error
     TypeMismatch(String),
+
+    /// The in-memory store reached its memory limit and creates no entry.
+    Full,
 }
 
 impl StoreError {
@@ -52,6 +55,7 @@ impl StoreError {
                 | Self::Timeout(_)
                 | Self::IoError(_)
                 | Self::RedisFailed(_)
+                | Self::Full
         )
     }
 }
@@ -76,6 +80,7 @@ impl fmt::Display for StoreError {
             StoreError::Timeout(msg) => write!(f, "Operation timed out: {}", msg),
             StoreError::IoError(msg) => write!(f, "I/O error: {}", msg),
             StoreError::TypeMismatch(msg) => write!(f, "Type mismatch error: {}", msg),
+            StoreError::Full => write!(f, "Store memory limit reached"),
         }
     }
 }

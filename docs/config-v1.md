@@ -251,6 +251,15 @@ Use a Traefik rate limit as a safety net: `allow` removes the distributed per-IP
 allowance during a store outage. It does not provide a local fallback counter.
 These settings belong to the configuration document and apply on reload.
 
+The edge profile keeps limits in memory, bounded by `STORE_MAX_MEMORY_MB`. Like
+Redis with `noeviction`, a full store evicts nothing, so sessions and
+revocations are never lost to make room: it refuses to create entries while
+existing ones keep updating. A limit check that needs a new bucket then follows
+its `on_store_error` policy, and the limit store reports degraded. Revocations
+are recorded even when the store is full; other new security state, such as a
+new session or a login attempt counter, fails closed with
+`503 auth.state_unavailable`. Expired entries free their room within a second.
+
 ### IAM and admin limits
 
 IAM endpoints (`/account/*`, `/oauth/*`, `/signup/*`, `/admin/*`, `/docs`,

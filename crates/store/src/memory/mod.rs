@@ -1,3 +1,4 @@
+mod capacity;
 mod config;
 #[allow(clippy::module_inception)]
 mod memory;

@@ -63,6 +63,13 @@ pub(crate) fn slot(key: &str) -> &str {
     }
 }
 
+/// Whether a full in-memory store must still accept a new `key`. A revocation
+/// ends access, so it never waits for memory to free up.
+#[cfg(feature = "memory")]
+pub(crate) fn admitted_when_full(key: &str) -> bool {
+    matches!(entity(key), Some(("j", _)))
+}
+
 fn digest(value: &str) -> String {
     let hash = Sha256::digest(value.as_bytes());
     hash.iter().map(|byte| format!("{byte:02x}")).collect()

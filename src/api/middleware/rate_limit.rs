@@ -342,6 +342,50 @@ mod tests {
         req
     }
 
+    /// The edge store creates no bucket once full: the ingress check follows
+    /// `on_store_error` and reports the store degraded.
+    #[tokio::test]
+    async fn a_full_edge_store_makes_ingress_follow_its_failure_policy() {
+        use store::{Store, StoreError, memory::MemoryStoreConfig};
+
+        let full = Arc::new(lim::State::with_config(MemoryStoreConfig {
+            max_memory_usage: 16 * 1024,
+            ..MemoryStoreConfig::default()
+        }));
+        for index in 0.. {
+            match full.set(&format!("filler-{index}"), &index, Some(60)).await {
+                Ok(()) => continue,
+                Err(StoreError::Full) => break,
+                Err(error) => panic!("{error}"),
+            }
+        }
+        for (policy, status) in [
+            ("allow", StatusCode::OK),
+            ("deny", StatusCode::SERVICE_UNAVAILABLE),
+        ] {
+            let mut cfg = config(1, 1);
+            cfg.ingress.on_store_error = policy.into();
+            let gate = Arc::new(
+                crate::gate::Gate::new(
+                    full.clone(),
+                    prepare_config(cfg).unwrap(),
+                    gate::PolicySnapshot::default(),
+                    None,
+                )
+                .unwrap(),
+            );
+            for _ in 0..3 {
+                let response = app(gate.clone())
+                    .oneshot(request("203.0.113.9:1000"))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), status, "{policy}");
+                assert!(!response.headers().contains_key("x-ratelimit-limit"));
+            }
+            assert!(gate.snapshot().limit_store_health.is_degraded());
+        }
+    }
+
     #[tokio::test]
     async fn ipv6_clients_share_the_bucket_of_their_listener_prefix() {
         let app = app(Arc::new(test_support::gate(config(1, 100))));

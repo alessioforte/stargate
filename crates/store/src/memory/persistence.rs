@@ -1,9 +1,8 @@
-use super::memory::{MemoryStore, StoreValue};
+use super::memory::{MemoryStore, StoreValue, new_hash};
 use super::stats::OperationStats;
 use crate::error::{StoreError, StoreResult};
 use crate::store::Store;
 use chrono::{DateTime, Utc};
-use dashmap::DashMap;
 use portable_atomic::AtomicI64;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -117,7 +116,7 @@ impl MemoryStore {
                     }
                 },
                 SerializableStoreValue::Hash(hash_data, exp) => {
-                    let dash_map = DashMap::new();
+                    let dash_map = new_hash();
                     for (field, (val, field_exp)) in hash_data {
                         match rmp_serde::to_vec(&val) {
                             Ok(bytes) => {
@@ -435,7 +434,7 @@ impl MemoryStore {
         for (key, value) in export_data {
             match value {
                 serde_json::Value::Object(object_fields) => {
-                    let hash_map = DashMap::new();
+                    let hash_map = new_hash();
                     for (field, field_value) in object_fields {
                         let data = rmp_serde::to_vec(&field_value).map_err(|e| {
                             StoreError::SerializationFailed(format!(
