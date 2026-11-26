@@ -180,17 +180,22 @@ async fn resolve_authorization(
             if let Some(names) = &key.allowed_listeners
                 && !listener.is_some_and(|listener| names.iter().any(|name| name == listener))
             {
-                return Err(ErrorResponse::new(ErrorCode::AdminKeyListenerForbidden));
+                tracing::warn!(
+                    admin_key_id = %key.id,
+                    listener = listener.unwrap_or("<missing>"),
+                    "Admin key rejected on disallowed listener"
+                );
+            } else {
+                authenticated = true;
+                let key_id = key.id.clone();
+                actor = Some(db::ent::TrustedAdminActor::admin_key(&key_id));
+                authorization = Some(AdminAuthorization::admin_key(
+                    AdminPrincipal::AdminKey {
+                        key_id: key_id.clone(),
+                    },
+                    parse_stored_permissions(&key_id, key.permissions.iter()),
+                ));
             }
-            authenticated = true;
-            let key_id = key.id.clone();
-            actor = Some(db::ent::TrustedAdminActor::admin_key(&key_id));
-            authorization = Some(AdminAuthorization::admin_key(
-                AdminPrincipal::AdminKey {
-                    key_id: key_id.clone(),
-                },
-                parse_stored_permissions(&key_id, key.permissions.iter()),
-            ));
         }
     }
 
@@ -251,6 +256,12 @@ async fn extract_authorization_for(
         }
         Err(error) => return error.into_response(),
     };
+    if matches!(boundary, AuditRouteBoundary::AdminControlPlane)
+        && resolution.authentication.credential_present
+        && !resolution.authentication.authenticated
+    {
+        return ErrorResponse::new(ErrorCode::AuthTokenInvalid).into_response();
+    }
     // Authenticated control-plane principals are limited by identity, not by
     // client address: an admin key's automation never drains a console user's
     // budget behind the same IP. Unauthenticated requests are bounded by the

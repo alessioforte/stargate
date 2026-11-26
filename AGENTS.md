@@ -1270,7 +1270,10 @@ Console edits. Edge imports use `kubectl exec` in the existing pod. Docs: `docs/
   endpoint documents `503 auth.state_unavailable` with `Retry-After: 10`.
   Admin keys optionally restrict `allowedListeners` (null: every listener); authorization
   checks the receiving connection's listener before granting privileges, including on
-  OAuth introspection/revocation. Super-admins manage permissions and listener restrictions
+  OAuth introspection/revocation. A listener rejection responds exactly like an unknown
+  or revoked admin key (admin: `401 auth.token_invalid`; OAuth: its existing invalid-credential
+  response, headers included). Only server logs distinguish it, by key ID and listener name,
+  never the secret. Super-admins manage permissions and listener restrictions
   together with `PUT /admin/admin-keys/{id}`.
   Super-admin users bypass capability checks; admin keys need exact `<resource>:<action>`
   permissions (`src/api/admin/authorization.rs`).

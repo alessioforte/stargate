@@ -34,11 +34,14 @@ name can match; names absent from that process never grant access. A renamed or
 removed listener immediately stops matching the key. Matching uses connection
 metadata, never request headers, host names, or forwarding headers.
 
-A restricted key on any other listener returns
-`403 admin_key.listener_forbidden` before principal rate limiting, capability
-checks, or handler operations. The restriction also applies to admin privileges
-on `/oauth/introspect` and `/oauth/revoke`, which retain the OAuth error envelope
-(`403 insufficient_scope`). Missing connection metadata fails closed for a
+A restricted key on any other listener grants no authority. On `/admin/*` it
+receives `401 auth.token_invalid`, with the same body and headers as an unknown
+or revoked key, before principal rate limiting, capability checks, or handler
+operations. On `/oauth/introspect` and `/oauth/revoke` it follows the same
+authentication path as an invalid admin credential, preserving the OAuth error
+envelope and headers. The response never reveals whether the key exists.
+The server logs the rejection with the key's ID and receiving listener name;
+it never logs the key secret. Missing connection metadata fails closed for a
 restricted key. Super-admin user credentials retain their existing behavior.
 
 The Console's create and edit drawers accept listener names; leaving the field

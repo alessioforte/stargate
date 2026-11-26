@@ -1,5 +1,10 @@
 use super::*;
-use axum::{Extension, Router, body::Body, middleware::from_fn, routing::post};
+use axum::{
+    Extension, Router,
+    body::Body,
+    middleware::from_fn,
+    routing::{get, post},
+};
 use http::StatusCode;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -20,6 +25,32 @@ fn context() -> db::ent::TrustedAuditContext {
 
 async fn body(response: Response) -> Value {
     serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+}
+
+async fn wire_response(response: Response) -> (StatusCode, http::HeaderMap, Vec<u8>) {
+    let (parts, body) = response.into_parts();
+    (
+        parts.status,
+        parts.headers,
+        body.collect().await.unwrap().to_bytes().to_vec(),
+    )
+}
+
+async fn revoked_key() -> String {
+    let secret = pw::generate_admin_key();
+    let key = crate::data::db::create_admin_key(
+        &pw::hash_api_key(&secret),
+        None,
+        vec!["users:read".into()],
+        None,
+        context(),
+    )
+    .await
+    .unwrap();
+    crate::data::db::revoke_admin_key(&key.id, context())
+        .await
+        .unwrap();
+    secret
 }
 
 fn request(secret: &str, listener: Option<&str>) -> Request {
@@ -65,20 +96,44 @@ async fn restricted_keys_are_checked_before_mutation_and_principal_limits() {
         )
         .await
         .unwrap();
+        let revoked = revoked_key().await;
+        // No gateway extension: rejection must precede principal limiting too.
+        let app = Router::new()
+            .route(
+                "/admin/service-accounts",
+                post(service_accounts::create_service_account),
+            )
+            .route("/admin/me", get(me::get_admin_me))
+            .layer(from_fn(extract_admin_authorization));
         for listener in [Some("admin"), Some("default"), None] {
             let before = crate::data::db::count_service_accounts().await.unwrap();
-            // No gateway extension: rejection must precede principal limiting too.
-            let response = Router::new()
-                .route(
-                    "/admin/service-accounts",
-                    post(service_accounts::create_service_account),
+            for path in ["/admin/service-accounts", "/admin/me"] {
+                let call = |key: &str| {
+                    let mut req = request(key, listener);
+                    *req.uri_mut() = path.parse().unwrap();
+                    if path == "/admin/me" {
+                        *req.method_mut() = http::Method::GET;
+                    }
+                    req
+                };
+                let unknown = wire_response(
+                    app.clone()
+                        .oneshot(call("unknown-admin-key"))
+                        .await
+                        .unwrap(),
                 )
-                .layer(from_fn(extract_admin_authorization))
-                .oneshot(request(&secret, listener))
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::FORBIDDEN);
-            assert_eq!(body(response).await["code"], "admin_key.listener_forbidden");
+                .await;
+                assert_eq!(unknown.0, StatusCode::UNAUTHORIZED);
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&unknown.2).unwrap()["code"],
+                    "auth.token_invalid"
+                );
+                for rejected in [&secret, &revoked] {
+                    let response =
+                        wire_response(app.clone().oneshot(call(rejected)).await.unwrap()).await;
+                    assert_eq!(response, unknown);
+                }
+            }
             assert_eq!(
                 crate::data::db::count_service_accounts().await.unwrap(),
                 before
@@ -101,7 +156,7 @@ async fn restricted_keys_are_checked_before_mutation_and_principal_limits() {
             .oneshot(request(&secret, Some("internal")))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         changed.set_allowed_listeners(None);
         crate::data::db::update_admin_key(changed, context())
             .await
@@ -155,23 +210,74 @@ async fn oauth_admin_operations_reject_keys_on_disallowed_listeners() {
         )
         .await
         .unwrap();
+        let revoked = revoked_key().await;
+        let app = Router::new()
+            .route("/oauth/introspect", post(crate::api::oidc::post_introspect))
+            .route("/oauth/revoke", post(crate::api::oidc::post_revoke))
+            .layer(from_fn(extract_authorization));
         for path in ["/oauth/introspect", "/oauth/revoke"] {
-            let app = Router::new()
-                .route(path, post(|| async { StatusCode::NO_CONTENT }))
-                .layer(from_fn(extract_authorization));
-            let mut req = request(&secret, Some("admin"));
-            *req.uri_mut() = path.parse().unwrap();
-            let response = app.clone().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::FORBIDDEN);
-            let payload = body(response).await;
-            assert_eq!(payload["error"], "insufficient_scope");
-            assert!(payload.get("code").is_none());
-            let mut req = request(&secret, Some("internal"));
-            *req.uri_mut() = path.parse().unwrap();
-            assert_eq!(
-                app.oneshot(req).await.unwrap().status(),
-                StatusCode::NO_CONTENT
-            );
+            // The bearer variant also exercises the invalid-client challenge header.
+            for bearer in [false, true] {
+                let call = |key: &str, listener| {
+                    let mut req = request(key, listener);
+                    *req.uri_mut() = path.parse().unwrap();
+                    req.headers_mut().insert(
+                        http::header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded".parse().unwrap(),
+                    );
+                    if bearer {
+                        req.headers_mut().insert(
+                            http::header::AUTHORIZATION,
+                            "Bearer invalid-bearer".parse().unwrap(),
+                        );
+                    }
+                    *req.body_mut() = Body::from("token=not-a-token");
+                    req
+                };
+                for listener in [Some("admin"), Some("default"), None] {
+                    let unknown = wire_response(
+                        app.clone()
+                            .oneshot(call("unknown-admin-key", listener))
+                            .await
+                            .unwrap(),
+                    )
+                    .await;
+                    assert_eq!(
+                        unknown.0,
+                        if bearer {
+                            StatusCode::UNAUTHORIZED
+                        } else {
+                            StatusCode::FORBIDDEN
+                        }
+                    );
+                    let payload: Value = serde_json::from_slice(&unknown.2).unwrap();
+                    assert_eq!(
+                        payload["error"],
+                        if bearer {
+                            "invalid_client"
+                        } else {
+                            "insufficient_scope"
+                        }
+                    );
+                    assert!(payload.get("code").is_none());
+                    if bearer {
+                        assert!(unknown.1.contains_key(http::header::WWW_AUTHENTICATE));
+                    }
+                    for rejected in [&secret, &revoked] {
+                        let response = wire_response(
+                            app.clone().oneshot(call(rejected, listener)).await.unwrap(),
+                        )
+                        .await;
+                        assert_eq!(response, unknown);
+                    }
+                }
+                let response = app
+                    .clone()
+                    .oneshot(call(&secret, Some("internal")))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            }
         }
     })
     .await;
@@ -266,6 +372,83 @@ async fn super_admin_can_create_read_and_replace_key_settings() {
             .await
             .unwrap();
         assert!(body(response).await["data"][0]["allowedListeners"].is_null());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn listener_rejections_log_metadata_without_credentials() {
+    const CHILD: &str = "STARGATE_TEST_ADMIN_KEY_REJECTION_LOG_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // Tracing's callsite cache is shared with parallel tests' subscribers.
+        let output = crate::conf::child_test::run(
+            "api::admin::listener_tests::listener_rejections_log_metadata_without_credentials",
+            |command| {
+                command.env(CHILD, "1");
+            },
+        );
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    use std::{io::Write, sync::Mutex};
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let capture = Capture(buffer.clone());
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .json()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || capture.clone())
+            .finish(),
+    )
+    .unwrap();
+    crate::data::db::with_test_database(async {
+        let secret = pw::generate_admin_key();
+        let hash = pw::hash_api_key(&secret);
+        let key = crate::data::db::create_admin_key(
+            &hash,
+            None,
+            vec!["users:read".into()],
+            Some(vec!["internal".into()]),
+            context(),
+        )
+        .await
+        .unwrap();
+        let resolution = resolve_authorization(None, Some(secret.clone()), Some("admin"))
+            .await
+            .unwrap();
+        assert!(!resolution.authentication.authenticated);
+        assert!(resolution.authorization.is_none());
+        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        assert!(!output.contains(&secret));
+        assert!(!output.contains(&hash));
+        let events = output
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let rejection = events
+            .iter()
+            .find(|event| event["fields"]["message"] == "Admin key rejected on disallowed listener")
+            .unwrap();
+        assert_eq!(rejection["fields"]["admin_key_id"], key.id);
+        assert_eq!(rejection["fields"]["listener"], "admin");
     })
     .await;
 }
