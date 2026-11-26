@@ -50,7 +50,10 @@ there, while the gateway and policy seeds stay on the read-only
 `gatewayConfig.mountPath`. A custom path, for example `/app/data`, is mounted
 into the pod together with the constant `/app/.stargate` path used by the
 bundled applications, email templates, and signing keys. Both mounts use the
-same claim.
+same claim. The chart rejects a `persistence.mountPath` that is equal to,
+nested in, or a parent of `gatewayConfig.mountPath`, or, when the internal
+context is enabled, of `internalContext.mountPath`, because the writable data
+volume must not overlap those read-only mounts.
 
 ## Production cluster deployment
 
