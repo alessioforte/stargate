@@ -19,10 +19,12 @@ with `PUT /admin/admin-keys/{id}`:
 }
 ```
 
-`allowedListeners: null` (or an omitted field) allows every listener. An empty
-array is rejected, as are invalid names. Names use the listener configuration's
-syntax (1–32 ASCII letters or digits, starting with a letter); whitespace is
-trimmed, case is normalized to lowercase, and duplicates are removed. The
+`allowedListeners: null` allows every listener. The field can be omitted only
+when creating a key. In `PUT` it is required: an update containing only
+`permissions` is rejected with `400 request.invalid_json` and preserves the
+key's listener restrictions. An empty array is rejected, as are invalid names.
+Names use the listener configuration's syntax (1–32 ASCII letters or digits,
+starting with a letter); whitespace is trimmed, case is normalized to lowercase, and duplicates are removed. The
 implicit listener is named `default`.
 
 Creation and updates validate syntax without checking this process's listener

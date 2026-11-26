@@ -223,6 +223,22 @@ async fn super_admin_can_create_read_and_replace_key_settings() {
         );
         let response = app
             .clone()
+            .oneshot(call("PUT", &path, json!({"permissions": ["users:read"]})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body(response).await["code"], "request.invalid_json");
+        let response = app
+            .clone()
+            .oneshot(call("GET", &path, Value::Null))
+            .await
+            .unwrap();
+        assert_eq!(
+            body(response).await["allowedListeners"],
+            json!(["future", "internal"])
+        );
+        let response = app
+            .clone()
             .oneshot(call(
                 "PUT",
                 &path,

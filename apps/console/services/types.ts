@@ -393,7 +393,7 @@ export interface CreateAdminKeyResponse extends AdminKey {
 
 export interface UpdateAdminKeyRequest {
   permissions: AdminKeyPermission[];
-  allowedListeners?: string[] | null;
+  allowedListeners: string[] | null;
 }
 
 export type ApiKeyOwnerType = "user" | "service_account";

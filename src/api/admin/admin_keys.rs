@@ -76,7 +76,9 @@ pub struct CreateAdminKeyRequest {
 pub struct UpdateAdminKeyRequest {
     #[schema(value_type = Vec<Permission>)]
     pub permissions: Vec<String>,
-    /// Allowed listener names; null or omitted allows every listener.
+    /// Allowed listener names; explicit null allows every listener.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(required = true)]
     pub allowed_listeners: Option<Vec<String>>,
 }
 
