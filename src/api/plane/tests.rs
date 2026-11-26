@@ -301,6 +301,7 @@ fn listener_settings(
         tls,
         max_connections: 16,
         trusted_proxies,
+        ipv6_prefix: crate::srv::client_ip::Ipv6Prefix::DEFAULT,
     }
 }
 

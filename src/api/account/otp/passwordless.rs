@@ -29,14 +29,14 @@ use crate::iam::otp::types::{
 pub async fn post_login_email_otp(
     req: Request,
 ) -> Result<Json<OtpChallengeResponse>, ErrorResponse> {
-    let client_ip = req.get_client_ip();
+    let client = req.get_client_network();
     let Json(body) = Json::<PasswordlessEmailOtpRequestBody>::from_request(req, &())
         .await
         .map_err(|error| {
             ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
         })?;
     Ok(Json(
-        start_passwordless_email_otp(&body.email, &client_ip).await?,
+        start_passwordless_email_otp(&body.email, &client).await?,
     ))
 }
 

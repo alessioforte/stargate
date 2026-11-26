@@ -184,11 +184,12 @@ async fn handle_request(
     let graph = &runtime.core.graph;
 
     let client_ip = req.get_client_ip();
+    let client_network = req.get_client_network();
     let listener_tls =
         crate::srv::ConnectionInfo::of(&req).is_some_and(|connection| connection.listener.tls);
     let upstream_headers = UpstreamHeaders::from_request(&req, listener_tls);
     let ingress_started = tokio::time::Instant::now();
-    ingress::apply_ingress_limit(&runtime, &client_ip, execution, usage)
+    ingress::apply_ingress_limit(&runtime, &client_network, execution, usage)
         .instrument(tracing::debug_span!("gateway.ingress"))
         .await?;
     let (identity, commands) =
@@ -260,7 +261,7 @@ async fn handle_request(
             execution.upload_idle_override = router.upload_idle_timeout;
             execution
         },
-        client_ip: client_ip.clone(),
+        client_ip,
         load_balancer_key: sub.map(|sub| sub.id.clone()),
         original_path: req.uri().path().to_string(),
         path: req.uri().path().to_string(),
@@ -295,7 +296,7 @@ async fn handle_request(
         &policies,
         &mut req,
         &identity,
-        &client_ip,
+        &client_network,
         &mut response_headers,
         usage,
     )

@@ -27,9 +27,15 @@ contain `{` or `}`: Redis hashes the first brace pair of the physical key, so a
 prefix such as `{stargate}:` would put every key in one Cluster slot. Startup
 rejects such a prefix.
 
-The tag is built from generated identifiers (ULIDs, digests) or an IP address.
-Free-form values are hashed with SHA-256: emails, login identifiers and OTP
-subjects never appear in a key or a tag.
+The tag is built from generated identifiers (ULIDs, digests) or a client
+network. Free-form values are hashed with SHA-256: emails, login identifiers and
+OTP subjects never appear in a key or a tag.
+
+`<net>` below is the client network the receiving listener counts: the IPv4
+address, or the IPv6 address truncated to the listener's prefix
+(`IPV6_PREFIX`, `LISTENER_<NAME>_IPV6_PREFIX`, default 64), written as
+`2001:db8:1:2::/64`. With prefix 128 it is the IPv6 address itself. An
+IPv4-mapped address (`::ffff:203.0.113.7`) counts as its IPv4 form.
 
 ## Keys
 
@@ -51,23 +57,23 @@ subjects never appear in a key or a tag.
 | `{otp:<challenge>}:login` | MFA challenge of a pending login | OTP TTL |
 | `{u:<user_id>}:mfa:<challenge>` | Authenticated MFA challenge | OTP TTL |
 | `{s:<sid>}:mfa:<purpose>` | Step-up marker verified in a session | step-up TTL |
-| `{ip:<ip>}:otp-request` | OTP requests from one address | 5 min |
-| `{otp:<subject hash>}:requests:<ip>` | OTP requests for one subject and address | 5 min |
+| `{ip:<net>}:otp-request` | OTP requests from one client network | 5 min |
+| `{otp:<subject hash>}:requests:<net>` | OTP requests for one subject and client network | 5 min |
 | `{em:<email hash>}:password-reset` | Pending password reset of an address | 1 h |
 | `{v:<sid>}:verification` | Pending email verification request | 1 h |
 | `{em:<email hash>}:verification-lookup` | Address → verification request id | 1 h |
 | `{sg:<sid>}:signup` | Sign-up copy created after verification | 1 h |
 | `{em:<email hash>}:email:<flow>` | Per-recipient email throttle | 1 h |
-| `{ip:<ip>}:login-attempts` | Reserved password attempts from one address | 5 min from the first reservation |
-| `{u:<user_id>}:login-attempts:<ip>` | Reserved password attempts against a user from one address | 5 min from the first reservation |
-| `{id:<identifier hash>}:login-attempts:<ip>` | Reserved password attempts for an unknown identifier from one address | 5 min from the first reservation |
-| `{u:<user_id>}:login-known` | Recognized addresses of completed password logins (address → deadline) | per-field TTL, 30 days renewed on completed password login |
+| `{ip:<net>}:login-attempts` | Reserved password attempts from one client network | 5 min from the first reservation |
+| `{u:<user_id>}:login-attempts:<net>` | Reserved password attempts against a user from one client network | 5 min from the first reservation |
+| `{id:<identifier hash>}:login-attempts:<net>` | Reserved password attempts for an unknown identifier from one client network | 5 min from the first reservation |
+| `{u:<user_id>}:login-known` | Recognized client networks of completed password logins (network → deadline) | per-field TTL, 30 days renewed on completed password login |
 | `{u:<user_id>}:login-attempts` | Account-wide password attempts and backoff timestamp | 5 min from the last reservation |
 | `{id:<identifier hash>}:login-attempts` | Password attempts and backoff for an unknown identifier across addresses | 5 min from the last reservation |
-| `{ip:<ip>}:ingress:<plane>` | Ingress allowance of an address on one plane (`gateway`, `identity`, `admin`) | limiter |
+| `{ip:<net>}:ingress:<plane>` | Ingress allowance of a client network on one plane (`gateway`, `identity`, `admin`) | limiter |
 | `{sub:<subject>}:rate` / `:quota` | Subject rate limit and short quota buckets (second, minute, hour) | limiter |
 | `{org:<org_id>}:rate` / `:quota` | Organization rate limit and short quota buckets | limiter |
-| `{ip:<ip>}:org-rate` / `:org-quota` | Organization limits charged to the address | limiter |
+| `{ip:<net>}:org-rate` / `:org-quota` | Organization limits charged to the client network | limiter |
 | `{org:<org_id>}:limit-overrides` | Cached named-limit overrides of an org | 60 s |
 | `{admin:<user|key>:<id>}:requests` | An admin principal's own bucket | limiter |
 
@@ -79,8 +85,9 @@ tracker keeps the window marker and the counter as fields of one hash key.
 Calendar-window quotas (day and longer) keep their balance in SQL instead and
 never touch a Redis key.
 
-IP addresses may be IPv6 (`{ip:2001:db8::1}:ingress:gateway`): the colons belong to the
-tag and do not change slot selection.
+Client networks may be IPv6 (`{ip:2001:db8:1:2::/64}:ingress:gateway`): the
+colons and the slash belong to the tag and do not change slot selection. An
+anonymous gateway subject is its client network too (`{sub:<net>}:rate`).
 
 No key lists every session. A session's subject, refresh rotation and record
 share its `{s:<sid>}` tag and change together: registration, renewal, record
@@ -97,10 +104,10 @@ Cluster.
 The [password login guard](config-v1.md#password-login-guard) reserves each
 bucket with a single-key atomic update. The source and account keys can occupy
 different slots, so a later denial refunds earlier reservations for that
-request. A live `login-known` field lets that account/address pair skip the
-account-wide backoff bucket. Both address-related buckets are always enforced.
-Deleting the `login-known` hash forgets every recognized address of the account
-in one command, with no `SCAN` or per-address index.
+request. A live `login-known` field lets that account/network pair skip the
+account-wide backoff bucket. Both network-related buckets are always enforced.
+Deleting the `login-known` hash forgets every recognized network of the account
+in one command, with no `SCAN` or per-network index.
 
 ## Redis Cluster rules
 

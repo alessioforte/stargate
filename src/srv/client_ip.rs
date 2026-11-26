@@ -8,11 +8,76 @@
 
 use crate::srv::{ConnectionInfo, proxy::ProxyTrust};
 use http::{HeaderMap, Request, header::HeaderName};
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    fmt,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+};
 
 /// The client address resolved at ingress with this listener's proxy trust.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientIp(pub IpAddr);
+
+/// How many leading bits of an IPv6 client address the per-address limits
+/// count on a listener (`IPV6_PREFIX`, `LISTENER_<NAME>_IPV6_PREFIX`). A
+/// subscriber usually receives a whole /64, so counting single addresses would
+/// give one client 2^64 allowances. Internal listeners, where a node's pods
+/// can share a /64, should count every address (`128`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Ipv6Prefix(u8);
+
+impl Ipv6Prefix {
+    pub const DEFAULT: Self = Self(64);
+    /// A /48 is the usual allocation of one site; a shorter prefix would group
+    /// unrelated customers of a provider.
+    const SHORTEST: u8 = 48;
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        value
+            .parse::<u8>()
+            .ok()
+            .filter(|bits| (Self::SHORTEST..=128).contains(bits))
+            .map(Self)
+            .ok_or_else(|| format!("expected a prefix length from {} to 128", Self::SHORTEST))
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// The network that `ip` charges per-address limits to.
+    pub fn network(self, ip: IpAddr) -> ClientNetwork {
+        match ip {
+            IpAddr::V4(_) => ClientNetwork::Address(ip),
+            IpAddr::V6(_) if self.0 == 128 => ClientNetwork::Address(ip),
+            IpAddr::V6(v6) => {
+                let mask = u128::MAX << (128 - u32::from(self.0));
+                ClientNetwork::Ipv6Block(Ipv6Addr::from(u128::from(v6) & mask), self.0)
+            }
+        }
+    }
+}
+
+/// What per-address limits count for one client: the IPv4 address, or the
+/// IPv6 address truncated to its listener's prefix. Ingress buckets, the
+/// password login guard, OTP throttles and the gateway limits of anonymous or
+/// `ip_fallback` requests key on it; logs, audit, the internal context, load
+/// balancing and source-IP matchers keep the exact [`ClientIp`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientNetwork {
+    Address(IpAddr),
+    Ipv6Block(Ipv6Addr, u8),
+}
+
+/// `203.0.113.7`, `2001:db8::7` with prefix 128, or `2001:db8:1:2::/64`. The
+/// length keeps a block distinct from an address of another listener's /128.
+impl fmt::Display for ClientNetwork {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Address(ip) => ip.fmt(f),
+            Self::Ipv6Block(network, bits) => write!(f, "{network}/{bits}"),
+        }
+    }
+}
 
 /// Resolves the client address and removes untrusted forwarding metadata.
 /// `ConnectionInfo` must already be in the request's extensions; requests a
@@ -56,7 +121,8 @@ fn is_forwarded(name: &HeaderName) -> bool {
 }
 
 /// Parse a single IP token that may be a bare IP, a bracketed IPv6 address,
-/// or a socket address (`ip:port` / `[ip]:port`).
+/// or a socket address (`ip:port` / `[ip]:port`). An IPv4-mapped address
+/// (`::ffff:a.b.c.d`) becomes its IPv4 form, like the connection peer.
 pub(crate) fn parse_single_ip(raw: &str) -> Option<IpAddr> {
     let token = raw.trim();
     if token.is_empty() {
@@ -68,15 +134,11 @@ pub(crate) fn parse_single_ip(raw: &str) -> Option<IpAddr> {
         .and_then(|value| value.strip_suffix(']'))
         .unwrap_or(token);
 
-    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
-        return Some(ip);
-    }
-
-    if let Ok(socket) = token.parse::<SocketAddr>() {
-        return Some(socket.ip());
-    }
-
-    None
+    let ip = unbracketed
+        .parse::<IpAddr>()
+        .or_else(|_| token.parse::<SocketAddr>().map(|socket| socket.ip()))
+        .ok()?;
+    Some(ip.to_canonical())
 }
 
 /// Resolve the real client IP from an `X-Forwarded-For` header value,
@@ -163,6 +225,7 @@ mod tests {
                 planes: crate::api::plane::PlaneSet::ALL,
                 tls: false,
                 trusted_proxies: ProxyTrust::default(),
+                ipv6_prefix: Ipv6Prefix::DEFAULT,
             }),
         });
 
@@ -194,6 +257,7 @@ mod tests {
                 planes: crate::api::plane::PlaneSet::ALL,
                 tls: false,
                 trusted_proxies: trust,
+                ipv6_prefix: Ipv6Prefix::DEFAULT,
             }),
         });
 
@@ -283,6 +347,56 @@ mod tests {
         );
         assert_eq!(parse_single_ip(""), None);
         assert_eq!(parse_single_ip("not-an-ip"), None);
+    }
+
+    #[test]
+    fn a_client_network_is_the_ipv4_address_or_the_ipv6_block_of_the_listener() {
+        let network = |prefix: &str, address: &str| {
+            Ipv6Prefix::parse(prefix)
+                .unwrap()
+                .network(ip(address))
+                .to_string()
+        };
+        assert_eq!(network("64", "203.0.113.7"), "203.0.113.7");
+        assert_eq!(
+            network("64", "2001:db8:1:2:a8f3:91ff:fe20:7c41"),
+            "2001:db8:1:2::/64"
+        );
+        assert_eq!(network("64", "2001:db8:1:2::9"), "2001:db8:1:2::/64");
+        assert_eq!(network("56", "2001:db8:1:2ff::1"), "2001:db8:1:200::/56");
+        assert_eq!(network("48", "2001:db8:1:2::9"), "2001:db8:1::/48");
+        // A /128 is the address itself; a block keeps its length, so it never
+        // collides with the network address counted by another listener.
+        assert_eq!(network("128", "2001:db8:1:2::"), "2001:db8:1:2::");
+        assert_ne!(
+            network("64", "2001:db8:1:2::"),
+            network("128", "2001:db8:1:2::")
+        );
+        assert_eq!(Ipv6Prefix::DEFAULT.bits(), 64);
+        for invalid in ["47", "129", "", "64 ", "0x40"] {
+            assert!(Ipv6Prefix::parse(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn forwarded_ipv4_mapped_addresses_are_ipv4() {
+        assert_eq!(
+            parse_single_ip("::ffff:203.0.113.7"),
+            Some(ip("203.0.113.7"))
+        );
+        assert_eq!(
+            parse_single_ip("[::ffff:203.0.113.7]:443"),
+            Some(ip("203.0.113.7"))
+        );
+        let trust = ProxyTrust::parse("10.0.0.0/8").unwrap();
+        assert_eq!(
+            resolve(
+                ip("10.0.0.1"),
+                &trust,
+                &headers(&[("x-forwarded-for", "::ffff:203.0.113.7, ::ffff:10.0.0.2")])
+            ),
+            ip("203.0.113.7")
+        );
     }
 
     #[test]

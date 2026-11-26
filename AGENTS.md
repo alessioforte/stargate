@@ -209,7 +209,11 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `X-Forwarded-*` field from an untrusted peer on every plane, and stores
   `srv::client_ip::ClientIp` in the request extensions. Logging and spans, ingress and
   admin limits, login guards, OTP, source-IP matchers, audit, and internal-context
-  signing all read it from there.
+  signing all read it from there. IPv4-mapped peers and forwarded addresses
+  (`::ffff:a.b.c.d`) are read as IPv4. Per-address limits (ingress, login guard
+  and its recognition, OTP throttles, anonymous and `ip_fallback` gateway limits)
+  count `RequestExt::get_client_network`: the IPv4 address or the IPv6 block of
+  the listener's `Ipv6Prefix` (`2001:db8:1:2::/64`, the address at 128).
   `web::request::RequestExt::is_https` decides HTTPS per request through
   `tls::request_https(listener_tls)`: the receiving listener's TLS or the public base
   URL scheme (read once). It drives the `Secure` cookie attribute, HSTS, the request's
@@ -240,14 +244,17 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 ### Listeners
 
 `srv::settings` reads and validates `LISTENERS` and, for each declared name,
-`LISTENER_<NAME>_ADDRESS`, `_PLANES`, `_TLS`, `_MAX_CONNECTIONS`, and
-`_TRUSTED_PROXIES` once at startup. Invalid or duplicate names, shared addresses,
-incomplete addresses, unknown planes, a management plane sharing its listener, TLS
-on a management listener, `PORT`/`TLS_ENABLED`/`MAX_CONNECTIONS`/`TRUSTED_PROXIES`
-alongside `LISTENERS`, an invalid proxy entry, an unknown `LISTENER_*` variable, and
-a declared configuration without `JWT_ISSUER` all stop it.
+`LISTENER_<NAME>_ADDRESS`, `_PLANES`, `_TLS`, `_MAX_CONNECTIONS`,
+`_TRUSTED_PROXIES`, and `_IPV6_PREFIX` once at startup. Invalid or duplicate
+names, shared addresses, incomplete addresses, unknown planes, a management plane
+sharing its listener, TLS on a management listener,
+`PORT`/`TLS_ENABLED`/`MAX_CONNECTIONS`/`TRUSTED_PROXIES`/`IPV6_PREFIX` alongside
+`LISTENERS`, an invalid proxy entry or prefix, an unknown `LISTENER_*` variable,
+and a declared configuration without `JWT_ISSUER` all stop it.
 Without `LISTENERS` the implicit listener is `0.0.0.0:$PORT` with every plane,
-`TLS_ENABLED`, `MAX_CONNECTIONS`, and its own `TRUSTED_PROXIES`. Names are 1–32
+`TLS_ENABLED`, `MAX_CONNECTIONS`, and its own `TRUSTED_PROXIES` and
+`IPV6_PREFIX`. The IPv6 prefix (48–128, default 64; 128 on internal listeners)
+is how many bits of an IPv6 client address per-address limits count. Names are 1–32
 ASCII letters or digits starting with a letter; addresses are literal IPs with a
 port, IPv6 included. A listener serves only the planes it declares: with
 `LISTENERS` and no listener for the management plane, `/livez` and `/readyz`
@@ -287,7 +294,7 @@ exercise forwarding headers). Guide: `docs/listeners.md`.
    version) and the independent `PolicySnapshot` (ACE engine + revision); acquire
    process admission (`503 gateway.overloaded` when exhausted).
 2. Charge the mandatory `ingress.limit` to the gateway plane's bucket
-   (`{ip:<ip>}:ingress:gateway`) of the client address the server resolved once
+   (`{ip:<net>}:ingress:gateway`) of the client network the server resolved once
    at ingress, bounded by `ingress.timeout` (default 250ms):
    `429` on denial; store errors/timeouts pass by default (`on_store_error: allow`),
    or return `503` with `deny`, before any credential check or route match.
@@ -346,7 +353,7 @@ limits:
       replenish_1_per: 100ms
 ```
 
-Top-level objects: `ingress` (mandatory per-IP, per-plane admission), `limits` (named
+Top-level objects: `ingress` (mandatory per-client, per-plane admission), `limits` (named
 `gcra` / `token_bucket` / `quota_tracker` specs; `default` is required),
 `runtime` (budgets/deadlines), optional `mtls` (upstream CA + client identity),
 and `http.{upstreams,services,middlewares,policies,routers}`.
@@ -910,8 +917,8 @@ MFA policy:
 OTP state keys follow the schema in `docs/redis-keys.md`: passwordless and
 pending-login challenges under `{otp:<challenge_id>}`, the authenticated challenge
 under `{u:<user_id>}:mfa:<challenge_id>`, the step-up marker under
-`{s:<sid>}:mfa:<purpose>`, and request throttling under `{ip:<ip>}:otp-request`
-and `{otp:<subject hash>}:requests:<ip>`.
+`{s:<sid>}:mfa:<purpose>`, and request throttling under `{ip:<net>}:otp-request`
+and `{otp:<subject hash>}:requests:<net>` (`<net>`: the client network).
 
 Delivery: `smtp::Smtp` on `spawn_blocking`; passwordless delivery is backgrounded
 against enumeration timing. `SMTP_TLS` selects `starttls` (default, required
@@ -1072,7 +1079,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
 | `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |
 | `MAX_CONNECTIONS`                                                                      | 1024                                   | Concurrent connections of the implicit listener; stops startup with `LISTENERS`                                                     |
-| `LISTENERS` / `LISTENER_<NAME>_*`                                                      | -                                      | Named listeners: `_ADDRESS` and `_PLANES` required, `_TLS` on except management, `_MAX_CONNECTIONS` 1024, `_TRUSTED_PROXIES` none; needs `JWT_ISSUER` (see "Listeners") |
+| `LISTENERS` / `LISTENER_<NAME>_*`                                                      | -                                      | Named listeners: `_ADDRESS` and `_PLANES` required, `_TLS` on except management, `_MAX_CONNECTIONS` 1024, `_TRUSTED_PROXIES` none, `_IPV6_PREFIX` 64; needs `JWT_ISSUER` (see "Listeners") |
 | `STARGATE_RUNTIME_PROFILE`                                                             | -                                      | `edge` or `cluster` (validated against the build)                                                                                   |
 | `JWT_ALGORITHM`                                                                        | active key / `RS256`                   | Must match the active key when set; picks the first generated key                                                                   |
 | `JWT_SECRET`                                                                           | -                                      | HMAC key for HS* algorithms                                                                                                         |
@@ -1119,6 +1126,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_OUTBOX_RETENTION` | 30d | Cluster published-row retention (duration or `none`); never prunes pending rows |
 | `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | TLS of the implicit listener (`TLS_ENABLED` stops startup with `LISTENERS`); the certificate is shared. With listener TLS off, an `https://` public base URL still marks the deployment HTTPS |
 | `TRUSTED_PROXIES`                                                                      | -                                      | Implicit listener's proxy sources; refused with `LISTENERS` (use `LISTENER_<NAME>_TRUSTED_PROXIES`)                                  |
+| `IPV6_PREFIX`                                                                          | 64                                     | IPv6 prefix (48–128) the implicit listener's per-address limits count; refused with `LISTENERS` (use `LISTENER_<NAME>_IPV6_PREFIX`) |
 | `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins (or `*` alone); the Console origin is additionally admitted on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and `GET`/`PUT /account/profile`; invalid entries stop startup |
 | `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints (no wildcard); the public URL and `AUTH_PUBLIC_BASE_URL` origins are always trusted; invalid entries stop startup |
 | `GEOIP_DB_PATH`                                                                        | -                                      | MaxMind GeoLite2                                                                                                                    |
@@ -1342,8 +1350,8 @@ gateway router can match without a positive host constraint.
 `main.rs` adds security headers and tracing to every listener's router.
 
 IAM limits (`src/api/middleware/rate_limit.rs`): every IAM route charges the same
-`ingress.limit` as the gateway to its own plane's bucket for the client IP,
-`{ip:<ip>}:ingress:identity` or `:ingress:admin` (`/docs`: identity, else admin),
+`ingress.limit` as the gateway to its own plane's bucket for the client network,
+`{ip:<net>}:ingress:identity` or `:ingress:admin` (`/docs`: identity, else admin),
 before credentials are read (`429 iam.ingress_rate_limit_exceeded`), so a gateway
 flood never spends a client's sign-in allowance. Authenticated
 `/admin/*` principals then charge their own `default` bucket, keyed
@@ -1354,14 +1362,15 @@ the console or other keys behind the same IP. `ingress.on_store_error` governs b
 without allowance headers by default; `deny` returns `503 iam.limiter_unavailable`
 with `Retry-After: 10`. Invalid limit configuration remains `500`.
 Password verification reserves an attempt atomically in each of three buckets
-(`iam/auth/login_guard.rs`): per IP, per account and IP, and per account across IPs.
-A valid password refunds its own reservations. The account-wide bucket uses
-bounded progressive backoff. A completed password login (JSON, OAuth form or MFA
-completion) recognizes the server-resolved account/IP pair for 30 days. This
-skips only the account-wide pause. The per-IP and account/IP limits always apply.
-A password reset or expired-password completion, and any revocation of every
-session, deletes the account's recognized addresses, so none stays exempt from
-the account-wide pause.
+(`iam/auth/login_guard.rs`): per client network, per account and network, and per
+account across networks. A valid password refunds its own reservations. The
+account-wide bucket uses bounded progressive backoff. A completed password login
+(JSON, OAuth form or MFA completion) recognizes the server-resolved account/network
+pair for 30 days, so a rotated IPv6 privacy address in the same /64 stays
+recognized. This skips only the account-wide pause. The per-network and
+account/network limits always apply. A password reset or expired-password
+completion, and any revocation of every session, deletes the account's recognized
+networks, so none stays exempt from the account-wide pause.
 See "Password login guard" in `docs/config-v1.md` for defaults and retry behavior.
 OTP flows have their own throttles.
 

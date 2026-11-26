@@ -29,7 +29,7 @@ pub async fn apply_policies(
     policies: &PolicySnapshot,
     req: &mut Request<Body>,
     identity: &VerifiedIdentity,
-    client_ip: &str,
+    client: &str,
     response_headers: &mut HeaderMap,
     usage: &mut StoreUsage,
 ) -> Result<(), ErrorResponse> {
@@ -149,7 +149,7 @@ pub async fn apply_policies(
     apply_limits(
         runtime,
         subject,
-        client_ip,
+        client,
         response_headers,
         selected_limits,
         usage,

@@ -5,6 +5,10 @@ use tools::Locale;
 
 pub(crate) const TOKEN_QUERY_KEYS: &[&str] = &["token", "access_token", "jwt"];
 
+/// The client of a request without a peer address (a request a test builds
+/// itself): such requests share one conservative bucket.
+pub(crate) const UNKNOWN_CLIENT: &str = "unknown";
+
 pub trait RequestExt {
     fn get_bearer_token(&self) -> Option<String>;
     fn get_gateway_token(&self) -> Option<String>;
@@ -13,6 +17,8 @@ pub trait RequestExt {
     fn get_protocol(&self) -> &'static str;
     fn get_client_ip(&self) -> String;
     fn get_client_ip_addr(&self) -> Option<IpAddr>;
+    /// What per-address limits count: [`crate::srv::client_ip::ClientNetwork`].
+    fn get_client_network(&self) -> String;
     fn is_https(&self) -> bool;
     fn get_user_agent(&self) -> Option<String>;
     fn get_host(&self) -> Option<String>;
@@ -217,7 +223,17 @@ impl<B> RequestExt for Request<B> {
     fn get_client_ip(&self) -> String {
         self.get_client_ip_addr()
             .map(|ip| ip.to_string())
-            .unwrap_or_else(|| "unknown".to_string())
+            .unwrap_or_else(|| UNKNOWN_CLIENT.to_string())
+    }
+
+    fn get_client_network(&self) -> String {
+        let prefix = crate::srv::ConnectionInfo::of(self)
+            .map_or(crate::srv::client_ip::Ipv6Prefix::DEFAULT, |connection| {
+                connection.listener.ipv6_prefix
+            });
+        self.get_client_ip_addr()
+            .map(|ip| prefix.network(ip).to_string())
+            .unwrap_or_else(|| UNKNOWN_CLIENT.to_string())
     }
 
     fn get_client_ip_addr(&self) -> Option<IpAddr> {

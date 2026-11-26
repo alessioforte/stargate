@@ -4,6 +4,7 @@ use axum::{Router, body::Body, response::Response};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject};
 use std::{
     convert::Infallible,
+    net::IpAddr,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -82,6 +83,7 @@ fn listener(tls: bool, max_connections: usize) -> settings::Listener {
         tls,
         max_connections,
         trusted_proxies: Default::default(),
+        ipv6_prefix: client_ip::Ipv6Prefix::DEFAULT,
     }
 }
 
@@ -198,6 +200,80 @@ async fn requests_carry_the_peer_and_the_listener_they_arrived_on() {
         response.contains("127.0.0.1 test management,identity,admin,gateway false"),
         "{response}"
     );
+}
+
+/// Reports every accepted peer the way a dual-stack socket reports an IPv4
+/// client: as an IPv4-mapped IPv6 address.
+struct DualStack(tokio::net::TcpListener);
+
+impl Accept for DualStack {
+    async fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
+        let (stream, peer) = self.0.accept().await?;
+        let IpAddr::V4(v4) = peer.ip() else {
+            unreachable!("the test listener is IPv4")
+        };
+        Ok((
+            stream,
+            SocketAddr::new(IpAddr::V6(v4.to_ipv6_mapped()), peer.port()),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn an_ipv4_mapped_peer_is_the_ipv4_address_proxy_trust_lists() {
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = socket.local_addr().unwrap();
+    let router = Router::new().fallback(|request: axum::extract::Request| async move {
+        let peer = ConnectionInfo::peer_of(&request).unwrap().ip();
+        let client_ip::ClientIp(client) = *request.extensions().get().unwrap();
+        format!("peer={peer} client={client}")
+    });
+    let bound = Bound {
+        info: Arc::new(ListenerInfo {
+            name: "dual".to_string(),
+            planes: PlaneSet::ALL,
+            tls: false,
+            trusted_proxies: proxy::ProxyTrust::parse("127.0.0.1/32").unwrap(),
+            ipv6_prefix: client_ip::Ipv6Prefix::DEFAULT,
+        }),
+        address,
+        tls: None,
+        max_connections: 8,
+        socket: DualStack(socket),
+        router,
+    };
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(run(
+        vec![bound],
+        HttpSettings::default(),
+        async {
+            let _ = stopped.await;
+        },
+        Duration::from_secs(1),
+    ));
+
+    let mut client = TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(
+            b"GET / HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: ::ffff:203.0.113.9\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = String::new();
+    tokio::time::timeout(Duration::from_secs(5), client.read_to_string(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        response.contains("peer=127.0.0.1 client=203.0.113.9"),
+        "{response}"
+    );
+
+    let _ = stop.send(());
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -427,6 +503,7 @@ async fn accept_errors_back_off_instead_of_spinning() {
             planes: PlaneSet::ALL,
             tls: false,
             trusted_proxies: Default::default(),
+            ipv6_prefix: client_ip::Ipv6Prefix::DEFAULT,
         }),
         address: "127.0.0.1:1".parse().unwrap(),
         tls: None,

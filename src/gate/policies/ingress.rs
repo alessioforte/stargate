@@ -15,12 +15,12 @@ const GATEWAY_PLANE: &str = "gateway";
 
 pub(in crate::gate) async fn apply_ingress_limit(
     runtime: &RuntimeSnapshot,
-    client_ip: &str,
+    client: &str,
     execution: &crate::gate::lifecycle::Execution,
     usage: &mut StoreUsage,
 ) -> Result<(), ErrorResponse> {
     let ingress = &runtime.ingress;
-    let key = ingress_key(GATEWAY_PLANE, client_ip);
+    let key = ingress_key(GATEWAY_PLANE, client);
     let (decision, commands) = store::observe::count_commands(execution.run(
         "ingress",
         None,

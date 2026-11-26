@@ -9,7 +9,7 @@
 use crate::{
     api::plane::{Plane, PlaneSet},
     conf::env::{EnvError, parse_bool},
-    srv::proxy::ProxyTrust,
+    srv::{client_ip::Ipv6Prefix, proxy::ProxyTrust},
 };
 use std::{net::SocketAddr, str::FromStr};
 
@@ -25,12 +25,22 @@ const IMPLICIT_NAME: &str = "default";
 const MAX_NAME_LENGTH: usize = 32;
 
 /// Fields a declared listener accepts after its name.
-const LISTENER_FIELDS: [&str; 5] = [
+const LISTENER_FIELDS: [&str; 6] = [
     "ADDRESS",
     "PLANES",
     "TLS",
     "MAX_CONNECTIONS",
     "TRUSTED_PROXIES",
+    "IPV6_PREFIX",
+];
+
+/// Settings of the implicit listener, refused alongside `LISTENERS`.
+const IMPLICIT_SETTINGS: [&str; 5] = [
+    "PORT",
+    "TLS_ENABLED",
+    "MAX_CONNECTIONS",
+    "TRUSTED_PROXIES",
+    "IPV6_PREFIX",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +55,8 @@ pub struct Listener {
     pub max_connections: usize,
     /// Forwarding-header sources this listener accepts; empty trusts nobody.
     pub trusted_proxies: ProxyTrust,
+    /// IPv6 prefix its per-address limits count (default /64).
+    pub ipv6_prefix: Ipv6Prefix,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -80,7 +92,7 @@ pub enum SettingsError {
         address: SocketAddr,
     },
     #[error(
-        "`{key}` is not a listener setting: declare the listener in `LISTENERS` and use ADDRESS, PLANES, TLS, MAX_CONNECTIONS, or TRUSTED_PROXIES"
+        "`{key}` is not a listener setting: declare the listener in `LISTENERS` and use ADDRESS, PLANES, TLS, MAX_CONNECTIONS, TRUSTED_PROXIES, or IPV6_PREFIX"
     )]
     UnknownSetting { key: String },
 }
@@ -145,6 +157,7 @@ fn implicit(var: &impl Fn(&str) -> Option<String>) -> Result<Listener, SettingsE
         Some(value) => parse_connections("MAX_CONNECTIONS", &value)?,
     };
     let trusted_proxies = parse_trust("TRUSTED_PROXIES", var("TRUSTED_PROXIES"))?;
+    let ipv6_prefix = parse_ipv6_prefix("IPV6_PREFIX", var("IPV6_PREFIX"))?;
     Ok(Listener {
         name: IMPLICIT_NAME.to_string(),
         address,
@@ -152,6 +165,7 @@ fn implicit(var: &impl Fn(&str) -> Option<String>) -> Result<Listener, SettingsE
         tls,
         max_connections,
         trusted_proxies,
+        ipv6_prefix,
     })
 }
 
@@ -160,7 +174,7 @@ fn declared(
     vars: &[(String, String)],
     var: &impl Fn(&str) -> Option<String>,
 ) -> Result<Vec<Listener>, SettingsError> {
-    for setting in ["PORT", "TLS_ENABLED", "MAX_CONNECTIONS", "TRUSTED_PROXIES"] {
+    for setting in IMPLICIT_SETTINGS {
         if var(setting).is_some() {
             return Err(SettingsError::SingleListenerSetting(setting));
         }
@@ -238,6 +252,10 @@ fn declared(
             &format!("{prefix}TRUSTED_PROXIES"),
             var(&format!("{prefix}TRUSTED_PROXIES")),
         )?;
+        let ipv6_prefix = parse_ipv6_prefix(
+            &format!("{prefix}IPV6_PREFIX"),
+            var(&format!("{prefix}IPV6_PREFIX")),
+        )?;
 
         listeners.push(Listener {
             name: name.clone(),
@@ -246,6 +264,7 @@ fn declared(
             tls,
             max_connections,
             trusted_proxies,
+            ipv6_prefix,
         });
     }
     Ok(listeners)
@@ -318,6 +337,13 @@ fn parse_trust(name: &str, value: Option<String>) -> Result<ProxyTrust, Settings
         return Ok(ProxyTrust::default());
     };
     ProxyTrust::parse(&value).map_err(|message| invalid(name, &value, &message).into())
+}
+
+fn parse_ipv6_prefix(name: &str, value: Option<String>) -> Result<Ipv6Prefix, SettingsError> {
+    let Some(value) = value else {
+        return Ok(Ipv6Prefix::DEFAULT);
+    };
+    Ipv6Prefix::parse(&value).map_err(|message| invalid(name, &value, &message).into())
 }
 
 fn invalid(name: &str, value: &str, message: &str) -> EnvError {
@@ -459,6 +485,7 @@ mod tests {
             ("TLS_ENABLED", "true"),
             ("MAX_CONNECTIONS", "10"),
             ("TRUSTED_PROXIES", "10.0.0.0/8"),
+            ("IPV6_PREFIX", "64"),
         ] {
             let error = listeners(&[
                 ("LISTENERS", "public"),
@@ -699,6 +726,41 @@ mod tests {
             ),
             "{error}"
         );
+    }
+
+    #[test]
+    fn each_listener_counts_its_own_ipv6_prefix() {
+        assert_eq!(listeners(&[]).unwrap()[0].ipv6_prefix.bits(), 64);
+        let parsed = listeners(&[("IPV6_PREFIX", "56")]).unwrap();
+        assert_eq!(parsed[0].ipv6_prefix.bits(), 56);
+
+        let parsed = listeners(&[
+            ("LISTENERS", "public,internal"),
+            ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+            ("LISTENER_PUBLIC_PLANES", "identity,gateway"),
+            ("LISTENER_INTERNAL_ADDRESS", "0.0.0.0:5052"),
+            ("LISTENER_INTERNAL_PLANES", "admin"),
+            ("LISTENER_INTERNAL_IPV6_PREFIX", "128"),
+        ])
+        .unwrap();
+        assert_eq!(parsed[0].ipv6_prefix.bits(), 64);
+        assert_eq!(parsed[1].ipv6_prefix.bits(), 128);
+
+        for value in ["47", "129", "0", "-64", "/64", "sixty-four"] {
+            let error = listeners(&[("IPV6_PREFIX", value)]).unwrap_err();
+            assert!(matches!(error, SettingsError::Env(_)), "{value}: {error}");
+            let error = listeners(&[
+                ("LISTENERS", "public"),
+                ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+                ("LISTENER_PUBLIC_PLANES", "identity"),
+                ("LISTENER_PUBLIC_IPV6_PREFIX", value),
+            ])
+            .unwrap_err();
+            assert!(matches!(error, SettingsError::Env(_)), "{value}: {error}");
+        }
+        for value in ["48", "128"] {
+            assert!(listeners(&[("IPV6_PREFIX", value)]).is_ok(), "{value}");
+        }
     }
 
     #[test]
