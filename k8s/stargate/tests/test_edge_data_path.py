@@ -97,7 +97,7 @@ class EdgeDataPath(unittest.TestCase):
                 self.assertIn(f"{path}.DATA_PATH is chart-managed", result.stderr)
 
     def test_data_mount_must_not_overlap_the_seed_mount(self):
-        for mount in ["/etc/stargate", "/etc/stargate/data", "/etc"]:
+        for mount in ["/", "//", "/etc/stargate", "/etc//stargate", "/etc/stargate/data", "/etc"]:
             with self.subTest(mount=mount):
                 result = render({"persistence": {"mountPath": mount}})
                 self.assertNotEqual(result.returncode, 0)
@@ -106,6 +106,21 @@ class EdgeDataPath(unittest.TestCase):
                     'gatewayConfig.mountPath "/etc/stargate"',
                     result.stderr,
                 )
+
+    def test_sibling_prefix_of_the_seed_mount_is_accepted(self):
+        result = render({"persistence": {"mountPath": "/etc/stargate-data"}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        deployment = container(resource(documents(result.stdout), "Deployment", "check-stargate"))
+        self.assertEqual(env_value(deployment, "DATA_PATH"), "/etc/stargate-data")
+
+    def test_disabled_internal_context_mount_is_not_compared(self):
+        result = render({
+            "gatewayConfig": {"mountPath": "/config"},
+            "persistence": {"mountPath": "/etc/stargate"},
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        deployment = container(resource(documents(result.stdout), "Deployment", "check-stargate"))
+        self.assertEqual(env_value(deployment, "DATA_PATH"), "/etc/stargate")
 
     def test_data_mount_must_not_overlap_the_internal_context_mount(self):
         for mount in ["/run/internal-context", "/run/internal-context/data", "/run"]:
