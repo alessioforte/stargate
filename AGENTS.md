@@ -217,7 +217,8 @@ them; `iam` imports neither `api` nor the local gateway runtime.
 - `web/`: request extraction (`request.rs`), origins/CORS (`origin.rs`
   trusted-origin middleware, `cors.rs`; both read and validated once at startup;
   the CORS layer also admits the Console's `CONSOLE_PUBLIC_URL` origin, and only
-  that origin, on `/oauth/token` and `/oauth/revoke`),
+  that origin, on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
+  `GET`/`PUT /account/profile`),
   security and retry headers, the session cookie
   (`cookies.rs`), base and auth-app URLs (`links.rs`), limit headers and `429` answers
   (`limits.rs`), message envelopes.
@@ -1115,7 +1116,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `AUDIT_OUTBOX_RETENTION` | 30d | Cluster published-row retention (duration or `none`); never prunes pending rows |
 | `TLS_ENABLED`, `TLS_CERT`, `TLS_KEY`                                                   | false                                  | TLS of the implicit listener (`TLS_ENABLED` stops startup with `LISTENERS`); the certificate is shared. With listener TLS off, an `https://` public base URL still marks the deployment HTTPS |
 | `TRUSTED_PROXIES`                                                                      | -                                      | Implicit listener's proxy sources; refused with `LISTENERS` (use `LISTENER_<NAME>_TRUSTED_PROXIES`)                                  |
-| `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins (or `*` alone); the Console origin is additionally admitted on `/oauth/token` and `/oauth/revoke`; invalid entries stop startup |
+| `CORS_ORIGINS`                                                                         | -                                      | Allowed CORS origins (or `*` alone); the Console origin is additionally admitted on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and `GET`/`PUT /account/profile`; invalid entries stop startup |
 | `TRUSTED_ORIGINS`                                                                      | -                                      | Trusted browser origins for sensitive IAM endpoints (no wildcard); the public URL and `AUTH_PUBLIC_BASE_URL` origins are always trusted; invalid entries stop startup |
 | `GEOIP_DB_PATH`                                                                        | -                                      | MaxMind GeoLite2                                                                                                                    |
 | `SERVER_DRAIN_DELAY_SECS`                                                              | 5                                      | Readiness-off delay before listeners close                                                                                          |
@@ -1127,7 +1128,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `PASSWORDLESS_LOGIN_ENABLED`                                                           | false                                  | Passwordless email-code login (needs `EMAIL_OTP_PEPPER`; not with `MFA_MODE=required`)                                              |
 | `CONSOLE_ENABLED`                                                                      | true                                   | Serve the Console app (`false`: its path answers `404 feature.disabled`)                                                            |
 | `CONSOLE_OAUTH_CLIENT_ID`                                                              | stargate_console                       | Reserved Console OAuth client                                                                                                       |
-| `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL`                                     | derived                                | Console callback / public origin: derives the callback, the `post_logout_redirect_uri`, and the origin admitted by identity CORS on token and revocation |
+| `CONSOLE_OAUTH_REDIRECT_URI`, `CONSOLE_PUBLIC_URL`                                     | derived                                | Console callback / public origin: derives the callback, the `post_logout_redirect_uri`, and the origin admitted by identity CORS on token, revocation, the message catalog, and the profile |
 | `EMAIL_OTP_PEPPER`, `EMAIL_OTP_LENGTH`, `EMAIL_OTP_TTL_SECS`, `EMAIL_OTP_MAX_ATTEMPTS` | -, 6, 300, 5                           | Email OTP                                                                                                                           |
 | `MFA_MODE`                                                                             | optional                               | `off`, `optional`, `required`                                                                                                       |
 | `MFA_METHODS` / `MFA_DEFAULT_METHOD` / `MFA_EMAIL_ENABLED`                             | email / email / true                   | MFA methods                                                                                                                         |

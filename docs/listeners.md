@@ -81,10 +81,11 @@ credentials must use `Authorization: Bearer` or `x-api-key` headers.
 A plane may appear on more than one listener; each listener mounts only the
 planes it declares. On a listener with IAM planes the shared ingress allowance
 and CORS/compression apply as on the single port. The identity plane also
-admits the Console's public origin (`CONSOLE_PUBLIC_URL`) on `/oauth/token` and
-`/oauth/revoke` only, so a Console served by the admin listener can exchange
-codes and refresh tokens against the issuer; `/admin` stays on the Console's
-own origin. On the routes whose credential comes from the session token
+admits the Console's public origin (`CONSOLE_PUBLIC_URL`) on `/oauth/token`,
+`/oauth/revoke`, `GET /i18n/{locale}`, and `GET`/`PUT /account/profile` only, so
+a Console served by the admin listener can exchange codes, refresh tokens, read
+the message catalog, and save the profile language against the issuer; `/admin`
+stays on the Console's own origin. On the routes whose credential comes from the session token
 (profile, logout, authenticated MFA, organization switch, consents,
 organizations), a request carrying `Authorization` skips the browser origin
 guard and the cookie is never used alongside such a header. Routes without a

@@ -28,10 +28,8 @@ and the profile preference then stay on the issuer, where the session cookie
 lives, while `/admin` calls go to `VITE_API_URL`. With one origin, leave it
 unset and nothing changes.
 
-The identity plane admits the Console origin on `/oauth/token` and
-`/oauth/revoke` automatically. When the Console is served from an origin other
-than the issuer, add it to `CORS_ORIGINS` as well if the API message catalog
-and the saved profile language must work cross-origin.
+The identity plane admits the Console origin on `/oauth/token`, `/oauth/revoke`,
+`GET /i18n/{locale}`, and `GET`/`PUT /account/profile` automatically.
 
 Provision the client together with the first administrator:
 

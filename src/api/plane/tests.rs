@@ -420,7 +420,7 @@ async fn proxied_bodies_are_not_compressed_but_iam_responses_are() {
 }
 
 #[tokio::test]
-async fn identity_cors_admits_the_console_origin_on_token_and_revoke_only() {
+async fn identity_cors_admits_the_console_origin_on_its_paths_only() {
     let upstream = Upstream::start().await;
     let app = app_for(&upstream, IamHosts::default());
     // The Console origin defaults to the public base URL.
@@ -428,11 +428,18 @@ async fn identity_cors_admits_the_console_origin_on_token_and_revoke_only() {
         .unwrap()
         .to_url();
 
-    for path in ["/oauth/token", "/oauth/revoke"] {
+    for (method, path) in [
+        ("POST", "/oauth/token"),
+        ("POST", "/oauth/revoke"),
+        ("GET", "/i18n/en"),
+        ("GET", "/account/profile"),
+    ] {
         let response = app
             .clone()
             .oneshot(
-                Request::post(path)
+                Request::builder()
+                    .method(method)
+                    .uri(path)
                     .header(header::ORIGIN, console.as_str())
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(""))
@@ -443,13 +450,31 @@ async fn identity_cors_admits_the_console_origin_on_token_and_revoke_only() {
         assert_eq!(
             response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
             console,
-            "{path}"
+            "{method} {path}"
         );
     }
 
+    let preflight = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/account/profile")
+                .header(header::ORIGIN, console.as_str())
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "PUT")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        preflight.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        console
+    );
+
     let response = app
         .oneshot(
-            Request::get("/i18n/en")
+            Request::get("/account/consents")
                 .header(header::ORIGIN, console.as_str())
                 .body(Body::empty())
                 .unwrap(),

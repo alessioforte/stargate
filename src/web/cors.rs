@@ -1,8 +1,8 @@
 //! CORS for the IAM planes (`CORS_ORIGINS`), read and validated once at
 //! startup like the other process-wide settings. The Console's public origin
-//! is admitted on the token and revocation endpoints, the two cross-origin
-//! calls a Console signed in on another origin makes without the session
-//! cookie.
+//! is admitted on the token, revocation, message-catalog, and profile
+//! endpoints, the cross-origin calls a Console signed in on another origin
+//! makes without the session cookie.
 
 use crate::web::origin::Origin;
 use http::HeaderValue;
@@ -12,8 +12,10 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 const CORS_ORIGINS_ENV: &str = "CORS_ORIGINS";
 const CONSOLE_PUBLIC_URL_ENV: &str = "CONSOLE_PUBLIC_URL";
 
-/// Cross-origin calls from the Console that never carry the session cookie.
-const CONSOLE_CORS_PATHS: [&str; 2] = ["/oauth/token", "/oauth/revoke"];
+/// Cross-origin Console calls that never carry the session cookie: the OAuth
+/// token and revocation endpoints, the API message catalog, and the profile
+/// preference (bearer-authenticated).
+const CONSOLE_CORS_PATHS: [&str; 3] = ["/oauth/token", "/oauth/revoke", "/account/profile"];
 
 static SETTINGS: OnceLock<CorsSettings> = OnceLock::new();
 
@@ -61,13 +63,23 @@ impl CorsSettings {
             {
                 true
             }
-            _ => CONSOLE_CORS_PATHS.contains(&path) && self.console.header_value() == *origin,
+            _ => console_cors_path(path) && self.console.header_value() == *origin,
         }
     }
 }
 
+/// The Console origin is admitted only on its own cross-origin paths, never
+/// on another IAM route: the two OAuth endpoints, the message catalog, and
+/// the profile preference.
+fn console_cors_path(path: &str) -> bool {
+    CONSOLE_CORS_PATHS.contains(&path)
+        || path
+            .strip_prefix("/i18n/")
+            .is_some_and(|locale| !locale.is_empty() && !locale.contains('/'))
+}
+
 /// The origins a browser may call the IAM planes from, plus the Console's
-/// origin on its token and revocation endpoints.
+/// origin on its own cross-origin paths.
 fn settings() -> &'static CorsSettings {
     SETTINGS
         .get_or_init(|| CorsSettings::from_env().expect("CORS settings are validated at startup"))
@@ -116,7 +128,7 @@ pub(crate) fn init() -> Result<(), String> {
         None => {}
     }
     tracing::info!(
-        "CORS admits the Console origin {} on the token and revocation endpoints ({CONSOLE_PUBLIC_URL_ENV})",
+        "CORS admits the Console origin {} on its token, revocation, catalog, and profile endpoints ({CONSOLE_PUBLIC_URL_ENV})",
         settings.console.to_url()
     );
     let _ = SETTINGS.set(settings);
@@ -172,7 +184,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::routing::get;
-    use http::{Request, StatusCode, header};
+    use http::{Request, header};
     use tower::ServiceExt;
 
     const CONSOLE: &str = "https://console.example.com";
@@ -233,24 +245,42 @@ mod tests {
     #[test]
     fn configured_origins_are_allowed_on_every_path() {
         let settings = parsed("https://app.example.com");
-        for path in ["/admin/me", "/oauth/token", "/account/profile"] {
+        for path in [
+            "/admin/me",
+            "/oauth/token",
+            "/account/profile",
+            "/account/consents",
+        ] {
             assert!(
                 settings.allows(&header("https://app.example.com"), path),
                 "{path}"
             );
         }
-        for path in ["/admin/me", "/account/profile", "/oauth/authorize"] {
+        for path in ["/admin/me", "/account/consents", "/oauth/authorize"] {
             assert!(!settings.allows(&header(CONSOLE), path), "{path}");
         }
     }
 
     #[test]
-    fn the_console_origin_is_allowed_only_on_token_and_revoke() {
+    fn the_console_origin_is_allowed_only_on_its_paths() {
         let settings = parsed("");
-        for path in ["/oauth/token", "/oauth/revoke"] {
+        for path in [
+            "/oauth/token",
+            "/oauth/revoke",
+            "/i18n/en",
+            "/i18n/it",
+            "/account/profile",
+        ] {
             assert!(settings.allows(&header(CONSOLE), path), "{path}");
         }
-        for path in ["/admin/me", "/account/profile", "/oauth/authorize"] {
+        for path in [
+            "/i18n/",
+            "/i18n/en/extra",
+            "/admin/me",
+            "/account/consents",
+            "/oauth/authorize",
+            "/oauth/login",
+        ] {
             assert!(!settings.allows(&header(CONSOLE), path), "{path}");
         }
         assert!(!settings.allows(&header("https://evil.example.com"), "/oauth/token"));
@@ -265,39 +295,84 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_layer_answers_the_console_on_the_token_endpoint_but_not_elsewhere() {
+    async fn the_layer_answers_the_console_on_its_paths_and_preflights() {
         let settings = parsed("");
         let app = axum::Router::new()
             .route("/oauth/token", get(|| async { "token" }))
-            .route("/account/profile", get(|| async { "profile" }))
+            .route("/i18n/{locale}", get(|| async { "catalog" }))
+            .route(
+                "/account/profile",
+                get(|| async { "profile" }).put(|| async { "profile" }),
+            )
+            .route("/account/consents", get(|| async { "consents" }))
             .layer(layer(&settings));
 
-        let allowed = app
-            .clone()
-            .oneshot(
-                Request::get("/oauth/token")
-                    .header(header::ORIGIN, CONSOLE)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(allowed.status(), StatusCode::OK);
-        assert_eq!(
-            allowed.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-            CONSOLE
-        );
+        for (method, path) in [
+            ("GET", "/oauth/token"),
+            ("GET", "/i18n/en"),
+            ("GET", "/account/profile"),
+            ("PUT", "/account/profile"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header(header::ORIGIN, CONSOLE)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                CONSOLE,
+                "{method} {path}"
+            );
+        }
+
+        for (path, requested) in [
+            ("/oauth/token", "POST"),
+            ("/oauth/revoke", "POST"),
+            ("/i18n/en", "GET"),
+            ("/account/profile", "PUT"),
+        ] {
+            let preflight = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("OPTIONS")
+                        .uri(path)
+                        .header(header::ORIGIN, CONSOLE)
+                        .header(header::ACCESS_CONTROL_REQUEST_METHOD, requested)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                preflight.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                CONSOLE,
+                "{path}"
+            );
+            assert!(
+                preflight
+                    .headers()
+                    .contains_key(header::ACCESS_CONTROL_ALLOW_METHODS),
+                "{path}"
+            );
+        }
 
         let denied = app
             .oneshot(
-                Request::get("/account/profile")
+                Request::get("/account/consents")
                     .header(header::ORIGIN, CONSOLE)
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(denied.status(), StatusCode::OK);
         assert!(
             !denied
                 .headers()

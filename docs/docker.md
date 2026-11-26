@@ -77,10 +77,9 @@ origin, set `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI` to the admin origin
 (for example `https://admin.example.com`) and `VITE_ISSUER_URL` plus
 `VITE_AUTH_URL` to the identity origin. At runtime, set `CONSOLE_PUBLIC_URL` to
 the admin origin as well: the identity plane admits that origin on
-`/oauth/token` and `/oauth/revoke`, and `admin bootstrap` registers the Console
-callback from it. The Console's message catalog and saved profile language
-also call the identity origin: add the Console origin to `CORS_ORIGINS` when
-those must work from another origin.
+`/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and `GET`/`PUT
+/account/profile`, and `admin bootstrap` registers the Console callback from
+it.
 
 `CONSOLE_APP_BASE_PATH` and `AUTH_APP_BASE_PATH` are also written into the image's
 runtime environment, keeping the Vite asset paths and Rust routes synchronized.

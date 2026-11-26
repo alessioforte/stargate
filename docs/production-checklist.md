@@ -23,13 +23,12 @@ example hostname, CIDR, Secret name and image tag.
       identity URL. It decides `Secure` cookies and HSTS behind Traefik.
 - [ ] **Console origin**: with the Console served by the admin listener,
       `CONSOLE_PUBLIC_URL` is its public `https://` origin. The identity plane admits
-      that origin on `/oauth/token` and `/oauth/revoke` only, and `admin bootstrap`
-      registers the Console callback and `post_logout_redirect_uri` from it. Build the
-      image with `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI` on the Console origin,
-      and `VITE_ISSUER_URL` and `VITE_AUTH_URL` on the identity origin. Add the
-      Console origin to `CORS_ORIGINS` if the message catalog and the saved profile
-      language must also work cross-origin. With one origin, `CONSOLE_PUBLIC_URL` may
-      stay on the identity URL.
+      that origin on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
+      `GET`/`PUT /account/profile` only, and `admin bootstrap` registers the Console
+      callback and `post_logout_redirect_uri` from it. Build the image with
+      `VITE_API_URL` and `VITE_OAUTH_REDIRECT_URI` on the Console origin, and
+      `VITE_ISSUER_URL` and `VITE_AUTH_URL` on the identity origin. With one origin,
+      `CONSOLE_PUBLIC_URL` may stay on the identity URL.
 - [ ] **Trusted proxies**: `trustedProxies` lists only Traefik's pod network.
 - [ ] Recalculate SQL connections for replicas, rollout surge and overlapping Job
       pools; the notification listener is already inside each server pool. See

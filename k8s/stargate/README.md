@@ -695,7 +695,8 @@ The client ID and redirect URI must match the Console image's
 the Console is served from a different origin than the identity host, set
 `CONSOLE_PUBLIC_URL` to that origin and build the image with `VITE_ISSUER_URL`
 pointing at the identity host; the identity plane then admits the Console
-origin on `/oauth/token` and `/oauth/revoke` only. The Job uses different labels
+origin on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and `GET`/`PUT
+/account/profile` only. The Job uses different labels
 from the server pods and can never be selected by the Service.
 
 ## Network and availability controls
