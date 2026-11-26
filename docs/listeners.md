@@ -78,19 +78,17 @@ credentials must use `Authorization: Bearer` or `x-api-key` headers.
 | `admin`      | `/admin/*` and the Console                                             |
 | `gateway`    | everything the gateway configuration matches                           |
 
-A plane may appear on more than one listener. Each listener serves the planes it
-declares, plus the management plane until a listener declares only that plane.
-Such a listener serves the probes and nothing else, never terminates TLS, and
-takes `/livez` and `/readyz` off every other listener, so probes leave the public
-ports without a deployment losing them. On a listener without the management
-plane a gateway catch-all owns the two paths like any other. On a listener with
-IAM planes the shared ingress allowance and CORS/compression apply as on the
-single port. The identity plane also admits the Console's public origin
-(`CONSOLE_PUBLIC_URL`) on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`,
-and `GET`/`PUT /account/profile` only, so a Console served by the admin listener
-can exchange codes, refresh tokens, read the message catalog, and save the
-profile language against the issuer; `/admin` stays on the Console's own origin.
-On the routes whose credential comes from the session token (profile, logout,
+A plane may appear on more than one listener; each listener mounts only the
+planes it declares. Nothing adds a plane a listener does not declare, so
+`LISTENERS` without a listener for the management plane answers `/livez` and
+`/readyz` nowhere and logs a warning at startup. On a listener with IAM planes
+the shared ingress allowance and CORS/compression apply as on the single port.
+The identity plane also admits the Console's public origin (`CONSOLE_PUBLIC_URL`)
+on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
+`GET`/`PUT /account/profile` only, so a Console served by the admin listener can
+exchange codes, refresh tokens, read the message catalog, and save the profile
+language against the issuer; `/admin` stays on the Console's own origin. On the
+routes whose credential comes from the session token (profile, logout,
 authenticated MFA, organization switch, consents, organizations), a request
 carrying `Authorization` skips the browser origin guard and the cookie is never
 used alongside such a header. Routes without a header credential (login, OTP/MFA
@@ -105,11 +103,9 @@ the gateway receives the path the client sent. A listener that serves IAM
 planes without the gateway answers `404` for paths no IAM route matches, so a
 public listener does not forward `/admin` to a backend.
 
-A listener that declares the management plane must declare only that plane:
-the dedicated management listener serves the probes in clear text, while the
-other planes can terminate TLS. `LISTENER_<NAME>_TLS=on` with only the
-management plane stops startup. Without such a listener the probes ride every
-listener and follow its TLS setting, as they do on the implicit listener.
+The management plane must be alone on its listener: probes carry no secret and
+stay in clear text, while the other planes can terminate TLS. `LISTENER_<NAME>_TLS=on`
+with only the management plane stops startup.
 
 ### Proxy trust
 

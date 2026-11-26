@@ -81,15 +81,8 @@ impl PlaneSet {
         self.0 & Self::of(plane).0 != 0
     }
 
-    /// The set together with `plane`; a set that already contains it is
-    /// unchanged.
-    pub const fn with(self, plane: Plane) -> Self {
-        Self(self.0 | Self::of(plane).0)
-    }
-
-    /// True when the set is exactly `plane`: a listener that declares the
-    /// management plane alone serves the probes in clear text while the
-    /// others terminate TLS.
+    /// True when the set is exactly `plane`: the management plane must stay
+    /// alone so its listener can be plaintext while the others terminate TLS.
     pub const fn only(self, plane: Plane) -> bool {
         self.0 == Self::of(plane).0
     }

@@ -198,7 +198,7 @@ async fn probe_bodies(address: SocketAddr) -> [String; 2] {
 async fn a_dedicated_management_listener_takes_the_probes_off_the_other_listeners() {
     let upstream = Upstream::start().await;
     let gate = Arc::new(test_support::gate(config(&upstream.url)));
-    let listeners = settings::assign_management_plane(vec![
+    let listeners = vec![
         listener_settings(
             "public",
             PlaneSet::parse("identity,gateway").unwrap(),
@@ -211,7 +211,7 @@ async fn a_dedicated_management_listener_takes_the_probes_off_the_other_listener
             false,
             Default::default(),
         ),
-    ]);
+    ];
     let routers = listeners
         .into_iter()
         .map(|settings| {
@@ -232,47 +232,7 @@ async fn a_dedicated_management_listener_takes_the_probes_off_the_other_listener
     running.stop().await;
 }
 
-/// Without a listener dedicated to the management plane, every listener keeps
-/// the probes: splitting the planes never leaves the process without liveness
-/// and readiness.
-#[tokio::test]
-async fn the_probes_stay_on_every_listener_without_a_dedicated_one() {
-    let upstream = Upstream::start().await;
-    let gate = Arc::new(test_support::gate(config(&upstream.url)));
-    let listeners = settings::assign_management_plane(vec![
-        listener_settings(
-            "public",
-            PlaneSet::parse("identity,gateway").unwrap(),
-            false,
-            Default::default(),
-        ),
-        listener_settings(
-            "admin",
-            PlaneSet::parse("admin").unwrap(),
-            false,
-            Default::default(),
-        ),
-    ]);
-    let routers = listeners
-        .into_iter()
-        .map(|settings| {
-            let router =
-                listener_router(settings.planes, Lifecycle::default(), IamHosts::default())
-                    .layer(Extension(gate.clone()));
-            (settings, router)
-        })
-        .collect();
-    let running = spawn_listeners(routers, None).await;
-
-    for address in &running.addresses {
-        assert_eq!(probe_bodies(*address).await, PROBE_BODIES);
-    }
-
-    running.stop().await;
-}
-
-/// The implicit listener serves every plane already, probes included, and the
-/// management rule leaves it unchanged.
+/// The implicit listener serves every plane already, probes included.
 #[tokio::test]
 async fn the_implicit_listener_keeps_serving_the_probes() {
     let upstream = Upstream::start().await;

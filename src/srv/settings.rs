@@ -4,8 +4,7 @@
 //! Without `LISTENERS` there is one implicit listener on `0.0.0.0:$PORT` that
 //! serves every plane, which is the single-listener behavior. Declaring
 //! listeners makes each one explicit: an address, the planes it serves, and
-//! whether it terminates TLS. The management plane joins every listener until
-//! one declares only that plane, which then serves the probes alone.
+//! whether it terminates TLS.
 
 use crate::{
     api::plane::{Plane, PlaneSet},
@@ -107,34 +106,26 @@ fn from_vars(vars: &[(String, String)]) -> Result<Vec<Listener>, SettingsError> 
             .filter(|value| !value.is_empty())
     };
 
-    let listeners = match var("LISTENERS") {
+    match var("LISTENERS") {
         None => {
             // A per-listener variable without `LISTENERS` would be ignored
             // silently, including every listener the operator meant to declare.
             if let Some((key, _)) = vars.iter().find(|(key, _)| key.starts_with("LISTENER_")) {
                 return Err(SettingsError::UnknownSetting { key: key.clone() });
             }
-            vec![implicit(&var)?]
+            implicit(&var).map(|listener| vec![listener])
         }
-        Some(value) => declared(&value, vars, &var)?,
-    };
-    Ok(assign_management_plane(listeners))
+        Some(value) => declared(&value, vars, &var),
+    }
 }
 
-/// Probes stay reachable when listeners are split: every listener serves the
-/// management plane unless one listener dedicates itself to it. That listener
-/// then answers `/livez` and `/readyz` alone, off the other ports.
-pub(crate) fn assign_management_plane(mut listeners: Vec<Listener>) -> Vec<Listener> {
-    if listeners
+/// Probes need a listener that declares the management plane. A declared
+/// configuration without one answers `/livez` and `/readyz` nowhere, which
+/// startup reports as a warning.
+pub fn serves_probes(listeners: &[Listener]) -> bool {
+    listeners
         .iter()
         .any(|listener| listener.planes.contains(Plane::Management))
-    {
-        return listeners;
-    }
-    for listener in &mut listeners {
-        listener.planes = listener.planes.with(Plane::Management);
-    }
-    listeners
 }
 
 /// The single listener of a process without `LISTENERS`: every plane on
@@ -339,7 +330,7 @@ fn invalid(name: &str, value: &str, message: &str) -> EnvError {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_MAX_CONNECTIONS, Listener, SettingsError, from_vars};
+    use super::{DEFAULT_MAX_CONNECTIONS, Listener, SettingsError, from_vars, serves_probes};
     use crate::api::plane::{Plane, PlaneSet};
     use std::{net::SocketAddr, str::FromStr};
 
@@ -431,10 +422,9 @@ mod tests {
     }
 
     #[test]
-    fn every_listener_serves_the_probes_until_one_dedicates_itself_to_them() {
-        // Without a management listener the probes stay on every listener, so
-        // splitting the planes never leaves the process without liveness and
-        // readiness.
+    fn declared_listeners_without_a_management_one_serve_no_probes() {
+        // Probes answer only on a listener that declares the management plane:
+        // splitting the planes without one leaves `/livez` and `/readyz` dark.
         let parsed = listeners(&[
             ("LISTENERS", "public,admin"),
             ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
@@ -443,16 +433,8 @@ mod tests {
             ("LISTENER_ADMIN_PLANES", "admin"),
         ])
         .unwrap();
-        for listener in &parsed {
-            assert!(
-                listener.planes.contains(Plane::Management),
-                "{}",
-                listener.name
-            );
-        }
+        assert!(!serves_probes(&parsed));
 
-        // A listener that declares the management plane alone keeps the probes
-        // to itself, in clear text, while the others terminate TLS.
         let parsed = listeners(&[
             ("LISTENERS", "public,management"),
             ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
@@ -461,10 +443,13 @@ mod tests {
             ("LISTENER_MANAGEMENT_PLANES", "management"),
         ])
         .unwrap();
+        assert!(serves_probes(&parsed));
         assert!(!parsed[0].planes.contains(Plane::Management));
-        assert!(parsed[0].tls);
         assert!(parsed[1].planes.only(Plane::Management));
         assert!(!parsed[1].tls);
+
+        // The implicit listener serves every plane, probes included.
+        assert!(serves_probes(&listeners(&[]).unwrap()));
     }
 
     #[test]
