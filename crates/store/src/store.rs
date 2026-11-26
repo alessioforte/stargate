@@ -1,4 +1,5 @@
 use crate::error::StoreResult;
+use crate::transaction::Transaction;
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
@@ -40,17 +41,6 @@ pub trait Store: Send + Sync {
         value: &T,
         ttl: Option<u64>,
     ) -> StoreResult<bool>;
-
-    /// Replace a live value only if its serialized bytes still match, keeping its expiration.
-    async fn replace_if_equal<T: SerializeValue>(
-        &self,
-        key: &str,
-        expected: &T,
-        value: &T,
-    ) -> StoreResult<bool>;
-
-    /// Set the remaining lifetime of an existing key, leaving its value intact.
-    async fn expire(&self, key: &str, ttl: u64) -> StoreResult<bool>;
 
     /// Delete a value from the store.
     async fn delete(&self, key: &str) -> StoreResult<bool>;
@@ -107,6 +97,10 @@ pub trait Store: Send + Sync {
         new: &T,
         ttl: Option<u64>,
     ) -> StoreResult<bool>;
+
+    /// Apply every write of `transaction` when all its requirements hold.
+    /// Returns whether it was applied.
+    async fn commit(&self, transaction: &Transaction) -> StoreResult<bool>;
 }
 
 /// Atomic integer operations.

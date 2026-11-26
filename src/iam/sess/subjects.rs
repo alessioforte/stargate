@@ -2,7 +2,7 @@ use crate::data::store::use_store;
 use crate::iam::auth::subject::{Subject, SubjectType};
 use db::service::Service;
 use serde::{Deserialize, Serialize};
-use store::{Store, StoreError};
+use store::{Store, StoreError, Transaction};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct PublishedSubject {
@@ -70,7 +70,11 @@ pub(crate) async fn publish(
         };
         #[cfg(test)]
         super::test_support::pause_at(super::test_support::Stage::SubjectWrite).await;
-        if store.replace_if_equal(&key, &current, &next).await? {
+        // The swap requires the current subject: a revoked session stays revoked.
+        if store
+            .commit(&Transaction::new().swap(&key, &current, &next)?)
+            .await?
+        {
             return Ok(Publication::Updated);
         }
     }

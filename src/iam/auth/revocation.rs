@@ -1,4 +1,4 @@
-use crate::data::store::{delete_confirmed, set_confirmed};
+use crate::data::store::set_confirmed;
 use chrono::Utc;
 use store::{Store, StoreError, StoreResult};
 
@@ -40,6 +40,8 @@ impl RevocationConfirmations {
     }
 }
 
+/// Stop a token: revoke its `jti` until it expires, and end its session when
+/// it is a refresh token or has no `jti` to revoke.
 pub async fn revoke_claims(claims: &jwt::Claims) -> Result<(), StoreError> {
     let mut confirmations = RevocationConfirmations::default();
     let mut jti_revoked = false;
@@ -51,10 +53,8 @@ pub async fn revoke_claims(claims: &jwt::Claims) -> Result<(), StoreError> {
         jti_revoked = true;
     }
 
-    if (claims.typ.as_deref() == Some("refresh") || !jti_revoked)
-        && let Some(sid) = claims.sid.as_deref()
-    {
-        confirmations.record(delete_confirmed(&store::keys::session::subject(sid)).await)?;
+    if claims.typ.as_deref() == Some("refresh") || !jti_revoked {
+        confirmations.record(crate::iam::sess::registry::end_token_session(claims).await)?;
     }
 
     confirmations.finish(())

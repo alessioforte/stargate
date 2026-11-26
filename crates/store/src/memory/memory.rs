@@ -4,14 +4,15 @@ use super::stats::{
 };
 use crate::error::{StoreError, StoreResult};
 use crate::store::{AtomicStore, DeserializeValue, SerializeValue, Store};
+use crate::transaction::{Requirement, Transaction, Write};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DashEntry;
 use portable_atomic::AtomicI64;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex, PoisonError};
 
 pub type Data = Arc<[u8]>;
 
@@ -29,6 +30,8 @@ pub struct MemoryStore {
     pub(crate) data: Arc<DashMap<String, StoreValue>>,
     pub(crate) stats: Arc<AtomicOperationStats>,
     config: MemoryStoreConfig,
+    /// Held while a transaction checks and writes its keys.
+    transactions: Arc<Mutex<()>>,
 }
 
 impl Clone for MemoryStore {
@@ -37,6 +40,7 @@ impl Clone for MemoryStore {
             data: Arc::clone(&self.data),
             stats: Arc::clone(&self.stats),
             config: self.config.clone(),
+            transactions: Arc::clone(&self.transactions),
         }
     }
 }
@@ -65,6 +69,7 @@ impl MemoryStore {
             data,
             stats: Arc::new(AtomicOperationStats::default()),
             config,
+            transactions: Arc::default(),
         }
     }
 
@@ -365,6 +370,59 @@ impl MemoryStore {
             StoreError::DeserializationFailed(format!("Failed to deserialize value: {}", e))
         })
     }
+
+    fn holds(&self, requirement: &Requirement, now: DateTime<Utc>) -> StoreResult<bool> {
+        let Some(entry) = self.data.get(requirement.key()) else {
+            return Ok(false);
+        };
+        if self.store_value_is_expired_at(entry.value(), now) {
+            return Ok(false);
+        }
+        match (requirement, entry.value()) {
+            (Requirement::Exists(_), _) => Ok(true),
+            (Requirement::Equals(_, expected), StoreValue::Simple(current, _)) => {
+                Ok(current.as_ref() == expected.as_slice())
+            }
+            (Requirement::Equals(..), _) => Err(self.wrong_type_error()),
+        }
+    }
+
+    fn apply(&self, write: &Write, now: DateTime<Utc>) {
+        match write {
+            Write::Set(key, value, ttl) => {
+                let expiration = self.expiration_from_ttl(Some(*ttl));
+                self.data.insert(
+                    key.clone(),
+                    StoreValue::Simple(value.as_slice().into(), expiration),
+                );
+                self.stats.sets.fetch_add(1, Ordering::Relaxed);
+            }
+            Write::Replace(key, value) => {
+                if let Some(mut entry) = self.data.get_mut(key)
+                    && let StoreValue::Simple(current, _) = entry.value_mut()
+                {
+                    *current = value.as_slice().into();
+                    self.stats.sets.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            Write::Expire(key, ttl) => {
+                let Some(mut entry) = self.data.get_mut(key) else {
+                    return;
+                };
+                let (StoreValue::Simple(_, expiration)
+                | StoreValue::Hash(_, expiration)
+                | StoreValue::AtomicI64(_, expiration)) = entry.value_mut();
+                if !self.is_expired_at(expiration, now) {
+                    *expiration = self.expiration_from_ttl(Some(*ttl));
+                    self.stats.sets.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            Write::Delete(key) => {
+                self.data.remove(key);
+                self.stats.deletes.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -464,57 +522,6 @@ impl Store for MemoryStore {
             }
         }
 
-        self.stats.sets.fetch_add(1, Ordering::Relaxed);
-        Ok(true)
-    }
-
-    async fn replace_if_equal<T: SerializeValue>(
-        &self,
-        key: &str,
-        expected: &T,
-        value: &T,
-    ) -> StoreResult<bool> {
-        if key.trim().is_empty() {
-            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
-        }
-        let expected = self.serialize(expected)?;
-        let data = self.serialize(value)?.into();
-        let Some(mut entry) = self.data.get_mut(key) else {
-            return Ok(false);
-        };
-        if self.store_value_is_expired_at(entry.value(), self.get_cached_now()) {
-            return Ok(false);
-        }
-        let StoreValue::Simple(current, _) = entry.value_mut() else {
-            return Err(self.wrong_type_error());
-        };
-        if current.as_ref() != expected.as_slice() {
-            return Ok(false);
-        }
-        *current = data;
-        self.stats.sets.fetch_add(1, Ordering::Relaxed);
-        Ok(true)
-    }
-
-    async fn expire(&self, key: &str, ttl: u64) -> StoreResult<bool> {
-        if key.trim().is_empty() {
-            return Err(StoreError::InvalidInput("Key cannot be empty".to_string()));
-        }
-        if ttl == 0 {
-            return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
-        }
-        let Some(mut entry) = self.data.get_mut(key) else {
-            return Ok(false);
-        };
-        let expiration = match entry.value_mut() {
-            StoreValue::Simple(_, expiration)
-            | StoreValue::Hash(_, expiration)
-            | StoreValue::AtomicI64(_, expiration) => expiration,
-        };
-        if self.is_expired_at(expiration, self.get_cached_now()) {
-            return Ok(false);
-        }
-        *expiration = self.expiration_from_ttl(Some(ttl));
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
         Ok(true)
     }
@@ -1092,6 +1099,24 @@ impl Store for MemoryStore {
         } else {
             Ok(false)
         }
+    }
+
+    async fn commit(&self, transaction: &Transaction) -> StoreResult<bool> {
+        transaction.validate()?;
+        let _applying = self
+            .transactions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let now = self.get_cached_now();
+        for requirement in &transaction.requirements {
+            if !self.holds(requirement, now)? {
+                return Ok(false);
+            }
+        }
+        for write in &transaction.writes {
+            self.apply(write, now);
+        }
+        Ok(true)
     }
 }
 
@@ -1899,6 +1924,86 @@ mod tests {
         store.hset("hash", "f", &1_i64, None).await.unwrap();
         let result: StoreResult<Vec<Option<i64>>> = store.batch_get(&["ok", "hash"]).await;
         assert!(matches!(result, Err(StoreError::TypeMismatch(_))));
+    }
+
+    #[tokio::test]
+    async fn test_transactions_apply_every_write_or_none() {
+        let store = MemoryStore::new();
+        let [live, rotation, record] = ["{s}:live", "{s}:rotation", "{s}:record"];
+        store.set(live, &"subject", Some(30)).await.unwrap();
+        store.set(rotation, &"first", Some(30)).await.unwrap();
+        store.set(record, &1, Some(30)).await.unwrap();
+
+        let rotate = |expected: &str| {
+            Transaction::new()
+                .require(live)
+                .require_equal(rotation, &expected)
+                .unwrap()
+                .set(rotation, &"second", 60)
+                .unwrap()
+                .swap(record, &1, &2)
+                .unwrap()
+                .expire(live, 60)
+        };
+        assert!(!store.commit(&rotate("stale")).await.unwrap());
+        assert_eq!(store.get::<i32>(record).await.unwrap(), Some(1));
+        assert!(store.commit(&rotate("first")).await.unwrap());
+        assert_eq!(
+            store.get::<String>(rotation).await.unwrap().as_deref(),
+            Some("second")
+        );
+        assert_eq!(store.get::<i32>(record).await.unwrap(), Some(2));
+        let kept = store.expiry(record).unwrap() - Utc::now();
+        assert!(kept <= chrono::Duration::seconds(30), "{kept}");
+        assert!(store.expiry(live).unwrap() - Utc::now() > chrono::Duration::seconds(30));
+
+        let close = Transaction::new()
+            .delete(live)
+            .delete(rotation)
+            .delete(record);
+        assert!(store.commit(&close).await.unwrap());
+        assert!(store.commit(&close).await.unwrap());
+        assert!(!store.commit(&rotate("second")).await.unwrap());
+        for key in [live, rotation, record] {
+            assert!(!store.exists(key).await.unwrap(), "{key}");
+        }
+
+        store.hset(live, "field", &1, None).await.unwrap();
+        let wrong_type = Transaction::new().require_equal(live, &1).unwrap();
+        assert!(matches!(
+            store.commit(&wrong_type).await,
+            Err(StoreError::TypeMismatch(_))
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_transactions_are_serialized() {
+        let store = MemoryStore::new();
+        let [counter, copy] = ["{t}:counter", "{t}:copy"];
+        store.set(counter, &0_u32, Some(60)).await.unwrap();
+        let mut tasks = Vec::new();
+        for _ in 0..32 {
+            let store = store.clone();
+            tasks.push(tokio::spawn(async move {
+                loop {
+                    let current = store.get::<u32>(counter).await.unwrap().unwrap();
+                    let next = current + 1;
+                    let increment = Transaction::new()
+                        .swap(counter, &current, &next)
+                        .unwrap()
+                        .set(copy, &next, 60)
+                        .unwrap();
+                    if store.commit(&increment).await.unwrap() {
+                        break;
+                    }
+                }
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
+        assert_eq!(store.get::<u32>(counter).await.unwrap(), Some(32));
+        assert_eq!(store.get::<u32>(copy).await.unwrap(), Some(32));
     }
 
     #[tokio::test]

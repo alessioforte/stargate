@@ -2,7 +2,6 @@ use super::registry;
 use crate::err::ErrorResponse;
 use crate::iam::auth::{jwt::jwt_config, subject::Subject};
 use crate::iam::user::profile::format_name;
-use store::Store;
 
 /// A session just started: its tokens and the organization it acts in.
 pub struct IssuedSession {
@@ -55,7 +54,6 @@ pub async fn start_user_session(
 
     let tokens = super::tokens::generate_tokens(claims).map_err(ErrorResponse::internal)?;
 
-    let store = crate::data::store::use_store();
     let refresh_exp = jwt_config().refresh_exp;
     let access_exp = jwt_config().access_exp;
     let sttl: u64 = refresh_exp.as_seconds_f64() as u64;
@@ -63,30 +61,20 @@ pub async fn start_user_session(
 
     #[cfg(test)]
     super::test_support::pause_at(super::test_support::Stage::Registration).await;
-    let published = super::subjects::PublishedSubject::from(subject);
-    store
-        .set(&store::keys::session::subject(&sid), &published, Some(sttl))
-        .await?;
-    if let Err(error) = registry::register_session(
+    let org_id = subject.org_id.clone();
+    registry::register_session(
         registry::NewSession {
-            user_id: &user.id,
             sid: &sid,
-            org_id: published.subject.org_id.as_deref(),
+            subject,
             authenticated_at_unix: auth_time as u64,
             amr,
         },
         &tokens.refresh_jti,
         sttl,
     )
-    .await
-    {
-        let _ = store.delete(&store::keys::session::subject(&sid)).await;
-        return Err(error.into());
-    }
+    .await?;
 
-    if let Err(error) =
-        registry::reconcile_new_session(&user.id, &sid, published.subject.org_id.as_deref()).await
-    {
+    if let Err(error) = registry::reconcile_new_session(&user.id, &sid, org_id.as_deref()).await {
         if let Err(revoke_error) = registry::revoke_session(&sid).await {
             tracing::error!(sid, %revoke_error, "Failed to revoke an unconfirmed session");
         }
@@ -96,7 +84,7 @@ pub async fn start_user_session(
     Ok(IssuedSession {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
-        org_id: published.subject.org_id,
+        org_id,
         access_ttl_secs: cttl,
     })
 }

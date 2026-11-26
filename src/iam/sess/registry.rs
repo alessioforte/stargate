@@ -2,10 +2,18 @@
 //!
 //! Each login has one stable standard JWT `sid`. Refresh-token replay
 //! protection is tracked separately through a rotating JWT `jti`. A session
-//! keeps its record, subject and refresh rotation under its own key tag; the
-//! per-user index names the user's sessions for targeted cleanup and listing.
-//! Every key and index field expires with the session. No key lists the
-//! sessions of every user.
+//! keeps its subject, refresh rotation and record under its own key tag and
+//! changes them in one store transaction: creation, renewal and revocation
+//! never stop halfway, and every write after creation requires the state it
+//! read, so a revoked session never comes back. The per-user index names the
+//! user's sessions for targeted cleanup and listing. Every key and index field
+//! expires with the session. No key lists the sessions of every user.
+//!
+//! The index lives under the user's tag and changes in a separate step. A
+//! session is indexed before any token names it, renewal extends the entry
+//! before the session, and revocation removes the entry after the session: an
+//! entry may outlive its session, but a usable session always has one, so
+//! revoking every session of a user always finds it.
 //!
 //! Deleting a `sid` record kills the session completely: the gateway and
 //! account endpoints resolve subjects from the store by sid, and the
@@ -15,8 +23,8 @@
 //! Every function that ends sessions here also notifies the relying parties
 //! linked to them (OIDC Back-Channel Logout, see `backchannel_logout`).
 
-use super::subjects::{self, Publication};
-use crate::data::store::{delete_confirmed, use_store, without_security_budget};
+use super::subjects::{self, Publication, PublishedSubject};
+use crate::data::store::{commit_confirmed, delete_confirmed, use_store, without_security_budget};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
 use crate::iam::auth::revocation::RevocationConfirmations;
@@ -24,7 +32,7 @@ use crate::iam::auth::subject::{Subject, SubjectType};
 use crate::iam::oidc::backchannel_logout::{self, LogoutDelivery};
 use db::ent::OrgMembership;
 use serde::{Deserialize, Serialize};
-use store::{Store, StoreError};
+use store::{Store, StoreError, Transaction};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,8 +63,20 @@ struct RefreshRotation {
     current_jti: String,
 }
 
+impl RefreshRotation {
+    fn new(jti: &str) -> Self {
+        Self {
+            current_jti: jti.to_string(),
+        }
+    }
+}
+
 fn index_key(user_id: &str) -> String {
     store::keys::session::index(user_id)
+}
+
+fn subject_key(sid: &str) -> String {
+    store::keys::session::subject(sid)
 }
 
 fn refresh_rotation_key(sid: &str) -> String {
@@ -71,57 +91,68 @@ pub(super) fn now_unix() -> u64 {
     chrono::Utc::now().timestamp().max(0) as u64
 }
 
-fn ttl_until(expires_at_unix: u64) -> Option<u64> {
-    let now = now_unix();
-    (expires_at_unix > now).then_some(expires_at_unix - now)
-}
-
-fn index_entry(record: &SessionRecord) -> SessionIndexEntry {
-    SessionIndexEntry {
+/// Index the session for its user until `ttl_secs` from now, its expiry.
+async fn index(record: &SessionRecord, ttl_secs: u64) -> Result<(), StoreError> {
+    let entry = SessionIndexEntry {
         org_id: record.org_id.clone(),
         expires_at_unix: record.expires_at_unix,
-    }
-}
-
-/// Index the session for its user, then write its record. The index entry is
-/// written first so a live record is always reachable from the user.
-async fn store_record(record: &SessionRecord, ttl_secs: u64) -> Result<(), StoreError> {
-    let store = use_store();
-    let user_key = index_key(&record.user_id);
-    store
-        .hset(&user_key, &record.id, &index_entry(record), Some(ttl_secs))
-        .await?;
-    if let Err(error) = store
-        .set(&record_key(&record.id), record, Some(ttl_secs))
-        .await
-    {
-        let _ = store.hdel(&user_key, &record.id).await;
-        return Err(error);
-    }
-    Ok(())
-}
-
-/// Rewrite a live record whose index entry is unchanged, keeping its expiry.
-async fn update_record(record: &SessionRecord) -> Result<bool, StoreError> {
-    let Some(ttl_secs) = ttl_until(record.expires_at_unix) else {
-        return Ok(false);
     };
     use_store()
-        .set(&record_key(&record.id), record, Some(ttl_secs))
-        .await?;
-    Ok(true)
+        .hset(
+            &index_key(&record.user_id),
+            &record.id,
+            &entry,
+            Some(ttl_secs),
+        )
+        .await
+        .map(drop)
+}
+
+/// Delete the session's subject, refresh rotation and record together.
+async fn delete_state(sid: &str) -> Result<(), StoreError> {
+    let delete = Transaction::new()
+        .delete(&subject_key(sid))
+        .delete(&refresh_rotation_key(sid))
+        .delete(&record_key(sid));
+    commit_confirmed(&delete).await.map(drop)
+}
+
+/// Apply `change` to the live record of `user_id`'s session, keeping its
+/// expiry. The write requires the record it changed, so it neither drops a
+/// concurrent change nor recreates a revoked session.
+async fn update_record(
+    sid: &str,
+    user_id: &str,
+    change: impl Fn(&mut SessionRecord),
+) -> Result<bool, StoreError> {
+    while let Some((current, _)) = get_active_session(sid, user_id).await? {
+        let mut next = current.clone();
+        change(&mut next);
+        #[cfg(test)]
+        super::test_support::pause_at(super::test_support::Stage::RecordWrite).await;
+        let update = Transaction::new().require(&subject_key(sid)).swap(
+            &record_key(sid),
+            &current,
+            &next,
+        )?;
+        if use_store().commit(&update).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// A newly authenticated login: who, when, and how (`amr`).
 pub struct NewSession<'a> {
-    pub user_id: &'a str,
     pub sid: &'a str,
-    pub org_id: Option<&'a str>,
+    /// The signed-in user, in the organization the session acts in.
+    pub subject: Subject,
     pub authenticated_at_unix: u64,
     pub amr: Vec<String>,
 }
 
-/// Register a newly authenticated login under its stable session id.
+/// Register a newly authenticated login under its stable session id, then
+/// index it. Its tokens must be issued only after this returns.
 pub async fn register_session(
     session: NewSession<'_>,
     refresh_jti: &str,
@@ -131,85 +162,80 @@ pub async fn register_session(
     let sid = session.sid;
     let record = SessionRecord {
         id: sid.to_string(),
-        user_id: session.user_id.to_string(),
-        org_id: session.org_id.map(str::to_string),
+        user_id: session.subject.id.clone(),
+        org_id: session.subject.org_id.clone(),
         authenticated_at_unix: session.authenticated_at_unix,
         last_seen_at_unix: now,
         expires_at_unix: now.saturating_add(ttl_secs),
         client_ids: Vec::new(),
         amr: session.amr,
     };
-    let store = use_store();
-    store
+    let create = Transaction::new()
+        .set(
+            &subject_key(sid),
+            &PublishedSubject::from(session.subject),
+            ttl_secs,
+        )?
         .set(
             &refresh_rotation_key(sid),
-            &RefreshRotation {
-                current_jti: refresh_jti.to_string(),
-            },
-            Some(ttl_secs),
-        )
-        .await?;
-    if let Err(error) = store_record(&record, ttl_secs).await {
-        let _ = store.delete(&refresh_rotation_key(sid)).await;
+            &RefreshRotation::new(refresh_jti),
+            ttl_secs,
+        )?
+        .set(&record_key(sid), &record, ttl_secs)?;
+    use_store().commit(&create).await?;
+    if let Err(error) = index(&record, ttl_secs).await {
+        // No token names the session yet: deleting it only tidies up.
+        let _ = delete_state(sid).await;
         return Err(error);
     }
+    #[cfg(test)]
+    super::test_support::pause_at(super::test_support::Stage::Indexed).await;
     Ok(())
 }
 
-/// Atomically consume one native refresh token and install its successor.
-/// Every login stores its first rotation record, so a missing one means the
-/// session is gone and the token is rejected.
-pub async fn rotate_refresh_token(
+/// Consume a native refresh token and extend its session: the next refresh
+/// `jti`, the record's times and the subject's lifetime change in one step,
+/// so a concurrent revocation either rejects the renewal or deletes the
+/// renewed session. A token already consumed, by a replay or a concurrent
+/// rotation, ends the session.
+pub async fn renew_session(
+    user_id: &str,
     sid: &str,
     presented_jti: &str,
     next_jti: &str,
     ttl_secs: u64,
 ) -> Result<bool, StoreError> {
-    let store = use_store();
-    let key = refresh_rotation_key(sid);
-    let next = RefreshRotation {
-        current_jti: next_jti.to_string(),
-    };
-
-    let Some(current) = store.get::<RefreshRotation>(&key).await? else {
-        return Ok(false);
-    };
-    if current.current_jti != presented_jti {
-        revoke_session(sid).await?;
-        return Ok(false);
-    }
-
-    let rotated = store
-        .compare_and_swap(&key, &current, &next, Some(ttl_secs))
-        .await?;
-    // A competing rotation consumed this token too. Treat concurrent reuse the
-    // same as a replay observed before the CAS.
-    if !rotated {
-        revoke_session(sid).await?;
-    }
-    Ok(rotated)
-}
-
-/// Renew a session after native refresh rotation. Extend the existing
-/// subject's TTL so a concurrent profile or membership write keeps its value.
-pub async fn renew_session(user_id: &str, sid: &str, ttl_secs: u64) -> Result<bool, StoreError> {
-    let Some(mut record) = get_session(sid)
-        .await?
-        .filter(|record| record.user_id == user_id)
-    else {
-        return Ok(false);
-    };
-    if !use_store()
-        .expire(&store::keys::session::subject(sid), ttl_secs)
-        .await?
-    {
-        return Ok(false);
-    }
+    let presented = RefreshRotation::new(presented_jti);
+    let next = RefreshRotation::new(next_jti);
     let now = now_unix();
-    record.last_seen_at_unix = now;
-    record.expires_at_unix = now.saturating_add(ttl_secs);
-    store_record(&record, ttl_secs).await?;
-    Ok(true)
+    while let Some((current, _)) = get_active_session(sid, user_id).await? {
+        let mut renewed = current.clone();
+        renewed.last_seen_at_unix = now;
+        renewed.expires_at_unix = now.saturating_add(ttl_secs);
+        index(&renewed, ttl_secs).await?;
+        #[cfg(test)]
+        super::test_support::pause_at(super::test_support::Stage::RecordWrite).await;
+        let renewal = Transaction::new()
+            .require(&subject_key(sid))
+            .require_equal(&refresh_rotation_key(sid), &presented)?
+            .require_equal(&record_key(sid), &current)?
+            .set(&refresh_rotation_key(sid), &next, ttl_secs)?
+            .set(&record_key(sid), &renewed, ttl_secs)?
+            .expire(&subject_key(sid), ttl_secs);
+        if use_store().commit(&renewal).await? {
+            return Ok(true);
+        }
+        let rotation = use_store()
+            .get::<RefreshRotation>(&refresh_rotation_key(sid))
+            .await?;
+        // Unless only the record changed meanwhile, the token was consumed or
+        // the session has ended: end it, and the entry extended above.
+        if rotation.as_ref() != Some(&presented) {
+            end_session(user_id, sid).await?;
+            return Ok(false);
+        }
+    }
+    Ok(false)
 }
 
 /// Associate an OAuth/OIDC client with an existing login session.
@@ -218,34 +244,30 @@ pub async fn register_session_client(
     user_id: &str,
     client_id: &str,
 ) -> Result<bool, StoreError> {
-    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
-        return Ok(false);
-    };
-    if !record.client_ids.iter().any(|value| value == client_id) {
-        record.client_ids.push(client_id.to_string());
-        record.client_ids.sort_unstable();
-    }
-    record.last_seen_at_unix = now_unix();
-    update_record(&record).await
+    let now = now_unix();
+    update_record(sid, user_id, |record| {
+        if !record.client_ids.iter().any(|value| value == client_id) {
+            record.client_ids.push(client_id.to_string());
+            record.client_ids.sort_unstable();
+        }
+        record.last_seen_at_unix = now;
+    })
+    .await
 }
 
 /// Record an email OTP the user verified in session `sid` (an MFA step-up):
 /// `otp`, and `mfa` when the session already had another factor. Returns
 /// false when the session is gone.
 pub async fn add_otp_factor(sid: &str, user_id: &str) -> Result<bool, StoreError> {
-    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
-        return Ok(false);
-    };
-    record.amr = oidc::authentication::with_otp(&record.amr);
-    update_record(&record).await
+    update_record(sid, user_id, |record| {
+        record.amr = oidc::authentication::with_otp(&record.amr);
+    })
+    .await
 }
 
 pub async fn touch_session(sid: &str, user_id: &str) -> Result<bool, StoreError> {
-    let Some((mut record, _)) = get_active_session(sid, user_id).await? else {
-        return Ok(false);
-    };
-    record.last_seen_at_unix = now_unix();
-    update_record(&record).await
+    let now = now_unix();
+    update_record(sid, user_id, |record| record.last_seen_at_unix = now).await
 }
 
 /// A live login has a current user subject and a matching, unexpired record.
@@ -302,18 +324,13 @@ pub async fn get_session(sid: &str) -> Result<Option<SessionRecord>, StoreError>
     }
 }
 
-/// Delete the state kept under the session's tag. Returns whether a subject
-/// was deleted, or `None` when replicas did not confirm the deletion.
-async fn delete_session_state(
-    sid: &str,
-    confirmations: &mut RevocationConfirmations,
-) -> Result<Option<bool>, StoreError> {
-    let store = use_store();
-    let deleted =
-        confirmations.record(delete_confirmed(&store::keys::session::subject(sid)).await)?;
-    store.delete(&refresh_rotation_key(sid)).await?;
-    store.delete(&record_key(sid)).await?;
-    Ok(deleted)
+/// The session's record, and whether revoking it counts: a readable record
+/// or a subject remains.
+async fn revocable(sid: &str) -> Result<(Option<SessionRecord>, bool), StoreError> {
+    let subject = subject_key(sid);
+    let (record, subject) = tokio::try_join!(get_session(sid), use_store().exists(&subject))?;
+    let counted = subject || record.is_some();
+    Ok((record, counted))
 }
 
 /// Revoke one stable login session, even when its record is missing or
@@ -321,7 +338,7 @@ async fn delete_session_state(
 pub async fn revoke_session(sid: &str) -> Result<Option<SessionRecord>, StoreError> {
     let record = get_session(sid).await?;
     let mut confirmations = RevocationConfirmations::default();
-    delete_session_state(sid, &mut confirmations).await?;
+    confirmations.record(delete_state(sid).await)?;
     if let Some(record) = &record {
         use_store().hdel(&index_key(&record.user_id), sid).await?;
         backchannel_logout::notify(std::slice::from_ref(record));
@@ -337,9 +354,20 @@ pub async fn end_session(user_id: &str, sid: &str) -> Result<LogoutDelivery, Sto
         .await?
         .filter(|record| record.user_id == user_id);
     let mut confirmations = RevocationConfirmations::default();
-    delete_session_state(sid, &mut confirmations).await?;
+    confirmations.record(delete_state(sid).await)?;
     use_store().hdel(&index_key(user_id), sid).await?;
     confirmations.finish(backchannel_logout::notify(record.as_slice()))
+}
+
+/// End the session a token names: its owner's when the token carries one.
+pub async fn end_token_session(claims: &jwt::Claims) -> Result<(), StoreError> {
+    let Some(sid) = claims.sid.as_deref() else {
+        return Ok(());
+    };
+    match claims.sub_id.as_deref() {
+        Some(user_id) => end_session(user_id, sid).await.map(drop),
+        None => revoke_session(sid).await.map(drop),
+    }
 }
 
 /// Delete the user's indexed sessions and notify linked clients when their
@@ -353,7 +381,7 @@ pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
         let mut records = Vec::new();
         let mut confirmations = RevocationConfirmations::default();
         for sid in store.hkeys(&key).await? {
-            let record = get_session(&sid).await?;
+            let (record, counted) = revocable(&sid).await?;
             if record
                 .as_ref()
                 .is_some_and(|record| record.user_id != user_id)
@@ -361,10 +389,8 @@ pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
                 store.hdel(&key, &sid).await?;
                 continue;
             }
-            let deleted = delete_session_state(&sid, &mut confirmations).await?;
-            if record.is_some() || deleted.unwrap_or(true) {
-                revoked += 1;
-            }
+            confirmations.record(delete_state(&sid).await)?;
+            revoked += usize::from(counted);
             records.extend(record);
             store.hdel(&key, &sid).await?;
         }
@@ -378,7 +404,7 @@ pub async fn revoke_all_sessions(user_id: &str) -> Result<usize, StoreError> {
 
 /// Delete the user's sessions whose active org is `org_id`; org-less and
 /// other-org sessions survive. Lazily prunes expired index entries. Returns
-/// the number of session records actually deleted.
+/// the number of sessions actually deleted.
 pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, StoreError> {
     without_security_budget(async {
         let store = use_store();
@@ -392,12 +418,9 @@ pub async fn revoke_org_sessions(user_id: &str, org_id: &str) -> Result<usize, S
             let expired = entry.expires_at_unix <= now;
             let matches = entry.org_id.as_deref() == Some(org_id);
             if matches && !expired {
-                let record = get_session(&sid).await?;
-                // A shortfall hides whether a subject was deleted: count it.
-                let deleted = delete_session_state(&sid, &mut confirmations).await?;
-                if record.is_some() || deleted.unwrap_or(true) {
-                    revoked += 1;
-                }
+                let (record, counted) = revocable(&sid).await?;
+                confirmations.record(delete_state(&sid).await)?;
+                revoked += usize::from(counted);
                 records.extend(record);
             }
             if matches || expired {
@@ -611,9 +634,8 @@ fn select_org<'a>(
 
 #[cfg(all(test, feature = "memory"))]
 mod index_tests {
-    use super::super::test_support::{corrupt_subject, expire_record, seed_session};
+    use super::super::test_support::{Pause, Stage, corrupt_subject, expire_record, seed_session};
     use super::*;
-    use serde_json::json;
 
     fn unique(prefix: &str) -> String {
         format!("{prefix}-{}", ulid::Ulid::generate())
@@ -790,7 +812,7 @@ mod index_tests {
         );
         assert!(get_session(&sid).await.unwrap().is_none());
         assert!(
-            !rotate_refresh_token(&sid, "refresh-jti", "next", 60)
+            !renew_session(&user, &sid, "refresh-jti", "next", 60)
                 .await
                 .unwrap()
         );
@@ -819,51 +841,32 @@ mod index_tests {
     async fn refresh_rotation_preserves_sid_and_rejects_replay() {
         let user = unique("user");
         let sid = unique("sid");
-        use_store()
-            .set(
-                &store::keys::session::subject(&sid),
-                &json!({ "id": &user }),
-                Some(60),
-            )
-            .await
-            .unwrap();
-        register_session(
-            NewSession {
-                user_id: &user,
-                sid: &sid,
-                org_id: None,
-                authenticated_at_unix: now_unix(),
-                amr: vec!["pwd".to_string()],
-            },
-            "jti-1",
-            60,
-        )
-        .await
-        .unwrap();
+        seed_session(&user, &sid, None).await;
 
         assert!(
-            rotate_refresh_token(&sid, "jti-1", "jti-2", 60)
+            renew_session(&user, &sid, "refresh-jti", "jti-2", 60)
                 .await
                 .unwrap()
         );
         assert!(
-            !rotate_refresh_token(&sid, "jti-1", "jti-3", 60)
+            !renew_session(&user, &sid, "refresh-jti", "jti-3", 60)
                 .await
                 .unwrap()
         );
 
-        assert!(get_session(&sid).await.unwrap().is_none());
+        assert_session_gone(&user, &sid).await;
         assert!(
-            !use_store()
-                .exists(&store::keys::session::subject(&sid))
+            !renew_session(&user, &sid, "jti-2", "jti-4", 60)
                 .await
                 .unwrap()
         );
-        assert!(
-            !rotate_refresh_token(&sid, "jti-2", "jti-4", 60)
-                .await
-                .unwrap()
-        );
+    }
+
+    async fn assert_session_gone(user: &str, sid: &str) {
+        for key in [subject_key(sid), refresh_rotation_key(sid), record_key(sid)] {
+            assert!(!use_store().exists(&key).await.unwrap(), "{key}");
+        }
+        assert!(!use_store().hexists(&index_key(user), sid).await.unwrap());
     }
 
     #[tokio::test]
@@ -885,19 +888,15 @@ mod index_tests {
 
     #[tokio::test]
     async fn refresh_without_rotation_state_is_rejected() {
+        let user = unique("user");
         let sid = unique("sid");
 
         assert!(
-            !rotate_refresh_token(&sid, "any-jti", "jti-1", 60)
+            !renew_session(&user, &sid, "any-jti", "jti-1", 60)
                 .await
                 .unwrap()
         );
-        assert!(
-            !use_store()
-                .exists(&refresh_rotation_key(&sid))
-                .await
-                .unwrap()
-        );
+        assert_session_gone(&user, &sid).await;
     }
 
     #[tokio::test]
@@ -906,15 +905,91 @@ mod index_tests {
         let sid = unique("sid");
         seed_session(&user, &sid, Some("org_a")).await;
 
-        assert!(renew_session(&user, &sid, 60).await.unwrap());
+        assert!(
+            renew_session(&user, &sid, "refresh-jti", "jti-2", 60)
+                .await
+                .unwrap()
+        );
         assert_eq!(
             get_session(&sid).await.unwrap().unwrap().org_id.as_deref(),
             Some("org_a")
         );
 
         revoke_session(&sid).await.unwrap();
-        assert!(!renew_session(&user, &sid, 60).await.unwrap());
-        assert!(get_session(&sid).await.unwrap().is_none());
+        assert!(
+            !renew_session(&user, &sid, "jti-2", "jti-3", 60)
+                .await
+                .unwrap()
+        );
+        assert_session_gone(&user, &sid).await;
+    }
+
+    #[tokio::test]
+    async fn record_updates_keep_concurrent_changes() {
+        let user = unique("user");
+        let sid = unique("sid");
+        seed_session(&user, &sid, None).await;
+
+        let pause = Pause::new(Stage::RecordWrite);
+        let touch = pause.scope(touch_session(&sid, &user));
+        let link = async {
+            pause.wait().await;
+            assert!(
+                register_session_client(&sid, &user, "client")
+                    .await
+                    .unwrap()
+            );
+            pause.resume();
+        };
+        let (touched, ()) = tokio::join!(touch, link);
+        assert!(touched.unwrap());
+        assert_eq!(
+            get_session(&sid).await.unwrap().unwrap().client_ids,
+            ["client"]
+        );
+
+        let pause = Pause::new(Stage::RecordWrite);
+        let touch = pause.scope(touch_session(&sid, &user));
+        let revoke = async {
+            pause.wait().await;
+            end_session(&user, &sid).await.unwrap();
+            pause.resume();
+        };
+        let (touched, ()) = tokio::join!(touch, revoke);
+        assert!(!touched.unwrap());
+        assert_session_gone(&user, &sid).await;
+    }
+
+    #[tokio::test]
+    async fn a_renewal_keeps_the_entry_of_a_live_session() {
+        let user = unique("user");
+        let sid = unique("sid");
+        seed_session(&user, &sid, None).await;
+
+        // A change to the record between the renewal's read and its write
+        // retries the renewal instead of ending the session.
+        let pause = Pause::new(Stage::RecordWrite);
+        let renew = pause.scope(renew_session(&user, &sid, "refresh-jti", "jti-2", 120));
+        let link = async {
+            pause.wait().await;
+            assert!(
+                register_session_client(&sid, &user, "client")
+                    .await
+                    .unwrap()
+            );
+            pause.resume();
+        };
+        let (renewed, ()) = tokio::join!(renew, link);
+        assert!(renewed.unwrap());
+        let record = get_session(&sid).await.unwrap().unwrap();
+        assert_eq!(record.client_ids, ["client"]);
+        let entry = use_store()
+            .hget::<SessionIndexEntry>(&index_key(&user), &sid)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.expires_at_unix, record.expires_at_unix);
+        revoke_all_sessions(&user).await.unwrap();
     }
 }
 

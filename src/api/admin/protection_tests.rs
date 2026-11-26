@@ -165,21 +165,12 @@ impl Fixture {
             .await
             .unwrap();
         let sid = ulid::Ulid::generate().to_string();
-        crate::data::store::use_store()
-            .set(
-                &store::keys::session::subject(&sid),
-                &crate::iam::sess::subjects::PublishedSubject::from(
-                    crate::iam::auth::subject::Subject::from(target.clone()),
-                ),
-                Some(3600),
-            )
-            .await
-            .unwrap();
+        let mut subject = crate::iam::auth::subject::Subject::from(target.clone());
+        subject.org_id = Some(org.id.clone());
         crate::iam::sess::registry::register_session(
             crate::iam::sess::registry::NewSession {
-                user_id: &target.id,
                 sid: &sid,
-                org_id: Some(&org.id),
+                subject,
                 authenticated_at_unix: 1,
                 amr: vec!["pwd".into()],
             },

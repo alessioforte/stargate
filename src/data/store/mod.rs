@@ -45,6 +45,19 @@ pub(crate) async fn delete_confirmed(key: &str) -> store::StoreResult<bool> {
     }
 }
 
+/// Commit a transaction and wait for the configured replicas.
+pub(crate) async fn commit_confirmed(transaction: &store::Transaction) -> store::StoreResult<bool> {
+    #[cfg(feature = "redis")]
+    {
+        use_store().commit_confirmed(transaction).await
+    }
+    #[cfg(feature = "memory")]
+    {
+        use store::Store;
+        use_store().commit(transaction).await
+    }
+}
+
 pub(crate) async fn set_confirmed<T: store::SerializeValue>(
     key: &str,
     value: &T,

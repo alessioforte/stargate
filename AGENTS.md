@@ -154,6 +154,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `stargate:v1:{<entity>}:<name>[:<qualifier>...]`. The version is part of the
   root, every key carries one entity hash tag (co-accessed keys share it), and
   batch operations split by tag so a Redis Cluster slot never mixes entities.
+  `store::Transaction` writes keys of one tag together while its requirements
+  hold (one Lua script; the memory store applies transactions one at a time and
+  its transaction keys are written only by transactions); one across tags is
+  rejected before it is sent.
   The pool opens connections on demand and requires `COMMAND INFO HEXPIRE`
   to succeed on every socket (Redis 7.4+ or Valkey 9.0+). An unavailable or
   unsupported backend does not block startup. The security-state request budget
@@ -471,6 +475,15 @@ linked user OAuth/OIDC tokens. A session's state shares the `{s:<sid>}` tag
 `jti` (`:refresh`) and the record (`:session`: owner, org, times, linked OAuth
 client ids, `amr`). The per-user index `{u:<user_id>}:sessions` (sid → org,
 expiry) names a user's sessions; no key lists every session.
+Registration, native renewal (refresh `jti`, record times and subject TTL),
+record updates (`touch_session`, `register_session_client`, `add_otp_factor`),
+subject publication and revocation each change the session's keys in one
+`store::Transaction`, and every write after registration requires the state it
+read: a concurrent revocation always wins, nothing stops halfway. The index
+changes in its own command: a session is indexed before its tokens exist,
+renewal extends the entry first and revocation removes it last, so an entry may
+outlive its session but a usable session is always indexed. `revoke_claims`
+ends a refresh token's (or `jti`-less token's) session through the registry.
 User-delegated OAuth access tokens need a `sid` for a live session owned by the
 token's `sub_id` on the admin API, profile, UserInfo, introspection, and gateway.
 The record must be unexpired and the versioned subject under the same `sid` must

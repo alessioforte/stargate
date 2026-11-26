@@ -5,6 +5,8 @@ use tokio::sync::Notify;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stage {
     Registration,
+    Indexed,
+    RecordWrite,
     IndexRead,
     ProfileRead,
     SubjectWrite,
@@ -75,23 +77,15 @@ pub(crate) fn inherit_pause<T>(work: impl Future<Output = T>) -> impl Future<Out
 /// Register a live session of `user_id` with a readable subject.
 #[cfg(feature = "memory")]
 pub(crate) async fn seed_session(user_id: &str, sid: &str, org_id: Option<&str>) {
-    use super::{registry, subjects::PublishedSubject};
+    use super::registry;
     use crate::iam::auth::subject::{Subject, SubjectType};
-    use store::Store;
 
-    crate::data::store::use_store()
-        .set(
-            &store::keys::session::subject(sid),
-            &PublishedSubject::from(Subject::new(user_id.into(), SubjectType::User, None)),
-            Some(60),
-        )
-        .await
-        .unwrap();
+    let mut subject = Subject::new(user_id.into(), SubjectType::User, None);
+    subject.org_id = org_id.map(str::to_string);
     registry::register_session(
         registry::NewSession {
-            user_id,
             sid,
-            org_id,
+            subject,
             authenticated_at_unix: registry::now_unix(),
             amr: vec!["pwd".to_string()],
         },

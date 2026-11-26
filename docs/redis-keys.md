@@ -83,9 +83,16 @@ IP addresses may be IPv6 (`{ip:2001:db8::1}:ingress`): the colons belong to the
 tag and do not change slot selection.
 
 No key lists every session. A session's subject, refresh rotation and record
-share its `{s:<sid>}` tag, and the user's index names the user's sessions.
-Listings enumerate users from SQL and read their indexes, one entity per
-command, so they work unchanged on Redis Cluster.
+share its `{s:<sid>}` tag and change together: registration, renewal, record
+updates, subject publication and revocation are each one Lua script in that
+slot, and every write after registration requires the state it read, so a
+revoked session never reappears. The user's index names the user's sessions
+under `{u:<user_id>}`, another slot, and changes in its own command: a session
+is indexed before any token names it, renewal extends the entry before the
+session, and revocation removes the entry last. An entry can outlive its
+session; a usable session always has one. Listings enumerate users from SQL
+and read their indexes, one entity per command, so they work unchanged on Redis
+Cluster.
 
 The [password login guard](config-v1.md#password-login-guard) reserves each
 bucket with a single-key atomic update. The source and account keys can occupy
@@ -102,6 +109,8 @@ in one command, with no `SCAN` or per-address index.
 - Lua scripts declare **all** keys they touch in `KEYS`; the token bucket
   receives both of its keys, and the short quota tracker derives no key inside the
   script.
+- A store transaction (`store::Transaction`) runs as one Lua script; one that
+  spans two tags is rejected before it is sent.
 - Batch store operations split their work by tag and send one pipeline per
   slot. `RedisStore::batch_get`, `batch_set`, `batch_delete` and `batch_exists`
   remain one round trip when their keys belong to one entity.
@@ -128,5 +137,6 @@ support. When replica confirmation is enabled, the ACL must also allow
 `benches/scripts/test_redis_prefix.py` runs the store and limiter suites, the
 gateway smoke test and the audit relay on a single instance under this ACL.
 `benches/scripts/test_redis_cluster.py` runs the same store and limiter tests on
-a disposable 3+3 cluster, plus raw cross-slot `MGET`/`EVAL` negative controls.
+a disposable 3+3 cluster, including session-shaped transactions confirmed by a
+replica, plus raw cross-slot `MGET`/`EVAL` negative controls.
 The Redis CI workflow runs both.

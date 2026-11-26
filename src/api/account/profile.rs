@@ -143,7 +143,6 @@ pub async fn put_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
 mod tests {
     use super::*;
     use crate::data::db::{service, with_test_database};
-    use crate::data::store::use_store;
     use crate::iam::auth::subject::Subject;
     use crate::iam::sess::registry::{NewSession, register_session};
     use axum::{Router, body::Body, routing::get};
@@ -154,7 +153,6 @@ mod tests {
     use http::StatusCode;
     use http_body_util::BodyExt;
     use serde_json::{Value, json};
-    use store::Store;
     use tower::ServiceExt;
 
     fn context() -> TrustedAuditContext {
@@ -189,21 +187,10 @@ mod tests {
                 .await
                 .unwrap();
             let sid = ulid::Ulid::generate().to_string();
-            use_store()
-                .set(
-                    &store::keys::session::subject(&sid),
-                    &crate::iam::sess::subjects::PublishedSubject::from(Subject::from(
-                        user.clone(),
-                    )),
-                    Some(3600),
-                )
-                .await
-                .unwrap();
             register_session(
                 NewSession {
-                    user_id: &user.id,
                     sid: &sid,
-                    org_id: None,
+                    subject: Subject::from(user.clone()),
                     authenticated_at_unix: chrono::Utc::now().timestamp() as u64,
                     amr: vec!["pwd".into()],
                 },

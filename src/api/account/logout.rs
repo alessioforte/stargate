@@ -1,4 +1,3 @@
-use crate::data::store::delete_confirmed;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
 use crate::iam::auth::revocation::{RevocationConfirmations, revoke_claims};
@@ -28,19 +27,9 @@ pub async fn delete_logout(req: Request) -> Result<Json<MessageResponse>, ErrorR
         .validate_session_access_token(&token)
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
 
-    let sid = claims.sid.clone().unwrap_or_default();
     let mut confirmations = RevocationConfirmations::default();
     confirmations.record(revoke_claims(&claims).await)?;
-
-    match claims.sub_id.as_deref() {
-        Some(user_id) => {
-            confirmations.record(crate::iam::sess::registry::end_session(user_id, &sid).await)?;
-        }
-        None => {
-            confirmations.record(delete_confirmed(&store::keys::session::subject(&sid)).await)?;
-        }
-    }
-
+    confirmations.record(crate::iam::sess::registry::end_token_session(&claims).await)?;
     confirmations.finish(())?;
     Ok(Json(MessageResponse::new(MessageCode::LogoutCompleted)))
 }

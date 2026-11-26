@@ -7,7 +7,9 @@
 //! key of one entity shares the tag, so an operation that works on a single
 //! instance must work here without `CROSSSLOT` or `non local key` errors.
 
-use store::{AtomicStore, RedisStore, Store, keys};
+mod transactions;
+
+use store::{AtomicStore, RedisReplicationConfig, RedisStore, Store, keys};
 
 fn setup() -> (String, String, String) {
     (
@@ -127,4 +129,22 @@ async fn one_entity_slot_supports_every_state_operation() -> Result<(), Box<dyn 
 
     assert!(store.delete(&value).await?);
     Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires a Redis Cluster node that owns REDIS_CLUSTER_TAG"]
+async fn one_entity_slot_supports_transactions() -> Result<(), Box<dyn std::error::Error>> {
+    let (url, tag, _) = setup();
+    let store = RedisStore::new(&url).await?.with_key_prefix("tenant:");
+    // Every primary of the test cluster has one replica.
+    let confirmed = RedisStore::new(&url)
+        .await?
+        .with_key_prefix("tenant:")
+        .with_replication(RedisReplicationConfig {
+            replicas: std::num::NonZeroU32::MIN,
+            timeout_ms: std::num::NonZeroU32::new(5000).unwrap(),
+            fail_on_timeout: true,
+            on_timeout: |_| {},
+        });
+    transactions::exercise(&store, &tag, &confirmed).await
 }

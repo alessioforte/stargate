@@ -1,5 +1,7 @@
 #![cfg(feature = "redis")]
 
+mod transactions;
+
 use std::time::Duration;
 use store::{AtomicStore, RedisStore, Store, StoreError, StreamEntry, keys, with_request_budget};
 
@@ -137,6 +139,15 @@ async fn prefixed_state_and_explicit_stream() -> Result<(), Box<dyn std::error::
     );
     assert_eq!(store.trim_stream_before("audit.raw", zero).await?, 0);
     Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires isolated REDIS_PREFIX_TEST_URL with the restricted Stargate ACL"]
+async fn transactions_apply_atomically_under_the_prefix() -> Result<(), Box<dyn std::error::Error>>
+{
+    let url = std::env::var("REDIS_PREFIX_TEST_URL")?;
+    let store = RedisStore::new(&url).await?.with_key_prefix(PREFIX);
+    transactions::exercise(&store, &test_tag(), &store).await
 }
 
 #[tokio::test]
