@@ -119,6 +119,15 @@ fn from_vars(vars: &[(String, String)]) -> Result<Vec<Listener>, SettingsError> 
     }
 }
 
+/// Probes need a listener that declares the management plane. A declared
+/// configuration without one answers `/livez` and `/readyz` nowhere, which
+/// startup reports as a warning.
+pub fn serves_probes(listeners: &[Listener]) -> bool {
+    listeners
+        .iter()
+        .any(|listener| listener.planes.contains(Plane::Management))
+}
+
 /// The single listener of a process without `LISTENERS`: every plane on
 /// `0.0.0.0:$PORT`, with the process-wide TLS and connection settings.
 fn implicit(var: &impl Fn(&str) -> Option<String>) -> Result<Listener, SettingsError> {
@@ -321,7 +330,7 @@ fn invalid(name: &str, value: &str, message: &str) -> EnvError {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_MAX_CONNECTIONS, Listener, SettingsError, from_vars};
+    use super::{DEFAULT_MAX_CONNECTIONS, Listener, SettingsError, from_vars, serves_probes};
     use crate::api::plane::{Plane, PlaneSet};
     use std::{net::SocketAddr, str::FromStr};
 
@@ -410,6 +419,37 @@ mod tests {
         assert!(!parsed[3].tls);
         assert_eq!(parsed[3].max_connections, 64);
         assert_eq!(parsed[3].planes, PlaneSet::of(Plane::Management));
+    }
+
+    #[test]
+    fn declared_listeners_without_a_management_one_serve_no_probes() {
+        // Probes answer only on a listener that declares the management plane:
+        // splitting the planes without one leaves `/livez` and `/readyz` dark.
+        let parsed = listeners(&[
+            ("LISTENERS", "public,admin"),
+            ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+            ("LISTENER_PUBLIC_PLANES", "identity,gateway"),
+            ("LISTENER_ADMIN_ADDRESS", "127.0.0.1:5051"),
+            ("LISTENER_ADMIN_PLANES", "admin"),
+        ])
+        .unwrap();
+        assert!(!serves_probes(&parsed));
+
+        let parsed = listeners(&[
+            ("LISTENERS", "public,management"),
+            ("LISTENER_PUBLIC_ADDRESS", "0.0.0.0:5050"),
+            ("LISTENER_PUBLIC_PLANES", "identity,gateway"),
+            ("LISTENER_MANAGEMENT_ADDRESS", "0.0.0.0:9000"),
+            ("LISTENER_MANAGEMENT_PLANES", "management"),
+        ])
+        .unwrap();
+        assert!(serves_probes(&parsed));
+        assert!(!parsed[0].planes.contains(Plane::Management));
+        assert!(parsed[1].planes.only(Plane::Management));
+        assert!(!parsed[1].tls);
+
+        // The implicit listener serves every plane, probes included.
+        assert!(serves_probes(&listeners(&[]).unwrap()));
     }
 
     #[test]

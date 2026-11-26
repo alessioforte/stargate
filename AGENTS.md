@@ -249,7 +249,9 @@ a declared configuration without `JWT_ISSUER` all stop it.
 Without `LISTENERS` the implicit listener is `0.0.0.0:$PORT` with every plane,
 `TLS_ENABLED`, `MAX_CONNECTIONS`, and its own `TRUSTED_PROXIES`. Names are 1–32
 ASCII letters or digits starting with a letter; addresses are literal IPs with a
-port, IPv6 included.
+port, IPv6 included. A listener serves only the planes it declares: with
+`LISTENERS` and no listener for the management plane, `/livez` and `/readyz`
+answer nowhere and startup logs a warning.
 
 Proxy trust is per listener and empty by default: only a peer in
 `LISTENER_<NAME>_TRUSTED_PROXIES` (the implicit listener: `TRUSTED_PROXIES`) may set
@@ -1300,7 +1302,8 @@ serves from the planes it declares (`api::plane::PlaneSet`): management (`/livez
 sign-in, the hosted auth app, docs, i18n, the internal-context JWKS), admin
 (`/admin/*` and the Console), and the gateway. `api::server_router` is the same
 composition with every plane, for tests. Probes are mounted on every host,
-including pod IPs and hostless requests. `dispatch::HostDispatch` sends allowed
+including pod IPs and hostless requests, and only on a listener that declares
+the management plane. `dispatch::HostDispatch` sends allowed
 hosts through the IAM planes and their shared ingress limit; the gateway is their
 fallback only when the listener serves it. Other hosts and hostless requests go
 directly to the gateway when `IAM_HOSTS` is configured, where the gateway ingress

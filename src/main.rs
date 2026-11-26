@@ -79,6 +79,11 @@ async fn serve() -> std::io::Result<()> {
         tracing::error!("Invalid listener settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
+    if !settings::serves_probes(&listeners) {
+        tracing::warn!(
+            "No listener declares the management plane: `/livez` and `/readyz` answer nowhere; declare a listener with `LISTENER_<NAME>_PLANES=management` to expose the probes"
+        );
+    }
     let runtime_profile = profile::validate_runtime_profile()?;
     let shutdown_timeout_secs = shutdown::server_shutdown_timeout_secs();
 

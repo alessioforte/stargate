@@ -14,7 +14,12 @@ from service traffic without restarting it.
 The two public endpoints also support `HEAD`, return `Cache-Control: no-store`,
 and bypass authentication, API rate limiting, gateway ingress/process admission,
 and gateway routing policies.
-They use the normal HTTP or HTTPS listener; no extra port is required.
+They belong to the management plane and answer only on a listener that declares
+it. On the implicit listener they stay on `0.0.0.0:$PORT`, over HTTP or HTTPS as
+before. With `LISTENERS`, a listener of only the `management` plane serves them,
+never terminates TLS, and keeps them off the other ports; without such a
+listener no listener serves them and startup logs a warning. See
+[Listeners](listeners.md#planes).
 Dependency errors and latency details appear only in `/admin/health`, which
 retains its admin authorization and normal API middleware. With default
 `ingress.on_store_error: allow`, an admin key verified through SQL can reach

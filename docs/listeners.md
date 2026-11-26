@@ -79,20 +79,22 @@ credentials must use `Authorization: Bearer` or `x-api-key` headers.
 | `gateway`    | everything the gateway configuration matches                           |
 
 A plane may appear on more than one listener; each listener mounts only the
-planes it declares. On a listener with IAM planes the shared ingress allowance
-and CORS/compression apply as on the single port. The identity plane also
-admits the Console's public origin (`CONSOLE_PUBLIC_URL`) on `/oauth/token`,
-`/oauth/revoke`, `GET /i18n/{locale}`, and `GET`/`PUT /account/profile` only, so
-a Console served by the admin listener can exchange codes, refresh tokens, read
-the message catalog, and save the profile language against the issuer; `/admin`
-stays on the Console's own origin. On the routes whose credential comes from the session token
-(profile, logout, authenticated MFA, organization switch, consents,
-organizations), a request carrying `Authorization` skips the browser origin
-guard and the cookie is never used alongside such a header. Routes without a
-header credential (login, OTP/MFA login, reset, refresh token, sign-up, social
-state, `/oauth/login`, interaction reads, consent, logout confirmation) keep
-the full guard even with `Authorization`. The gateway plane owns its paths,
-preflights, and encoding.
+planes it declares. Nothing adds a plane a listener does not declare, so
+`LISTENERS` without a listener for the management plane answers `/livez` and
+`/readyz` nowhere and logs a warning at startup. On a listener with IAM planes
+the shared ingress allowance and CORS/compression apply as on the single port.
+The identity plane also admits the Console's public origin (`CONSOLE_PUBLIC_URL`)
+on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
+`GET`/`PUT /account/profile` only, so a Console served by the admin listener can
+exchange codes, refresh tokens, read the message catalog, and save the profile
+language against the issuer; `/admin` stays on the Console's own origin. On the
+routes whose credential comes from the session token (profile, logout,
+authenticated MFA, organization switch, consents, organizations), a request
+carrying `Authorization` skips the browser origin guard and the cookie is never
+used alongside such a header. Routes without a header credential (login, OTP/MFA
+login, reset, refresh token, sign-up, social state, `/oauth/login`, interaction
+reads, consent, logout confirmation) keep the full guard even with
+`Authorization`. The gateway plane owns its paths, preflights, and encoding.
 
 Host selection (`IAM_HOSTS`) still applies per request. On a listener that
 serves both IAM planes and the gateway, a request on an IAM host falls through
