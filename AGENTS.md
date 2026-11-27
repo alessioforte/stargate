@@ -206,8 +206,10 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   connection facts from it instead of a process-wide setting.
   `srv::client_ip` resolves the client address once at ingress from the peer and that
   listener's `ProxyTrust` (`srv::proxy`), removes `Forwarded`, `X-Real-IP`, and every
-  `X-Forwarded-*` field from an untrusted peer on every plane, and stores
-  `srv::client_ip::ClientIp` in the request extensions. Logging and spans, ingress and
+  `X-Forwarded-*` field from an untrusted peer on every plane, consumes the
+  client's hop-by-hop fields (`Connection` and what it names, keeping a WebSocket
+  upgrade), and stores `srv::client_ip::ClientIp` in the request extensions.
+  Logging and spans, ingress and
   admin limits, login guards, OTP, source-IP matchers, audit, and internal-context
   signing all read it from there.
   `web::request::RequestExt::is_https` decides HTTPS per request through
@@ -267,10 +269,15 @@ listeners share `TLS_CERT` and `TLS_KEY` and offer ALPN `h2` and `http/1.1`.
 Per connection: a 10 s first-request and header-read timeout (it also closes a
 mute connection, a client that stops after the HTTP/2 preface, and an idle HTTP/1
 keep-alive connection), a 10 s TLS handshake timeout, 100 HTTP/2 concurrent
-streams, a 32 KiB HTTP/2 header list, a 30 s keep-alive PING with a 10 s timeout,
-`TCP_NODELAY`, and a slot from the listener's connection cap (default 1024); a
-failed accept backs off 100 ms. Upgraded WebSockets leave the cap and are bounded
-by gateway admission, and a proxy that reuses connections needs an idle timeout
+streams, a request header block of 32 KiB (`MAX_HEADER_SIZE`, the HTTP/1 read
+buffer and the HTTP/2 decoded list), 100 HTTP/1 header fields (`MAX_HEADERS`), a
+30 s keep-alive PING with a 10 s timeout, `TCP_NODELAY`, and a slot from the
+listener's connection cap (default 1024); a failed accept backs off 100 ms.
+Over-limit request headers answer `431`. IAM JSON and form bodies have an
+explicit 2 MiB cap (`MAX_IAM_BODY_SIZE`), answered with
+`413 request.payload_too_large`; the gateway keeps its own replay limits.
+Upgraded WebSockets leave the cap and are bounded by gateway admission, and a
+proxy that reuses connections needs an idle timeout
 below 10 s (Traefik: `serversTransport.forwardingTimeouts.idleConnTimeout`).
 Every request carries `srv::ConnectionInfo` (peer, listener name, planes, TLS,
 proxy trust) and the resolved `ClientIp`; handlers read the client address from
@@ -291,9 +298,16 @@ exercise forwarding headers). Guide: `docs/listeners.md`.
    `429` on denial; store errors/timeouts pass by default (`on_store_error: allow`),
    or return `503` with `deny`, before any credential check or route match.
    The listener already removed `Forwarded`, `X-Real-IP`, and every `X-Forwarded-*`
-   field from an untrusted peer before routing. Capture the original peer and host;
-   operator middleware may then supply forwarding metadata.
-3. Verify API key / JWT / OAuth token and capture the subject.
+   field from an untrusted peer before routing, and consumed the client's
+   `Connection` field with every field it nominated plus the fixed hop-by-hop
+   list (a WebSocket upgrade keeps `Connection: upgrade` and `Upgrade:
+   websocket`). Capture the original peer and host; operator middleware may then
+   supply forwarding metadata, and a client `Connection` header can no longer
+   remove it. Route matching is pure and runs before authentication only to
+   decide whether the matched router's `auth` policy accepts query tokens.
+3. Verify API key / JWT / OAuth token and capture the subject. The `token`,
+   `access_token`, and `jwt` query parameters are read only when an attached
+   `auth` policy sets `allow_query_token: true`.
 4. Match compiled v1 routers (descending `priority`, declaration order for ties).
 5. Apply route middlewares (path rewrite, preserve host, header transforms).
 6. Apply policies in fixed order: auth, access control, rate limit, quota.
@@ -308,7 +322,9 @@ exercise forwarding headers). Guide: `docs/listeners.md`.
    append the peer IP once, preserve middleware output, and fill missing
    proto/host values with the actual listener TLS scheme and original host.
    These facts survive replay, failover, and mirrors; normalization precedes
-   internal-context sanitization and signing.
+   internal-context sanitization and signing. Each router's WebSocket limits
+   bound messages and frames on both sockets. On IAM hosts (every host without
+   `IAM_HOSTS`), upstream `Set-Cookie` for the `jwt` session cookie is dropped.
 
 Modules: `snap/` (snapshot lifecycle: `config.rs` database documents, seed, preparation and saves,
 `runtime.rs` preparation/publication, `reload.rs` text activation, `body.rs` pinning during streaming),
@@ -358,7 +374,9 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
 - Services: `load_balancer`, `weighted`, `mirror`, `failover` (`on_status`),
   `direct_response`.
 - Policies: `auth` (strategies `jwt`, `api_key`, `oauth`; OAuth requires an exact
-  `audience` and a live linked session), `access_control`, `rate_limit`, `quota`.
+  `audience` and a live linked session; `allow_query_token: true` opts a route
+  into reading the `token`, `access_token`, and `jwt` query parameters),
+  `access_control`, `rate_limit`, `quota`.
   Org-scoped limits have `on_missing: skip | ip_fallback | deny`. Quota windows
   up to an hour stay in the state store; day, week, month and year keep a
   durable balance in SQL (`timezone` required, `anchor_day` for a billing
@@ -398,7 +416,9 @@ and `http.{upstreams,services,middlewares,policies,routers}`.
   Connection-nominated fields are always removed as hop-by-hop headers.
 - Routers: `response_mode: stream` for long-lived responses (default `finite`).
   Optional `timeouts.request` and `timeouts.upload_idle` override runtime values;
-  `none` is allowed only for streams. gRPC requires an HTTP/2 upstream and sends
+  `none` is allowed only for streams. Optional `websocket.max_message_bytes`
+  (default 8 MiB) and `websocket.max_frame_bytes` (default 1 MiB) bound both
+  sockets of a proxied WebSocket. gRPC requires an HTTP/2 upstream and sends
   the remaining `grpc-timeout` on every attempt; it returns gateway errors and
   stream failures as gRPC status, and records completed statuses.
 - `runtime` defaults: primary 1024 / mirror 64 slots, replay 2 MiB per request /
@@ -1071,6 +1091,9 @@ the same logical columns on PostgreSQL and SQLite.
 | `CONFIG_SYNC_INTERVAL_SECS`                                                            | 30                                     | Gateway/policy reconciliation interval in both profiles (integer >= 1); validated at startup                                        |
 | `PORT`                                                                                 | 5050                                   | Port of the implicit listener; stops startup with `LISTENERS`                                                                        |
 | `MAX_CONNECTIONS`                                                                      | 1024                                   | Concurrent connections of the implicit listener; stops startup with `LISTENERS`                                                     |
+| `MAX_HEADER_SIZE`                                                                      | 32768                                  | Request header block: HTTP/1 read buffer and HTTP/2 decoded list; 8192–4294967295 bytes; over-limit answers `431`                    |
+| `MAX_HEADERS`                                                                          | 100                                    | HTTP/1 request header field count; over-limit answers `431`                                                                          |
+| `MAX_IAM_BODY_SIZE`                                                                    | 2097152                                | Largest IAM JSON or form body; over-limit answers `413 request.payload_too_large`; the gateway has its own replay limits              |
 | `LISTENERS` / `LISTENER_<NAME>_*`                                                      | -                                      | Named listeners: `_ADDRESS` and `_PLANES` required, `_TLS` on except management, `_MAX_CONNECTIONS` 1024, `_TRUSTED_PROXIES` none; needs `JWT_ISSUER` (see "Listeners") |
 | `STARGATE_RUNTIME_PROFILE`                                                             | -                                      | `edge` or `cluster` (validated against the build)                                                                                   |
 | `JWT_ALGORITHM`                                                                        | active key / `RS256`                   | Must match the active key when set; picks the first generated key                                                                   |

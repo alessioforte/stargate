@@ -416,14 +416,25 @@ name, and certificate verification always use the upstream URI. The
 `preserve_host` middleware replaces the generated Host with exactly one incoming
 value; it does not change the TLS identity or destination. Without it, the
 handshake uses the target Host. HTTP and WebSocket requests share hop-by-hop
-sanitization, including fields named by every `Connection` value. The WebSocket
-client regenerates its Upgrade, key, and version fields after that cleanup.
-Origin and offered subprotocols are forwarded unless explicitly nominated as
-hop-by-hop fields; multiple subprotocol fields are combined for negotiation.
+sanitization: the client's `Connection` field and every field it names are
+consumed at ingress, before route middleware runs, so a later
+`request_headers` value cannot be removed by the client. At dispatch only the
+fixed hop-by-hop list is removed. The WebSocket client regenerates its Upgrade,
+key, and version fields after that cleanup. Origin and offered subprotocols are
+forwarded unless explicitly nominated as hop-by-hop fields; multiple subprotocol
+fields are combined for negotiation.
 The upstream's selected subprotocol is returned to the downstream client.
 Extensions are not offered, and an upstream response that selects an extension
 or repeats the selected subprotocol is rejected. Internal-context sanitization
 and per-attempt signing run after the final handshake URI and headers are set.
+Both sockets use the router's WebSocket limits (`websocket.max_message_bytes`,
+default 8 MiB, and `websocket.max_frame_bytes`, default 1 MiB); a peer exceeding
+them closes the relay instead of making the gateway buffer the message.
+
+On IAM hosts (every host while `IAM_HOSTS` is unset), Stargate owns the origin of
+its session cookie. Gateway responses from upstreams on those hosts drop every
+`Set-Cookie` for the `jwt` session cookie, so an upstream cannot plant, replace,
+or delete the session. Other cookies pass through unchanged.
 
 ### Forwarded request headers
 
@@ -437,7 +448,12 @@ client IP derived from incoming headers. Processing happens in this order:
    `X-Real-IP`, and every `X-Forwarded-*` field from an untrusted or missing
    peer. This includes custom fields such as `X-Forwarded-Client-Cert` and
    `X-Forwarded-Ssl`, and it applies to IAM, admin, management, and gateway
-   requests alike. Trusted proxy fields remain available to routing.
+   requests alike. Trusted proxy fields remain available to routing. Ingress
+   also consumes the client's hop-by-hop fields: `Connection`, every field it
+   nominates, and the fixed RFC 9110 §7.6.1 list. A WebSocket upgrade keeps
+   `Connection: upgrade` and `Upgrade: websocket` for the handshake. At
+   dispatch only the fixed list is removed, so a field named by the client's
+   `Connection` no longer removes an operator-provided value.
 2. Apply route middleware. Operator-provided forwarding metadata, such as
    `X-Forwarded-Prefix: /api` alongside `strip_prefix`, is preserved regardless
    of the original peer's trust.
@@ -1052,6 +1068,19 @@ http:
       response_mode: stream  # default: finite
 ```
 
+WebSocket routes can bound both sockets explicitly:
+
+```yaml
+http:
+  routers:
+    socket:
+      match: { path: { prefix: /socket } }
+      service: socket-service
+      websocket:
+        max_message_bytes: 8388608  # default: 8 MiB
+        max_frame_bytes: 1048576    # default: 1 MiB
+```
+
 For ordinary HTTP, `stream` retains the inherited request budget through
 response headers, then uses `response_body_idle_timeout` and primary admission
 without a fixed response lifetime. An explicit router request timeout also
@@ -1167,6 +1196,11 @@ http:
       strategies: [oauth]
       audience: gateway
 
+    query-token-auth:
+      kind: auth
+      strategies: [jwt]
+      allow_query_token: true
+
     reports-read:
       kind: access_control
       resource: financial_reports:read
@@ -1186,6 +1220,15 @@ flow. Every policy containing `oauth` must configure one exact `audience`.
 The OAuth client must be registered for that audience and request it during
 authorization. OAuth client-credentials tokens are not user identities and
 are not accepted by this strategy.
+
+The gateway reads the `token`, `access_token`, and `jwt` query parameters only
+when a router's attached `auth` policy sets `allow_query_token: true`; without
+it they are not credentials. Query credentials travel in logs, referrers, and
+caches, so prefer the `Authorization` header or the session cookie. An auth
+policy with `allow_query_token: true` on a router is enough even when that
+router attaches more than one auth policy. The parameters remain subject to
+credential forwarding cleanup before dispatch unless the upstream sets
+`forward_credentials: true`.
 
 Attach policies on a router:
 
