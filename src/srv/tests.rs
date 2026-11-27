@@ -167,6 +167,47 @@ async fn read_until_eof<R: AsyncRead + Unpin>(stream: &mut R, within: Duration) 
 }
 
 #[tokio::test]
+async fn request_headers_over_the_configured_limits_are_rejected() {
+    let http = HttpSettings {
+        max_header_size: 8192,
+        max_headers: 4,
+        ..HttpSettings::default()
+    };
+    let server = Server::start(
+        plain_listener(),
+        echo_router(),
+        None,
+        http,
+        Duration::from_secs(1),
+    )
+    .await;
+
+    let mut client = TcpStream::connect(server.address).await.unwrap();
+    client
+        .write_all(
+            b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nX-A: 1\r\nX-B: 2\r\nX-C: 3\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let response = read_headers(&mut client, Duration::from_secs(5)).await;
+    assert!(response.starts_with("HTTP/1.1 431"), "{response}");
+
+    let mut client = TcpStream::connect(server.address).await.unwrap();
+    let long = "x".repeat(9000);
+    client
+        .write_all(
+            format!(
+                "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nX-Long: {long}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let response = read_headers(&mut client, Duration::from_secs(5)).await;
+    assert!(response.starts_with("HTTP/1.1 431"), "{response}");
+}
+
+#[tokio::test]
 async fn requests_carry_the_peer_and_the_listener_they_arrived_on() {
     let router = Router::new().fallback(
         |axum::Extension(connection): axum::Extension<ConnectionInfo>| async move {

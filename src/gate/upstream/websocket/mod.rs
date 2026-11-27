@@ -9,10 +9,11 @@ use crate::{
     gate::PreparedTransport,
 };
 use axum::{body::Body, response::Response};
+use gate::graph::WebSocketLimits;
 use handshake::{build_upstream_request, connect_upstream, validate_upgrade};
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use relay::proxy_websocket;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::protocol::WebSocketConfig};
 
 type UpstreamSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -22,6 +23,7 @@ pub async fn handler(
     mut req: http::Request<Body>,
     upstream: UpstreamRequest<'_>,
     ingress: &UpstreamHeaders,
+    limits: &WebSocketLimits,
     execution: &Execution,
 ) -> Result<Response, ErrorResponse> {
     validate_upgrade(&req)?;
@@ -32,7 +34,8 @@ pub async fn handler(
         );
     }
 
-    let (mut response, websocket) = hyper_tungstenite::upgrade(&mut req, None)
+    let config = web_socket_config(limits);
+    let (mut response, websocket) = hyper_tungstenite::upgrade(&mut req, Some(config))
         .map_err(|_| ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid))?;
 
     let upstream_request = build_upstream_request(upstream, req.headers(), ingress).await?;
@@ -41,6 +44,7 @@ pub async fn handler(
         transport,
         execution,
         runtime.settings.response_header_timeout,
+        config,
     )
     .await?;
 
@@ -91,6 +95,39 @@ pub async fn handler(
     }
 
     Ok(response.map(Body::new))
+}
+
+/// The same limits apply to the client and the upstream socket: a peer cannot
+/// make the gateway buffer a larger message on either side of the relay.
+fn web_socket_config(limits: &WebSocketLimits) -> WebSocketConfig {
+    WebSocketConfig::default()
+        .max_message_size(Some(limits.max_message_bytes))
+        .max_frame_size(Some(limits.max_frame_bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_limits_apply_to_both_socket_sizes() {
+        let config = web_socket_config(&WebSocketLimits {
+            max_message_bytes: 4096,
+            max_frame_bytes: 1024,
+        });
+
+        assert_eq!(config.max_message_size, Some(4096));
+        assert_eq!(config.max_frame_size, Some(1024));
+        assert!(!config.accept_unmasked_frames);
+    }
+
+    #[test]
+    fn default_limits_are_explicit() {
+        let config = web_socket_config(&WebSocketLimits::default());
+
+        assert_eq!(config.max_message_size, Some(8 * 1024 * 1024));
+        assert_eq!(config.max_frame_size, Some(1024 * 1024));
+    }
 }
 
 #[cfg(test)]

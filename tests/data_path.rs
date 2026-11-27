@@ -97,6 +97,9 @@ fn isolated_command(root: &Path) -> Command {
         .env_remove("TRUSTED_ORIGINS")
         .env_remove("OAUTH_CLIENT_CA_FILE")
         .env_remove("STORE_MAX_MEMORY_MB")
+        .env_remove("MAX_HEADER_SIZE")
+        .env_remove("MAX_HEADERS")
+        .env_remove("MAX_IAM_BODY_SIZE")
         .env_remove("STARGATE_RUNTIME_PROFILE");
     command
 }

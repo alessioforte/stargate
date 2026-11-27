@@ -3,9 +3,7 @@ use crate::gate::{
     lifecycle::Execution,
     upstream::{
         UpstreamRequest,
-        headers::{
-            UpstreamHeaders, apply_forwarded_headers, strip_credentials, strip_hop_by_hop_headers,
-        },
+        headers::{UpstreamHeaders, apply_forwarded_headers, strip_credentials},
         uri::{QueryMode, sanitize_auth_uri},
     },
 };
@@ -13,6 +11,7 @@ use crate::{
     err::{ErrorCode, ErrorResponse},
     gate::PreparedTransport,
     obs::telemetry,
+    web::headers::strip_hop_by_hop_headers,
 };
 use axum::body::Body;
 use base64::Engine as _;
@@ -20,7 +19,7 @@ use http::header::{
     CONTENT_LENGTH, HOST, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_EXTENSIONS, SEC_WEBSOCKET_KEY,
     SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION,
 };
-use tokio_tungstenite::{MaybeTlsStream, client_async, tungstenite::client::IntoClientRequest};
+use tokio_tungstenite::{MaybeTlsStream, tungstenite::client::IntoClientRequest};
 
 pub(super) fn validate_upgrade(req: &http::Request<Body>) -> Result<(), ErrorResponse> {
     let invalid = || ErrorResponse::new(ErrorCode::GatewayWebsocketUpgradeInvalid);
@@ -55,6 +54,7 @@ pub(super) async fn connect_upstream(
     transport: &PreparedTransport,
     execution: &Execution,
     handshake_timeout: std::time::Duration,
+    config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
 ) -> Result<(UpstreamSocket, http::Response<Option<Vec<u8>>>), ErrorResponse> {
     let invalid = || ErrorResponse::new(ErrorCode::GatewayRequestPreparationFailed);
     let host = request
@@ -102,7 +102,7 @@ pub(super) async fn connect_upstream(
         .run(
             "websocket_handshake",
             Some(handshake_timeout),
-            client_async(request, stream),
+            tokio_tungstenite::client_async_with_config(request, stream, Some(config)),
         )
         .await?
         .map_err(|error| {

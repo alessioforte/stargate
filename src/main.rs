@@ -79,6 +79,10 @@ async fn serve() -> std::io::Result<()> {
         tracing::error!("Invalid listener settings: {error}");
         std::io::Error::other(error.to_string())
     })?;
+    let http_settings = settings::http_from_env().map_err(|error| {
+        tracing::error!("Invalid HTTP limit settings: {error}");
+        std::io::Error::other(error.to_string())
+    })?;
     if !settings::serves_probes(&listeners) {
         tracing::warn!(
             "No listener declares the management plane: `/livez` and `/readyz` answer nowhere; declare a listener with `LISTENER_<NAME>_PLANES=management` to expose the probes"
@@ -164,10 +168,15 @@ async fn serve() -> std::io::Result<()> {
     let listeners = listeners
         .into_iter()
         .map(|settings| {
-            let router = api::listener_router(settings.planes, lifecycle.clone(), hosts.clone())
-                .layer(Extension(Arc::clone(&gate)))
-                .layer(from_fn(headers::security_headers_middleware))
-                .layer(from_fn(logging::trace_middleware));
+            let router = api::listener_router(
+                settings.planes,
+                lifecycle.clone(),
+                hosts.clone(),
+                http_settings.max_iam_body_size,
+            )
+            .layer(Extension(Arc::clone(&gate)))
+            .layer(from_fn(headers::security_headers_middleware))
+            .layer(from_fn(logging::trace_middleware));
             srv::Listener { settings, router }
         })
         .collect::<Vec<_>>();
@@ -195,6 +204,7 @@ async fn serve() -> std::io::Result<()> {
     let result = srv::serve(
         listeners,
         tls_config,
+        http_settings,
         shutdown,
         std::time::Duration::from_secs(shutdown_timeout_secs),
     )

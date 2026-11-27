@@ -4,17 +4,22 @@ use crate::web::request::RequestExt;
 use axum::body::Body;
 use http::Request;
 
-pub(super) async fn authenticate(auth_req: Request<()>) -> Result<VerifiedIdentity, ErrorResponse> {
+pub(super) async fn authenticate(
+    auth_req: Request<()>,
+    allow_query_token: bool,
+) -> Result<VerifiedIdentity, ErrorResponse> {
     #[cfg(test)]
     if let Some(authenticator) = auth_req.extensions().get::<TestAuthenticator>() {
-        return Ok((authenticator.verify)(&auth_req));
+        return Ok((authenticator.verify)(&auth_req, allow_query_token));
     }
     if let Some(identity) = verification::verify_api_key(&auth_req).await? {
         return Ok(identity);
     }
-    Ok(verification::verify_bearer(auth_req.get_gateway_token())
-        .await?
-        .unwrap_or_else(VerifiedIdentity::anonymous))
+    Ok(
+        verification::verify_bearer(auth_req.get_gateway_token(allow_query_token))
+            .await?
+            .unwrap_or_else(VerifiedIdentity::anonymous),
+    )
 }
 
 pub(super) fn auth_request(req: &Request<Body>) -> Request<()> {
@@ -30,7 +35,7 @@ pub(super) fn auth_request(req: &Request<Body>) -> Request<()> {
 }
 
 #[cfg(test)]
-type IdentityVerifier = dyn Fn(&Request<()>) -> VerifiedIdentity + Send + Sync;
+type IdentityVerifier = dyn Fn(&Request<()>, bool) -> VerifiedIdentity + Send + Sync;
 
 #[cfg(test)]
 #[derive(Clone)]

@@ -5,8 +5,7 @@ use crate::api::account::session::issue_password_session;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::login_guard;
 use crate::web::request::RequestExt;
-use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::Request;
 use axum::response::Response;
 use db::ent::CredentialType;
 
@@ -30,11 +29,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
     let client_ip = req.get_client_ip();
     let secure = req.is_https();
 
-    let Json(credentials) = Json::<UserCredentials>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let credentials = crate::web::body::json_body::<UserCredentials>(req).await?;
 
     let (user, user_credential) =
         verify_login_password(&client_ip, &credentials.username, &credentials.password).await?;

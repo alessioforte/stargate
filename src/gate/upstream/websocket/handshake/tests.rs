@@ -236,6 +236,7 @@ async fn internal_websocket_handshake_is_sanitized_verified_and_frame_compatible
         runtime.transport("socket").unwrap(),
         &execution,
         std::time::Duration::from_secs(1),
+        Default::default(),
     )
     .await
     .unwrap();

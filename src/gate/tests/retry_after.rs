@@ -129,7 +129,7 @@ async fn gateway_ingress_rate_and_quota_denials_emit_integer_retry_after_and_kee
             let mut request = Request::new(Body::empty());
             request.extensions_mut().insert(gate(name, duration));
             request.extensions_mut().insert(TestAuthenticator {
-                verify: Arc::new(|_| VerifiedIdentity::anonymous()),
+                verify: Arc::new(|_, _| VerifiedIdentity::anonymous()),
             });
             let response = crate::gate::service(request).await.unwrap();
             assert_eq!(response.headers()[format!("{prefix}-scope")], scope);

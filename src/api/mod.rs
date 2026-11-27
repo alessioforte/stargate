@@ -169,7 +169,12 @@ pub fn server_router(
 ) -> axum::Router {
     // The single implicit listener serves every plane. A listener that declares
     // only some of them composes the same way with `plane::listener_router`.
-    plane::listener_router(plane::PlaneSet::ALL, lifecycle, hosts)
+    plane::listener_router(
+        plane::PlaneSet::ALL,
+        lifecycle,
+        hosts,
+        crate::srv::HttpSettings::default().max_iam_body_size,
+    )
 }
 
 /// IAM routes without the plane layers, for tests of the handlers themselves.

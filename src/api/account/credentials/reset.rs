@@ -5,7 +5,7 @@ use crate::iam::user::profile::{format_name, locale as user_locale};
 use crate::iam::{auth::jwt::jwt_config, pwd};
 use crate::web::messages::{MessageCode, MessageWithContinuation};
 use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::Request;
 use smtp::{Smtp, Template};
 use tracing::error;
 
@@ -28,11 +28,7 @@ use tracing::error;
 pub async fn put_credentials(req: Request) -> Result<Json<MessageWithContinuation>, ErrorResponse> {
     let audit_request = audit_request_from(req.extensions());
 
-    let Json(body) = Json::<ChangePasswordRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<ChangePasswordRequestBody>(req).await?;
 
     let token = body.token.clone();
     let claims = jwt_config()

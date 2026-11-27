@@ -26,12 +26,13 @@ fn token_from_cookie_jwt() {
 }
 
 #[test]
-fn only_the_gateway_reads_query_credentials() {
+fn only_the_gateway_reads_query_credentials_when_the_route_allows_them() {
     for key in super::TOKEN_QUERY_KEYS {
         let r = req_with(&[], Some(&format!("foo=1&{key}=qtok&bar=2")));
         assert_eq!(r.get_token(), None);
         assert_eq!(r.get_bearer_token(), None);
-        assert_eq!(r.get_gateway_token().as_deref(), Some("qtok"));
+        assert_eq!(r.get_gateway_token(false), None);
+        assert_eq!(r.get_gateway_token(true).as_deref(), Some("qtok"));
     }
 }
 
@@ -43,10 +44,13 @@ fn header_credentials_take_precedence_over_cookies_and_query() {
     );
     assert_eq!(r.get_bearer_token().as_deref(), Some("header"));
     assert_eq!(r.get_token().as_deref(), Some("header"));
-    assert_eq!(r.get_gateway_token().as_deref(), Some("header"));
+    assert_eq!(r.get_gateway_token(false).as_deref(), Some("header"));
+    assert_eq!(r.get_gateway_token(true).as_deref(), Some("header"));
     let r = req_with(&[("cookie", "jwt=cookie")], Some("token=query"));
     assert_eq!(r.get_bearer_token(), None);
     assert_eq!(r.get_token().as_deref(), Some("cookie"));
+    assert_eq!(r.get_gateway_token(false).as_deref(), Some("cookie"));
+    assert_eq!(r.get_gateway_token(true).as_deref(), Some("cookie"));
 }
 
 #[test]

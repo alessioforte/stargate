@@ -8,12 +8,13 @@ use crate::gate::{
     response::strip_internal_context_response,
     upstream::{
         headers::{
-            UpstreamHeaders, apply_forwarded_headers, strip_credentials, strip_hop_by_hop_headers,
+            UpstreamHeaders, apply_forwarded_headers, strip_credentials, strip_session_cookies,
         },
         uri::{QueryMode, sanitize_auth_uri},
     },
 };
 use crate::obs::telemetry;
+use crate::web::headers::strip_hop_by_hop_headers;
 use axum::{body::Body, response::Response};
 use http::header::HOST;
 
@@ -104,6 +105,9 @@ pub async fn handler(
     let (parts, body) = response.into_parts();
     let mut upstream_headers = parts.headers;
     strip_hop_by_hop_headers(&mut upstream_headers);
+    if ingress.iam_host {
+        strip_session_cookies(&mut upstream_headers);
+    }
     strip_internal_context_response(&mut upstream_headers);
 
     // Hyper writes the response for the downstream connection (RFC 9110 §6.2).

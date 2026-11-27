@@ -853,7 +853,7 @@ async fn grpc_access_denial_and_rate_limit_preserve_status_and_headers() {
         .unwrap();
     request.extensions_mut().insert(gate);
     request.extensions_mut().insert(TestAuthenticator {
-        verify: Arc::new(|_| {
+        verify: Arc::new(|_, _| {
             VerifiedIdentity::test_api_key(Subject::new("test".into(), SubjectType::ApiKey, None))
         }),
     });

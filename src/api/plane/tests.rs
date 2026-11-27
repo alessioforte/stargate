@@ -1,6 +1,5 @@
 use crate::{
     api::{
-        listener_router,
         plane::{Plane, PlaneSet},
         server_router,
     },
@@ -20,6 +19,15 @@ use tokio::{
     task::JoinHandle,
 };
 use tower::ServiceExt;
+
+fn listener_router(planes: PlaneSet, lifecycle: Lifecycle, hosts: IamHosts) -> Router {
+    crate::api::listener_router(
+        planes,
+        lifecycle,
+        hosts,
+        HttpSettings::default().max_iam_body_size,
+    )
+}
 
 struct Upstream {
     url: String,
@@ -118,6 +126,35 @@ async fn text(response: Response) -> String {
             .to_vec(),
     )
     .unwrap()
+}
+
+#[tokio::test]
+async fn iam_routes_reject_a_body_over_the_explicit_limit() {
+    let app = crate::api::listener_router(
+        PlaneSet::of(Plane::Identity),
+        Lifecycle::default(),
+        IamHosts::default(),
+        64,
+    )
+    .layer(Extension(Arc::new(test_support::gate(
+        gate::cfg::Config::default(),
+    ))));
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/account/login")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(" ".repeat(128)))
+        .unwrap();
+    request.extensions_mut().insert(crate::srv::test_connection(
+        "203.0.113.10:12345".parse().unwrap(),
+    ));
+    crate::srv::client_ip::prepare(&mut request);
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["code"], "request.payload_too_large");
 }
 
 #[tokio::test]

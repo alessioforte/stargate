@@ -187,7 +187,7 @@ fn request(
         .unwrap();
     request.extensions_mut().insert(gate.clone());
     request.extensions_mut().insert(TestAuthenticator {
-        verify: Arc::new(move |_| identity()),
+        verify: Arc::new(move |_, _| identity()),
     });
     request.extensions_mut().insert(crate::srv::test_connection(
         IP.parse::<SocketAddr>().unwrap(),

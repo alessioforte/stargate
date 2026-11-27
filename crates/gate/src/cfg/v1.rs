@@ -3,7 +3,7 @@ use super::graph::{
     CompileError, CompiledConfig, HeaderValueNode, HttpGraph, InternalContextNode, MatchExprNode,
     MiddlewareNode, MirrorServiceNode, NamedValuePredicate, PathPredicate, PolicyNode,
     ResponseBodyNode, RouterNode, ServiceNode, SourceIpPredicate, TimeoutOverride, TransportNode,
-    UpstreamNode, UpstreamTargetNode, ValuePredicate, WeightedServiceNode,
+    UpstreamNode, UpstreamTargetNode, ValuePredicate, WebSocketLimits, WeightedServiceNode,
 };
 use super::limit::{default_on_store_error, is_default_on_store_error};
 use super::{
@@ -256,6 +256,11 @@ pub enum Policy {
         strategies: Vec<AuthStrategy>,
         #[serde(default)]
         audience: Option<String>,
+        /// Read the gateway token from `token`, `access_token`, or `jwt` query
+        /// parameters. Off by default: query tokens leak into logs, referrers,
+        /// and caches, so a route must opt in.
+        #[serde(default)]
+        allow_query_token: bool,
     },
     AccessControl {
         resource: String,
@@ -328,6 +333,8 @@ pub struct Router {
     pub response_mode: ResponseMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeouts: Option<RouterTimeouts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websocket: Option<RouterWebSocket>,
     #[serde(default)]
     pub priority: Option<i32>,
     #[serde(rename = "match")]
@@ -342,6 +349,17 @@ pub struct Router {
     /// scope and the subject's `attrs.quota`.
     #[serde(default)]
     pub quota_cost: Option<u64>,
+}
+
+/// Per-router WebSocket frame limits. Both sides of a proxied WebSocket use
+/// them: the client connection and the upstream one.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterWebSocket {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_message_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_frame_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -647,6 +665,7 @@ fn compile_policies(
             Policy::Auth {
                 strategies,
                 audience,
+                allow_query_token,
             } => {
                 if strategies.is_empty() {
                     return Err(CompileError::new(
@@ -687,6 +706,7 @@ fn compile_policies(
                 PolicyNode::Auth {
                     strategies: strategies.clone(),
                     audience,
+                    allow_query_token: *allow_query_token,
                 }
             }
             Policy::AccessControl { resource, env } => {
@@ -1108,12 +1128,14 @@ fn compile_routers(
                 .as_ref()
                 .and_then(|timeouts| timeouts.upload_idle.as_deref()),
         )?;
+        let websocket = compile_websocket(&router.websocket, name)?;
 
         out.push(RouterNode {
             name: name.clone(),
             response_mode: router.response_mode,
             request_timeout,
             upload_idle_timeout,
+            websocket,
             priority: router.priority.unwrap_or(0),
             order,
             matcher: compile_match_expr(&router.matcher, format!("http.routers.{}.match", name))?,
@@ -1131,6 +1153,35 @@ fn compile_routers(
     });
 
     Ok(out)
+}
+
+fn compile_websocket(
+    websocket: &Option<RouterWebSocket>,
+    router: &str,
+) -> Result<WebSocketLimits, CompileError> {
+    let mut limits = WebSocketLimits::default();
+    let Some(websocket) = websocket else {
+        return Ok(limits);
+    };
+    if let Some(value) = websocket.max_message_bytes {
+        if value == 0 {
+            return Err(CompileError::new(
+                format!("http.routers.{router}.websocket.max_message_bytes"),
+                "must be greater than zero",
+            ));
+        }
+        limits.max_message_bytes = value;
+    }
+    if let Some(value) = websocket.max_frame_bytes {
+        if value == 0 {
+            return Err(CompileError::new(
+                format!("http.routers.{router}.websocket.max_frame_bytes"),
+                "must be greater than zero",
+            ));
+        }
+        limits.max_frame_bytes = value;
+    }
+    Ok(limits)
 }
 
 fn compile_match_expr(expr: &MatchExpr, path: String) -> Result<MatchExprNode, CompileError> {
@@ -1379,6 +1430,7 @@ mod tests {
         cfg::AuthStrategy,
         graph::{
             MatchExprNode, MiddlewareNode, PathPredicate, PolicyNode, ServiceNode, ValuePredicate,
+            WebSocketLimits,
         },
     };
 
@@ -1541,6 +1593,101 @@ mod tests {
     }
 
     #[test]
+    fn validates_router_websocket_limits() {
+        let mut raw = serde_json::to_value(Config::default()).unwrap();
+        raw["http"] = serde_json::json!({
+            "services": {"local": {"kind": "direct_response", "status": 200}},
+            "routers": {"api": {"match": {"path": {"prefix": "/"}}, "service": "local"}}
+        });
+        let mut configured = raw.clone();
+        configured["http"]["routers"]["api"]["websocket"] =
+            serde_json::json!({"max_message_bytes": 4096, "max_frame_bytes": 1024});
+        let compiled = serde_json::from_value::<Config>(configured)
+            .unwrap()
+            .compile()
+            .unwrap();
+        assert_eq!(
+            compiled.http.routers[0].websocket,
+            WebSocketLimits {
+                max_message_bytes: 4096,
+                max_frame_bytes: 1024,
+            }
+        );
+
+        let compiled = serde_json::from_value::<Config>(raw.clone())
+            .unwrap()
+            .compile()
+            .unwrap();
+        assert_eq!(
+            compiled.http.routers[0].websocket,
+            WebSocketLimits::default()
+        );
+
+        for field in ["max_message_bytes", "max_frame_bytes"] {
+            let mut invalid = raw.clone();
+            invalid["http"]["routers"]["api"]["websocket"] = serde_json::json!({ field: 0 });
+            let error = serde_json::from_value::<Config>(invalid)
+                .unwrap()
+                .compile()
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("http.routers.api.websocket.{field}"))
+            );
+        }
+    }
+
+    #[test]
+    fn auth_policy_opts_into_query_tokens() {
+        let compiled = parse_config(
+            r#"
+schema: stargate/v1
+ingress:
+  limit: ingress
+  timeout: 250ms
+limits:
+  default:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 1s
+  ingress:
+    strategy: gcra
+    params:
+      max_burst: 100
+      replenish_1_per: 100ms
+http:
+  policies:
+    bearer:
+      kind: auth
+      strategies: [jwt]
+    query:
+      kind: auth
+      strategies: [jwt]
+      allow_query_token: true
+"#,
+        )
+        .compile()
+        .expect("auth policies should compile");
+
+        assert!(matches!(
+            &compiled.http.policies["bearer"],
+            PolicyNode::Auth {
+                allow_query_token: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &compiled.http.policies["query"],
+            PolicyNode::Auth {
+                allow_query_token: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn compiles_oauth_auth_policy_with_exact_audience() {
         let compiled = parse_config(
             r#"
@@ -1574,9 +1721,11 @@ http:
             PolicyNode::Auth {
                 strategies,
                 audience,
+                allow_query_token,
             } => {
                 assert_eq!(strategies, &[AuthStrategy::OAuth]);
                 assert_eq!(audience.as_deref(), Some("gateway"));
+                assert!(!allow_query_token);
             }
             other => panic!("unexpected policy node: {other:?}"),
         }

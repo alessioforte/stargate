@@ -2,7 +2,7 @@
 use super::*;
 use authorization::Permission;
 use axum::{
-    Extension, Router,
+    Extension, Json, Router,
     body::Body,
     middleware::from_fn,
     routing::{delete, get, post, put},

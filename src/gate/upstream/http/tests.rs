@@ -1,6 +1,7 @@
 use super::*;
 use crate::ctx::sign::test_support::{PRIVATE_KEY, PUBLIC_KEY};
 use crate::gate::upstream::internal_context::InternalDispatch;
+use crate::web::headers::strip_hop_by_hop_headers;
 use crate::{
     ctx::{
         INTERNAL_CONTEXT_HEADER, PropagationDraft, RequestContext, sign::InternalContextRuntime,
@@ -151,14 +152,17 @@ async fn axum_body_wrapper_preserves_trailers() {
 }
 
 #[test]
-fn strip_hop_by_hop_headers_removes_standard_and_connection_listed_headers() {
+fn strip_hop_by_hop_headers_removes_only_the_fixed_fields() {
     let mut headers = http::HeaderMap::new();
     headers.insert(
         CONNECTION,
-        http::HeaderValue::from_static("keep-alive, x-remove"),
+        http::HeaderValue::from_static("keep-alive, x-keep-at-dispatch"),
     );
     headers.insert("keep-alive", http::HeaderValue::from_static("timeout=5"));
-    headers.insert("x-remove", http::HeaderValue::from_static("1"));
+    headers.insert(
+        "x-keep-at-dispatch",
+        http::HeaderValue::from_static("configured"),
+    );
     headers.insert(TE, http::HeaderValue::from_static("trailers"));
     headers.insert("x-keep", http::HeaderValue::from_static("ok"));
 
@@ -166,9 +170,11 @@ fn strip_hop_by_hop_headers_removes_standard_and_connection_listed_headers() {
 
     assert!(headers.get(CONNECTION).is_none());
     assert!(headers.get("keep-alive").is_none());
-    assert!(headers.get("x-remove").is_none());
     assert!(headers.get(TE).is_none());
-    assert_eq!(headers.get("x-keep").unwrap(), "ok");
+    // The client-nominated field is consumed at ingress; at dispatch only the
+    // fixed list is removed, so an operator value with that name survives.
+    assert_eq!(headers["x-keep-at-dispatch"], "configured");
+    assert_eq!(headers["x-keep"], "ok");
 }
 
 #[tokio::test]

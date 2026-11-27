@@ -144,10 +144,19 @@ Every listener applies the same per-connection limits:
 | ------------------------------ | ------- | ------------------------------------------------------------------- |
 | First request and header read  | 10 s    | Ends a connection that sends no complete request                     |
 | TLS handshake timeout          | 10 s    | A client that never completes the handshake releases its slot       |
+| HTTP/1 request header fields   | 100     | Bounds parsing work; `MAX_HEADERS` changes it                        |
+| Request header size            | 32 KiB  | HTTP/1 read buffer and HTTP/2 decoded list; `MAX_HEADER_SIZE` changes it |
 | HTTP/2 concurrent streams      | 100     | Bounds work per connection; clients wait or open another one        |
-| HTTP/2 header list size        | 32 KiB  | Covers cookies and bearer tokens with headroom; bounds decode work  |
 | HTTP/2 keep-alive              | 30 s / 10 s | Detects silent peers and releases their slots within 40 s       |
 | Concurrent connections         | 1024    | Bounds descriptors and tasks; the kernel backlog holds the rest     |
+| IAM request body               | 2 MiB   | Largest JSON or form body the IAM planes buffer; `MAX_IAM_BODY_SIZE` changes it |
+
+`MAX_HEADER_SIZE` applies to the HTTP/1 read buffer that bounds the header
+block (hyper's minimum is 8192 bytes) and to `max_header_list_size` on HTTP/2.
+`MAX_HEADERS` bounds the HTTP/1 field count; HTTP/2 requests are bounded by the
+decoded header size. An over-limit request header block is answered with
+`431`; an IAM body over `MAX_IAM_BODY_SIZE` with `413 request.payload_too_large`.
+Invalid or non-positive values stop startup.
 
 The first-request timeout covers what hyper's own header timer cannot: it runs
 from the accepted connection (or the completed TLS handshake) until the first

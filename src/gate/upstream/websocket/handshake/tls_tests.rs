@@ -151,6 +151,7 @@ async fn prepared_websocket_tls_uses_private_ca_identity_target_name_and_pinned_
             runtime.transport("socket").unwrap(),
             &execution(runtime),
             Duration::from_secs(1),
+            Default::default(),
         )
         .await
         .unwrap_err();
@@ -175,6 +176,7 @@ async fn prepared_websocket_tls_uses_private_ca_identity_target_name_and_pinned_
         good.transport("socket").unwrap(),
         &execution(&good),
         Duration::from_secs(1),
+        Default::default(),
     )
     .await
     .unwrap();

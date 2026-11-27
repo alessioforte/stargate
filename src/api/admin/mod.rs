@@ -23,8 +23,7 @@ use crate::ctx::{audit_request_from, take_trusted_audit_context_from};
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::auth::jwt::jwt_config;
 use crate::{api::middleware::rate_limit, web::request::RequestExt};
-use axum::Json;
-use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
+use axum::extract::{FromRequestParts, Path, Query, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -341,10 +340,7 @@ pub async fn extract_json<T>(req: Request) -> Result<T, ErrorResponse>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
-    let Json(value) = Json::<T>::from_request(req, &()).await.map_err(|error| {
-        ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-    })?;
-    Ok(value)
+    crate::web::body::json_body(req).await
 }
 
 /// Like `extract_json`, but an empty body yields `None` instead of a 400,
@@ -358,7 +354,17 @@ where
     let bytes = axum::body::to_bytes(req.into_body(), MAX_OPTIONAL_BODY_BYTES)
         .await
         .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalid).with_message(error.to_string())
+            let message = error.to_string();
+            let too_large = error
+                .into_inner()
+                .downcast::<http_body_util::LengthLimitError>()
+                .is_ok();
+            ErrorResponse::new(if too_large {
+                ErrorCode::RequestPayloadTooLarge
+            } else {
+                ErrorCode::RequestInvalid
+            })
+            .with_message(message)
         })?;
     if bytes.is_empty() {
         return Ok(None);

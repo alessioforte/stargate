@@ -48,6 +48,12 @@ impl IamHosts {
     }
 }
 
+/// Request extension set by host dispatch when a request reached the IAM
+/// planes, including their gateway fallback. The gateway then owns the origin
+/// the IAM session cookie belongs to and must not let an upstream set it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IamHost;
+
 static IAM_HOSTS: OnceLock<IamHosts> = OnceLock::new();
 
 /// Validate before opening the listener; requests use only the stored setting.

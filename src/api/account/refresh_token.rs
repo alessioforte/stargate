@@ -4,7 +4,7 @@ use crate::iam::{auth::jwt::jwt_config, sess::registry};
 use crate::web::cookies::build_jwt_cookie;
 use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
 use http::header::SET_COOKIE;
 
@@ -23,11 +23,7 @@ use http::header::SET_COOKIE;
 )]
 pub async fn put_refresh_token(req: Request) -> Result<Response, ErrorResponse> {
     let secure = req.is_https();
-    let Json(body) = Json::<RefreshTokenRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<RefreshTokenRequestBody>(req).await?;
     let claims = jwt_config()
         .validate_session_refresh_token(&body.refresh_token)
         .map_err(|_| ErrorResponse::new(ErrorCode::AuthTokenInvalid))?;
