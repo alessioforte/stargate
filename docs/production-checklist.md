@@ -43,6 +43,13 @@ example hostname, CIDR, Secret name and image tag.
       changing `PASSWORD_PEPPER` invalidates every stored password hash.
 - [ ] **Migration Secret** (`migrations.job.existingSecret`) with a schema-owner role
       (`POSTGRES_USERNAME`, `POSTGRES_PASSWORD`); the runtime role has DML only.
+- [ ] **Redis memory policy**: set `maxmemory` and `maxmemory-policy noeviction`.
+      An eviction policy, `volatile-lru` included, can delete sessions and
+      revocations, because Stargate sets an expiry on them; an evicted revocation
+      makes its token valid again until the token expires. Redis starts without a
+      bound (`maxmemory 0`), and many managed services default to `volatile-lru`.
+      A full Redis with `noeviction` answers new sign-ins with `503` while existing
+      sessions stay readable. See [Redis state keys](redis-keys.md#memory-policy).
 - [ ] **CA bundles**: the CNPG CA Secret (`<cluster>-ca`, key `ca.crt`) and the Redis CA,
       mounted by `extraVolumes`. `POSTGRES_SSLMODE=verify-full` and `REDIS_CA_FILE`
       refuse unverified connections.

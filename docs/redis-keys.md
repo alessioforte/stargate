@@ -125,6 +125,25 @@ in one command, with no `SCAN` or per-network index.
   is an external contract, explicitly named and deliberately outside the
   namespaced keyspace.
 
+## Memory policy
+
+Run Redis with `maxmemory` set and `maxmemory-policy noeviction`. Stargate sets
+an expiry on its security state (sessions, revocations, OAuth state, counters),
+so the `volatile-*` policies can evict it as well as the `allkeys-*` ones.
+Evicting a session signs its user out. Evicting a revocation
+(`{j:<jti>}:revoked`) makes the revoked token valid again until the token's own
+expiry, and evicting a login-guard counter resets a brute-force budget. Redis
+itself starts with `noeviction` and no bound (`maxmemory 0`), and many managed
+services start with `volatile-lru`, so set both explicitly.
+
+With `noeviction` a full Redis refuses writes that need memory. New sign-ins,
+OTP and MFA challenges and OAuth state fail closed with
+`503 auth.state_unavailable`, traffic limits follow their `on_store_error`
+policy, and existing sessions stay readable until memory frees; the `memory-full`
+scenario of the [Redis failure bench](redis-failure-bench.md) checks this. The
+edge in-memory store applies the same policy at `STORE_MAX_MEMORY_MB` (see
+[Ingress admission](config-v1.md#ingress-admission)).
+
 ## ACL
 
 Restrict the Redis user to the schema root (and the audit stream):

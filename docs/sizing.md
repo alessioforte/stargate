@@ -143,6 +143,10 @@ keys and audit retention. Linked clients, claims and scopes change record sizes.
 Keep audit-stream capacity and consumer outages in the separate Redis budget;
 never derive the server memory limit directly from this small-session estimate.
 
+Run Redis with `maxmemory` set and `maxmemory-policy noeviction`, as described
+in [Redis state keys](redis-keys.md#memory-policy): an eviction policy can
+delete sessions and revocations.
+
 ## Pod resources and scaling
 
 The production overlay keeps request 250m CPU / 512 MiB and limit 2 CPUs / 1 GiB,

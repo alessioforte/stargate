@@ -153,7 +153,9 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `redis.rs` init/readiness and
   Redis TLS/credential settings (`settings.rs`). Redis uses verified TLS for
   `rediss://`, public roots by default or `REDIS_CA_FILE`, and
-  separate credentials without URL encoding. The store, limiter, and audit relay
+  separate credentials without URL encoding. Redis must run with `maxmemory` set
+  and `maxmemory-policy noeviction`: an eviction policy can delete sessions and
+  revocations (`docs/redis-keys.md`, "Memory policy"). The store, limiter, and audit relay
   share the same pool; URL credentials cannot be combined with separate fields.
   `crates/store/src/keys.rs` owns every state-key name:
   `stargate:v1:{<entity>}:<name>[:<qualifier>...]`. The version is part of the
