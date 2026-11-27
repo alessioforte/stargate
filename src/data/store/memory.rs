@@ -10,7 +10,7 @@ const MAX_MEMORY_ENV: &str = "STORE_MAX_MEMORY_MB";
 const DEFAULT_MEMORY_BACKUP_INTERVAL_SECS: u64 = 30;
 const DEFAULT_MEMORY_BACKUP_WRITE_THRESHOLD: u64 = 100;
 const MEMORY_BACKUP_CHECK_INTERVAL_SECS: u64 = 1;
-const DEFAULT_MAX_MEMORY_MB: usize = 100;
+const DEFAULT_MAX_MEMORY_MB: usize = 256;
 /// How often expired entries free their memory: a full store accepts new
 /// entries again within this delay of their expiry.
 const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -238,5 +238,33 @@ mod tests {
     #[test]
     fn the_backup_lives_in_the_data_directory() {
         assert_eq!(backup_path(), crate::conf::data::dir().join("memory.bin"));
+    }
+
+    /// Without `STORE_MAX_MEMORY_MB` the store holds at most 256 MiB.
+    #[tokio::test]
+    async fn the_memory_limit_defaults_to_256_mib() {
+        const CHILD: &str = "STARGATE_TEST_STORE_MEMORY_DEFAULT";
+        if std::env::var_os(CHILD).is_none() {
+            let output = tokio::task::spawn_blocking(|| {
+                crate::conf::child_test::run(
+                    "data::store::memory::tests::the_memory_limit_defaults_to_256_mib",
+                    |command| {
+                        command.env(CHILD, "1").env_remove(MAX_MEMORY_ENV);
+                    },
+                )
+            })
+            .await
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        assert_eq!(init_settings().unwrap(), 256);
+        assert_eq!(STORE.memory_limit_bytes(), 256 * 1024 * 1024);
     }
 }

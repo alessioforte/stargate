@@ -251,14 +251,34 @@ Use a Traefik rate limit as a safety net: `allow` removes the distributed per-IP
 allowance during a store outage. It does not provide a local fallback counter.
 These settings belong to the configuration document and apply on reload.
 
-The edge profile keeps limits in memory, bounded by `STORE_MAX_MEMORY_MB`. Like
-Redis with `noeviction`, a full store evicts nothing, so sessions and
-revocations are never lost to make room: it refuses to create entries while
-existing ones keep updating. A limit check that needs a new bucket then follows
-its `on_store_error` policy, and the limit store reports degraded. Revocations
-are recorded even when the store is full; other new security state, such as a
-new session or a login attempt counter, fails closed with
-`503 auth.state_unavailable`. Expired entries free their room within a second.
+The edge profile keeps limits and security state in memory, bounded by
+`STORE_MAX_MEMORY_MB` (default 256 MiB). Like Redis with `noeviction`, a full
+store evicts nothing, so sessions and revocations are never lost to make room:
+it refuses to create entries while existing ones keep updating. A limit check
+that needs a new bucket then follows its `on_store_error` policy, and the limit
+store reports degraded. Revocations are recorded even when the store is full;
+other new security state, such as a new session, a login attempt counter, an OTP
+challenge or OAuth state, fails closed with `503 auth.state_unavailable`.
+Expired entries free their room within a second of their expiry.
+
+The bound counts an estimate of each entry: its slot in the map, its key and its
+value. An ingress bucket takes about 160 bytes (about 6,500 per MiB) and a
+password attempt counter about 240 bytes (about 4,300 per MiB), so 256 MiB hold
+about 1.6 million ingress buckets or 1.1 million attempt counters. The process
+uses more memory than the estimate: allocator and table overhead, request
+buffers and password hashing come on top, so keep the container limit well
+above `STORE_MAX_MEMORY_MB`.
+
+A flood of sign-in attempts can fill the store. Each attempt with an unknown
+login identifier creates two attempt counters that live five minutes, and one
+client network may try 20 times in five minutes. About 1,900 such requests per
+second, from some 28,000 IPv6 /64 networks (fewer than one /48), keep 256 MiB
+full. Until the flood stops and its counters expire, new sign-ins, OTP and MFA
+challenges and OAuth flows that need new state answer `503`; existing sessions,
+their renewal and revocations keep working. In the cluster profile Redis with
+`noeviction` fails the same flows and also refuses updates that need more memory
+(see `docs/redis-keys.md`). Keep a rate limit in front of Stargate and size the
+store for the expected live state; see `docs/sizing.md`.
 
 ### IAM and admin limits
 

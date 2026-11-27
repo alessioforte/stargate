@@ -145,7 +145,7 @@ them; `iam` imports neither `api` nor the local gateway runtime.
   `pg_database_datname_index`, after a fresh existence query confirms the target.
   `data/store/`: selected profile interface; `memory.rs` persistence (backup at
   `DATA_PATH/memory.bin`, next to the edge SQLite database;
-  `STORE_MAX_MEMORY_MB` validated at startup and enforced like Redis `noeviction`:
+  `STORE_MAX_MEMORY_MB` (default 256) validated at startup and enforced like Redis `noeviction`:
   a full store evicts nothing and refuses new entries with `StoreError::Full`,
   except revocations; existing entries keep updating; limit checks follow
   `on_store_error`, other security state answers `503`; a one-second sweep
@@ -1115,7 +1115,7 @@ the same logical columns on PostgreSQL and SQLite.
 | `REDIS_WAIT_TIMEOUT_MS` | 250 | Positive milliseconds to wait for replica acknowledgments |
 | `REDIS_WAIT_FAIL_ON_TIMEOUT` | true | Return `503` on replication shortfall. With false, warn and return success |
 | `REDIS_CA_FILE`                                                                        | -                                      | Private CA PEM roots for `rediss://`; replace public roots                                                                          |
-| `STORE_MAX_MEMORY_MB`                                                                  | 100                                    | In-memory store limit in MiB (`edge`); positive integer, invalid values stop startup. A full store evicts nothing and refuses new entries except revocations |
+| `STORE_MAX_MEMORY_MB`                                                                  | 256                                    | In-memory store limit in MiB (`edge`); positive integer, invalid values stop startup. A full store evicts nothing and refuses new entries except revocations |
 | `RUST_LOG`                                                                             | -                                      | Tracing/log filter directives                                                                                                       |
 | `LOG_FORMAT`                                                                           | pretty (debug), json (release)         | Console format: json, compact, or pretty; invalid values stop logging initialization                                                |
 | `LOG_CONSOLE_ENABLED`                                                                  | true                                   | Log to stdout; stays enabled if both sinks are disabled                                                                             |
