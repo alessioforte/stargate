@@ -1,7 +1,7 @@
-use crate::err::{ErrorCode, ErrorResponse};
+use crate::err::ErrorResponse;
 use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::Request;
 use axum::response::Response;
 
 use crate::iam::otp::service::{complete_passwordless_email_otp, start_passwordless_email_otp};
@@ -30,11 +30,7 @@ pub async fn post_login_email_otp(
     req: Request,
 ) -> Result<Json<OtpChallengeResponse>, ErrorResponse> {
     let client_ip = req.get_client_ip();
-    let Json(body) = Json::<PasswordlessEmailOtpRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<PasswordlessEmailOtpRequestBody>(req).await?;
     Ok(Json(
         start_passwordless_email_otp(&body.email, &client_ip).await?,
     ))
@@ -61,11 +57,7 @@ pub async fn post_login_email_otp(
 #[axum::debug_handler]
 pub async fn put_login_email_otp(req: Request) -> Result<Response, ErrorResponse> {
     let secure = req.is_https();
-    let Json(body) = Json::<PasswordlessEmailOtpVerifyRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<PasswordlessEmailOtpVerifyRequestBody>(req).await?;
     let (user, auth_time) = complete_passwordless_email_otp(&body.challenge_id, &body.code).await?;
     crate::api::account::session::issue_user_session(
         user,

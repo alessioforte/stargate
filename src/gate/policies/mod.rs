@@ -54,6 +54,7 @@ pub async fn apply_policies(
             PolicyNode::Auth {
                 strategies,
                 audience,
+                ..
             } => {
                 if !auth_policy_allows(strategies, audience.as_deref(), identity) {
                     telemetry::record_gateway_policy("auth", "denied");
@@ -155,6 +156,22 @@ pub async fn apply_policies(
         usage,
     )
     .await
+}
+
+/// Query credentials are read only when an attached auth policy opts in.
+pub(in crate::gate) fn accepts_query_token(
+    router: &RouterNode,
+    graph: &gate::graph::HttpGraph,
+) -> bool {
+    router.policies.iter().any(|name| {
+        matches!(
+            graph.policies.get(name),
+            Some(PolicyNode::Auth {
+                allow_query_token: true,
+                ..
+            })
+        )
+    })
 }
 
 fn auth_strategy_allowed(strategies: &[AuthStrategy], kind: AuthKind) -> bool {

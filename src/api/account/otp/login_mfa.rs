@@ -1,9 +1,9 @@
-use crate::err::{ErrorCode, ErrorResponse};
+use crate::err::ErrorResponse;
 use crate::iam::otp::service::{complete_login_mfa, maybe_start_login_mfa as start_login_mfa};
 use crate::iam::otp::types::MfaChallengeVerifyRequestBody;
 use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::{FromRequest, Path, Request};
+use axum::extract::{Path, Request};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
@@ -33,11 +33,7 @@ pub async fn put_login_mfa_challenge(
 ) -> Result<Response, ErrorResponse> {
     let client_ip = req.get_client_ip();
     let secure = req.is_https();
-    let Json(body) = Json::<MfaChallengeVerifyRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<MfaChallengeVerifyRequestBody>(req).await?;
 
     let (user, auth_time, requested_org_id) = complete_login_mfa(&challenge_id, &body.code).await?;
 

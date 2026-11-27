@@ -431,6 +431,75 @@ async fn check_gateway_ingress(trusted: bool) {
     assert_eq!(records[0].headers["x-forwarded-prefix"], "/api");
 }
 
+#[tokio::test]
+#[allow(clippy::result_large_err)]
+async fn an_upstream_message_over_the_router_limit_closes_with_1011() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_url = format!("http://{}", listener.local_addr().unwrap());
+    let upstream = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket =
+            accept_hdr_async(stream, |_: &WsRequest, response: WsResponse| Ok(response))
+                .await
+                .unwrap();
+        socket
+            .send(Message::Text("x".repeat(64).into()))
+            .await
+            .unwrap();
+        let _ = socket.next().await;
+    });
+    let mut config = serde_json::to_value(gate::cfg::Config::default()).unwrap();
+    config["http"] = json!({
+        "upstreams":{"socket":{"targets":[{"url":upstream_url}]}},
+        "services":{"socket":{"kind":"load_balancer","upstream":"socket"}},
+        "routers":{"socket":{
+            "match":{"path":{"prefix":"/"}},
+            "service":"socket",
+            "websocket":{"max_message_bytes":16,"max_frame_bytes":16}
+        }}
+    });
+    let runtime = runtime(config, false);
+    let limits = runtime
+        .core
+        .graph
+        .routers
+        .iter()
+        .find(|router| router.name == "socket")
+        .unwrap()
+        .websocket;
+    let app = Router::new().fallback(any(move |mut req: Request<Body>| {
+        let runtime = runtime.clone();
+        async move {
+            req.extensions_mut().insert(crate::srv::test_connection(
+                "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+            ));
+            crate::srv::client_ip::prepare(&mut req);
+            let mut state = request_state(&runtime, &mut req, false);
+            state.websocket = limits;
+            let plan = build_execution_plan(&runtime.core.graph, "socket", "request-id").unwrap();
+            execute_plan_with_request(&runtime, &plan, req, &state).await
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/socket", listener.local_addr().unwrap());
+    let gateway = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    let (mut socket, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let Message::Close(Some(frame)) = message else {
+        panic!("expected a close after the oversize upstream message, got {message:?}");
+    };
+    assert_eq!(u16::from(frame.code), 1011);
+    assert_eq!(frame.reason, "upstream connection lost");
+
+    upstream.abort();
+    gateway.abort();
+}
+
 #[test]
 fn upstreams_share_the_forwarding_trust_boundary() {
     tokio::runtime::Runtime::new().unwrap().block_on(async {

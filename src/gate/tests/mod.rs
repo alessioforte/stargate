@@ -5,6 +5,8 @@ mod forwarded_headers;
 #[cfg(feature = "memory")]
 mod grpc;
 #[cfg(feature = "memory")]
+mod hygiene;
+#[cfg(feature = "memory")]
 mod ingress;
 mod lifecycle;
 mod nested_execution;

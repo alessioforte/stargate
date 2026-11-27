@@ -4,7 +4,7 @@ use crate::iam::auth::jwt::jwt_config;
 use crate::iam::user::profile::locale as user_locale;
 use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::Request;
 use db::ent::{TrustedAuditActor, TrustedAuditContext};
 use serde::{Deserialize, Serialize};
 use tools::Locale;
@@ -120,11 +120,7 @@ pub async fn put_profile(req: Request) -> Result<Json<UserSchema>, ErrorResponse
         .ok_or_else(|| ErrorResponse::new(ErrorCode::AuthTokenMissing))?;
     let user = session_user(token).await?;
 
-    let Json(body) = Json::<UpdateProfileRequest>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<UpdateProfileRequest>(req).await?;
     let locale = Locale::parse(&body.locale).ok_or_else(|| {
         ErrorResponse::new(ErrorCode::RequestInvalid).with_param("field", "locale")
     })?;

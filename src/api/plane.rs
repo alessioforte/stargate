@@ -48,11 +48,11 @@ impl Plane {
     }
 
     /// The plane's router with the layers the plane owns.
-    pub fn router(self, lifecycle: Lifecycle) -> Router {
+    pub fn router(self, lifecycle: Lifecycle, max_iam_body_size: usize) -> Router {
         match self {
             Self::Management => crate::api::health::router(lifecycle),
-            Self::Identity => iam_layers(identity_routes()),
-            Self::Admin => iam_layers(admin_routes()),
+            Self::Identity => iam_layers(identity_routes(), max_iam_body_size),
+            Self::Admin => iam_layers(admin_routes(), max_iam_body_size),
             Self::Gateway => Router::new().fallback_service(service_fn(|request| async {
                 crate::gate::service(restore_client_uri(request)).await
             })),
@@ -130,11 +130,16 @@ impl fmt::Display for PlaneSet {
 /// The router a listener serves: the planes it declares, each with its own
 /// layers. Requests on IAM hosts reach the gateway, if the listener serves it,
 /// only when no IAM route matches, exactly as on the single implicit listener.
-pub fn listener_router(planes: PlaneSet, lifecycle: Lifecycle, hosts: IamHosts) -> Router {
+pub fn listener_router(
+    planes: PlaneSet,
+    lifecycle: Lifecycle,
+    hosts: IamHosts,
+    max_iam_body_size: usize,
+) -> Router {
     let gateway = planes
         .contains(Plane::Gateway)
-        .then(|| Plane::Gateway.router(lifecycle.clone()));
-    let iam = iam_planes(planes, &lifecycle).map(|iam| match &gateway {
+        .then(|| Plane::Gateway.router(lifecycle.clone(), max_iam_body_size));
+    let iam = iam_planes(planes, &lifecycle, max_iam_body_size).map(|iam| match &gateway {
         Some(gateway) => kept_uri(normalized(iam.fallback_service(gateway.clone()))),
         None => normalized(iam),
     });
@@ -149,19 +154,19 @@ pub fn listener_router(planes: PlaneSet, lifecycle: Lifecycle, hosts: IamHosts) 
         (None, None) => Router::new(),
     };
     if planes.contains(Plane::Management) {
-        router.merge(Plane::Management.router(lifecycle))
+        router.merge(Plane::Management.router(lifecycle, max_iam_body_size))
     } else {
         router
     }
 }
 
 /// The IAM routes a listener serves, with the layers of each plane.
-fn iam_planes(planes: PlaneSet, lifecycle: &Lifecycle) -> Option<Router> {
+fn iam_planes(planes: PlaneSet, lifecycle: &Lifecycle, max_iam_body_size: usize) -> Option<Router> {
     let mut iam = Router::new();
     let mut serves_iam = false;
     for plane in [Plane::Identity, Plane::Admin] {
         if planes.contains(plane) {
-            iam = iam.merge(plane.router(lifecycle.clone()));
+            iam = iam.merge(plane.router(lifecycle.clone(), max_iam_body_size));
             serves_iam = true;
         }
     }
@@ -173,18 +178,22 @@ fn iam_planes(planes: PlaneSet, lifecycle: &Lifecycle) -> Option<Router> {
             .nest_service(&crate::conf::apps::console_app_base_path(), Router::new());
     }
     if serves_iam {
-        iam = iam.merge(iam_layers(crate::api::docs::router(planes)));
+        iam = iam.merge(iam_layers(
+            crate::api::docs::router(planes),
+            max_iam_body_size,
+        ));
     }
     (serves_iam || planes.contains(Plane::Gateway)).then_some(iam)
 }
 
 /// Layers shared by the IAM planes: the per-IP ingress allowance, the matched
-/// route for telemetry, and the CORS and compression the hosted API and apps
-/// expect. The gateway plane deliberately has none of them.
-fn iam_layers(router: Router) -> Router {
+/// route for telemetry, the explicit body cap, and the CORS and compression the
+/// hosted API and apps expect. The gateway plane deliberately has none of them.
+fn iam_layers(router: Router, max_iam_body_size: usize) -> Router {
     router
         .layer(from_fn(ingress_limit_middleware))
         .layer(from_fn(record_route))
+        .layer(axum::extract::DefaultBodyLimit::max(max_iam_body_size))
         .layer(crate::web::cors::hyper_configure())
         .layer(CompressionLayer::new())
 }

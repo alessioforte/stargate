@@ -137,6 +137,7 @@ pub enum PolicyNode {
     Auth {
         strategies: Vec<AuthStrategy>,
         audience: Option<String>,
+        allow_query_token: bool,
     },
     AccessControl {
         resource: String,
@@ -161,6 +162,7 @@ pub struct RouterNode {
     pub response_mode: ResponseMode,
     pub request_timeout: TimeoutOverride,
     pub upload_idle_timeout: TimeoutOverride,
+    pub websocket: WebSocketLimits,
     pub name: String,
     pub priority: i32,
     pub order: usize,
@@ -178,6 +180,22 @@ pub enum TimeoutOverride {
     Inherit,
     Disabled,
     Duration(std::time::Duration),
+}
+
+/// Limits applied to both sides of a proxied WebSocket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebSocketLimits {
+    pub max_message_bytes: usize,
+    pub max_frame_bytes: usize,
+}
+
+impl Default for WebSocketLimits {
+    fn default() -> Self {
+        Self {
+            max_message_bytes: 8 * 1024 * 1024,
+            max_frame_bytes: 1024 * 1024,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -1,8 +1,9 @@
+use crate::conf::hosts::IamHost;
 use crate::ctx::{INTERNAL_CONTEXT_HEADER, REQUEST_ID_HEADER};
 use crate::web::cookies::SESSION_COOKIE;
 use ::http::{HeaderMap, HeaderName, HeaderValue};
 use gate::graph::HeaderValueNode;
-use http::header::{AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION};
+use http::header::{AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION, SET_COOKIE};
 use std::net::IpAddr;
 
 /// Ingress facts survive URI/header rewrites and every replayed dispatch.
@@ -12,6 +13,9 @@ pub(in crate::gate) struct UpstreamHeaders {
     pub(in crate::gate) peer: Option<IpAddr>,
     pub(in crate::gate) original_host: Option<HeaderValue>,
     pub(in crate::gate) listener_tls: bool,
+    /// The request is on an IAM host, where the session cookie belongs to
+    /// Stargate and an upstream may not set it.
+    pub(in crate::gate) iam_host: bool,
 }
 
 impl UpstreamHeaders {
@@ -25,6 +29,7 @@ impl UpstreamHeaders {
                     .and_then(|authority| HeaderValue::from_str(authority.as_str()).ok())
             }),
             listener_tls,
+            iam_host: req.extensions().get::<IamHost>().is_some(),
         }
     }
 }
@@ -251,31 +256,37 @@ fn is_cookie_octet(byte: u8) -> bool {
     matches!(byte, 0x21 | 0x23..=0x2b | 0x2d..=0x3a | 0x3c..=0x5b | 0x5d..=0x7e)
 }
 
-// RFC 9110 section 7.6.1: remove Connection-nominated fields before forwarding.
-pub(in crate::gate) fn strip_hop_by_hop_headers(headers: &mut http::HeaderMap) {
-    let mut connection_headers = Vec::new();
-    for value in headers.get_all(http::header::CONNECTION) {
-        for header in value.as_bytes().split(|byte| *byte == b',') {
-            if let Ok(name) = http::header::HeaderName::from_bytes(header.trim_ascii()) {
-                connection_headers.push(name);
-            }
-        }
+/// Removes every `Set-Cookie` for Stargate's session cookie. On an IAM host an
+/// upstream response shares the origin that carries the session, so it must not
+/// overwrite, delete, or plant it.
+pub(in crate::gate) fn strip_session_cookies(headers: &mut HeaderMap) {
+    let values = headers.get_all(SET_COOKIE);
+    if !values.iter().any(sets_session_cookie) {
+        return;
     }
-
-    for name in connection_headers {
-        headers.remove(name);
+    let retained = headers
+        .get_all(SET_COOKIE)
+        .iter()
+        .filter(|value| !sets_session_cookie(value))
+        .cloned()
+        .collect::<Vec<_>>();
+    headers.remove(SET_COOKIE);
+    for value in retained {
+        headers.append(SET_COOKIE, value);
     }
+}
 
-    headers.remove(http::header::CONNECTION);
-    headers.remove("keep-alive");
-    headers.remove(http::header::PROXY_AUTHENTICATE);
-    headers.remove(PROXY_AUTHORIZATION);
-    headers.remove(http::header::TE);
-    headers.remove(http::header::TRAILER);
-    headers.remove(http::header::TRANSFER_ENCODING);
-    headers.remove(http::header::UPGRADE);
-    headers.remove("proxy-connection");
-    headers.remove("trailers");
+fn sets_session_cookie(value: &HeaderValue) -> bool {
+    let name = value
+        .as_bytes()
+        .split(|byte| *byte == b'=')
+        .next()
+        .unwrap_or_default()
+        .split(|byte| *byte == b';')
+        .next()
+        .unwrap_or_default();
+    name.trim_ascii()
+        .eq_ignore_ascii_case(SESSION_COOKIE.as_bytes())
 }
 
 #[cfg(test)]

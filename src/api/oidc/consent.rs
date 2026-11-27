@@ -18,7 +18,7 @@ use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::sess::registry::authenticated_session;
 use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::{FromRequest, Path, Request};
+use axum::extract::{Path, Request};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -126,11 +126,7 @@ pub async fn post_consent(
 ) -> Result<Json<ConsentDecisionResponse>, ErrorResponse> {
     let session = authenticated_session(req.get_token()).await?;
     let audit_request = crate::ctx::audit_request_from(req.extensions());
-    let Json(decision) = Json::<ConsentDecisionRequest>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let decision = crate::web::body::json_body::<ConsentDecisionRequest>(req).await?;
     let user_id = session.user.id.as_str();
     let (pending, stage) = pending_consent(&interaction_id, user_id).await?;
 

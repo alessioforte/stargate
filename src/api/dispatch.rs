@@ -1,4 +1,7 @@
-use crate::{conf::hosts::IamHosts, web::request::RequestExt};
+use crate::{
+    conf::hosts::{IamHost, IamHosts},
+    web::request::RequestExt,
+};
 use axum::{Router, body::Body, extract::Request, response::Response};
 use std::{
     convert::Infallible,
@@ -33,8 +36,9 @@ impl Service<Request<Body>> for HostDispatch {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: Request<Body>) -> Self::Future {
+    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
         if self.hosts.allows(request.get_host().as_deref()) {
+            request.extensions_mut().insert(IamHost);
             self.iam.call(request)
         } else {
             self.gateway.call(request)

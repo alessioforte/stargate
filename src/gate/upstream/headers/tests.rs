@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn session_set_cookie_removal_keeps_other_cookies() {
+    let mut headers = HeaderMap::new();
+    for value in [
+        "jwt=session-token; Path=/; HttpOnly",
+        "app=1; Path=/",
+        "jwt=; Max-Age=0; Path=/",
+        "jwt; Path=/",
+        "JWT=planted; Path=/",
+        "notjwt=2; Path=/",
+        "sidebar=jwt; Path=/",
+    ] {
+        headers.append(http::header::SET_COOKIE, value.parse().unwrap());
+    }
+
+    strip_session_cookies(&mut headers);
+
+    let retained = headers
+        .get_all(http::header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retained,
+        ["app=1; Path=/", "notjwt=2; Path=/", "sidebar=jwt; Path=/"]
+    );
+}
+
+#[test]
+fn session_set_cookie_removal_leaves_clean_headers_untouched() {
+    let mut headers = HeaderMap::new();
+    headers.append(http::header::SET_COOKIE, "app=1; Path=/".parse().unwrap());
+    headers.append(
+        http::header::SET_COOKIE,
+        "jwtish=2; Path=/".parse().unwrap(),
+    );
+
+    strip_session_cookies(&mut headers);
+
+    assert_eq!(headers.get_all(http::header::SET_COOKIE).iter().count(), 2);
+}
+
+#[test]
 fn forwarding_uses_the_connection_peer_and_original_host_or_authority() {
     for (host, uri, expected) in [
         (Some("Frontend.test:8443"), "/orders", "Frontend.test:8443"),

@@ -73,6 +73,7 @@ pub(super) async fn execute_selected_with_request(
                         forward_credentials: *forward_credentials,
                     },
                     &state.upstream_headers,
+                    &state.websocket,
                     &state.execution,
                 )
                 .instrument(observation.span.clone())

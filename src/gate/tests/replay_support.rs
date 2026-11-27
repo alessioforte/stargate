@@ -41,6 +41,10 @@ pub(super) struct Upstream {
 
 impl Upstream {
     pub(super) async fn start(outcome: Outcome) -> Self {
+        Self::start_with(outcome, HeaderMap::new()).await
+    }
+
+    pub(super) async fn start_with(outcome: Outcome, response_headers: HeaderMap) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let committed = Arc::new(Mutex::new(Vec::new()));
@@ -52,9 +56,11 @@ impl Upstream {
                     accepted = listener.accept() => {
                         let (socket, _) = accepted.unwrap();
                         let records = records.clone();
+                        let response_headers = response_headers.clone();
                         connections.spawn(async move {
                             let service = service_fn(move |request: Request<hyper::body::Incoming>| {
                                 let records = records.clone();
+                                let response_headers = response_headers.clone();
                                 async move {
                                     let (parts, body) = request.into_parts();
                                     let body = body.collect().await.map_err(io::Error::other)?.to_bytes();
@@ -63,7 +69,13 @@ impl Upstream {
                                         // The operation has committed. Fail the connection before
                                         // any response headers can tell the gateway it succeeded.
                                         Outcome::CommitThenClose => Err(io::Error::other("closed after commit")),
-                                        Outcome::Status(status) => Ok(Response::builder().status(status).body(Body::from("upstream response")).unwrap()),
+                                        Outcome::Status(status) => {
+                                            let mut response = Response::builder().status(status);
+                                            for (name, value) in &response_headers {
+                                                response = response.header(name, value);
+                                            }
+                                            Ok(response.body(Body::from("upstream response")).unwrap())
+                                        }
                                     }
                                 }
                             });
@@ -125,6 +137,7 @@ pub(super) fn state(runtime: &RuntimeSnapshot) -> RequestState {
         path: "/orders".into(),
         query: String::new(),
         upstream_headers: Default::default(),
+        websocket: Default::default(),
         response_headers: Default::default(),
         propagation_draft: None,
         internal_context_runtime: None,

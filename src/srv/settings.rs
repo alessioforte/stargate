@@ -9,7 +9,7 @@
 use crate::{
     api::plane::{Plane, PlaneSet},
     conf::env::{EnvError, parse_bool},
-    srv::proxy::ProxyTrust,
+    srv::{HttpSettings, proxy::ProxyTrust},
 };
 use std::{net::SocketAddr, str::FromStr};
 
@@ -117,6 +117,60 @@ fn from_vars(vars: &[(String, String)]) -> Result<Vec<Listener>, SettingsError> 
         }
         Some(value) => declared(&value, vars, &var),
     }
+}
+
+/// Reads and validates the process-wide HTTP limits once at startup:
+/// `MAX_HEADER_SIZE`, `MAX_HEADERS`, and `MAX_IAM_BODY_SIZE`.
+pub fn http_from_env() -> Result<HttpSettings, SettingsError> {
+    let vars = std::env::vars_os()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    http_from_vars(&vars)
+}
+
+fn http_from_vars(vars: &[(String, String)]) -> Result<HttpSettings, SettingsError> {
+    let var = |name: &str| {
+        vars.iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let mut settings = HttpSettings::default();
+    if let Some(value) = var("MAX_HEADER_SIZE") {
+        settings.max_header_size = parse_positive(
+            "MAX_HEADER_SIZE",
+            &value,
+            "expected a number of bytes from 8192 to 4294967295",
+        )?;
+        if !(8192..=u32::MAX as usize).contains(&settings.max_header_size) {
+            return Err(invalid(
+                "MAX_HEADER_SIZE",
+                &value,
+                "expected a number of bytes from 8192 to 4294967295",
+            )
+            .into());
+        }
+    }
+    if let Some(value) = var("MAX_HEADERS") {
+        settings.max_headers = parse_positive(
+            "MAX_HEADERS",
+            &value,
+            "expected a positive number of request header fields",
+        )?;
+    }
+    if let Some(value) = var("MAX_IAM_BODY_SIZE") {
+        settings.max_iam_body_size = parse_positive(
+            "MAX_IAM_BODY_SIZE",
+            &value,
+            "expected a positive number of bytes",
+        )?;
+    }
+    Ok(settings)
 }
 
 /// Probes need a listener that declares the management plane. A declared
@@ -313,6 +367,13 @@ fn parse_connections(name: &str, value: &str) -> Result<usize, SettingsError> {
     }
 }
 
+fn parse_positive(name: &str, value: &str, message: &str) -> Result<usize, SettingsError> {
+    match value.parse::<usize>() {
+        Ok(0) | Err(_) => Err(invalid(name, value, message).into()),
+        Ok(value) => Ok(value),
+    }
+}
+
 fn parse_trust(name: &str, value: Option<String>) -> Result<ProxyTrust, SettingsError> {
     let Some(value) = value else {
         return Ok(ProxyTrust::default());
@@ -330,8 +391,11 @@ fn invalid(name: &str, value: &str, message: &str) -> EnvError {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_MAX_CONNECTIONS, Listener, SettingsError, from_vars, serves_probes};
+    use super::{
+        DEFAULT_MAX_CONNECTIONS, Listener, SettingsError, from_vars, http_from_vars, serves_probes,
+    };
     use crate::api::plane::{Plane, PlaneSet};
+    use crate::srv::HttpSettings;
     use std::{net::SocketAddr, str::FromStr};
 
     fn listeners(vars: &[(&str, &str)]) -> Result<Vec<Listener>, SettingsError> {
@@ -729,5 +793,44 @@ mod tests {
             "https://identity.example.com".to_string(),
         ));
         assert!(from_vars(&vars).is_ok());
+    }
+
+    #[test]
+    fn http_limits_default_and_override() {
+        let defaults = http_from_vars(&[]).unwrap();
+        assert_eq!(defaults, HttpSettings::default());
+        assert_eq!(defaults.max_header_size, 32 * 1024);
+        assert_eq!(defaults.max_headers, 100);
+        assert_eq!(defaults.max_iam_body_size, 2 * 1024 * 1024);
+
+        let vars = [
+            ("MAX_HEADER_SIZE", "8192"),
+            ("MAX_HEADERS", "42"),
+            ("MAX_IAM_BODY_SIZE", "65536"),
+        ]
+        .map(|(key, value)| (key.to_string(), value.to_string()));
+        let settings = http_from_vars(&vars).unwrap();
+        assert_eq!(settings.max_header_size, 8192);
+        assert_eq!(settings.max_headers, 42);
+        assert_eq!(settings.max_iam_body_size, 65536);
+    }
+
+    #[test]
+    fn invalid_http_limits_stop_startup() {
+        for (name, value) in [
+            ("MAX_HEADER_SIZE", "0"),
+            ("MAX_HEADER_SIZE", "4096"),
+            ("MAX_HEADER_SIZE", "-1"),
+            ("MAX_HEADER_SIZE", "many"),
+            ("MAX_HEADER_SIZE", "4294967296"),
+            ("MAX_HEADERS", "0"),
+            ("MAX_HEADERS", "ten"),
+            ("MAX_IAM_BODY_SIZE", "0"),
+            ("MAX_IAM_BODY_SIZE", "1.5"),
+        ] {
+            let vars = [(name.to_string(), value.to_string())];
+            let error = http_from_vars(&vars).expect_err("invalid limit must stop startup");
+            assert!(error.to_string().contains(name), "{name}={value}: {error}");
+        }
     }
 }

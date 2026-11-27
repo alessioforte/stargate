@@ -7,7 +7,7 @@ pub(crate) const TOKEN_QUERY_KEYS: &[&str] = &["token", "access_token", "jwt"];
 
 pub trait RequestExt {
     fn get_bearer_token(&self) -> Option<String>;
-    fn get_gateway_token(&self) -> Option<String>;
+    fn get_gateway_token(&self, allow_query: bool) -> Option<String>;
     fn get_token(&self) -> Option<String>;
     fn get_api_key(&self) -> Option<String>;
     fn get_protocol(&self) -> &'static str;
@@ -169,9 +169,14 @@ impl<B> RequestExt for Request<B> {
     }
 
     /// Gateway credential extraction is separate from the IAM API contract.
-    fn get_gateway_token(&self) -> Option<String> {
-        self.get_token()
-            .or_else(|| token_from_query(self.uri().query()))
+    /// Query parameters are read only when the matched route's auth policy
+    /// opts in.
+    fn get_gateway_token(&self, allow_query: bool) -> Option<String> {
+        self.get_token().or_else(|| {
+            allow_query
+                .then(|| token_from_query(self.uri().query()))
+                .flatten()
+        })
     }
 
     fn get_token(&self) -> Option<String> {

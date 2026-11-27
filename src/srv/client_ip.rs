@@ -5,6 +5,8 @@
 //! removed before any plane or route sees it. Every later reader (logging,
 //! ingress and admin limits, login guards, OTP, source-IP matchers, audit, and
 //! the signed internal context) reads the result from the request extensions.
+//! Ingress also consumes the client's hop-by-hop fields, so route middleware
+//! can add values a `Connection` header can no longer remove.
 
 use crate::srv::{ConnectionInfo, proxy::ProxyTrust};
 use http::{HeaderMap, Request, header::HeaderName};
@@ -27,6 +29,7 @@ pub(crate) fn prepare<B>(request: &mut Request<B>) {
     if !trust.trusts(peer) {
         strip_forwarded(request.headers_mut());
     }
+    crate::web::headers::strip_ingress_hop_by_hop_headers(request.headers_mut());
     request.extensions_mut().insert(ClientIp(client));
 }
 

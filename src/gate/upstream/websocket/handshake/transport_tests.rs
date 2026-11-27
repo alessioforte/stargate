@@ -13,6 +13,7 @@ use tokio_tungstenite::{
 async fn serialized_host_is_replaced_once_and_connection_nominated_headers_are_removed() {
     let mut source = http::HeaderMap::new();
     source.insert(HOST, "gateway.example:8443".parse().unwrap());
+    source.insert(UPGRADE, "websocket".parse().unwrap());
     source.append(CONNECTION, "Upgrade, x-private, origin".parse().unwrap());
     source.append(CONNECTION, "x-another, sec-websocket-key".parse().unwrap());
     for name in [
@@ -35,6 +36,8 @@ async fn serialized_host_is_replaced_once_and_connection_nominated_headers_are_r
     );
     source.append(SEC_WEBSOCKET_PROTOCOL, "chat".parse().unwrap());
     source.append(SEC_WEBSOCKET_PROTOCOL, "superchat".parse().unwrap());
+    // Ingress consumes the client's Connection nominations before dispatch.
+    crate::web::headers::strip_ingress_hop_by_hop_headers(&mut source);
     for preserve in [false, true] {
         let request = build_upstream_request(
             UpstreamRequest {
@@ -62,7 +65,7 @@ async fn serialized_host_is_replaced_once_and_connection_nominated_headers_are_r
         assert_eq!(request.headers()[UPGRADE], "websocket");
         assert_ne!(
             request.headers()[SEC_WEBSOCKET_KEY],
-            source[SEC_WEBSOCKET_KEY]
+            "client-key-must-be-replaced"
         );
         for name in [
             "x-private",
@@ -126,6 +129,7 @@ async fn unsupported_transport_and_invalid_client_handshakes_fail_before_connect
             forward_credentials: false,
         },
         &UpstreamHeaders::default(),
+        &Default::default(),
         &execution(&runtime),
     )
     .await
@@ -197,6 +201,7 @@ async fn unsupported_transport_and_invalid_client_handshakes_fail_before_connect
                 forward_credentials: false,
             },
             &UpstreamHeaders::default(),
+            &Default::default(),
             &execution(&runtime),
         )
         .await
@@ -246,6 +251,7 @@ async fn tls_connect_and_upgrade_have_separate_deadlines_and_use_the_upstream_ov
             runtime.transport("socket").unwrap(),
             &execution(&runtime),
             Duration::from_millis(80),
+            Default::default(),
         )
         .await
         .unwrap_err();
@@ -285,6 +291,7 @@ async fn tls_connect_and_upgrade_have_separate_deadlines_and_use_the_upstream_ov
         runtime.transport("socket").unwrap(),
         &execution(&runtime),
         Duration::from_millis(300),
+        Default::default(),
     )
     .await
     .unwrap();
@@ -337,6 +344,7 @@ async fn upstream_extensions_and_duplicate_subprotocol_selection_are_rejected() 
             runtime.transport("socket").unwrap(),
             &execution(&runtime),
             Duration::from_secs(1),
+            Default::default(),
         )
         .await
         .unwrap_err();

@@ -50,11 +50,14 @@ pub struct HttpSettings {
     /// recognized. It closes slowloris connections, mute connections, and a
     /// client that stops after the HTTP/2 preface.
     pub header_read_timeout: Duration,
-    /// Largest request header list on HTTP/2. It covers the session cookie,
-    /// bearer tokens, and a normal browser's headers with headroom, and bounds
-    /// the header block a peer may make the server decode. HTTP/1 headers are
-    /// bounded by hyper's read buffer and the read timeout.
-    pub max_header_list_size: u32,
+    /// Largest request header block, including the request line on HTTP/1 and
+    /// the decoded field list on HTTP/2. It covers the session cookie, bearer
+    /// tokens, and a normal browser's headers with headroom, and bounds the
+    /// header block a peer may make the server parse.
+    pub max_header_size: usize,
+    /// Fields one HTTP/1 request may carry, matching hyper's default. HTTP/2
+    /// requests are bounded by `max_header_size`.
+    pub max_headers: usize,
     /// Streams one HTTP/2 connection may run at once; further requests wait or
     /// open another connection.
     pub max_concurrent_streams: u32,
@@ -65,17 +68,22 @@ pub struct HttpSettings {
     /// Upper bound on the TLS handshake: a client that never completes it holds
     /// neither a worker nor a connection slot indefinitely.
     pub tls_handshake_timeout: Duration,
+    /// Largest JSON or form body an IAM route buffers. The default preserves
+    /// axum's previous implicit 2 MiB cap; the gateway has its own replay limits.
+    pub max_iam_body_size: usize,
 }
 
 impl Default for HttpSettings {
     fn default() -> Self {
         Self {
             header_read_timeout: Duration::from_secs(10),
-            max_header_list_size: 32 * 1024,
+            max_header_size: 32 * 1024,
+            max_headers: 100,
             max_concurrent_streams: 100,
             keep_alive_interval: Duration::from_secs(30),
             keep_alive_timeout: Duration::from_secs(10),
             tls_handshake_timeout: Duration::from_secs(10),
+            max_iam_body_size: 2 * 1024 * 1024,
         }
     }
 }
@@ -147,6 +155,7 @@ pub struct Listener {
 pub async fn serve(
     listeners: Vec<Listener>,
     tls: Option<Arc<ServerConfig>>,
+    http: HttpSettings,
     shutdown: impl Future<Output = ()>,
     timeout: Duration,
 ) -> io::Result<()> {
@@ -161,7 +170,7 @@ pub async fn serve(
             "Serving"
         );
     }
-    run(bound, HttpSettings::default(), shutdown, timeout).await;
+    run(bound, http, shutdown, timeout).await;
     Ok(())
 }
 
@@ -369,14 +378,22 @@ async fn connection<I>(
     builder
         .http1()
         .timer(TokioTimer::new())
-        .header_read_timeout(http.header_read_timeout);
+        .header_read_timeout(http.header_read_timeout)
+        .max_headers(http.max_headers)
+        // hyper has no dedicated HTTP/1 header-size setting through the auto
+        // builder: its read buffer is the bound the header parser can reach.
+        .max_buf_size(http.max_header_size);
     builder
         .http2()
         .timer(TokioTimer::new())
         .keep_alive_interval(http.keep_alive_interval)
         .keep_alive_timeout(http.keep_alive_timeout)
         .max_concurrent_streams(http.max_concurrent_streams)
-        .max_header_list_size(http.max_header_list_size);
+        .max_header_list_size(
+            http.max_header_size
+                .try_into()
+                .expect("validated header size fits HTTP/2"),
+        );
     let connection =
         builder.serve_connection_with_upgrades(TokioIo::new(io), TowerToHyperService::new(service));
     tokio::pin!(connection);

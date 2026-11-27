@@ -54,7 +54,7 @@ impl AuthenticationCalls {
     fn boundary(self: &Arc<Self>, identity: VerifiedIdentity) -> TestAuthenticator {
         let calls = self.clone();
         TestAuthenticator {
-            verify: Arc::new(move |request| {
+            verify: Arc::new(move |request, _| {
                 calls.verification.fetch_add(1, Ordering::SeqCst);
                 // Model the backing lookup inside the verification boundary. A
                 // denied admission must never enter either stage of authentication.

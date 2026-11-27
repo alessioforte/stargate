@@ -38,6 +38,7 @@ pub(super) struct RequestState {
     pub(super) path: String,
     pub(super) query: String,
     pub(super) upstream_headers: UpstreamHeaders,
+    pub(super) websocket: gate::graph::WebSocketLimits,
     pub(super) response_headers: ResponseHeaderMutations,
     pub(super) propagation_draft: Option<Arc<PropagationDraft>>,
     pub(super) internal_context_runtime: Option<Arc<InternalContextRuntime>>,
@@ -191,10 +192,21 @@ async fn handle_request(
     ingress::apply_ingress_limit(&runtime, &client_ip, execution, usage)
         .instrument(tracing::debug_span!("gateway.ingress"))
         .await?;
+    // Route matching is pure, so it can decide query-token extraction before
+    // authentication while route-not-found still follows a credential error.
+    let matched_router = {
+        let _span = tracing::debug_span!("gateway.route_match").entered();
+        graph
+            .routers
+            .iter()
+            .find(|router| router_matches(router, &req))
+    };
+    let allow_query_token =
+        matched_router.is_some_and(|router| super::policies::accepts_query_token(router, graph));
     let (identity, commands) =
         store::observe::count_commands(crate::data::store::with_security_budget(
             ingress_started.elapsed(),
-            authentication::authenticate(authentication::auth_request(&req))
+            authentication::authenticate(authentication::auth_request(&req), allow_query_token)
                 .instrument(tracing::debug_span!("gateway.authenticate")),
         ))
         .await;
@@ -212,14 +224,8 @@ async fn handle_request(
         },
     );
 
-    let router = {
-        let _span = tracing::debug_span!("gateway.route_match").entered();
-        graph
-            .routers
-            .iter()
-            .find(|router| router_matches(router, &req))
-            .ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayRouteNotFound))?
-    };
+    let router =
+        matched_router.ok_or_else(|| ErrorResponse::new(ErrorCode::GatewayRouteNotFound))?;
     if let Some(telemetry) = req.extensions().get::<telemetry::HttpRequestTelemetry>() {
         telemetry.record_gateway(&router.name, &router.service, runtime.version);
         if let Some(route) = super::routing::route_template(&router.matcher, &req) {
@@ -266,6 +272,7 @@ async fn handle_request(
         path: req.uri().path().to_string(),
         query: req.uri().query().unwrap_or("").to_string(),
         upstream_headers,
+        websocket: router.websocket,
         response_headers: ResponseHeaderMutations::default(),
         propagation_draft: None,
         internal_context_runtime: crate::ctx::sign::runtime().cloned(),

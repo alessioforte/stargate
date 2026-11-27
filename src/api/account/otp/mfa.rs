@@ -1,4 +1,4 @@
-use crate::err::{ErrorCode, ErrorResponse};
+use crate::err::ErrorResponse;
 use crate::iam::otp::service::{complete_mfa_challenge, list_mfa_methods, start_mfa_challenge};
 use crate::iam::otp::types::{
     MfaChallengeRequestBody, MfaChallengeVerifyRequestBody, MfaMethodsResponse,
@@ -6,7 +6,7 @@ use crate::iam::otp::types::{
 };
 use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::{FromRequest, Path, Request};
+use axum::extract::{Path, Request};
 
 #[utoipa::path(
     get,
@@ -47,11 +47,7 @@ pub async fn get_mfa_methods(req: Request) -> Result<Json<MfaMethodsResponse>, E
 pub async fn post_mfa_challenge(req: Request) -> Result<Json<OtpChallengeResponse>, ErrorResponse> {
     let client_ip = req.get_client_ip();
     let token = req.get_token();
-    let Json(body) = Json::<MfaChallengeRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<MfaChallengeRequestBody>(req).await?;
 
     Ok(Json(
         start_mfa_challenge(token, &client_ip, body.method, body.purpose.as_deref()).await?,
@@ -83,11 +79,7 @@ pub async fn put_mfa_challenge(
     req: Request,
 ) -> Result<Json<MfaVerificationResponse>, ErrorResponse> {
     let token = req.get_token();
-    let Json(body) = Json::<MfaChallengeVerifyRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<MfaChallengeVerifyRequestBody>(req).await?;
 
     Ok(Json(
         complete_mfa_challenge(token, &challenge_id, &body.code).await?,

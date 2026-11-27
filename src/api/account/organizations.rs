@@ -2,7 +2,7 @@ use crate::err::{ErrorCode, ErrorResponse};
 use crate::iam::sess::registry::authenticated_session;
 use crate::web::request::RequestExt;
 use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::Request;
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
 
@@ -90,11 +90,7 @@ pub async fn get_account_organizations(req: Request) -> Result<Response, ErrorRe
 pub async fn put_session_organization(req: Request) -> Result<Response, ErrorResponse> {
     let token = req.get_token();
     let secure = req.is_https();
-    let Json(body) = Json::<SwitchOrganizationRequest>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<SwitchOrganizationRequest>(req).await?;
 
     let session = authenticated_session(token).await?;
 

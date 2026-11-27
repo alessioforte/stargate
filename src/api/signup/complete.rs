@@ -9,7 +9,7 @@ use crate::iam::user::{
 use crate::iam::{auth::jwt::jwt_config, pwd};
 use crate::web::messages::{MessageCode, MessageWithContinuation};
 use axum::Json;
-use axum::extract::{FromRequest, Request};
+use axum::extract::Request;
 use db::ent::{CredentialType, Profile, TrustedAuditActor, TrustedAuditContext};
 use smtp::Smtp;
 use tracing::error;
@@ -32,11 +32,7 @@ use tracing::error;
 pub async fn put_signup(req: Request) -> Result<Json<MessageWithContinuation>, ErrorResponse> {
     let audit_request = audit_request_from(req.extensions());
 
-    let Json(body) = Json::<SignupCompleteRequestBody>::from_request(req, &())
-        .await
-        .map_err(|error| {
-            ErrorResponse::new(ErrorCode::RequestInvalidJson).with_message(error.body_text())
-        })?;
+    let body = crate::web::body::json_body::<SignupCompleteRequestBody>(req).await?;
 
     let jwt_cfg = jwt_config();
     let claim = jwt_cfg

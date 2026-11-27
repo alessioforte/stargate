@@ -28,6 +28,9 @@ fn assert_startup_fails(variable: &str, value: &str) {
         .env_remove("TRUSTED_ORIGINS")
         .env_remove("OAUTH_CLIENT_CA_FILE")
         .env_remove("STORE_MAX_MEMORY_MB")
+        .env_remove("MAX_HEADER_SIZE")
+        .env_remove("MAX_HEADERS")
+        .env_remove("MAX_IAM_BODY_SIZE")
         .env_remove("CONFIG_PATH")
         .env_remove("DATA_PATH")
         .env(variable, value)
@@ -58,6 +61,9 @@ fn invalid_security_settings_stop_startup() {
         "OAUTH_CLIENT_CA_FILE",
         "/nonexistent/stargate-oauth-client-ca.pem",
     );
+    assert_startup_fails("MAX_HEADER_SIZE", "4096");
+    assert_startup_fails("MAX_HEADERS", "0");
+    assert_startup_fails("MAX_IAM_BODY_SIZE", "-1");
     if cfg!(feature = "edge") {
         assert_startup_fails("STORE_MAX_MEMORY_MB", "0");
         assert_startup_fails("DATA_PATH", "");

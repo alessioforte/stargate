@@ -334,7 +334,7 @@ async fn removing_an_attribute_referenced_limit_fails_new_requests_but_preserves
         Some(1_784_473_000),
     );
     let authenticator = TestAuthenticator {
-        verify: Arc::new(move |_| identity.clone()),
+        verify: Arc::new(move |_, _| identity.clone()),
     };
     let request = || {
         let mut req = Request::new(Body::empty());

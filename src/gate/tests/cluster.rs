@@ -61,7 +61,7 @@ async fn send(
     ));
     let calls = calls.clone();
     request.extensions_mut().insert(TestAuthenticator {
-        verify: Arc::new(move |_| {
+        verify: Arc::new(move |_, _| {
             calls.fetch_add(1, Ordering::SeqCst);
             identity.clone()
         }),

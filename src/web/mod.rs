@@ -1,3 +1,4 @@
+pub mod body;
 pub mod cookies;
 pub mod cors;
 pub mod headers;

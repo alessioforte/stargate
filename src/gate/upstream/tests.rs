@@ -75,6 +75,7 @@ async fn direct_response_remains_local_and_has_no_internal_context() {
         path: "/direct".to_owned(),
         query: String::new(),
         upstream_headers: Default::default(),
+        websocket: Default::default(),
         response_headers: Default::default(),
         propagation_draft: None,
         internal_context_runtime: None,
