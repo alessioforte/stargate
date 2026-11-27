@@ -67,8 +67,8 @@ WebSockets open concurrently: the failing stage measures handshake pressure as
 well as active sessions; it is not a hard steady-connection limit.
 
 Discovery performs two HTTP calls per operation; OAuth performs three. Their
-high-rate ceilings include the shared per-IP ingress allowance, and the short
-OAuth stages can consume burst capacity. Do not project the 400-flow/s sample to
+high-rate ceilings include the identity plane's per-client ingress allowance,
+and the short OAuth stages can consume burst capacity. Do not project the 400-flow/s sample to
 an indefinite single-IP rate. Likewise, no conclusion about unlimited public
 endpoint throughput follows from a rate-limited result.
 
@@ -143,6 +143,40 @@ keys and audit retention. Linked clients, claims and scopes change record sizes.
 Keep audit-stream capacity and consumer outages in the separate Redis budget;
 never derive the server memory limit directly from this small-session estimate.
 
+Run Redis with `maxmemory` set and `maxmemory-policy noeviction`, as described
+in [Redis state keys](redis-keys.md#memory-policy): an eviction policy can
+delete sessions and revocations.
+
+## Edge store memory
+
+The edge profile keeps sessions, revocations, OAuth state and every limit
+counter in the process, bounded by `STORE_MAX_MEMORY_MB` (default 256). The
+bound counts the store's estimate of each entry, its map slot, key and value:
+
+| Entry | Estimated bytes | Entries per MiB |
+| --- | ---: | ---: |
+| Ingress bucket, IPv4 address or IPv6 /64 | 156–163 | about 6,500 |
+| Password attempt counter, unknown identifier | 231–249 | about 4,300 |
+
+Sessions and OAuth records weigh about their MessagePack size from the Redis table
+above, plus some 150 bytes of slot and key each. Size the bound from the live
+state: active sessions and OAuth families, pending codes, plus five minutes of
+sign-in attempts and the ingress buckets of the distinct client networks seen
+within their refill time.
+
+At the bound the store refuses new entries, like Redis with `noeviction`. Sign-in
+attempts with random identifiers create about 480 bytes of counters each, which
+live five minutes; one client network may make 20 such attempts in five minutes.
+About 1,900 attempts per second from some 28,000 IPv6 /64 networks, fewer than
+one /48, keep 256 MiB full. While the store is full, new sign-ins, OTP and MFA
+challenges and OAuth flows answer `503`, and new ingress buckets follow
+`on_store_error`; existing sessions and revocations keep working. A rate limit
+in front of Stargate bounds how fast one source fills the store.
+
+The bound is an estimate, not the process's resident memory. Allocator and hash
+table overhead, request buffers and Argon2 work come on top: keep the container
+limit well above `STORE_MAX_MEMORY_MB`. The chart's default limit is 1 GiB.
+
 ## Pod resources and scaling
 
 The production overlay keeps request 250m CPU / 512 MiB and limit 2 CPUs / 1 GiB,
@@ -168,7 +202,8 @@ utilization, admission errors and p95/p99 while tuning.
 ## Ingress, NAT and the independent limiter
 
 Stargate's example ingress allowance is shared across replicas: burst 100 and
-10 HTTP requests/s **per client IP**. Many users behind one corporate/mobile NAT
+10 HTTP requests/s **per client IP and plane** (IPv6 clients count by /64 unless
+the listener sets another prefix). Many users behind one corporate/mobile NAT
 share it. Raise it for a known workload together with its backstop and resource
 budget; account for the several requests in an OAuth or login-page flow.
 Configure `trustedProxies` for the actual Traefik peer networks so Stargate sees

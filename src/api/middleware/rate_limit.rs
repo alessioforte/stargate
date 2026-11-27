@@ -1,11 +1,13 @@
 //! IAM/admin request limits.
 //!
-//! Every IAM route first charges the client IP's ingress allowance, the same
-//! bucket the gateway uses, before any credential is read. Authenticated
-//! `/admin/*` principals then charge a bucket of their own
-//! ([`charge_admin_principal`]), so one principal's automation never drains
-//! the budget of another principal behind the same address.
+//! Every IAM route first charges its plane's ingress allowance for the client
+//! network, the same `ingress.limit` the gateway charges to its own bucket,
+//! before any credential is read. Authenticated `/admin/*` principals then
+//! charge a bucket of their own ([`charge_admin_principal`]), so one
+//! principal's automation never drains the budget of another principal behind
+//! the same address.
 
+use crate::api::plane::Plane;
 use crate::err::{ErrorCode, ErrorResponse};
 use crate::gate::{Gate, RuntimeSnapshot, retain_runtime};
 use crate::web::request::RequestExt;
@@ -15,7 +17,7 @@ use crate::{
     },
     web::limits::{insert_limit_headers, limited_response},
 };
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::HeaderMap;
@@ -25,7 +27,12 @@ use std::sync::Arc;
 /// Named limit charged per authenticated admin principal.
 const ADMIN_PRINCIPAL_LIMIT: &str = "default";
 
-pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response {
+/// Charges `plane`'s ingress bucket; mount it with `from_fn_with_state`.
+pub async fn ingress_limit_middleware(
+    State(plane): State<Plane>,
+    mut req: Request,
+    next: Next,
+) -> Response {
     let gate = req
         .extensions()
         .get::<Arc<Gate>>()
@@ -35,9 +42,9 @@ pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response 
     let runtime = gate.snapshot();
     req.extensions_mut().insert(runtime.clone());
     with_traffic_budget(runtime.ingress.timeout, async move {
-        let client_ip = req.get_client_ip();
+        let client = req.get_client_network();
         let ingress_started = tokio::time::Instant::now();
-        if let Err(error) = check_ingress(&runtime, &client_ip).await {
+        if let Err(error) = check_ingress(&runtime, plane, &client).await {
             return error.into_response();
         }
         crate::data::store::with_security_budget(ingress_started.elapsed(), next.run(req))
@@ -47,9 +54,13 @@ pub async fn ingress_limit_middleware(mut req: Request, next: Next) -> Response 
     .await
 }
 
-async fn check_ingress(runtime: &RuntimeSnapshot, client_ip: &str) -> Result<(), ErrorResponse> {
+async fn check_ingress(
+    runtime: &RuntimeSnapshot,
+    plane: Plane,
+    client: &str,
+) -> Result<(), ErrorResponse> {
     let ingress = &runtime.ingress;
-    let key = ingress_key(client_ip);
+    let key = ingress_key(plane.name(), client);
     let Some(decision) = check_traffic_limit(
         runtime,
         LimitPoint::IamIngress,
@@ -115,8 +126,9 @@ pub fn insert_principal_limit_headers(headers: &mut HeaderMap, decision: &RateLi
 #[cfg(all(test, feature = "memory"))]
 mod tests {
     use super::{charge_admin_principal, ingress_limit_middleware};
+    use crate::api::plane::Plane;
     use crate::gate::{RuntimeSnapshot, prepare_config, test_support};
-    use axum::{Extension, Router, body::Body, middleware::from_fn, routing::get};
+    use axum::{Extension, Router, body::Body, middleware::from_fn_with_state, routing::get};
     use http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use std::sync::Arc;
@@ -138,7 +150,10 @@ mod tests {
     fn app(gate: Arc<crate::gate::Gate>) -> Router {
         Router::new()
             .route("/", get(|| async { "ok" }))
-            .layer(from_fn(ingress_limit_middleware))
+            .layer(from_fn_with_state(
+                Plane::Identity,
+                ingress_limit_middleware,
+            ))
             .layer(Extension(gate))
     }
 
@@ -242,7 +257,10 @@ mod tests {
                     }
                 }),
             )
-            .layer(from_fn(ingress_limit_middleware))
+            .layer(from_fn_with_state(
+                Plane::Identity,
+                ingress_limit_middleware,
+            ))
             .layer(Extension(gate.clone()));
         let pending = tokio::spawn(
             app.clone().oneshot(
@@ -307,6 +325,108 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
+    fn request_on(peer: &str, ipv6_prefix: u8) -> Request<Body> {
+        let mut req = Request::builder().uri("/").body(Body::empty()).unwrap();
+        req.extensions_mut().insert(crate::srv::ConnectionInfo {
+            peer: std::net::SocketAddr::new(peer.parse().unwrap(), 1000),
+            listener: Arc::new(crate::srv::ListenerInfo {
+                name: "test".to_string(),
+                planes: crate::api::plane::PlaneSet::ALL,
+                tls: false,
+                trusted_proxies: Default::default(),
+                ipv6_prefix: crate::srv::client_ip::Ipv6Prefix::parse(&ipv6_prefix.to_string())
+                    .unwrap(),
+            }),
+        });
+        crate::srv::client_ip::prepare(&mut req);
+        req
+    }
+
+    /// The edge store creates no bucket once full: the ingress check follows
+    /// `on_store_error` and reports the store degraded.
+    #[tokio::test]
+    async fn a_full_edge_store_makes_ingress_follow_its_failure_policy() {
+        use store::{Store, StoreError, memory::MemoryStoreConfig};
+
+        let full = Arc::new(lim::State::with_config(MemoryStoreConfig {
+            max_memory_usage: 16 * 1024,
+            ..MemoryStoreConfig::default()
+        }));
+        for index in 0.. {
+            match full.set(&format!("filler-{index}"), &index, Some(60)).await {
+                Ok(()) => continue,
+                Err(StoreError::Full) => break,
+                Err(error) => panic!("{error}"),
+            }
+        }
+        for (policy, status) in [
+            ("allow", StatusCode::OK),
+            ("deny", StatusCode::SERVICE_UNAVAILABLE),
+        ] {
+            let mut cfg = config(1, 1);
+            cfg.ingress.on_store_error = policy.into();
+            let gate = Arc::new(
+                crate::gate::Gate::new(
+                    full.clone(),
+                    prepare_config(cfg).unwrap(),
+                    gate::PolicySnapshot::default(),
+                    None,
+                )
+                .unwrap(),
+            );
+            for _ in 0..3 {
+                let response = app(gate.clone())
+                    .oneshot(request("203.0.113.9:1000"))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), status, "{policy}");
+                assert!(!response.headers().contains_key("x-ratelimit-limit"));
+            }
+            assert!(gate.snapshot().limit_store_health.is_degraded());
+        }
+    }
+
+    #[tokio::test]
+    async fn ipv6_clients_share_the_bucket_of_their_listener_prefix() {
+        let app = app(Arc::new(test_support::gate(config(1, 100))));
+        let status = |peer: &'static str, prefix: u8| {
+            let app = app.clone();
+            async move {
+                app.oneshot(request_on(peer, prefix))
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        };
+
+        // Rotating addresses inside one /64 is still one client.
+        assert_eq!(status("2001:db8:1:1::1", 64).await, StatusCode::OK);
+        assert_eq!(
+            status("2001:db8:1:1:a8f3:91ff:fe20:7c41", 64).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(status("2001:db8:1:2::1", 64).await, StatusCode::OK);
+
+        // A listener counting /128 gives each address its own allowance.
+        assert_eq!(status("2001:db8:2:1::1", 128).await, StatusCode::OK);
+        assert_eq!(status("2001:db8:2:1::2", 128).await, StatusCode::OK);
+        assert_eq!(
+            status("2001:db8:2:1::2", 128).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+
+        // A /48 groups the subnets of one site.
+        assert_eq!(status("2001:db8:3:1::1", 48).await, StatusCode::OK);
+        assert_eq!(
+            status("2001:db8:3:2::1", 48).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+
+        // IPv4 clients are never aggregated.
+        assert_eq!(status("203.0.113.1", 48).await, StatusCode::OK);
+        assert_eq!(status("203.0.113.2", 48).await, StatusCode::OK);
+    }
+
     #[tokio::test]
     async fn admin_principals_have_independent_buckets_outside_the_ingress_namespace() {
         let gate = test_support::gate(config(1, 2));
@@ -345,7 +465,7 @@ mod tests {
             .limiter
             .check(
                 "ingress",
-                &crate::gate::limits::ingress_key("127.0.0.1"),
+                &crate::gate::limits::ingress_key("identity", "127.0.0.1"),
                 None,
             )
             .await

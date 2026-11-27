@@ -87,7 +87,7 @@ different condition once clients depend on it.
 | Code | HTTP status | Condition |
 | --- | --- | --- |
 | `gateway.overloaded` | 503 | Primary admission or internal-context signing capacity is exhausted |
-| `gateway.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its gateway ingress allowance, before authentication or routing |
+| `gateway.ingress_rate_limit_exceeded` | 429 | The client network exhausted its gateway ingress allowance, before authentication or routing |
 | `gateway.ingress_unavailable` | 503 | The ingress limiter store fails or exceeds its deadline with `on_store_error: deny` |
 | `gateway.limiter_unavailable` | 503 | A rate/quota policy store fails or exceeds its deadline with `on_store_error: deny` |
 | `gateway.organization_limits_unavailable` | 503 | SQL lookup of organization limit overrides fails; always fail-closed, independently of `on_store_error` |
@@ -126,13 +126,14 @@ ordinary mutations return the first result. See [replay eligibility](config-v1.m
 
 ## IAM limit errors
 
-IAM endpoints share the gateway's per-IP ingress allowance; authenticated
-`/admin/*` principals also have a bucket of their own. See
+IAM endpoints charge the same `ingress.limit` as the gateway, to a bucket of
+their plane for the client network; authenticated `/admin/*` principals also
+have a bucket of their own. See
 [IAM and admin limits](config-v1.md#iam-and-admin-limits).
 
 | Code | HTTP status | Condition |
 | --- | --- | --- |
-| `iam.ingress_rate_limit_exceeded` | 429 | The client IP exhausted its ingress allowance on an IAM endpoint, before authentication (`X-RateLimit-Scope: ingress`) |
+| `iam.ingress_rate_limit_exceeded` | 429 | The client network exhausted its ingress allowance on the endpoint's plane (identity or admin), before authentication (`X-RateLimit-Scope: ingress`) |
 | `iam.rate_limit_exceeded` | 429 | An authenticated admin user or admin key exhausted its own `/admin/*` budget (`X-RateLimit-Scope: subject`) |
 | `iam.overloaded` | 503 | Foreground password hashing, verification or history admission exceeded 5s; not a failed login attempt. `Retry-After: 10` |
 | `iam.limiter_unavailable` | 503 | The IAM limiter store fails, or the ingress check exceeds `ingress.timeout`; `params.scope` is `ingress` or `subject` |

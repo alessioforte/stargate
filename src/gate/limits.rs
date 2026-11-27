@@ -11,12 +11,13 @@ use crate::{
 };
 use lim::{LimitKind, Limiter, RateLimitError};
 
-/// Per-IP ingress bucket shared by gateway and IAM traffic: one admission
-/// allowance per client address for the whole process. This namespace never
-/// intersects subject/org rate or quota buckets, even when they reference the
-/// same named limit.
-pub fn ingress_key(client_ip: &str) -> String {
-    ::store::keys::limits::ingress(client_ip)
+/// Ingress bucket of one client network on one serving plane: every plane
+/// charges the same `ingress.limit` to its own bucket, so a flood on the
+/// gateway leaves the identity and admin allowances of that client intact.
+/// This namespace never intersects subject/org rate or quota buckets, even
+/// when they reference the same named limit.
+pub fn ingress_key(plane: &str, client: &str) -> String {
+    ::store::keys::limits::ingress(plane, client)
 }
 
 pub fn attribute_name<'a>(

@@ -45,7 +45,7 @@ pub async fn get_mfa_methods(req: Request) -> Result<Json<MfaMethodsResponse>, E
 )]
 #[axum::debug_handler]
 pub async fn post_mfa_challenge(req: Request) -> Result<Json<OtpChallengeResponse>, ErrorResponse> {
-    let client_ip = req.get_client_ip();
+    let client = req.get_client_network();
     let token = req.get_token();
     let Json(body) = Json::<MfaChallengeRequestBody>::from_request(req, &())
         .await
@@ -54,7 +54,7 @@ pub async fn post_mfa_challenge(req: Request) -> Result<Json<OtpChallengeRespons
         })?;
 
     Ok(Json(
-        start_mfa_challenge(token, &client_ip, body.method, body.purpose.as_deref()).await?,
+        start_mfa_challenge(token, &client, body.method, body.purpose.as_deref()).await?,
     ))
 }
 

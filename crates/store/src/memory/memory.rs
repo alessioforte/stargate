@@ -1,3 +1,4 @@
+use super::capacity::Capacity;
 use super::config::MemoryStoreConfig;
 use super::stats::{
     AtomicOperationStats, MemoryEfficiencyStats, MemoryStorePerformanceMetrics, StorageStats,
@@ -15,21 +16,64 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, PoisonError};
 
 pub type Data = Arc<[u8]>;
+pub type HashFields = DashMap<String, (Data, Option<DateTime<Utc>>)>;
 
 #[derive(Debug, Clone)]
 pub enum StoreValue {
     Simple(Data, Option<DateTime<Utc>>),
-    Hash(
-        DashMap<String, (Data, Option<DateTime<Utc>>)>,
-        Option<DateTime<Utc>>,
-    ),
+    Hash(HashFields, Option<DateTime<Utc>>),
     AtomicI64(Arc<AtomicI64>, Option<DateTime<Utc>>),
+}
+
+/// Shards of a hash value. A write to a hash already holds its key's slot in
+/// the outer map, so more shards would only add memory: each is a lock padded
+/// to a cache line.
+const HASH_SHARDS: usize = 2;
+const HASH_SHARD_BYTES: usize = 128;
+/// Reference counts in front of an `Arc` allocation.
+const ARC_HEADER_BYTES: usize = 2 * std::mem::size_of::<usize>();
+
+/// An empty hash value.
+pub(crate) fn new_hash() -> HashFields {
+    DashMap::with_shard_amount(HASH_SHARDS)
+}
+
+/// Estimated bytes one entry holds: its slot in the map, the key and the
+/// value's allocations. Allocator and table overhead are left out; the
+/// estimate bounds memory, it does not account for it exactly.
+fn entry_size(key: &str, value: &StoreValue) -> usize {
+    slot_size(key)
+        + match value {
+            StoreValue::Simple(data, _) => ARC_HEADER_BYTES + data.len(),
+            StoreValue::AtomicI64(..) => ARC_HEADER_BYTES + std::mem::size_of::<AtomicI64>(),
+            StoreValue::Hash(fields, _) => {
+                HASH_SHARDS * HASH_SHARD_BYTES
+                    + fields
+                        .iter()
+                        .map(|field| field_size(field.key(), &field.value().0))
+                        .sum::<usize>()
+            }
+        }
+}
+
+/// Estimated bytes of a key's slot in the map, before its value.
+fn slot_size(key: &str) -> usize {
+    std::mem::size_of::<(String, StoreValue)>() + key.len()
+}
+
+/// Estimated bytes one hash field adds.
+fn field_size(field: &str, data: &Data) -> usize {
+    std::mem::size_of::<(String, (Data, Option<DateTime<Utc>>))>()
+        + field.len()
+        + ARC_HEADER_BYTES
+        + data.len()
 }
 
 pub struct MemoryStore {
     pub(crate) data: Arc<DashMap<String, StoreValue>>,
     pub(crate) stats: Arc<AtomicOperationStats>,
     config: MemoryStoreConfig,
+    capacity: Arc<Capacity>,
     /// Held while a transaction checks and writes its keys.
     transactions: Arc<Mutex<()>>,
 }
@@ -40,6 +84,7 @@ impl Clone for MemoryStore {
             data: Arc::clone(&self.data),
             stats: Arc::clone(&self.stats),
             config: self.config.clone(),
+            capacity: Arc::clone(&self.capacity),
             transactions: Arc::clone(&self.transactions),
         }
     }
@@ -68,6 +113,7 @@ impl MemoryStore {
         Self {
             data,
             stats: Arc::new(AtomicOperationStats::default()),
+            capacity: Arc::new(Capacity::new(config.max_memory_usage)),
             config,
             transactions: Arc::default(),
         }
@@ -80,12 +126,16 @@ impl MemoryStore {
     /// Replace this store's contents with the contents of `other` and reset
     /// operational stats. Intended for restoring a snapshot into an already
     /// initialized (e.g. global) store.
+    ///
+    /// A restored snapshot is never truncated: if it exceeds the memory limit,
+    /// the store creates nothing until expiry frees room.
     pub fn absorb(&self, other: &MemoryStore) {
         self.data.clear();
         for entry in other.data.iter() {
             self.data.insert(entry.key().clone(), entry.value().clone());
         }
         self.reset_stats();
+        self.sweep();
     }
 
     /// Get cached current time to reduce syscalls
@@ -136,6 +186,35 @@ impl MemoryStore {
         StoreError::TypeMismatch(
             "WRONGTYPE Operation against a key holding the wrong kind of value".to_string(),
         )
+    }
+
+    /// Writes `value` under `key`, replacing any value; a new key needs room.
+    fn insert(&self, key: &str, value: StoreValue) -> StoreResult<()> {
+        match self.data.entry(key.to_string()) {
+            DashEntry::Vacant(entry) => {
+                self.capacity.admit(key, entry_size(key, &value))?;
+                entry.insert(value);
+            }
+            DashEntry::Occupied(mut entry) => {
+                entry.insert(value);
+            }
+        }
+        Ok(())
+    }
+
+    /// The entry of a counter, created at zero when absent and room allows.
+    fn counter(
+        &self,
+        key: &str,
+    ) -> StoreResult<dashmap::mapref::one::RefMut<'_, String, StoreValue>> {
+        match self.data.entry(key.to_string()) {
+            DashEntry::Occupied(entry) => Ok(entry.into_ref()),
+            DashEntry::Vacant(entry) => {
+                let value = StoreValue::AtomicI64(Arc::new(AtomicI64::new(0)), None);
+                self.capacity.admit(key, entry_size(key, &value))?;
+                Ok(entry.insert(value))
+            }
+        }
     }
 
     #[inline]
@@ -231,35 +310,6 @@ impl MemoryStore {
         }
     }
 
-    fn estimate_value_size(&self, value: &StoreValue) -> usize {
-        match value {
-            StoreValue::Simple(data, _) => {
-                std::mem::size_of::<String>()
-                    + data.len()
-                    + std::mem::size_of::<Option<DateTime<Utc>>>()
-            }
-            StoreValue::Hash(hash_map, _) => {
-                let base_size =
-                    std::mem::size_of::<DashMap<String, (Data, Option<DateTime<Utc>>)>>()
-                        + std::mem::size_of::<Option<DateTime<Utc>>>();
-                let entries_size: usize = hash_map
-                    .iter()
-                    .map(|entry| {
-                        let (field, (value, _)) = entry.pair();
-                        std::mem::size_of::<String>() * 2
-                            + field.len()
-                            + value.len()
-                            + std::mem::size_of::<Option<DateTime<Utc>>>()
-                    })
-                    .sum();
-                base_size + entries_size
-            }
-            StoreValue::AtomicI64(_, _) => {
-                std::mem::size_of::<Arc<AtomicI64>>() + std::mem::size_of::<Option<DateTime<Utc>>>()
-            }
-        }
-    }
-
     pub fn get_storage_stats(&self) -> StorageStats {
         let mut total_keys = 0;
         let mut simple_keys = 0;
@@ -270,7 +320,7 @@ impl MemoryStore {
         for entry in self.data.iter() {
             total_keys += 1;
             let value = entry.value();
-            estimated_memory_bytes += self.estimate_value_size(value);
+            estimated_memory_bytes += entry_size(entry.key(), value);
 
             match value {
                 StoreValue::Simple(_, _) => {
@@ -480,13 +530,10 @@ impl Store for MemoryStore {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
-        self.stats.sets.fetch_add(1, Ordering::Relaxed);
-
         let data: Data = self.serialize(value)?.into();
-
         let exp = self.expiration_from_ttl(ttl);
-        self.data
-            .insert(key.to_string(), StoreValue::Simple(data, exp));
+        self.insert(key, StoreValue::Simple(data, exp))?;
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -509,6 +556,7 @@ impl Store for MemoryStore {
 
         match self.data.entry(key.to_string()) {
             DashEntry::Vacant(entry) => {
+                self.capacity.admit(key, entry_size(key, &new_value))?;
                 entry.insert(new_value);
             }
             DashEntry::Occupied(mut entry) => {
@@ -571,9 +619,11 @@ impl Store for MemoryStore {
 
         match self.data.entry(key.to_string()) {
             DashEntry::Vacant(entry) => {
-                let hash = DashMap::new();
+                let hash = new_hash();
                 hash.insert(field.to_string(), (serialized_value, field_exp));
-                entry.insert(StoreValue::Hash(hash, None));
+                let value = StoreValue::Hash(hash, None);
+                self.capacity.admit(key, entry_size(key, &value))?;
+                entry.insert(value);
                 Ok(true)
             }
             DashEntry::Occupied(mut entry) => {
@@ -581,7 +631,7 @@ impl Store for MemoryStore {
                 match value {
                     StoreValue::Hash(hash, exp) => {
                         if self.is_expired_at(exp, self.get_cached_now()) {
-                            let hash = DashMap::new();
+                            let hash = new_hash();
                             hash.insert(field.to_string(), (serialized_value, field_exp));
                             *value = StoreValue::Hash(hash, None);
                             self.stats
@@ -595,8 +645,10 @@ impl Store for MemoryStore {
                                 field.insert((serialized_value, field_exp));
                                 Ok(false)
                             }
-                            DashEntry::Vacant(field) => {
-                                field.insert((serialized_value, field_exp));
+                            DashEntry::Vacant(vacant) => {
+                                self.capacity
+                                    .admit(key, field_size(field, &serialized_value))?;
+                                vacant.insert((serialized_value, field_exp));
                                 Ok(true)
                             }
                         }
@@ -1113,6 +1165,22 @@ impl Store for MemoryStore {
                 return Ok(false);
             }
         }
+        // One tag per transaction: every key it creates is admitted together,
+        // and a refused transaction writes nothing.
+        let created = transaction
+            .writes
+            .iter()
+            .filter_map(|write| match write {
+                Write::Set(key, value, _) if !self.data.contains_key(key) => {
+                    Some((key, slot_size(key) + ARC_HEADER_BYTES + value.len()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if let Some((key, _)) = created.first() {
+            self.capacity
+                .admit(key, created.iter().map(|(_, bytes)| bytes).sum())?;
+        }
         for write in &transaction.writes {
             self.apply(write, now);
         }
@@ -1173,12 +1241,10 @@ impl AtomicStore for MemoryStore {
             return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
         }
 
-        self.stats.sets.fetch_add(1, Ordering::Relaxed);
-
         let atomic = Arc::new(AtomicI64::new(value));
         let exp = self.expiration_from_ttl(ttl);
-        self.data
-            .insert(key.to_string(), StoreValue::AtomicI64(atomic, exp));
+        self.insert(key, StoreValue::AtomicI64(atomic, exp))?;
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1192,10 +1258,7 @@ impl AtomicStore for MemoryStore {
 
         let exp = self.expiration_from_ttl(ttl);
 
-        let mut entry = self
-            .data
-            .entry(key.to_string())
-            .or_insert_with(|| StoreValue::AtomicI64(Arc::new(AtomicI64::new(0)), None));
+        let mut entry = self.counter(key)?;
 
         match entry.value_mut() {
             StoreValue::AtomicI64(atomic, current_exp) => {
@@ -1232,10 +1295,7 @@ impl AtomicStore for MemoryStore {
 
         let exp = self.expiration_from_ttl(ttl);
 
-        let mut entry = self
-            .data
-            .entry(key.to_string())
-            .or_insert_with(|| StoreValue::AtomicI64(Arc::new(AtomicI64::new(0)), None));
+        let mut entry = self.counter(key)?;
 
         match entry.value_mut() {
             StoreValue::AtomicI64(atomic, current_exp) => {
@@ -1338,7 +1398,9 @@ impl MemoryStore {
             DashEntry::Vacant(vacant) => {
                 let (res, new_value) = measure_fn(default);
                 let new_data: Data = self.serialize(&new_value)?.into();
-                vacant.insert(StoreValue::Simple(new_data, exp));
+                let value = StoreValue::Simple(new_data, exp);
+                self.capacity.admit(key, entry_size(key, &value))?;
+                vacant.insert(value);
                 self.stats.sets.fetch_add(1, Ordering::Relaxed);
                 Ok((res, new_value))
             }
@@ -1393,10 +1455,9 @@ impl MemoryStore {
         match self.data.entry(key.to_string()) {
             DashEntry::Vacant(vacant) => {
                 let (res, new_value) = measure_fn(0);
-                vacant.insert(StoreValue::AtomicI64(
-                    Arc::new(AtomicI64::new(new_value)),
-                    exp,
-                ));
+                let value = StoreValue::AtomicI64(Arc::new(AtomicI64::new(new_value)), exp);
+                self.capacity.admit(key, entry_size(key, &value))?;
+                vacant.insert(value);
                 self.stats.sets.fetch_add(1, Ordering::Relaxed);
                 Ok((res, new_value))
             }
@@ -1479,12 +1540,10 @@ impl MemoryStore {
                 return Err(StoreError::InvalidInput("TTL cannot be zero".to_string()));
             }
 
-            self.stats.sets.fetch_add(1, Ordering::Relaxed);
-
             let data: Data = self.serialize(value)?.into();
             let exp = self.expiration_from_ttl(ttl);
-            self.data
-                .insert(key.to_string(), StoreValue::Simple(data, exp));
+            self.insert(key, StoreValue::Simple(data, exp))?;
+            self.stats.sets.fetch_add(1, Ordering::Relaxed);
         }
 
         Ok(())
@@ -1523,72 +1582,54 @@ impl MemoryStore {
         Ok(results)
     }
 
-    /// Batch cleanup of expired entries - MemoryStore specific.
-    /// Uses config.cleanup_batch_size if no max_items specified.
+    /// Removes every expired entry and hash field, then measures the live
+    /// entries for the memory bound. Returns how many it removed.
     ///
-    /// Note: `retain` still walks the whole map (taking each shard's write
-    /// lock); the batch size only caps how many entries get their expiry
-    /// *checked* per call. Entries beyond the cap are kept unconditionally
-    /// and picked up by later calls.
-    pub async fn batch_cleanup_expired(&self, max_items: Option<usize>) -> usize {
-        let effective_batch_size = max_items.unwrap_or(self.config.cleanup_batch_size);
-        let mut removed: usize = 0;
-        let mut checked = 0;
-        let now = self.get_cached_now();
-
-        // Avoid full memory scans in the hot cleanup path: use a cheap approximation.
-        let estimated_usage = self.data.len().saturating_mul(128);
-        let is_under_pressure =
-            self.config.max_memory_usage > 0 && estimated_usage > self.config.max_memory_usage;
-
-        // Apply memory pressure adjustment to batch size
-        let adjusted_batch_size = if is_under_pressure {
-            effective_batch_size * 2 // Clean more aggressively under memory pressure
-        } else {
-            effective_batch_size
-        };
-
-        self.data.retain(|_, value| {
-            if checked >= adjusted_batch_size {
-                return true; // Keep remaining items for next batch
-            }
-            checked += 1;
-
-            let should_keep = match value {
-                StoreValue::Simple(_, exp) => !self.is_expired_at(exp, now),
-                StoreValue::Hash(hash_map, exp) => {
-                    // Clean expired hash fields
-                    let mut fields_removed = 0;
-                    hash_map.retain(|_, (_, field_exp)| {
-                        let keep = field_exp.is_none_or(|e| e > now);
-                        if !keep {
-                            fields_removed += 1;
-                        }
-                        keep
+    /// Reads already treat expired entries as missing; the sweep frees the
+    /// memory of those nothing reads again, such as the buckets of clients
+    /// that never return.
+    pub fn sweep(&self) -> usize {
+        let admitted = self.capacity.admitted();
+        let now = Utc::now();
+        let mut removed = 0;
+        let mut measured = 0;
+        self.data.retain(|key, value| {
+            let live = match value {
+                StoreValue::Hash(fields, expiration) => {
+                    let before = fields.len();
+                    fields.retain(|_, (_, field_expiration)| {
+                        field_expiration.is_none_or(|expiration| expiration > now)
                     });
-                    removed += fields_removed;
-
-                    // Keep hash if not expired and has fields
-                    !self.is_expired_at(exp, now) && !hash_map.is_empty()
+                    removed += before - fields.len();
+                    !self.is_expired_at(expiration, now) && !fields.is_empty()
                 }
-                StoreValue::AtomicI64(_, exp) => !self.is_expired_at(exp, now),
+                StoreValue::Simple(_, expiration) | StoreValue::AtomicI64(_, expiration) => {
+                    !self.is_expired_at(expiration, now)
+                }
             };
-
-            if !should_keep {
+            if live {
+                measured += entry_size(key, value);
+            } else {
                 removed += 1;
             }
-            should_keep
+            live
         });
-
+        self.capacity.measured(measured, admitted);
         self.stats
             .expired_entries_cleaned
             .fetch_add(removed as u64, Ordering::Relaxed);
         removed
     }
 
-    /// Cleanup expired entries using default config settings
-    pub async fn cleanup_expired(&self) -> usize {
-        self.batch_cleanup_expired(None).await
+    /// Estimated bytes in use, as the memory bound counts them.
+    pub fn used_memory_bytes(&self) -> usize {
+        self.capacity.used()
+    }
+
+    /// Bytes the store may hold before it refuses new entries; zero is
+    /// unbounded.
+    pub fn memory_limit_bytes(&self) -> usize {
+        self.capacity.limit()
     }
 
     /// Get detailed performance metrics - MemoryStore specific
@@ -1679,13 +1720,10 @@ impl MemoryStore {
         }
     }
 
-    /// Check if memory usage exceeds configured limits - MemoryStore specific
+    /// Whether the store holds more than 90% of its memory limit.
     pub fn is_memory_pressure(&self) -> bool {
-        if self.config.max_memory_usage == 0 {
-            return false; // Memory limiting disabled
-        }
-
-        self.get_memory_usage_bytes() > self.config.max_memory_usage
+        let limit = self.capacity.limit();
+        limit > 0 && self.capacity.used() > limit / 10 * 9
     }
 
     /// Get recommendations for performance optimization - MemoryStore specific
@@ -1713,7 +1751,7 @@ impl MemoryStore {
         // Check memory pressure
         if self.is_memory_pressure() {
             recommendations.push(
-                "Memory usage exceeds configured limit. Consider reducing TTL or increasing cleanup frequency.".to_string()
+                "Memory usage is close to the configured limit, beyond which new entries are refused. Consider shorter TTLs or a higher limit.".to_string()
             );
         }
 
@@ -1732,127 +1770,20 @@ impl MemoryStore {
         recommendations
     }
 
-    /// Adaptive cleaner that uses configuration parameters effectively
-    pub fn run_adaptive_cleaner(&self, base_interval: u64) {
-        let data = self.data.clone();
-        let stats = self.stats.clone();
-        let config = self.config.clone();
-
+    /// Sweeps the store every `interval` on a blocking thread, so expired
+    /// entries free their memory and the memory bound sees freed room.
+    pub fn run_sweeper(&self, interval: std::time::Duration) {
+        let store = self.clone();
         tokio::spawn(async move {
-            // A zero interval would make this loop spin hot.
-            let base_interval = base_interval.max(1);
-            tracing::info!(
-                "MemoryStore adaptive cleaner started with base interval: {} seconds, batch size: {}",
-                base_interval,
-                config.cleanup_batch_size
-            );
-
-            let mut current_interval = base_interval;
-
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(current_interval)).await;
-
-                let start_time = std::time::Instant::now();
-                let data_size_before = data.len();
-                // Use a single time reference for the whole cleanup cycle.
-                let now = Utc::now();
-
-                let mut removed: u64 = 0;
-                let mut processed: usize = 0;
-
-                // Adaptive batch processing
-                let effective_batch_size = if config.max_memory_usage > 0 {
-                    // Increase batch size if we're approaching memory limits
-                    let estimated_memory = data.len() * 100; // rough estimate
-                    if estimated_memory > config.max_memory_usage * 80 / 100 {
-                        config.cleanup_batch_size * 2
-                    } else {
-                        config.cleanup_batch_size
-                    }
-                } else {
-                    config.cleanup_batch_size
-                };
-
-                // Use retain with configurable batch processing
-                data.retain(|_, value| {
-                    if processed >= effective_batch_size {
-                        return true; // Keep remaining for next batch
-                    }
-                    processed += 1;
-
-                    match value {
-                        StoreValue::Hash(hash_map, exp) => {
-                            // Clean expired fields within the hash atomically
-                            let mut fields_removed = 0;
-                            hash_map.retain(|_, (_, field_exp)| {
-                                let keep = field_exp.is_none_or(|exp_time| exp_time > now);
-                                if !keep {
-                                    fields_removed += 1;
-                                }
-                                keep
-                            });
-                            removed += fields_removed;
-
-                            // Keep the hash if it's not expired and has fields
-                            let keep_hash =
-                                exp.is_none_or(|exp_time| exp_time > now) && !hash_map.is_empty();
-                            if !keep_hash {
-                                removed += 1;
-                            }
-                            keep_hash
-                        }
-                        StoreValue::Simple(_, exp) => {
-                            let keep = exp.is_none_or(|exp_time| exp_time > now);
-                            if !keep {
-                                removed += 1;
-                            }
-                            keep
-                        }
-                        StoreValue::AtomicI64(_, exp) => {
-                            let keep = exp.is_none_or(|exp_time| exp_time > now);
-                            if !keep {
-                                removed += 1;
-                            }
-                            keep
-                        }
-                    }
-                });
-
-                let cleanup_duration = start_time.elapsed();
-                let data_size_after = data.len();
-
-                // Adaptive interval adjustment based on effectiveness
-                if removed > (effective_batch_size / 2) as u64 {
-                    // High expiration rate, clean more frequently
-                    current_interval = std::cmp::max(base_interval / 2, 1);
-                } else if removed < (effective_batch_size / 10) as u64 {
-                    // Low expiration rate, clean less frequently
-                    current_interval = std::cmp::min(base_interval * 2, 300);
-                } else {
-                    current_interval = base_interval;
-                }
-
-                if removed > 0 {
-                    stats
-                        .expired_entries_cleaned
-                        .fetch_add(removed, Ordering::Relaxed);
-                    tracing::info!(
-                        "MemoryStore cleaner: removed {} expired entries, processed {}/{} items in {:?}, next interval: {}s",
-                        removed,
-                        processed,
-                        data_size_before,
-                        cleanup_duration,
-                        current_interval
-                    );
-                }
-
-                // Memory pressure check
-                if config.max_memory_usage > 0 && data_size_after > config.max_memory_usage / 100 {
-                    tracing::warn!(
-                        "MemoryStore approaching memory limit: {} keys (estimated {} bytes)",
-                        data_size_after,
-                        data_size_after * 100
-                    );
+                ticker.tick().await;
+                let swept = store.clone();
+                match tokio::task::spawn_blocking(move || swept.sweep()).await {
+                    Ok(0) => {}
+                    Ok(removed) => tracing::debug!(removed, "MemoryStore removed expired entries"),
+                    Err(error) => tracing::warn!(%error, "MemoryStore sweep failed"),
                 }
             }
         });
@@ -2004,6 +1935,143 @@ mod tests {
         }
         assert_eq!(store.get::<u32>(counter).await.unwrap(), Some(32));
         assert_eq!(store.get::<u32>(copy).await.unwrap(), Some(32));
+    }
+
+    fn bounded(bytes: usize) -> MemoryStore {
+        MemoryStore::with_config(MemoryStoreConfig {
+            max_memory_usage: bytes,
+            ..MemoryStoreConfig::default()
+        })
+    }
+
+    /// Creates ingress buckets the way the limiter does until the store
+    /// refuses one, and returns how many fit.
+    async fn flood(store: &MemoryStore, client_prefix: &str) -> usize {
+        for index in 0.. {
+            let key = crate::keys::limits::ingress("gateway", &format!("{client_prefix}{index}"));
+            match store
+                .measure_and_set_i64(&key, |tat| (true, tat + 1), Some(1))
+                .await
+            {
+                Ok(_) => continue,
+                Err(StoreError::Full) => return index,
+                Err(error) => panic!("{error}"),
+            }
+        }
+        unreachable!()
+    }
+
+    #[tokio::test]
+    async fn a_full_store_stays_under_its_limit_and_keeps_sessions_and_revocations() {
+        const LIMIT: usize = 64 * 1024;
+        let store = bounded(LIMIT);
+        let sid = "01JZ00000000000000000000AA";
+        let session = crate::keys::session::subject(sid);
+        store.set(&session, &"alice", Some(3600)).await.unwrap();
+        store
+            .hset(
+                &crate::keys::session::index("01JZ00000000000000000000U1"),
+                sid,
+                &"org",
+                Some(3600),
+            )
+            .await
+            .unwrap();
+
+        let admitted = flood(&store, "203.0.113.").await;
+        assert!(admitted > 100, "only {admitted} buckets fit");
+        assert!(store.used_memory_bytes() <= LIMIT);
+        assert!(store.is_memory_pressure());
+        // The full measurement agrees: nothing was written beyond the limit.
+        assert!(store.get_storage_stats().estimated_memory_bytes <= LIMIT);
+        store.sweep();
+        assert!(store.used_memory_bytes() <= LIMIT);
+
+        // Nothing was evicted to make room, and existing entries still update.
+        assert_eq!(
+            store.get::<String>(&session).await.unwrap().as_deref(),
+            Some("alice")
+        );
+        store
+            .set(&session, &"alice-renewed", Some(3600))
+            .await
+            .unwrap();
+        let bucket = crate::keys::limits::ingress("gateway", "203.0.113.0");
+        store
+            .measure_and_set_i64(&bucket, |tat| (true, tat + 1), Some(1))
+            .await
+            .unwrap();
+
+        // New entries of every kind are refused, except a revocation.
+        assert!(matches!(
+            store
+                .set(
+                    &crate::keys::session::subject("01JZ00000000000000000000BB"),
+                    &"bob",
+                    Some(60)
+                )
+                .await,
+            Err(StoreError::Full)
+        ));
+        assert!(matches!(
+            store
+                .incr_i64(&crate::keys::otp::request_ip("198.51.100.1"), 1, Some(60))
+                .await,
+            Err(StoreError::Full)
+        ));
+        assert!(matches!(
+            store
+                .hset(
+                    &crate::keys::account::login_known("01JZ00000000000000000000U1"),
+                    "198.51.100.1",
+                    &1_i64,
+                    Some(60)
+                )
+                .await,
+            Err(StoreError::Full)
+        ));
+        let created = Transaction::new()
+            .set(
+                &crate::keys::session::record("01JZ00000000000000000000CC"),
+                &"record",
+                60,
+            )
+            .unwrap();
+        assert!(matches!(
+            store.commit(&created).await,
+            Err(StoreError::Full)
+        ));
+        assert!(
+            !store
+                .exists(&crate::keys::session::record("01JZ00000000000000000000CC"))
+                .await
+                .unwrap()
+        );
+        let revoked = crate::keys::session::revoked_jti("jti-1");
+        store.set(&revoked, &true, Some(60)).await.unwrap();
+        assert_eq!(store.get::<bool>(&revoked).await.unwrap(), Some(true));
+        // Callers answer a full store like an unavailable Redis.
+        assert!(StoreError::Full.is_unavailable());
+
+        // Once the buckets expire, the sweep frees their room for new clients.
+        tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+        assert!(store.sweep() >= admitted);
+        assert!(flood(&store, "198.51.100.").await > 100);
+        assert!(store.exists(&session).await.unwrap());
+        assert!(store.exists(&revoked).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn an_unbounded_store_never_refuses() {
+        let store = MemoryStore::new();
+        for index in 0..10_000 {
+            store
+                .set(&format!("key-{index}"), &index, Some(60))
+                .await
+                .unwrap();
+        }
+        assert_eq!(store.memory_limit_bytes(), 0);
+        assert!(!store.is_memory_pressure());
     }
 
     #[tokio::test]

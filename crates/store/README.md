@@ -35,6 +35,7 @@ crates/store/
 │   ├── error.rs            # StoreError enum + StoreResult<T>
 │   ├── memory/
 │   │   ├── memory.rs       # MemoryStore impl (DashMap)
+│   │   ├── capacity.rs     # Memory bound: noeviction admission of new entries
 │   │   ├── config.rs       # MemoryStoreConfig + presets
 │   │   ├── persistence.rs  # Save/load to binary (MsgPack) and JSON
 │   │   └── stats.rs        # AtomicOperationStats, StorageStats, metrics
@@ -163,7 +164,7 @@ In-process store backed by `DashMap` (sharded `RwLock`s, no global lock). Design
 ```rust
 use store::MemoryStore;
 
-// Defaults: initial_capacity=1000, time_caching=true, cleanup_batch=100
+// Defaults: initial_capacity=1000, time_caching=true, unbounded memory
 let store = MemoryStore::new();
 
 // Preset configurations
@@ -178,21 +179,30 @@ let store = MemoryStore::with_config(MemoryStoreConfig::development());
 |----------------------|----------|--------------------------------------------------|
 | `initial_capacity`   | `1000`   | Pre-allocated DashMap buckets                    |
 | `enable_time_caching`| `true`   | Cache `Utc::now()` for 50ms to reduce syscalls   |
-| `cleanup_batch_size` | `100`    | Max entries scanned per manual cleanup call      |
 | `enable_preallocation`| `true`  | Pre-allocate `HashMap` on `hgetall`              |
-| `max_memory_usage`   | `0`      | Soft memory limit in bytes (0 = disabled)        |
+| `max_memory_usage`   | `0`      | Memory bound in estimated bytes (0 = unbounded)  |
 
 ### TTL and expiry
 
-TTL is stored as an absolute `DateTime<Utc>` alongside each value (and per hash field). Expiry is **lazy**: entries are removed on first access after expiration. The adaptive cleaner handles background eviction.
+TTL is stored as an absolute `DateTime<Utc>` alongside each value (and per hash field). Reads treat an expired entry as missing and remove it. The sweep removes the expired entries nothing reads again.
 
-### Adaptive background cleaner
+### Sweep and memory bound
 
 ```rust
-// Starts a Tokio task. Interval adapts: halves when high expiry rate,
-// doubles (up to 300s) when low expiry rate.
-store.run_adaptive_cleaner(60); // base interval in seconds
+// Removes every expired entry and hash field, and re-measures usage.
+let removed = store.sweep();
+
+// Sweeps on a blocking thread every interval.
+store.run_sweeper(std::time::Duration::from_secs(1));
 ```
+
+With `max_memory_usage` set, the store behaves like Redis with
+`maxmemory-policy noeviction`: it never evicts, and once the estimated usage
+would exceed the bound it refuses to create keys and hash fields with
+`StoreError::Full`. Updates of existing entries still apply, and revocation keys
+(`{j:<jti>}:revoked`) are always accepted. Usage is the last sweep's measurement
+plus the entries created since; deletions count at the next sweep, so the
+estimate errs towards full between sweeps.
 
 ### Extra operations (not part of the `Store` trait)
 
@@ -224,9 +234,8 @@ store.measure_and_set_i64("counter", |current| {
     (current < limit, current + 1)
 }, Some(ttl)).await?;
 
-// Manual cleanup
-let removed = store.cleanup_expired().await;
-let removed = store.batch_cleanup_expired(Some(500)).await;
+// Manual sweep
+let removed = store.sweep();
 
 // Observability
 let stats   = store.get_storage_stats();
@@ -236,7 +245,9 @@ let ratio   = store.get_cache_hit_ratio();
 let tips    = store.get_optimization_recommendations();
 let bytes   = store.get_memory_usage_bytes();
 let keys    = store.get_total_keys();
-let is_pressure = store.is_memory_pressure();
+let is_pressure = store.is_memory_pressure(); // above 90% of the bound
+let used    = store.used_memory_bytes();     // the bound's estimate
+let limit   = store.memory_limit_bytes();
 store.reset_stats();
 ```
 
@@ -363,7 +374,7 @@ struct Session { user_id: String, ip: String }
 #[tokio::main]
 async fn main() -> store::StoreResult<()> {
     let store = MemoryStore::new();
-    store.run_adaptive_cleaner(60);
+    store.run_sweeper(std::time::Duration::from_secs(1));
 
     // Simple value with 1h TTL
     store.set("session:abc", &Session { user_id: "u1".into(), ip: "1.2.3.4".into() }, Some(3600)).await?;

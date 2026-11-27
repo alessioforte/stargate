@@ -84,10 +84,12 @@ enum OrgTarget<'a> {
     Ip,
 }
 
+/// `client` is the client network per-address limits count
+/// ([`crate::srv::client_ip::ClientNetwork`]).
 pub async fn apply_limits(
     runtime: &RuntimeSnapshot,
     subject: Option<&Subject>,
-    client_ip: &str,
+    client: &str,
     headers: &mut HeaderMap,
     policies: SelectedLimitPolicies,
     usage: &mut StoreUsage,
@@ -106,7 +108,7 @@ pub async fn apply_limits(
     apply_selected_limits(
         runtime,
         subject,
-        client_ip,
+        client,
         headers,
         policies,
         &org_overrides,
@@ -127,7 +129,7 @@ struct LimitCheck {
 
 fn org_check(
     org_id: Option<&str>,
-    client_ip: &str,
+    client: &str,
     policy: Option<&OrgScopedLimit>,
     override_name: Option<&str>,
     kind: LimitKind,
@@ -152,8 +154,8 @@ fn org_check(
         Some(OrgTarget::Ip) => (
             policy.limit.as_str(),
             match kind {
-                LimitKind::Rate => store::keys::limits::org_ip_rate(client_ip),
-                LimitKind::Quota => store::keys::limits::org_ip_quota(client_ip),
+                LimitKind::Rate => store::keys::limits::org_ip_rate(client),
+                LimitKind::Quota => store::keys::limits::org_ip_quota(client),
             },
             "ip",
             true,
@@ -173,7 +175,7 @@ fn org_check(
 async fn apply_selected_limits(
     runtime: &RuntimeSnapshot,
     subject: Option<&Subject>,
-    client_ip: &str,
+    client: &str,
     headers: &mut HeaderMap,
     policies: SelectedLimitPolicies,
     overrides: &OrgLimitOverrides,
@@ -181,7 +183,7 @@ async fn apply_selected_limits(
 ) -> Result<(), ErrorResponse> {
     let selected = select_limits(
         subject,
-        client_ip,
+        client,
         policies
             .subject_rate
             .as_ref()
@@ -196,7 +198,7 @@ async fn apply_selected_limits(
     let mut checks = Vec::with_capacity(4);
     if let Some(check) = org_check(
         org_id,
-        client_ip,
+        client,
         policies.org_rate.as_ref(),
         overrides.rate_limit.as_deref(),
         LimitKind::Rate,
@@ -216,7 +218,7 @@ async fn apply_selected_limits(
     });
     if let Some(check) = org_check(
         org_id,
-        client_ip,
+        client,
         policies.org_quota.as_ref(),
         overrides.quota.as_deref(),
         LimitKind::Quota,
@@ -368,7 +370,7 @@ fn binding_check<'a>(
 
 fn select_limits(
     subject: Option<&Subject>,
-    client_ip: &str,
+    client: &str,
     rate_limit_override: Option<&str>,
     quota_override: Option<&str>,
 ) -> Result<SelectedLimits, ErrorResponse> {
@@ -376,7 +378,7 @@ fn select_limits(
         .unwrap_or(DEFAULT_RATE_LIMIT)
         .to_string();
     let mut quota_name = quota_override.map(str::to_string);
-    let mut subject_key = client_ip.to_string();
+    let mut subject_key = client.to_string();
 
     if let Some(subject) = subject {
         if rate_limit_name == DEFAULT_RATE_LIMIT

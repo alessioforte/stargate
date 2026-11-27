@@ -2,7 +2,8 @@
 
 Stargate binds one or more listeners at startup. Each listener has a name, a
 complete address, the serving planes it exposes, its own TLS switch, its proxy
-trust, and its own connection cap. Without configuration there is one implicit
+trust, the IPv6 prefix its per-address limits count, and its own connection
+cap. Without configuration there is one implicit
 listener, which is the single-port behavior every deployment had before named
 listeners.
 
@@ -20,6 +21,7 @@ serves every plane on it:
 | `TLS_ENABLED`     | `false` | Terminates TLS on the implicit listener                     |
 | `MAX_CONNECTIONS` | `1024`  | Concurrent connections the implicit listener accepts         |
 | `TRUSTED_PROXIES` | none    | Proxy sources whose forwarding headers it accepts            |
+| `IPV6_PREFIX`     | `64`    | IPv6 prefix its per-address limits count (48–128)            |
 
 `TLS_CERT` and `TLS_KEY` hold the certificate when TLS is on. Routes, proxies,
 and hosted apps behave exactly as they did before named listeners.
@@ -37,6 +39,7 @@ LISTENER_INTERNAL_ADDRESS=[::1]:5052
 LISTENER_INTERNAL_PLANES=admin
 LISTENER_INTERNAL_TLS=off
 LISTENER_INTERNAL_MAX_CONNECTIONS=256
+LISTENER_INTERNAL_IPV6_PREFIX=128
 LISTENER_MANAGEMENT_ADDRESS=0.0.0.0:9000
 LISTENER_MANAGEMENT_PLANES=management
 ```
@@ -50,6 +53,7 @@ LISTENER_MANAGEMENT_PLANES=management
 | `LISTENER_<NAME>_TLS`             | no       | on, except for management   |
 | `LISTENER_<NAME>_MAX_CONNECTIONS` | no       | `1024`                      |
 | `LISTENER_<NAME>_TRUSTED_PROXIES` | no       | none                        |
+| `LISTENER_<NAME>_IPV6_PREFIX`     | no       | `64`                        |
 
 Names are 1–32 ASCII letters or digits, start with a letter, and are compared
 case-insensitively; the environment variable uses the uppercase name. A field
@@ -59,9 +63,9 @@ silently fall back to a default.
 The address is a literal IP and a port — `0.0.0.0:5050`, `127.0.0.1:5051`,
 `[::1]:5052`. Hostnames and addresses without a port are rejected.
 
-`PORT`, `TLS_ENABLED`, `MAX_CONNECTIONS`, and `TRUSTED_PROXIES` configure the
-implicit listener and stop startup when `LISTENERS` is declared: every listener
-states its own values.
+`PORT`, `TLS_ENABLED`, `MAX_CONNECTIONS`, `TRUSTED_PROXIES`, and `IPV6_PREFIX`
+configure the implicit listener and stop startup when `LISTENERS` is declared:
+every listener states its own values.
 
 ### Planes
 
@@ -81,8 +85,14 @@ credentials must use `Authorization: Bearer` or `x-api-key` headers.
 A plane may appear on more than one listener; each listener mounts only the
 planes it declares. Nothing adds a plane a listener does not declare, so
 `LISTENERS` without a listener for the management plane answers `/livez` and
-`/readyz` nowhere and logs a warning at startup. On a listener with IAM planes
-the shared ingress allowance and CORS/compression apply as on the single port.
+`/readyz` nowhere and logs a warning at startup. Each plane charges the
+configuration's `ingress.limit` to a bucket of its own for the client network: a
+flood on the gateway does not spend the same client's sign-in allowance, and the
+identity and admin planes do not spend each other's. The OpenAPI document
+charges the identity plane, or the admin plane on a listener without identity.
+The buckets belong to the plane, not the listener: a plane served by two
+listeners shares one bucket per client network. On a listener with IAM planes
+CORS/compression apply as on the single port.
 The identity plane also admits the Console's public origin (`CONSOLE_PUBLIC_URL`)
 on `/oauth/token`, `/oauth/revoke`, `GET /i18n/{locale}`, and
 `GET`/`PUT /account/profile` only, so a Console served by the admin listener can
@@ -122,6 +132,28 @@ so an internal service cannot forge its address in logs, limits, or audit.
 Entries are IP addresses or CIDR blocks. Invalid entries stop startup instead of
 being dropped, and the list is read once. `TRUSTED_PROXIES` is the implicit
 listener's list; with `LISTENERS` it stops startup so the trust has one source.
+
+A dual-stack socket reports IPv4 clients as IPv4-mapped IPv6 addresses
+(`::ffff:10.42.0.9`). Stargate reads them, and forwarded addresses in that
+form, as their IPv4 address: IPv4 trust entries match them, and logs, limits,
+and audit record the IPv4 form.
+
+### IPv6 prefix
+
+Per-address limits count a client network, not a single IPv6 address: an
+Internet subscriber usually receives a whole /64 and can rotate its addresses
+inside it. `LISTENER_<NAME>_IPV6_PREFIX` (`IPV6_PREFIX` on the implicit
+listener) sets how many leading bits count, from 48 to 128, default 64; other
+values stop startup. IPv4 clients always count by address.
+
+The prefix applies to the ingress buckets of every plane, the password login
+guard and its recognition of returning clients, the OTP request throttles, and
+the gateway rate and quota buckets of anonymous clients and of `ip_fallback`
+organization limits. Logs, spans, audit, source-IP matchers, load balancing,
+and the signed internal context keep the exact address.
+
+Use `128` on an internal listener: with IPv6 pod networks, many pods of a node
+share one /64, and a /64 would put unrelated internal callers in one bucket.
 
 ### TLS
 

@@ -203,26 +203,34 @@ through connection acquisition and Redis responses. An exhausted check follows
 its own `on_store_error` policy immediately. Time spent on other request work
 does not consume the budget. Generated configs and the Helm defaults use
 burst 100 with one request replenished every `100ms` (10/s); tune these values
-for the gateway and IAM traffic sharing each client IP (NAT, VPN, office egress).
+for the traffic one plane receives from a client network (NAT, VPN, office
+egress).
 
-Gateway requests first acquire process admission, then consume the ingress
-allowance of the client address the listener resolved once at ingress, before
-credential verification, database lookup, or route matching. Invalid API
-keys/bearer tokens, rejected auth/access policies, and nonexistent routes all
-consume allowance. Keys use the resolved IP only; changing credentials or client
-headers cannot choose another bucket. The peer's forwarding headers count only
+Gateway requests first acquire process admission, then consume the gateway
+plane's ingress allowance of the client network, before credential
+verification, database lookup, or route matching. Invalid API keys/bearer
+tokens, rejected auth/access policies, and nonexistent routes all consume
+allowance. The client network is the address the listener resolved once at
+ingress: an IPv4 address, or an IPv6 address truncated to the listener's
+prefix (`IPV6_PREFIX` or `LISTENER_<NAME>_IPV6_PREFIX`, default /64, see
+`docs/listeners.md`), so rotating addresses inside one subscriber's /64 never
+opens a fresh bucket. Keys use that network only; changing credentials or
+client headers cannot choose another bucket. The peer's forwarding headers count only
 when the receiving listener trusts the peer (`TRUSTED_PROXIES` on the implicit
 listener, `LISTENER_<NAME>_TRUSTED_PROXIES` with `LISTENERS`); an untrusted peer
 is keyed by its socket address and its forwarding headers are removed. Without a
 peer address, requests share the conservative `unknown` bucket. Keep
 trusted-proxy entries restricted to the deployment's actual proxy peers. Behind
 a load balancer or ingress controller, trust the proxy on that listener:
-otherwise every client resolves to the proxy's address and shares one allowance,
-so a single client can exhaust it for everyone, IAM logins included. See
+otherwise every client resolves to the proxy's address and shares one allowance
+per plane, so a single client can exhaust it for everyone. See
 `docs/listeners.md`.
 
 Ingress uses its own key namespace, distinct from resource subject/org rate and
-quota buckets even when both reference the same named limit. After admission,
+quota buckets even when both reference the same named limit. Each plane
+(gateway, identity, admin) has its own bucket per client network with the same
+`ingress.limit`: a flood on the gateway does not consume the sign-in allowance of
+the same client. After admission,
 authentication and selected resource policies still enforce their own limits
 and `quota_cost`. Ingress allowances persist through reloads of the same named
 limit because generations share limiter state; each request pins its ingress
@@ -243,12 +251,45 @@ Use a Traefik rate limit as a safety net: `allow` removes the distributed per-IP
 allowance during a store outage. It does not provide a local fallback counter.
 These settings belong to the configuration document and apply on reload.
 
+The edge profile keeps limits and security state in memory, bounded by
+`STORE_MAX_MEMORY_MB` (default 256 MiB). Like Redis with `noeviction`, a full
+store evicts nothing, so sessions and revocations are never lost to make room:
+it refuses to create entries while existing ones keep updating. A limit check
+that needs a new bucket then follows its `on_store_error` policy, and the limit
+store reports degraded. Revocations are recorded even when the store is full;
+other new security state, such as a new session, a login attempt counter, an OTP
+challenge or OAuth state, fails closed with `503 auth.state_unavailable`.
+Expired entries free their room within a second of their expiry.
+
+The bound counts an estimate of each entry: its slot in the map, its key and its
+value. An ingress bucket takes about 160 bytes (about 6,500 per MiB) and a
+password attempt counter about 240 bytes (about 4,300 per MiB), so 256 MiB hold
+about 1.6 million ingress buckets or 1.1 million attempt counters. The process
+uses more memory than the estimate: allocator and table overhead, request
+buffers and password hashing come on top, so keep the container limit well
+above `STORE_MAX_MEMORY_MB`.
+
+A flood of sign-in attempts can fill the store. Each attempt with an unknown
+login identifier creates two attempt counters that live five minutes, and one
+client network may try 20 times in five minutes. About 1,900 such requests per
+second, from some 28,000 IPv6 /64 networks (fewer than one /48), keep 256 MiB
+full. Until the flood stops and its counters expire, new sign-ins, OTP and MFA
+challenges and OAuth flows that need new state answer `503`; existing sessions,
+their renewal and revocations keep working. In the cluster profile Redis with
+`noeviction` fails the same flows and also refuses updates that need more memory
+(see `docs/redis-keys.md`). Keep a rate limit in front of Stargate and size the
+store for the expected live state; see `docs/sizing.md`.
+
 ### IAM and admin limits
 
 IAM endpoints (`/account/*`, `/oauth/*`, `/signup/*`, `/admin/*`, `/docs`,
 `/i18n`, `/.well-known/*`, and the hosted `/auth` and `/stargate` apps) consume
-the same per-IP ingress allowance as the gateway, with the same key and before
-any credential is read: one allowance per client address for the whole process.
+the same `ingress.limit` as the gateway, before any credential is read, from the
+bucket of their plane: identity endpoints and the hosted auth app charge the
+identity plane, `/admin/*` and the Console the admin plane, and `/docs` the
+identity plane (the admin plane on a listener without identity). Each plane has
+one allowance per client network for the whole process, separate from the
+gateway's.
 IAM denials return `429 iam.ingress_rate_limit_exceeded` with
 `X-RateLimit-Scope: ingress`. `ingress.on_store_error` also governs IAM ingress
 and the admin principal check below: store failures/timeouts pass by default,
@@ -287,13 +328,17 @@ error such as hash-worker overload refunds that request's reservations.
 A denied request refunds any reservations it had already made. Outstanding
 reservations after cancellation or a failed refund expire with their buckets.
 
-- **Per source IP** allows 20 attempts in a five-minute window. The larger
+The source of an attempt is its client network: the IPv4 address, or the IPv6
+address truncated to the receiving listener's prefix (default /64, see
+`docs/listeners.md`). Addresses rotated inside one /64 are one source.
+
+- **Per source network** allows 20 attempts in a five-minute window. The larger
   budget accommodates several users sharing an address and limits password
   spraying across different accounts.
-- **Per account and source IP** allows five attempts in a five-minute window.
-  This gives users a few chances to correct a password while constraining
-  repeated guesses from one address. Both fixed windows begin with the
-  first reservation.
+- **Per account and source network** allows five attempts in a five-minute
+  window. This gives users a few chances to correct a password while
+  constraining repeated guesses from one source. Both fixed windows begin with
+  the first reservation.
 - **Per account across all IPs** applies a two-second pause after the fifth
   outstanding or failed attempt, doubling after each additional attempt
   to a maximum of 30 seconds. This slows distributed guessing while letting
@@ -302,27 +347,31 @@ reservations after cancellation or a failed refund expire with their buckets.
   bucket. Unknown login names use the same policy with their normalized
   identifier.
 
-A completed password login recognizes the account/source IP pair for 30 days.
-The JSON login, OAuth password form and login MFA completion record the address
-resolved by the server after session issuance, once password, MFA and
-password-expiry checks have completed. Each completed password login renews
-the deadline. Thirty days covers routine
-returning users while bounding recognition of an address that may be reassigned.
+A completed password login recognizes the account/source network pair for 30
+days. The JSON login, OAuth password form and login MFA completion record the
+network of the address resolved by the server after session issuance, once
+password, MFA and password-expiry checks have completed. Each completed password
+login renews the deadline. Thirty days covers routine returning users while
+bounding recognition of an address that may be reassigned. Recognition follows
+the network the counters use, so a returning IPv6 client is recognized after its
+privacy address rotates within its /64.
 
-A recognized pair skips the account-wide backoff bucket. Its per-IP and
-per-account/IP limits still apply on every attempt, including during a
-distributed attack. New addresses and expired recognition use all three
+A recognized pair skips the account-wide backoff bucket. Its per-network and
+per-account/network limits still apply on every attempt, including during a
+distributed attack, so recognition never widens what one network may try
+against the account. New networks and expired recognition use all three
 buckets. The password and any required MFA are still verified. A store error
 while checking recognition rejects the attempt. A failed recognition write
 is logged and leaves ordinary account backoff in effect. A password reset,
 expired-password completion or revocation of every session deletes the
-account's recognized addresses, so an attacker's address loses the exemption
+account's recognized networks, so an attacker's network loses the exemption
 and returns to the account-wide pause.
 
 A sustained distributed attack can repeatedly take the next account-wide
-attempt and delay sign-in from a new address. Recognition lets returning users
-on the same address complete their login during that pause. A shared address
-also shares recognition for this account until its deadline.
+attempt and delay sign-in from a new network. Recognition lets returning users
+on the same network complete their login during that pause. A shared address,
+or another host in the same IPv6 /64, also shares recognition for this account
+until its deadline.
 
 Rejections leave the charged attempts and their deadlines in place, so
 repeated requests during a pause do not extend it. The JSON API returns
@@ -1488,7 +1537,8 @@ subject has no organization:
 
 - `skip` (default): the org check is skipped; subject-scoped checks still
   apply.
-- `ip_fallback`: the org limit is applied keyed by client IP instead.
+- `ip_fallback`: the org limit is applied keyed by the client network instead
+  (the IPv4 address or the listener's IPv6 prefix).
 - `deny`: the request is rejected with `403` — the route requires an org
   context.
 

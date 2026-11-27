@@ -650,10 +650,18 @@ fn login_request(ip: &str, uri: &str, body: Value) -> Request<Body> {
     request
 }
 
-async fn assert_remembered(user: &User, ip: &str, remembered: bool) {
+/// What the login guard counts for a request from `ip` on a listener with the
+/// default IPv6 prefix.
+fn client_network(ip: &str) -> String {
+    crate::srv::client_ip::Ipv6Prefix::DEFAULT
+        .network(ip.parse().unwrap())
+        .to_string()
+}
+
+async fn assert_remembered(user: &User, client: &str, remembered: bool) {
     let key = store::keys::account::login_known(&user.id);
     let expires_at = crate::data::store::use_store()
-        .hget::<i64>(&key, ip)
+        .hget::<i64>(&key, client)
         .await
         .unwrap();
     assert_eq!(expires_at.is_some(), remembered);
@@ -679,7 +687,9 @@ async fn completed_password_login_suite() {
 
     let hash = pwd::hash::hash_password(PASSWORD.into()).await.unwrap();
     let user = create_user_with_password_hash(&hash).await;
-    let json_ip = "2001:db8:bbbb::1";
+    // Each flow comes from its own /64: recognition is per client network.
+    let json_ip = "2001:db8:bbbb:1::1";
+    let json_client = client_network(json_ip);
     let credentials = json!({"username": user.email, "password": PASSWORD});
 
     let wrong = json!({"username": user.email, "password": "wrong"});
@@ -690,19 +700,19 @@ async fn completed_password_login_suite() {
             .code,
         ErrorCode::AuthInvalidCredentials
     );
-    assert_remembered(&user, json_ip, false).await;
+    assert_remembered(&user, &json_client, false).await;
     // Verification alone cannot recognize an address before the rest of the flow.
     verify_login_password(json_ip, &user.email, PASSWORD)
         .await
         .unwrap();
-    assert_remembered(&user, json_ip, false).await;
+    assert_remembered(&user, &json_client, false).await;
     let invalid_org = json!({"username": user.email, "password": PASSWORD, "orgId": "missing"});
     assert!(
         post_login(login_request(json_ip, "/account/login", invalid_org))
             .await
             .is_err()
     );
-    assert_remembered(&user, json_ip, false).await;
+    assert_remembered(&user, &json_client, false).await;
     assert_eq!(
         post_login(login_request(json_ip, "/account/login", credentials))
             .await
@@ -710,9 +720,9 @@ async fn completed_password_login_suite() {
             .status(),
         StatusCode::OK
     );
-    assert_remembered(&user, json_ip, true).await;
+    assert_remembered(&user, &json_client, true).await;
 
-    let form_ip = "2001:db8:bbbb::2";
+    let form_ip = "2001:db8:bbbb:2::1";
     let interaction = interactions::park(AuthorizationRequest::default())
         .await
         .unwrap();
@@ -738,15 +748,16 @@ async fn completed_password_login_suite() {
             .unwrap()
             .ends_with(&interaction)
     );
-    assert_remembered(&user, form_ip, true).await;
+    assert_remembered(&user, &client_network(form_ip), true).await;
 
     // Seed a delivered challenge so the real completion endpoint can be tested
     // without SMTP. The password was checked from this address before parking.
-    let mfa_ip = "2001:db8:bbbb::3";
-    verify_login_password(mfa_ip, &user.email, PASSWORD)
+    let mfa_ip = "2001:db8:bbbb:3::1";
+    let mfa_client = client_network(mfa_ip);
+    verify_login_password(&mfa_client, &user.email, PASSWORD)
         .await
         .unwrap();
-    assert_remembered(&user, mfa_ip, false).await;
+    assert_remembered(&user, &mfa_client, false).await;
     let now = chrono::Utc::now().timestamp() as u64;
     let issued = otp::issue_email_otp(
         &user.email,
@@ -788,7 +799,7 @@ async fn completed_password_login_suite() {
         .await
         .is_err()
     );
-    assert_remembered(&user, mfa_ip, false).await;
+    assert_remembered(&user, &mfa_client, false).await;
     assert_eq!(
         verify(
             axum::extract::Path(challenge_id),
@@ -803,7 +814,7 @@ async fn completed_password_login_suite() {
         .status(),
         StatusCode::OK
     );
-    assert_remembered(&user, mfa_ip, true).await;
+    assert_remembered(&user, &mfa_client, true).await;
 
     // Four distributed failures plus the first wrong password activate the
     // account pause. Remembered addresses can still complete a login.
@@ -822,31 +833,34 @@ async fn completed_password_login_suite() {
     }
     let fresh_ip = "2001:db8:cccc::100";
     assert_eq!(
-        verify_login_password(fresh_ip, &user.email, PASSWORD)
+        verify_login_password(&client_network(fresh_ip), &user.email, PASSWORD)
             .await
             .unwrap_err()
             .code,
         ErrorCode::AuthLoginRateLimited
     );
-    let credentials = json!({"username": user.email, "password": PASSWORD});
-    assert_eq!(
-        post_login(login_request(json_ip, "/account/login", credentials))
-            .await
-            .unwrap()
-            .status(),
-        StatusCode::OK
-    );
+    // A rotated privacy address in the remembered /64 is the same client.
+    for ip in [json_ip, "2001:db8:bbbb:1:a8f3:91ff:fe20:7c41"] {
+        let credentials = json!({"username": user.email, "password": PASSWORD});
+        assert_eq!(
+            post_login(login_request(ip, "/account/login", credentials))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+    }
     crate::data::store::use_store()
         .hset(
             &store::keys::account::login_known(&user.id),
-            json_ip,
+            &json_client,
             &0_i64,
             Some(60),
         )
         .await
         .unwrap();
     assert_eq!(
-        verify_login_password(json_ip, &user.email, PASSWORD)
+        verify_login_password(&json_client, &user.email, PASSWORD)
             .await
             .unwrap_err()
             .code,
@@ -864,10 +878,11 @@ async fn forgotten_after_credential_change(user: &User) {
     use crate::iam::auth::login_guard;
 
     let ip = "2001:db8:dddd::1";
-    login_guard::record_success(&user.id, ip).await;
+    let client = client_network(ip);
+    login_guard::record_success(&user.id, &client).await;
     login_guard::seed_account_backoff(&user.id).await;
     assert!(
-        verify_login_password(ip, &user.email, PASSWORD)
+        verify_login_password(&client, &user.email, PASSWORD)
             .await
             .is_ok()
     );
@@ -889,9 +904,9 @@ async fn forgotten_after_credential_change(user: &User) {
     ))
     .await
     .unwrap();
-    assert_remembered(user, ip, false).await;
+    assert_remembered(user, &client, false).await;
     assert_eq!(
-        verify_login_password(ip, &user.email, PASSWORD)
+        verify_login_password(&client, &user.email, PASSWORD)
             .await
             .unwrap_err()
             .code,
@@ -914,18 +929,18 @@ async fn forgotten_after_credential_change(user: &User) {
         .status(),
         StatusCode::OK
     );
-    assert_remembered(user, ip, true).await;
+    assert_remembered(user, &client, true).await;
 
     login_guard::seed_account_backoff(&user.id).await;
     assert!(
-        verify_login_password(ip, &user.email, PASSWORD)
+        verify_login_password(&client, &user.email, PASSWORD)
             .await
             .is_ok()
     );
     assert!(registry::revoke_all_sessions(&user.id).await.unwrap() > 0);
-    assert_remembered(user, ip, false).await;
+    assert_remembered(user, &client, false).await;
     assert_eq!(
-        verify_login_password(ip, &user.email, PASSWORD)
+        verify_login_password(&client, &user.email, PASSWORD)
             .await
             .unwrap_err()
             .code,

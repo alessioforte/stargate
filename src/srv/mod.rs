@@ -9,6 +9,7 @@ pub mod tls;
 
 use crate::api::plane::PlaneSet;
 use axum::{Router, extract::Request, response::Response};
+use client_ip::Ipv6Prefix;
 use hyper::body::Incoming;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
@@ -89,6 +90,8 @@ pub struct ListenerInfo {
     pub tls: bool,
     /// Forwarding-header sources this listener accepts; empty trusts nobody.
     pub trusted_proxies: ProxyTrust,
+    /// IPv6 prefix per-address limits count on this listener.
+    pub ipv6_prefix: Ipv6Prefix,
 }
 
 /// Facts about the connection carrying a request: the peer address before any
@@ -132,6 +135,7 @@ pub(crate) fn test_connection_with(
             planes: PlaneSet::ALL,
             tls: false,
             trusted_proxies,
+            ipv6_prefix: Ipv6Prefix::DEFAULT,
         }),
     }
 }
@@ -158,6 +162,7 @@ pub async fn serve(
             planes = %listener.info.planes,
             tls = listener.info.tls,
             trusted_proxies = listener.info.trusted_proxies.source_count(),
+            ipv6_prefix = listener.info.ipv6_prefix.bits(),
             "Serving"
         );
     }
@@ -202,6 +207,7 @@ pub(crate) async fn bind(
             planes: settings.planes,
             tls: tls_acceptor.is_some(),
             trusted_proxies: settings.trusted_proxies,
+            ipv6_prefix: settings.ipv6_prefix,
         });
         bound.push(Bound {
             info,
@@ -309,6 +315,10 @@ async fn serve_listener<S: Accept + Send + 'static>(
         if let Err(error) = tcp.set_nodelay(true) {
             debug!(listener = %info.name, %error, "Could not set TCP_NODELAY");
         }
+        // A dual-stack socket reports IPv4 clients as `::ffff:a.b.c.d`; every
+        // reader (proxy trust, limits, logs, forwarded headers) sees the IPv4
+        // address they configure and log.
+        let peer = SocketAddr::new(peer.ip().to_canonical(), peer.port());
         let service = Connection {
             router: router.clone(),
             peer,

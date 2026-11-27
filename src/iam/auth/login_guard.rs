@@ -1,4 +1,12 @@
+//! Password attempt throttles. Every bucket that names a source counts the
+//! client network (`srv::client_ip::ClientNetwork`): the IPv4 address or the
+//! IPv6 block of the listener's prefix, so rotating addresses inside one
+//! subscriber's /64 never opens fresh buckets. Recognition after a completed
+//! login follows the same unit: it lifts only the account-wide pause, while the
+//! network and account/network limits keep counting every attempt.
+
 use crate::data::store::use_store;
+use crate::web::request::UNKNOWN_CLIENT;
 use serde::{Deserialize, Serialize};
 use store::{Store, StoreError, StoreResult};
 
@@ -44,35 +52,33 @@ pub(crate) enum Admission<T> {
 pub(crate) struct LoginAttempt<'a>(Vec<Reservation<'a>>);
 
 impl LoginThrottle {
-    pub(crate) fn for_user(client_ip: &str, user_id: &str) -> Self {
-        let mut throttle = Self::new(client_ip, |ip| {
-            store::keys::account::login_user(user_id, ip)
-        });
+    pub(crate) fn for_user(client: &str, user_id: &str) -> Self {
+        let mut throttle = Self::new(client, |ip| store::keys::account::login_user(user_id, ip));
         throttle.known = Some(KnownAddress {
             key: store::keys::account::login_known(user_id),
-            field: client_ip.to_string(),
+            field: client.to_string(),
         });
         throttle
     }
 
-    pub(crate) fn for_identifier(client_ip: &str, identifier: &str) -> Self {
-        Self::new(client_ip, |ip| {
+    pub(crate) fn for_identifier(client: &str, identifier: &str) -> Self {
+        Self::new(client, |ip| {
             store::keys::account::login_identifier(identifier, ip)
         })
     }
 
-    fn new(client_ip: &str, subject_key: impl Fn(Option<&str>) -> String) -> Self {
+    fn new(client: &str, subject_key: impl Fn(Option<&str>) -> String) -> Self {
         Self {
             known: None,
             buckets: [
                 Bucket {
-                    key: store::keys::account::login_ip(client_ip),
+                    key: store::keys::account::login_ip(client),
                     policy: Policy::FixedWindow {
                         limit: MAX_IP_ATTEMPTS,
                     },
                 },
                 Bucket {
-                    key: subject_key(Some(client_ip)),
+                    key: subject_key(Some(client)),
                     policy: Policy::FixedWindow {
                         limit: MAX_SUBJECT_IP_ATTEMPTS,
                     },
@@ -121,14 +127,14 @@ impl LoginThrottle {
 
 /// Called only after the password flow has issued a session, including MFA
 /// when required. A failed write leaves the ordinary account backoff in force.
-pub(crate) async fn record_success(user_id: &str, client_ip: &str) {
-    if client_ip.parse::<std::net::IpAddr>().is_err() {
+pub(crate) async fn record_success(user_id: &str, client: &str) {
+    if client == UNKNOWN_CLIENT {
         return;
     }
     let key = store::keys::account::login_known(user_id);
     let expires_at = chrono::Utc::now().timestamp() + KNOWN_IP_TTL_SECS as i64;
     if let Err(error) = use_store()
-        .hset(&key, client_ip, &expires_at, Some(KNOWN_IP_TTL_SECS))
+        .hset(&key, client, &expires_at, Some(KNOWN_IP_TTL_SECS))
         .await
     {
         tracing::warn!(%error, "failed to remember password login address");
@@ -327,7 +333,7 @@ mod tests {
 
         let store = use_store();
         let user_id = ulid::Ulid::generate().to_string();
-        let known_ip = "2001:db8:aaaa::1";
+        let known_ip = "2001:db8:aaaa::/64";
         let throttle = LoginThrottle::for_user(known_ip, &user_id);
         // Seed the account at maximum backoff so the assertions have a stable
         // 30-second pause, independently of Argon2 speed or scheduler load.
@@ -355,7 +361,7 @@ mod tests {
         };
         attempt.refund().await;
 
-        let new_ip = LoginThrottle::for_user("2001:db8:aaaa::2", &user_id);
+        let new_ip = LoginThrottle::for_user("2001:db8:bbbb::/64", &user_id);
         assert!(matches!(
             new_ip.reserve().await.unwrap(),
             Admission::Limited { .. }

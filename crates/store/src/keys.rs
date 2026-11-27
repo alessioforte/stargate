@@ -16,8 +16,9 @@
 //!   default) before the root; that prefix is outside every tag and does not
 //!   move a key to another slot.
 //!
-//! The values that form a tag are generated identifiers (ULIDs, digests) or an
-//! IP address. Free-form input (an email, an identifier typed at login, an OTP
+//! The values that form a tag are generated identifiers (ULIDs, digests) or a
+//! client network: an IP address, or an IPv6 block such as `2001:db8::/64`.
+//! Free-form input (an email, an identifier typed at login, an OTP
 //! subject) is hashed first: the caller canonicalizes it and the builders hash
 //! it with SHA-256. A tag never contains `{` or `}`.
 //!
@@ -60,6 +61,13 @@ pub(crate) fn slot(key: &str) -> &str {
         Some(close) if close > 0 => &rest[..close],
         _ => key,
     }
+}
+
+/// Whether a full in-memory store must still accept a new `key`. A revocation
+/// ends access, so it never waits for memory to free up.
+#[cfg(feature = "memory")]
+pub(crate) fn admitted_when_full(key: &str) -> bool {
+    matches!(entity(key), Some(("j", _)))
 }
 
 fn digest(value: &str) -> String {
@@ -241,9 +249,10 @@ pub mod account {
 pub mod limits {
     use super::scoped;
 
-    /// The per-address ingress allowance shared by gateway and IAM.
-    pub fn ingress(client_ip: &str) -> String {
-        scoped(&format!("ip:{client_ip}"), "ingress")
+    /// A client network's ingress allowance on one serving plane: a flood on
+    /// one plane never spends another plane's allowance.
+    pub fn ingress(plane: &str, client: &str) -> String {
+        scoped(&format!("ip:{client}"), &format!("ingress:{plane}"))
     }
 
     /// A subject's rate limit bucket.
@@ -349,7 +358,8 @@ mod tests {
             account::login_known("01JZ00000000000000000000U1"),
             account::login_identifier("alice@example.com", Some("203.0.113.1")),
             account::login_identifier("alice@example.com", None),
-            limits::ingress("203.0.113.1"),
+            limits::ingress("gateway", "203.0.113.1"),
+            limits::ingress("identity", "2001:db8::/64"),
             limits::subject_rate("01JZ00000000000000000000U1"),
             limits::subject_quota("01JZ00000000000000000000U1"),
             limits::org_rate("01JZ00000000000000000000O1"),
@@ -416,8 +426,12 @@ mod tests {
         assert_eq!(api_key::subject("abc"), "stargate:v1:{k:abc}:subject");
         assert_eq!(oauth::authorization_code("abc"), "stargate:v1:{c:abc}:code");
         assert_eq!(
-            limits::ingress("203.0.113.8"),
-            "stargate:v1:{ip:203.0.113.8}:ingress"
+            limits::ingress("gateway", "203.0.113.8"),
+            "stargate:v1:{ip:203.0.113.8}:ingress:gateway"
+        );
+        assert_eq!(
+            limits::ingress("identity", "2001:db8:1:2::/64"),
+            "stargate:v1:{ip:2001:db8:1:2::/64}:ingress:identity"
         );
         assert_eq!(
             limits::admin_principal("key:01JZ00000000000000000000K1"),

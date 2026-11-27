@@ -54,11 +54,11 @@ pub(crate) async fn issue_password_session(
     auth_time: usize,
     requested_org_id: Option<&str>,
     amr: Vec<String>,
-    client_ip: &str,
+    client: &str,
     secure: bool,
 ) -> Result<Response, ErrorResponse> {
     let user_id = user.id.clone();
     let response = issue_user_session(user, auth_time, requested_org_id, amr, secure).await?;
-    crate::iam::auth::login_guard::record_success(&user_id, client_ip).await;
+    crate::iam::auth::login_guard::record_success(&user_id, client).await;
     Ok(response)
 }

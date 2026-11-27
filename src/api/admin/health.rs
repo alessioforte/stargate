@@ -66,6 +66,9 @@ struct FeatureStatus {
 struct StoreStats {
     total_keys: usize,
     estimated_memory_bytes: usize,
+    /// `STORE_MAX_MEMORY_MB` in bytes: at this estimate the store creates no
+    /// new entry.
+    memory_limit_bytes: usize,
     cache_hit_ratio: f64,
 }
 
@@ -137,6 +140,7 @@ fn health_response(gate: &Gate, dependencies: DependencyHealth) -> Response {
         StoreStats {
             total_keys: stats.total_keys,
             estimated_memory_bytes: stats.estimated_memory_bytes,
+            memory_limit_bytes: store.memory_limit_bytes(),
             cache_hit_ratio: store.get_cache_hit_ratio(),
         }
     };
@@ -404,7 +408,8 @@ mod fail_open_tests {
                     }),
                 )
                 .layer(from_fn(super::super::extract_admin_authorization))
-                .layer(from_fn(
+                .layer(axum::middleware::from_fn_with_state(
+                    crate::api::plane::Plane::Admin,
                     crate::api::middleware::rate_limit::ingress_limit_middleware,
                 ))
                 .layer(Extension(gate));

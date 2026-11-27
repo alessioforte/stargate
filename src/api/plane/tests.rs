@@ -301,6 +301,7 @@ fn listener_settings(
         tls,
         max_connections: 16,
         trusted_proxies,
+        ipv6_prefix: crate::srv::client_ip::Ipv6Prefix::DEFAULT,
     }
 }
 
@@ -599,6 +600,76 @@ fn ingress_config(burst: u32) -> gate::cfg::Config {
     .unwrap()
 }
 
+/// Every plane charges `ingress.limit` to a bucket of its own: a flood on the
+/// gateway leaves the same client's identity and admin allowances intact, and
+/// the reverse.
+#[tokio::test]
+async fn a_flood_on_one_plane_leaves_the_other_planes_allowance() {
+    let gate = Arc::new(test_support::gate(ingress_config(2)));
+    let app = server_router(Lifecycle::default(), IamHosts::default()).layer(Extension(gate));
+    let send = |peer: &'static str, path: &'static str| {
+        let app = app.clone();
+        async move {
+            let mut request = request(Method::GET, path);
+            request
+                .extensions_mut()
+                .insert(srv::test_connection(peer.parse().unwrap()));
+            srv::client_ip::prepare(&mut request);
+            app.oneshot(request).await.unwrap()
+        }
+    };
+
+    let flooded = "203.0.113.70:1000";
+    for _ in 0..2 {
+        let response = send(flooded, "/no-such-route").await;
+        assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+    let response = send(flooded, "/no-such-route").await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()["x-ratelimit-scope"], "ingress");
+    assert!(
+        text(response)
+            .await
+            .contains("gateway.ingress_rate_limit_exceeded")
+    );
+
+    for _ in 0..2 {
+        assert_eq!(
+            send(flooded, "/account/features").await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            send(flooded, "/admin/me").await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let response = send(flooded, "/account/features").await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        text(response)
+            .await
+            .contains("iam.ingress_rate_limit_exceeded")
+    );
+    assert_eq!(
+        send(flooded, "/admin/me").await.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+
+    // A flood on identity leaves the gateway allowance of another client.
+    let other = "203.0.113.71:1000";
+    for _ in 0..3 {
+        send(other, "/account/features").await;
+    }
+    assert_eq!(
+        send(other, "/account/features").await.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_ne!(
+        send(other, "/no-such-route").await.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
 /// Reports the same client address the traces log, the ingress limit charges,
 /// and audit records, plus whether the forwarding header survived ingress.
 async fn client_ip_probe(req: axum::extract::Request) -> String {
@@ -622,7 +693,8 @@ async fn client_ip_probe(req: axum::extract::Request) -> String {
 fn probe_router(burst: u32) -> Router {
     Router::new()
         .route("/client-ip", get(client_ip_probe))
-        .layer(from_fn(
+        .layer(axum::middleware::from_fn_with_state(
+            Plane::Identity,
             crate::api::middleware::rate_limit::ingress_limit_middleware,
         ))
         .layer(from_fn(crate::obs::logging::trace_middleware))

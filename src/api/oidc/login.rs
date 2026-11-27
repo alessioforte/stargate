@@ -45,7 +45,7 @@ struct LoginForm {
     )
 )]
 pub async fn post_login(req: Request) -> Response {
-    let client_ip = req.get_client_ip();
+    let client = req.get_client_network();
     let secure = req.is_https();
     let interaction = req.get_cookie_value(INTERACTION_COOKIE);
     let form = Form::<LoginForm>::from_request(req, &())
@@ -77,7 +77,7 @@ pub async fn post_login(req: Request) -> Response {
     });
     let username = form.username.as_deref().unwrap_or_default();
     let password = form.password.as_deref().unwrap_or_default();
-    let user = match verify_login_password(&client_ip, username, password).await {
+    let user = match verify_login_password(&client, username, password).await {
         Ok((user, _)) => user,
         Err(error) if error.code == ErrorCode::AuthStateUnavailable => {
             return error.into_response();
@@ -94,7 +94,7 @@ pub async fn post_login(req: Request) -> Response {
     let auth_time = chrono::Utc::now().timestamp() as usize;
     let password = vec![oidc::authentication::AMR_PASSWORD.to_string()];
     let session =
-        match issue_password_session(user, auth_time, None, password, &client_ip, secure).await {
+        match issue_password_session(user, auth_time, None, password, &client, secure).await {
             Ok(session) => session,
             Err(error) if error.code == ErrorCode::AuthStateUnavailable => {
                 return OAuthErrorResponse::from(error).into_response();

@@ -31,7 +31,7 @@ pub async fn put_login_mfa_challenge(
     Path(challenge_id): Path<String>,
     req: Request,
 ) -> Result<Response, ErrorResponse> {
-    let client_ip = req.get_client_ip();
+    let client = req.get_client_network();
     let secure = req.is_https();
     let Json(body) = Json::<MfaChallengeVerifyRequestBody>::from_request(req, &())
         .await
@@ -57,7 +57,7 @@ pub async fn put_login_mfa_challenge(
         auth_time,
         requested_org_id.as_deref(),
         password_and_code,
-        &client_ip,
+        &client,
         secure,
     )
     .await
@@ -65,11 +65,11 @@ pub async fn put_login_mfa_challenge(
 
 pub(crate) async fn maybe_start_login_mfa(
     user: &db::ent::User,
-    client_ip: &str,
+    client: &str,
     auth_time: usize,
     requested_org_id: Option<&str>,
 ) -> Result<Option<Response>, ErrorResponse> {
-    let Some(body) = start_login_mfa(user, client_ip, auth_time, requested_org_id).await? else {
+    let Some(body) = start_login_mfa(user, client, auth_time, requested_org_id).await? else {
         return Ok(None);
     };
 

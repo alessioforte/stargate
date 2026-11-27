@@ -24,11 +24,11 @@ use super::{DEFAULT_MFA_PURPOSE, DEFAULT_PASSWORDLESS_PURPOSE};
 
 pub(crate) async fn start_passwordless_email_otp(
     raw_email: &str,
-    client_ip: &str,
+    client: &str,
 ) -> Result<OtpChallengeResponse, ErrorResponse> {
     let email = normalize_email(raw_email)?;
     check_and_record_otp_request(
-        client_ip,
+        client,
         &format!("passwordless:{}", email.to_ascii_lowercase()),
     )
     .await?;
@@ -121,7 +121,7 @@ pub(crate) async fn login_mfa_required(user: &db::ent::User) -> Result<bool, Err
 
 pub(crate) async fn maybe_start_login_mfa(
     user: &db::ent::User,
-    client_ip: &str,
+    client: &str,
     auth_time: usize,
     requested_org_id: Option<&str>,
 ) -> Result<Option<LoginMfaRequiredResponse>, ErrorResponse> {
@@ -135,7 +135,7 @@ pub(crate) async fn maybe_start_login_mfa(
         ErrorResponse::new(ErrorCode::MfaUnavailable)
     })?;
     ensure_method_allowed(&policy, method)?;
-    check_and_record_otp_request(client_ip, &format!("mfa-login:{}", user.id)).await?;
+    check_and_record_otp_request(client, &format!("mfa-login:{}", user.id)).await?;
 
     match method {
         OtpMethod::Email => start_email_login_mfa(
@@ -246,7 +246,7 @@ pub(crate) async fn list_mfa_methods(
 
 pub(crate) async fn start_mfa_challenge(
     token: Option<String>,
-    client_ip: &str,
+    client: &str,
     method: OtpMethod,
     purpose: Option<&str>,
 ) -> Result<OtpChallengeResponse, ErrorResponse> {
@@ -254,7 +254,7 @@ pub(crate) async fn start_mfa_challenge(
     let purpose = normalize_purpose(purpose, DEFAULT_MFA_PURPOSE)?;
     let policy = mfa_policy_for_user(&auth.user).await?;
     ensure_method_allowed(&policy, method)?;
-    check_and_record_otp_request(client_ip, &format!("mfa:{}:{}", auth.user.id, purpose)).await?;
+    check_and_record_otp_request(client, &format!("mfa:{}:{}", auth.user.id, purpose)).await?;
 
     match method {
         OtpMethod::Email => {

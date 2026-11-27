@@ -27,7 +27,7 @@ use db::ent::CredentialType;
     )
 )]
 pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
-    let client_ip = req.get_client_ip();
+    let client = req.get_client_network();
     let secure = req.is_https();
 
     let Json(credentials) = Json::<UserCredentials>::from_request(req, &())
@@ -37,12 +37,12 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         })?;
 
     let (user, user_credential) =
-        verify_login_password(&client_ip, &credentials.username, &credentials.password).await?;
+        verify_login_password(&client, &credentials.username, &credentials.password).await?;
 
     let auth_time = chrono::Utc::now().timestamp() as usize;
 
     if let Some(response) =
-        maybe_start_login_mfa(&user, &client_ip, auth_time, credentials.org_id.as_deref()).await?
+        maybe_start_login_mfa(&user, &client, auth_time, credentials.org_id.as_deref()).await?
     {
         return Ok(response);
     }
@@ -58,7 +58,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
         auth_time,
         credentials.org_id.as_deref(),
         vec![oidc::authentication::AMR_PASSWORD.to_string()],
-        &client_ip,
+        &client,
         secure,
     )
     .await
@@ -69,7 +69,7 @@ pub async fn post_login(req: Request) -> Result<Response, ErrorResponse> {
 /// background rehash when the stored hash is outdated. Shared by the JSON
 /// login API and the OpenID Provider login page.
 pub(crate) async fn verify_login_password(
-    client_ip: &str,
+    client: &str,
     username: &str,
     password: &str,
 ) -> Result<(db::ent::User, db::ent::Credential), ErrorResponse> {
@@ -80,11 +80,11 @@ pub(crate) async fn verify_login_password(
         .map_err(ErrorResponse::internal)?;
 
     let throttle = match user.as_ref() {
-        Some(u) => login_guard::LoginThrottle::for_user(client_ip, &u.id),
+        Some(u) => login_guard::LoginThrottle::for_user(client, &u.id),
         // Identifiers match case-insensitively, so casing never opens a
         // fresh bucket for an unknown one.
         None => {
-            login_guard::LoginThrottle::for_identifier(client_ip, &login_identifier.to_lowercase())
+            login_guard::LoginThrottle::for_identifier(client, &login_identifier.to_lowercase())
         }
     };
 
